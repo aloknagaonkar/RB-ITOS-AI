@@ -1,0 +1,611 @@
+from red_bar_lab.ui._shared import *
+
+
+def render_page(settings, layout, database, token, underlying_name, instrument_key, interval) -> None:
+    st.subheader("Research Lab")
+    st.markdown("#### Historical Data")
+    today = date.today()
+    start_date = st.date_input("From", today - timedelta(days=10))
+    end_date = st.date_input("To", today)
+    force = st.checkbox("Force re-download", value=False)
+    if st.button("Download Historical Candles", type="primary"):
+        try:
+            service = _historical_service(token, layout)
+            result = service.load_or_download(
+                instrument_key,
+                start_date,
+                end_date,
+                interval_minutes=interval,
+                force=force,
+            )
+            st.success(
+                f"Downloaded {len(result.downloaded_dates)} day(s), "
+                f"reused {len(result.existing_dates)} day(s), "
+                f"stored {result.rows_stored} rows."
+            )
+            if result.in_progress_dates:
+                st.info(
+                    "Current session refreshed (IN PROGRESS): "
+                    + ", ".join(day.isoformat() for day in result.in_progress_dates)
+                )
+            if result.no_data_dates:
+                st.warning(
+                    "No data: "
+                    + ", ".join(day.isoformat() for day in result.no_data_dates)
+                )
+            if result.future_dates:
+                st.warning(
+                    "Future dates skipped: "
+                    + ", ".join(day.isoformat() for day in result.future_dates)
+                )
+        except MissingAccessToken as exc:
+            st.error(str(exc))
+        except Exception as exc:
+            st.exception(exc)
+
+    st.markdown("---")
+    st.markdown("#### Bulk Historical Backtest")
+    st.caption(
+        "Runs cached dates through: reference levels → signal replay → "
+        "paper trades → aggregate performance. This workflow does not "
+        "download data; use Research Lab → Historical Data first."
+    )
+
+    try:
+        cached_reader = RedBarHistoricalService(
+            RedBarUpstoxService("cache-only"), layout
+        )
+        bulk_dates = cached_reader.available_dates(
+            instrument_key, interval_minutes=1
+        )
+    except Exception:
+        bulk_dates = []
+
+    if not bulk_dates:
+        st.info("No cached historical dates are available.")
+    else:
+        b1, b2 = st.columns(2)
+        with b1:
+            bulk_start = st.date_input(
+                "Bulk From",
+                value=bulk_dates[0],
+                min_value=bulk_dates[0],
+                max_value=bulk_dates[-1],
+                key="bulk_start",
+            )
+        with b2:
+            bulk_end = st.date_input(
+                "Bulk To",
+                value=bulk_dates[-1],
+                min_value=bulk_dates[0],
+                max_value=bulk_dates[-1],
+                key="bulk_end",
+            )
+
+        if st.button("Run Bulk Historical Backtest", type="primary"):
+            progress = st.progress(0.0)
+            status = st.empty()
+
+            def on_progress(index, total, trading_date):
+                pct = index / total if total else 1.0
+                progress.progress(min(1.0, pct))
+                status.write(
+                    f"Processing {trading_date.isoformat()} "
+                    f"({index}/{total})"
+                )
+
+            try:
+                service = BulkHistoricalBacktestService(
+                    cached_reader,
+                    database,
+                    progress_callback=on_progress,
+                )
+                bulk_result = service.run(
+                    instrument_key,
+                    bulk_start,
+                    bulk_end,
+                )
+                progress.progress(1.0)
+                status.success(
+                    f"Completed {bulk_result.trading_days_processed} "
+                    f"cached trading day(s)."
+                )
+                if bulk_result.skipped_days:
+                    st.warning(
+                        f"Skipped {len(bulk_result.skipped_days)} day(s)."
+                    )
+                    st.dataframe(
+                        [
+                            {
+                                "trading_date": row.trading_date,
+                                "status": row.status,
+                                "message": row.message,
+                            }
+                            for row in bulk_result.skipped_days
+                        ],
+                        width="stretch",
+                        hide_index=True,
+                    )
+            except Exception as exc:
+                st.exception(exc)
+
+        summary = database.paper_trade_range_summary(
+            instrument_key,
+            bulk_start.isoformat(),
+            bulk_end.isoformat(),
+        )
+
+        s1, s2, s3, s4, s5 = st.columns(5)
+        s1.metric("Trade models", summary["rows"])
+        s2.metric("Win rate", f'{summary["win_rate"]:.1f}%')
+        s3.metric("Net points", f'{summary["net_points"]:.2f}')
+        s4.metric("Avg points", f'{summary["average_points"]:.2f}')
+        pf = summary["profit_factor"]
+        s5.metric(
+            "Profit factor",
+            "∞" if pf is None and summary["winners"] else (
+                f"{pf:.2f}" if pf is not None else "—"
+            ),
+        )
+
+        range_rows = database.paper_trade_range_rows(
+            instrument_key,
+            bulk_start.isoformat(),
+            bulk_end.isoformat(),
+        )
+        if range_rows:
+            st.markdown("#### Backtest Filters")
+
+            signal_types = ["ALL"] + sorted(
+                {
+                    str(row.get("level_type"))
+                    for row in range_rows
+                    if row.get("level_type")
+                }
+            )
+            directions = ["ALL"] + sorted(
+                {
+                    str(row.get("direction"))
+                    for row in range_rows
+                    if row.get("direction")
+                }
+            )
+            exit_models = ["ALL"] + sorted(
+                {
+                    str(row.get("exit_model"))
+                    for row in range_rows
+                    if row.get("exit_model")
+                }
+            )
+
+            bf1, bf2, bf3, bf4 = st.columns(4)
+            with bf1:
+                bt_signal_type = st.selectbox(
+                    "Signal Type",
+                    signal_types,
+                    key="bt_filter_signal_type",
+                )
+            with bf2:
+                bt_direction = st.selectbox(
+                    "Direction",
+                    directions,
+                    key="bt_filter_direction",
+                )
+            with bf3:
+                bt_exit_model = st.selectbox(
+                    "Exit Model",
+                    exit_models,
+                    key="bt_filter_exit_model",
+                )
+            with bf4:
+                bt_trade_result = st.selectbox(
+                    "Trade Result",
+                    ["ALL", "WIN", "LOSS", "BREAKEVEN"],
+                    key="bt_filter_trade_result",
+                )
+
+            bq1, bq2 = st.columns(2)
+            with bq1:
+                bt_signal_quality = st.selectbox(
+                    "Signal Quality",
+                    [
+                        "ALL",
+                        "STRONG_SUCCESS",
+                        "SUCCESS",
+                        "MIXED",
+                        "WEAK",
+                        "BREAKEVEN",
+                        "FAILED",
+                        "IN_PROGRESS",
+                    ],
+                    key="bt_filter_signal_quality",
+                )
+            with bq2:
+                bt_min_success_score = st.selectbox(
+                    "Minimum Success Score",
+                    [0, 3, 6, 8, 9, 10],
+                    format_func=lambda value: (
+                        "ALL"
+                        if value == 0
+                        else f"{value}+/10"
+                    ),
+                    key="bt_filter_min_success_score",
+                )
+
+            filtered_rows = _filter_backtest_rows(
+                range_rows,
+                signal_type=bt_signal_type,
+                direction=bt_direction,
+                exit_model=bt_exit_model,
+                trade_result=bt_trade_result,
+                signal_quality=bt_signal_quality,
+                min_success_score=bt_min_success_score,
+            )
+            filtered_summary = _filtered_backtest_summary(
+                filtered_rows
+            )
+
+            fs1, fs2, fs3, fs4, fs5, fs6 = st.columns(6)
+            fs1.metric(
+                "Actionable Rows",
+                filtered_summary["actionable_rows"],
+            )
+            fs2.metric(
+                "Win Rate",
+                f'{filtered_summary["win_rate"]:.1f}%',
+            )
+            fs3.metric(
+                "Avg Points",
+                f'{filtered_summary["average_points"]:.2f}',
+            )
+            fs4.metric(
+                "Best",
+                (
+                    f'{filtered_summary["best_points"]:.2f}'
+                    if filtered_summary["best_points"] is not None
+                    else "—"
+                ),
+            )
+            fs5.metric(
+                "Worst",
+                (
+                    f'{filtered_summary["worst_points"]:.2f}'
+                    if filtered_summary["worst_points"] is not None
+                    else "—"
+                ),
+            )
+            fs6.metric(
+                "Benchmark Rows",
+                filtered_summary["benchmark_rows"],
+            )
+
+            st.markdown("#### Filtered Trade Outcomes")
+            st.dataframe(
+                _trade_display_rows(filtered_rows),
+                width="stretch",
+                hide_index=True,
+            )
+        else:
+            st.info(
+                "No paper trades stored for this range yet. "
+                "Click Run Bulk Historical Backtest."
+            )
+
+    st.markdown("---")
+    st.markdown("#### Historical Decision Replay")
+    st.caption(
+        "Replays the decision at the historical timestamp using only data available "
+        "up to that moment. It reports whether live-style execution would TAKE, WAIT, "
+        "or BLOCK the setup. Missing intraday option microstructure/Greeks are neutral; "
+        "EOD option data is never used to make an intraday decision."
+    )
+    try:
+        replay_reader = RedBarHistoricalService(
+            RedBarUpstoxService("cache-only"), layout
+        )
+        replay_dates = replay_reader.available_dates(
+            instrument_key, interval_minutes=1
+        )
+    except Exception:
+        replay_dates = []
+
+    if not replay_dates:
+        st.info("Download/cache at least one historical trading day first.")
+    else:
+        default_replay_date = replay_dates[-1]
+        replay_date = st.selectbox(
+            "Replay Trading Date",
+            replay_dates,
+            index=len(replay_dates) - 1,
+            format_func=lambda value: value.isoformat(),
+            key="historical_decision_replay_date",
+        )
+        replay_mode = st.radio(
+            "Replay Mode",
+            ["Full Session", "Fast Validation"],
+            horizontal=True,
+            key="historical_decision_replay_mode",
+        )
+        st.caption(
+            "RB-1.6.0 validates historical option-chain coverage first, then uses the "
+            "same Primary / Opportunity / Committee / Portfolio / Exit policy engines "
+            "where historical option data is replay-ready."
+        )
+
+        # Historical option-chain sync + readiness gate. Historical expired-option
+        # candles include OHLC/volume/OI, but not historical bid/ask, IV or Greeks.
+        cache_option_sync = HistoricalOptionChainSyncService(
+            RedBarUpstoxService(token or "cache-only"), layout, replay_reader, database=database
+        )
+        coverage = cache_option_sync.validate_day(instrument_key, replay_date)
+        st.markdown("##### Option Chain Sync Validation")
+        oc1, oc2, oc3, oc4, oc5 = st.columns(5)
+        oc1.metric("Contracts", f"{coverage.contracts_stored}/{coverage.contracts_discovered}")
+        oc2.metric("Contract Coverage", f"{coverage.contract_coverage_pct:.1f}%")
+        oc3.metric("Candle Coverage", f"{coverage.candle_coverage_pct:.1f}%")
+        oc4.metric("OI Coverage", f"{coverage.oi_coverage_pct:.1f}%")
+        oc5.metric("Replay Ready", "YES" if coverage.replay_ready else "NO")
+        ds1, ds2, ds3, ds4 = st.columns(4)
+        ds1.metric("Replay Source", coverage.data_source)
+        ds2.metric("Live Snapshots", coverage.live_snapshots)
+        ds3.metric("Snapshot Coverage", f"{coverage.snapshot_coverage_pct:.1f}%")
+        ds4.metric("Bid/Ask", "AVAILABLE" if coverage.bid_ask_available else "UNAVAILABLE")
+        if coverage.replay_ready:
+            st.success(f"{coverage.fidelity}: {coverage.reason}")
+        else:
+            st.warning(f"{coverage.fidelity}: {coverage.reason}")
+        if coverage.data_source == "LIVE_MARKET_CAPTURE":
+            st.caption(
+                "Using ITOS ONLINE option-chain snapshots captured on the replay date. "
+                f"IV={'available' if coverage.iv_available else 'unavailable'}; "
+                f"Greeks={'available' if coverage.greeks_available else 'unavailable'}. "
+                "Only snapshots at or before each replay timestamp are used."
+            )
+        else:
+            st.caption("Historical bid/ask depth, IV and Greeks are unavailable from expired-option candles and are never fabricated.")
+
+        st.markdown("##### Replay Diagnostics & Health")
+        st.caption(
+            "Read-only diagnostics explain exactly where replay readiness succeeds or fails. "
+            "Running diagnostics does not change trading rules, portfolio state or replay data."
+        )
+        if st.button("Run Replay Diagnostics", key="historical_replay_diagnostics"):
+            try:
+                diagnostic_provider = RedBarUpstoxService(resolve_access_token(token))
+                diagnostic_sync = HistoricalOptionChainSyncService(
+                    diagnostic_provider, layout, replay_reader, database=database
+                )
+                diagnostic_service = ReplayDiagnosticsService(
+                    diagnostic_sync, replay_reader, database=database
+                )
+                with st.spinner("Checking underlying data, expiry resolution, contract discovery, storage and replay readiness..."):
+                    st.session_state["historical_replay_diagnostics_result"] = diagnostic_service.inspect_day(
+                        instrument_key, replay_date, probe_provider=True
+                    )
+            except MissingAccessToken as exc:
+                st.warning(str(exc))
+            except Exception as exc:
+                st.error(f"Replay diagnostics failed: {type(exc).__name__}: {exc}")
+
+        diagnostic_result = st.session_state.get("historical_replay_diagnostics_result")
+        if diagnostic_result is not None and diagnostic_result.trading_date == replay_date:
+            summary = diagnostic_result.as_dict()
+            d1, d2, d3, d4, d5 = st.columns(5)
+            d1.metric("Underlying Rows", summary["Underlying Rows"])
+            d2.metric("Resolved Expiry", summary["Resolved Expiry"])
+            d3.metric("Provider Contracts", summary["Provider Contracts Found"])
+            d4.metric("Stored Contracts", summary["Stored Manifest Contracts"])
+            d5.metric("DB Status", summary["Database"])
+            ex1, ex2, ex3, ex4 = st.columns(4)
+            ex1.metric("Parsed Expiries", f'{summary["Parsed Expiries"]}/{summary["Expired Expiries Found"]}')
+            ex2.metric("Previous Expiry", summary["Previous Expiry"])
+            ex3.metric("Next Eligible Expiry", summary["Next Eligible Expiry"])
+            ex4.metric("Resolution Rule", summary["Expiry Rule"])
+            st.caption(f'Eligible/provider-verified expiries: {summary["Expiry Candidates"]}')
+            st.caption(
+                f'Expiry source: {summary["Expiry Resolution Source"]}; '
+                f'provider probe dates: {summary["Probed Expiry Dates"]}'
+            )
+            if diagnostic_result.replay_ready:
+                st.success(
+                    f"Diagnostics: replay path is ready via {diagnostic_result.data_source} "
+                    f"({diagnostic_result.replay_fidelity})."
+                )
+            else:
+                failed = [stage for stage in diagnostic_result.stages if stage.status in {"FAIL", "BLOCKED", "LOCKED"}]
+                first_failure = failed[0].detail if failed else diagnostic_result.error or "Replay readiness failed."
+                st.warning(f"Diagnostics first actionable failure: {first_failure}")
+            with st.expander("Replay Pipeline Diagnostics", expanded=not diagnostic_result.replay_ready):
+                st.dataframe(
+                    [stage.as_dict() for stage in diagnostic_result.stages],
+                    width="stretch", hide_index=True
+                )
+                st.caption(
+                    f"SQLite journal mode: {diagnostic_result.database_journal_mode}; "
+                    f"database size: {diagnostic_result.database_size_mb:.2f} MB; "
+                    f"diagnostics elapsed: {diagnostic_result.total_duration_ms:.1f} ms."
+                )
+
+        if st.button("Sync / Repair Historical Option Chain", key="historical_option_chain_sync"):
+            try:
+                sync_provider = RedBarUpstoxService(resolve_access_token(token))
+                sync_service = HistoricalOptionChainSyncService(sync_provider, layout, replay_reader, database=database)
+                with st.spinner("Discovering expired contracts and syncing one-minute option candles..."):
+                    sync_result = sync_service.sync_day(instrument_key, replay_date, force=False)
+                st.session_state["historical_option_sync_result"] = sync_result
+                st.success(
+                    f"Option sync complete: discovered {sync_result.discovered}, downloaded {sync_result.downloaded}, "
+                    f"reused {sync_result.reused}, failed {sync_result.failed}."
+                )
+                if sync_result.errors:
+                    st.warning("Some contracts could not be synced. See coverage below / rerun repair.")
+                st.rerun()
+            except MissingAccessToken as exc:
+                st.error(str(exc))
+            except Exception as exc:
+                st.exception(exc)
+
+        if coverage.contracts:
+            with st.expander("Option Chain Coverage Details", expanded=False):
+                st.dataframe([c.__dict__ for c in coverage.contracts], width="stretch", hide_index=True)
+        if not coverage.replay_ready:
+            st.info(
+                "Replay is disabled for this date until option data is ready. "
+                "Use Sync / Repair Historical Option Chain, or select a date with stored ONLINE snapshots / expired-option history."
+            )
+        if st.button("Run Historical Decision Replay", type="primary", disabled=not coverage.replay_ready):
+            try:
+                replay_service = HistoricalDecisionReplayService(
+                    replay_reader,
+                    freshness_seconds=180,
+                    hard_expiry_seconds=900,
+                    minimum_confidence_pct=70.0,
+                    stop_loss_pct=15.0,
+                    target_pct=25.0,
+                    option_chain_sync=cache_option_sync,
+                )
+                st.session_state["historical_decision_replay_result"] = (
+                    replay_service.run_day(instrument_key, replay_date)
+                )
+            except ValueError as exc:
+                st.warning(str(exc))
+            except Exception as exc:
+                st.exception(exc)
+
+        replay_result = st.session_state.get("historical_decision_replay_result")
+        if replay_result is not None and replay_result.trading_date == replay_date:
+            st.markdown("##### Live-Style Decision Summary")
+            r1, r2, r3, r4, r5, r6 = st.columns(6)
+            r1.metric("Signals", replay_result.active_signals)
+            r2.metric("Would Take", replay_result.approved)
+            r3.metric("Would Wait", replay_result.waiting)
+            r4.metric("Would Block", replay_result.blocked)
+            r5.metric("Wins (Taken)", replay_result.winners)
+            r6.metric("Decision Accuracy", f"{replay_result.decision_accuracy_pct:.1f}%")
+            l1, l2, l3, l4 = st.columns(4)
+            l1.metric("Missed Opportunities", replay_result.missed_opportunities)
+            l2.metric("False Positives", replay_result.false_positives)
+            l3.metric("Correct Skips", replay_result.correct_skips)
+            l4.metric("Net Underlying Points", f"{replay_result.net_points:.2f}")
+            st.info(
+                "Replay fidelity: " + replay_result.data_fidelity + ". "
+                + replay_result.replay_fidelity_reason + " "
+                "Future option candles are used only by the normal Exit Engine after entry; "
+                "they are never used to make the entry decision."
+            )
+            pf1, pf2, pf3, pf4 = st.columns(4)
+            pf1.metric("Option Contracts", f"{replay_result.option_contract_coverage_pct:.1f}%")
+            pf2.metric("Option Candles", f"{replay_result.option_candle_coverage_pct:.1f}%")
+            pf3.metric("Portfolio Admitted", replay_result.portfolio_admitted)
+            pf4.metric("Portfolio Watchlist", replay_result.portfolio_watchlisted)
+            replay_rows = [row.as_dict() for row in replay_result.rows]
+            if replay_rows:
+                display_rows = []
+                for row in replay_rows:
+                    display_rows.append({
+                        "Time": row["timestamp"],
+                        "Signal": row["signal_id"],
+                        "Level": row["level_type"],
+                        "Direction": row["direction"],
+                        "Option": row["option_side"],
+                        "Candidate": row.get("candidate_symbol"),
+                        "Rank": row.get("candidate_rank"),
+                        "Candidate Score": row.get("candidate_score"),
+                        "Opportunity Health": row.get("opportunity_health"),
+                        "Lifecycle": row["lifecycle_state"],
+                        "Primary %": row["primary_confidence_pct"],
+                        "Shadow": row["shadow_decision"],
+                        "Shadow %": row["shadow_confidence_pct"],
+                        "Agreement": row["agreement"],
+                        "Final %": row["final_confidence_pct"],
+                        "Expectancy %": row["expectancy_pct"],
+                        "Decision": row["decision"],
+                        "Execution": row["execution"],
+                        "Portfolio": row.get("portfolio_status"),
+                        "Portfolio Reason": row.get("portfolio_reason"),
+                        "Blocker / Reason": row["blocker"],
+                        "Exit Reason": row.get("exit_reason"),
+                        "Option Return %": row.get("option_return_pct"),
+                        "Outcome": row["outcome_result"],
+                        "Outcome Basis": row.get("outcome_basis"),
+                        "Outcome Points": row["outcome_points"],
+                        "Verdict": row["verdict"],
+                        "Learning Attribution": row["learning_attribution"],
+                    })
+                st.dataframe(display_rows, width="stretch", hide_index=True)
+
+                st.markdown("##### Decision Learning Summary")
+                st.caption(
+                    "Learning is advisory-only. Historical outcomes classify decisions and suggest what to review; "
+                    "RB-1.4.1 keeps Shadow informational-only and does not automatically modify live thresholds or weights."
+                )
+                for recommendation in replay_result.learning_recommendations:
+                    st.info(recommendation)
+
+                st.markdown("##### Replay Accuracy & Decision Calibration")
+                st.caption(
+                    "Post-decision research only. Missing option minutes, confidence calibration and threshold scenarios are measured "
+                    "after historical decisions are frozen. Recommendations never change live parameters automatically."
+                )
+                accuracy_service = ReplayAccuracyService(cache_option_sync, replay_reader, minimum_calibration_samples=30)
+                accuracy = accuracy_service.build(instrument_key, replay_result)
+                aq1, aq2, aq3, aq4, aq5 = st.columns(5)
+                aq1.metric("Temporal Coverage", f"{accuracy.temporal_coverage_pct:.1f}%")
+                aq2.metric("Missing Minutes", accuracy.missing_minutes)
+                aq3.metric("Longest Gap", f"{accuracy.longest_gap_minutes} min")
+                aq4.metric("Resolved Candidates", accuracy.resolved_candidates)
+                aq5.metric("Calibration", accuracy.recommendation_status)
+                if accuracy.missing_ranges:
+                    with st.expander("Option Capture Gaps", expanded=False):
+                        st.caption("Missing minute ranges: " + ", ".join(accuracy.missing_ranges[:40]))
+                        if len(accuracy.missing_ranges) > 40:
+                            st.caption(f"+ {len(accuracy.missing_ranges)-40} additional gap range(s)")
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.markdown("**Confidence Calibration**")
+                    st.dataframe([b.as_dict() for b in accuracy.confidence_buckets], width="stretch", hide_index=True)
+                with c2:
+                    st.markdown("**Advisory Confidence Threshold Scenarios**")
+                    st.dataframe([x.as_dict() for x in accuracy.threshold_scenarios], width="stretch", hide_index=True)
+                for rec in accuracy.recommendations:
+                    st.info(rec)
+
+                st.markdown("##### Why Trade Was Taken / Blocked")
+                selected_signal = st.selectbox(
+                    "Inspect Replay Signal",
+                    [row["signal_id"] for row in replay_rows],
+                    key="historical_decision_replay_signal",
+                )
+                selected = next(
+                    row for row in replay_rows if row["signal_id"] == selected_signal
+                )
+                d1, d2, d3, d4 = st.columns(4)
+                d1.metric("Primary", f'{selected["primary_confidence_pct"]:.2f}%')
+                d2.metric("Final", f'{selected["final_confidence_pct"]:.2f}%')
+                d3.metric("Expectancy", f'{selected["expectancy_pct"]:.3f}%')
+                d4.metric("Execution", selected["execution"])
+                st.write(
+                    {
+                        "Lifecycle": selected["lifecycle_state"],
+                        "Lifecycle Action": selected["lifecycle_action"],
+                        "Market Session": selected["market_session"],
+                        "VWAP aligned": selected["vwap_ok"],
+                        "EMA aligned": selected["ema_ok"],
+                        "Momentum aligned": selected["momentum_ok"],
+                        "Volume Score": selected["volume_score"],
+                        "OI Score": selected["oi_score"],
+                        "Shadow Decision": selected["shadow_decision"],
+                        "Agreement": selected["agreement"],
+                        "Shadow Adjustment": selected["shadow_adjustment_pct"],
+                        "Blocker / Reason": selected["blocker"],
+                        "Historical Outcome": selected["outcome_result"],
+                        "Outcome Basis": selected.get("outcome_basis"),
+                        "Historical Outcome Points": selected["outcome_points"],
+                        "Decision Verdict": selected["verdict"],
+                        "Learning Attribution": selected["learning_attribution"],
+                        "Learning Recommendation": selected["learning_recommendation"],
+                        "Data Fidelity": selected["data_fidelity"],
+                    }
+                )
+            else:
+                st.warning("No confirmed historical Red Bar signals were found for this day.")

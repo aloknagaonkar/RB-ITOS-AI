@@ -1,0 +1,14 @@
+[project]
+name = "red-bar-lab"
+version = "0.1.0"
+description = "Standalone Red Bar Strategy Lab"
+requires-python = ">=3.11"
+dependencies = [
+  "pandas>=2.2",
+  "requests>=2.31",
+  "streamlit>=1.40",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["red_bar_lab/tests"]
+pythonpath = ["."]

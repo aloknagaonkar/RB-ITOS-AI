@@ -1,0 +1,1540 @@
+from __future__ import annotations
+
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
+from datetime import date, datetime, time
+from zoneinfo import ZoneInfo
+from uuid import uuid4
+
+import pandas as pd
+
+from red_bar_lab.execution.exit_engine import PaperExitEngine
+from red_bar_lab.execution.candidate_lifecycle import CandidateLifecycleManager, MarketSessionManager
+from red_bar_lab.execution.institutional_execution import InstitutionalExecutionCommittee
+from red_bar_lab.execution.opportunity_engine import OpportunityIntelligenceEngine
+from red_bar_lab.execution.performance_selection import PerformanceTradeSelectionEngine
+from red_bar_lab.execution.portfolio_manager import PortfolioCandidate, PortfolioRiskManager
+from red_bar_lab.execution.paper_engine import (
+    PaperContract,
+    RedBarPaperExecutionEngine,
+)
+
+IST = ZoneInfo("Asia/Kolkata")
+
+
+@dataclass(frozen=True)
+class CandidateScore:
+    contract: PaperContract
+    total_score: float
+    spread_score: float
+    liquidity_score: float
+    volume_score: float
+    oi_score: float
+    vwap_score: float
+    ema_score: float
+    momentum_score: float
+    momentum_pct: float | None
+    candle_count: int
+    ltp: float | None
+    best_bid: float | None
+    best_ask: float | None
+    reason: str
+
+
+@dataclass(frozen=True)
+class AutomationReport:
+    signals_seen: int
+    candidates_scored: int
+    paper_orders_opened: int
+    paper_orders_closed: int
+    skipped: int
+    errors: tuple[str, ...]
+
+
+def _num(value, default=0.0):
+    try:
+        if value is None or pd.isna(value):
+            return float(default)
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _underlying_quote_key(underlying_name: str) -> str:
+    if underlying_name == "NIFTY 50":
+        return "NSE:NIFTY 50"
+    if underlying_name == "BANK NIFTY":
+        return "NSE:NIFTY BANK"
+    raise ValueError(f"Unsupported Zerodha underlying {underlying_name}")
+
+
+class RedBarPaperAutomationService:
+    """Automatic rule-based paper execution for confirmed Red Bar signals.
+
+    This is not AI. It creates auditable paper evidence for later AI training.
+    """
+
+    def __init__(
+        self,
+        *,
+        zerodha,
+        database,
+        settings,
+        underlying_name: str,
+        account_id: str = "PAPER-STD",
+        initial_capital: float = 100000.0,
+        minimum_candidate_score: float = 65.0,
+        stop_loss_pct: float = 15.0,
+        target_pct: float = 25.0,
+        eod_exit_time: time = time(15, 25),
+        max_signal_age_seconds: int = 180,
+        allow_outside_market_hours: bool = False,
+        allow_stale_signals: bool = False,
+        candidate_recheck_seconds: int = 30,
+        enable_opportunity_extension: bool = True,
+        minimum_opportunity_score: float = 75.0,
+        minimum_extended_candidate_score: float = 85.0,
+        minimum_reward_remaining_pct: float = 40.0,
+        minimum_selection_score: float = 70.0,
+        minimum_history_samples: int = 10,
+        minimum_execution_probability_pct: float = 70.0,
+        minimum_expected_value_pct: float = 0.0,
+        minimum_module_samples: int = 10,
+        maximum_open_trades: int = 5,
+        maximum_same_direction_trades: int = 3,
+        maximum_portfolio_capital_pct: float = 40.0,
+        maximum_portfolio_risk_pct: float = 2.0,
+        minimum_opportunity_health: float = 75.0,
+    ):
+        self.zerodha = zerodha
+        self.database = database
+        self.settings = settings
+        self.underlying_name = underlying_name
+        self.minimum_candidate_score = float(minimum_candidate_score)
+        self.initial_capital = float(initial_capital)
+        self.stop_loss_pct = float(stop_loss_pct)
+        self.target_pct = float(target_pct)
+        self.eod_exit_time = eod_exit_time
+        self.max_signal_age_seconds = int(max_signal_age_seconds)
+        self.allow_outside_market_hours = bool(
+            allow_outside_market_hours
+        )
+        self.allow_stale_signals = bool(allow_stale_signals)
+        self.candidate_recheck_seconds = int(candidate_recheck_seconds)
+        self.enable_opportunity_extension = bool(
+            enable_opportunity_extension
+        )
+        self.opportunity_engine = OpportunityIntelligenceEngine(
+            minimum_opportunity_score=float(minimum_opportunity_score),
+            minimum_extended_candidate_score=float(
+                minimum_extended_candidate_score
+            ),
+            minimum_reward_remaining_pct=float(
+                minimum_reward_remaining_pct
+            ),
+        )
+        self.selection_engine = PerformanceTradeSelectionEngine(
+            minimum_selection_score=float(minimum_selection_score),
+            minimum_history_samples=int(minimum_history_samples),
+        )
+        self.lifecycle_manager = CandidateLifecycleManager(
+            freshness_seconds=self.max_signal_age_seconds
+        )
+        self.session_manager = MarketSessionManager()
+        self.execution_committee = InstitutionalExecutionCommittee(
+            minimum_execution_probability_pct=float(
+                minimum_execution_probability_pct
+            ),
+            minimum_expected_value_pct=float(minimum_expected_value_pct),
+            minimum_module_samples=int(minimum_module_samples),
+        )
+        self.portfolio_manager = PortfolioRiskManager(
+            maximum_open_trades=maximum_open_trades,
+            maximum_same_direction=maximum_same_direction_trades,
+            maximum_capital_pct=maximum_portfolio_capital_pct,
+            maximum_risk_pct=maximum_portfolio_risk_pct,
+            minimum_opportunity_health=minimum_opportunity_health,
+        )
+        self.engine = RedBarPaperExecutionEngine(
+            database,
+            settings,
+            account_id=account_id,
+            initial_capital=initial_capital,
+        )
+
+    def score_candidates(
+        self,
+        *,
+        direction: str,
+        spot_price: float,
+    ) -> list[CandidateScore]:
+        contracts = self.engine.candidate_contracts(
+            zerodha=self.zerodha,
+            underlying_name=self.underlying_name,
+            direction=direction,
+            spot_price=spot_price,
+            strike_count_each_side=2,
+        )
+        quotes = self.engine.contract_quotes(
+            zerodha=self.zerodha,
+            contracts=contracts,
+        )
+        quote_by_symbol = {
+            str(row.get("symbol")): row for row in quotes
+        }
+        scored = []
+
+        today = date.today().isoformat()
+
+        # RB-1.3.2 performance: option-candle validation is independent per
+        # candidate, so fetch the small candidate set concurrently.  Scoring and
+        # sorting remain sequential below to preserve deterministic output.
+        candle_results: dict[str, tuple[pd.DataFrame | None, str | None]] = {}
+        if contracts:
+            worker_count = min(5, len(contracts))
+            with ThreadPoolExecutor(
+                max_workers=worker_count,
+                thread_name_prefix="rb-candidate-candles",
+            ) as pool:
+                futures = {
+                    pool.submit(
+                        self.engine.option_candles,
+                        zerodha=self.zerodha,
+                        instrument_token=contract.instrument_token,
+                        date_from=today,
+                        date_to=today,
+                        interval="minute",
+                    ): contract
+                    for contract in contracts
+                }
+                for future in as_completed(futures):
+                    contract = futures[future]
+                    key = str(contract.instrument_token)
+                    try:
+                        candle_results[key] = (future.result(), None)
+                    except Exception as exc:
+                        candle_results[key] = (
+                            None, f"candle validation unavailable: {type(exc).__name__}"
+                        )
+
+        for contract in contracts:
+            q = quote_by_symbol.get(contract.tradingsymbol, {})
+            ltp = _num(q.get("ltp"), 0.0)
+            bid = _num(q.get("best_bid"), 0.0)
+            ask = _num(q.get("best_ask"), 0.0)
+            volume = _num(q.get("volume"), 0.0)
+            oi = _num(q.get("oi"), 0.0)
+            buy_qty = _num(q.get("buy_quantity"), 0.0)
+            sell_qty = _num(q.get("sell_quantity"), 0.0)
+
+            spread_pct = (
+                (ask - bid) / ltp * 100.0
+                if ltp > 0 and ask > 0 and bid > 0 and ask >= bid
+                else 99.0
+            )
+            spread_score = (
+                15.0 if spread_pct <= 0.5 else
+                12.0 if spread_pct <= 1.0 else
+                8.0 if spread_pct <= 2.0 else
+                3.0 if spread_pct <= 4.0 else 0.0
+            )
+            liquidity_score = (
+                20.0 if min(buy_qty, sell_qty) >= contract.lot_size * 5 else
+                15.0 if min(buy_qty, sell_qty) >= contract.lot_size * 2 else
+                10.0 if min(buy_qty, sell_qty) >= contract.lot_size else
+                5.0 if buy_qty > 0 and sell_qty > 0 else 0.0
+            )
+            volume_score = min(15.0, volume / 50000.0 * 15.0)
+            oi_score = min(10.0, oi / 100000.0 * 10.0)
+
+            vwap_score = ema_score = momentum_score = 0.0
+            momentum_pct = None
+            candle_count = 0
+            candle_reason = "no candle validation"
+            candles, candle_error = candle_results.get(
+                str(contract.instrument_token), (None, None)
+            )
+            if candle_error:
+                candle_reason = candle_error
+            elif candles is not None:
+                candle_count = len(candles)
+                if not candles.empty:
+                    latest = candles.iloc[-1]
+                    close = _num(latest.get("close"), ltp)
+                    vwap = _num(latest.get("vwap"), close)
+                    ema9 = _num(latest.get("ema9"), close)
+                    ema21 = _num(latest.get("ema21"), close)
+                    vwap_score = 10.0 if close >= vwap else 0.0
+                    ema_score = 10.0 if ema9 >= ema21 else 0.0
+
+                    # Momentum uses up to five completed one-minute bars and
+                    # gracefully falls back to the previous bar. This avoids
+                    # reporting zero merely because fewer than four bars were
+                    # returned by the data provider.
+                    lookback = min(5, max(1, candle_count - 1))
+                    if candle_count >= 2:
+                        previous = _num(
+                            candles.iloc[-1 - lookback].get("close"),
+                            close,
+                        )
+                        momentum_pct = (
+                            (close - previous) / previous * 100.0
+                            if previous else 0.0
+                        )
+                        momentum_score = (
+                            10.0 if momentum_pct >= 0.75 else
+                            8.0 if momentum_pct >= 0.35 else
+                            6.0 if momentum_pct >= 0.10 else
+                            4.0 if momentum_pct >= 0.00 else
+                            2.0 if momentum_pct >= -0.25 else 0.0
+                        )
+
+                    candle_reason = (
+                        f"close={close:.2f}, vwap={vwap:.2f}, "
+                        f"ema9={ema9:.2f}, ema21={ema21:.2f}, "
+                        f"momentum_pct="
+                        f"{momentum_pct if momentum_pct is not None else 'NA'}, "
+                        f"candles={candle_count}"
+                    )
+
+            raw_total = (
+                spread_score + liquidity_score + volume_score + oi_score
+                + vwap_score + ema_score + momentum_score
+            )
+            # Published paper candidate score is normalized to 0-100.
+            total = raw_total / 90.0 * 100.0
+            scored.append(
+                CandidateScore(
+                    contract=contract,
+                    total_score=round(total, 2),
+                    spread_score=round(spread_score, 2),
+                    liquidity_score=round(liquidity_score, 2),
+                    volume_score=round(volume_score, 2),
+                    oi_score=round(oi_score, 2),
+                    vwap_score=round(vwap_score, 2),
+                    ema_score=round(ema_score, 2),
+                    momentum_score=round(momentum_score, 2),
+                    momentum_pct=(
+                        round(float(momentum_pct), 4)
+                        if momentum_pct is not None else None
+                    ),
+                    candle_count=int(candle_count),
+                    ltp=ltp or None,
+                    best_bid=bid or None,
+                    best_ask=ask or None,
+                    reason=candle_reason,
+                )
+            )
+
+        return sorted(
+            scored,
+            key=lambda item: (
+                item.total_score,
+                -abs(item.contract.strike - spot_price),
+            ),
+            reverse=True,
+        )
+
+    def _record_state(
+        self,
+        *,
+        signal_id: str,
+        state: str,
+        detail: str,
+        order_id: str | None = None,
+        score: float | None = None,
+    ) -> None:
+        previous = self.database.read_execution_state_events(
+            signal_id=signal_id,
+            limit=1,
+        )
+        if (
+            previous
+            and previous[0].get("state") == state
+            and previous[0].get("detail") == detail
+        ):
+            return
+        self.database.insert_execution_state_event(
+            {
+                "event_id": f"EVT-{uuid4().hex[:14].upper()}",
+                "signal_id": signal_id,
+                "order_id": order_id,
+                "state": state,
+                "detail": detail,
+                "candidate_score": score,
+                "timestamp": datetime.now(IST).isoformat(),
+            }
+        )
+
+
+    def process_new_signals(
+        self,
+        *,
+        trading_date: str,
+        lots: int = 1,
+        queue_only: bool = False,
+    ) -> tuple[int, int, int, list[str]]:
+        """Evaluate candidates and persist committee decisions to the execution queue.
+
+        With ``queue_only=True`` this is the RB-0.9.3 foreground decision phase:
+        no position is opened. With the default compatibility mode, approved queue
+        items are also executed immediately. There is no fixed trade-count limit.
+        """
+        now = datetime.now(IST)
+        scan_id = f"SCAN-{uuid4().hex[:12].upper()}"
+        market_open = (
+            now.weekday() < 5
+            and time(9, 15) <= now.time() < time(15, 25)
+        )
+        instrument_key = (
+            "NSE_INDEX|Nifty 50"
+            if self.underlying_name == "NIFTY 50"
+            else "NSE_INDEX|Nifty Bank"
+        )
+        signals = [
+            row for row in self.database.read_signal_attempts(
+                instrument_key, trading_date
+            )
+            if row.get("signal_id")
+            and row.get("confirmation_timestamp")
+            and row.get("direction") in {"BULLISH", "BEARISH"}
+        ]
+        opened = skipped = scored_count = 0
+        errors: list[str] = []
+        signals = sorted(
+            signals, key=lambda item: str(item.get("confirmation_timestamp") or "")
+        )
+        newest_signal_id = str(signals[-1].get("signal_id") or "") if signals else ""
+
+        if not market_open and not self.allow_outside_market_hours:
+            for signal in signals:
+                self.database.insert_paper_signal_diagnostic({
+                    "scan_id": scan_id,
+                    "signal_id": signal.get("signal_id"),
+                    "signal_state": signal.get("state"),
+                    "direction": signal.get("direction"),
+                    "confirmation_timestamp": signal.get("confirmation_timestamp"),
+                    "signal_age_seconds": None,
+                    "market_hours_ok": False,
+                    "freshness_ok": False,
+                    "duplicate_free": True,
+                    "candidate_available": False,
+                    "best_candidate": None,
+                    "best_score": None,
+                    "minimum_score": self.minimum_candidate_score,
+                    "score_ok": False,
+                    "final_decision": "SKIP",
+                    "reason": "OUTSIDE_AUTOMATIC_ENTRY_HOURS",
+                    "timestamp": now.isoformat(),
+                })
+            return 0, len(signals), 0, [
+                "Automatic paper entry skipped outside entry market hours."
+            ]
+
+        spot_map = self.zerodha.ltp([_underlying_quote_key(self.underlying_name)])
+        spot = spot_map.get(_underlying_quote_key(self.underlying_name))
+        if spot is None:
+            return 0, len(signals), 0, ["Underlying market-data LTP unavailable."]
+
+        historical_orders = self.database.read_paper_execution_orders(
+            self.engine.account_id
+        )
+        historical_shadow = self.database.read_shadow_intelligence_evaluations(
+            limit=5000
+        )
+
+        for signal in signals:
+            signal_id = str(signal["signal_id"])
+            signal_state = str(signal.get("state") or "")
+            confirmation_timestamp = signal.get("confirmation_timestamp")
+            try:
+                signal_ts = pd.Timestamp(confirmation_timestamp)
+                if signal_ts.tzinfo is None:
+                    signal_ts = signal_ts.tz_localize("Asia/Kolkata")
+                else:
+                    signal_ts = signal_ts.tz_convert("Asia/Kolkata")
+                age_seconds = (pd.Timestamp(now) - signal_ts).total_seconds()
+            except Exception:
+                age_seconds = float(self.max_signal_age_seconds + 1)
+
+            freshness_ok = bool(
+                self.allow_stale_signals
+                or (0 <= age_seconds <= self.max_signal_age_seconds)
+            )
+            stale_for_extension = bool(
+                not freshness_ok and not self.allow_stale_signals
+            )
+            diagnostic = {
+                "scan_id": scan_id,
+                "signal_id": signal_id,
+                "signal_state": signal_state,
+                "direction": signal.get("direction"),
+                "confirmation_timestamp": confirmation_timestamp,
+                "signal_age_seconds": round(float(age_seconds), 2),
+                "market_hours_ok": market_open,
+                "freshness_ok": freshness_ok,
+                "duplicate_free": True,
+                "candidate_available": False,
+                "best_candidate": None,
+                "best_score": None,
+                "minimum_score": self.minimum_candidate_score,
+                "score_ok": False,
+                "final_decision": "SKIP",
+                "reason": None,
+                "timestamp": now.isoformat(),
+            }
+
+            newer_signal_id = None
+            for newer in reversed(signals):
+                if str(newer.get("confirmation_timestamp") or "") > str(confirmation_timestamp or ""):
+                    newer_signal_id = str(newer.get("signal_id") or "") or None
+                    break
+            signal_lifecycle = self.lifecycle_manager.evaluate(
+                signal_id=signal_id,
+                confirmation_timestamp=confirmation_timestamp,
+                now=now,
+                replacement_signal_id=newer_signal_id,
+            )
+            self.database.upsert_candidate_lifecycle({
+                **signal_lifecycle.__dict__,
+                "trading_date": trading_date,
+                "created_at": now.isoformat(),
+                "updated_at": now.isoformat(),
+            })
+            if signal_lifecycle.state == "EXPIRED" and not self.allow_stale_signals:
+                reason = signal_lifecycle.reason
+                self.database.expire_execution_queue_for_signal(
+                    signal_id=signal_id, reason=reason
+                )
+                diagnostic["final_decision"] = "EXPIRED"
+                diagnostic["reason"] = f"{reason}; ACTION={signal_lifecycle.action}"
+                self.database.insert_paper_signal_diagnostic(diagnostic)
+                self._record_state(
+                    signal_id=signal_id, state="CANDIDATE_EXPIRED",
+                    detail=(f"{reason}; action={signal_lifecycle.action}; "
+                            f"replacement={signal_lifecycle.replacement_signal_id or 'AWAIT_NEW_RED_BAR'}"),
+                    score=signal_lifecycle.health_score,
+                )
+                skipped += 1
+                continue
+
+            # RB-1.5.0: age alone never blocks an otherwise healthy opportunity.
+            # ``stale_for_extension`` is retained only for audit/entry-mode labeling.
+
+            previous_events = self.database.read_execution_state_events(
+                signal_id=signal_id, limit=1
+            )
+            if not previous_events:
+                self._record_state(
+                    signal_id=signal_id,
+                    state="SIGNAL_CONFIRMED",
+                    detail=f"direction={signal['direction']}; signal_state={signal_state}",
+                )
+
+            try:
+                self._record_state(
+                    signal_id=signal_id,
+                    state="CANDIDATE_SELECTION",
+                    detail=(
+                        f"direction={signal['direction']}; signal_state={signal_state}; "
+                        f"age={age_seconds:.0f}s; mode=MULTI_PERFORMANCE"
+                    ),
+                )
+                scores = self.score_candidates(
+                    direction=str(signal["direction"]),
+                    spot_price=float(spot),
+                )
+                scored_count += len(scores)
+                if not scores:
+                    diagnostic["reason"] = "NO_ELIGIBLE_CE_PE_CANDIDATE"
+                    self.database.insert_paper_signal_diagnostic(diagnostic)
+                    skipped += 1
+                    continue
+
+                best = scores[0]
+                diagnostic.update({
+                    "candidate_available": True,
+                    "best_candidate": best.contract.tradingsymbol,
+                    "best_score": best.total_score,
+                    "score_ok": best.total_score >= self.minimum_candidate_score,
+                })
+
+                opposite_direction = (
+                    "BEARISH"
+                    if str(signal["direction"]).upper() == "BULLISH"
+                    else "BULLISH"
+                )
+                opposite_red_bar = any(
+                    str(item.get("direction") or "").upper() == opposite_direction
+                    and bool(item.get("confirmation_timestamp"))
+                    and str(item.get("confirmation_timestamp") or "")
+                    > str(confirmation_timestamp or "")
+                    for item in signals
+                    if str(item.get("signal_id") or "") != signal_id
+                )
+                entry_mode = (
+                    "OPPORTUNITY_EXTENSION" if stale_for_extension else "FRESH_SIGNAL"
+                )
+
+                current_shadow_rows = self.database.read_shadow_intelligence_evaluations(
+                    signal_id=signal_id, limit=1
+                )
+                current_shadow = current_shadow_rows[0] if current_shadow_rows else None
+
+                evaluations = []
+                for rank, candidate in enumerate(scores, start=1):
+                    opportunity = self.opportunity_engine.evaluate(
+                        signal=signal,
+                        candidate=candidate,
+                        spot_price=float(spot),
+                        signal_age_seconds=float(age_seconds),
+                        opposite_red_bar_confirmed=opposite_red_bar,
+                        freshness_seconds=float(self.max_signal_age_seconds),
+                    )
+                    self._record_state(
+                        signal_id=signal_id,
+                        state="OPPORTUNITY_EVALUATED",
+                        detail=(
+                            f"candidate={candidate.contract.tradingsymbol}; "
+                            f"rank={rank}; mode={entry_mode}; "
+                            f"score={opportunity.opportunity_score:.2f}; "
+                            f"reward_remaining={opportunity.reward_remaining_pct:.1f}%; "
+                            f"decision={opportunity.decision}"
+                        ),
+                        score=opportunity.opportunity_score,
+                    )
+                    self.database.insert_opportunity_evaluation({
+                        "scan_id": scan_id,
+                        "signal_id": signal_id,
+                        "trading_date": trading_date,
+                        "direction": signal.get("direction"),
+                        "signal_age_seconds": age_seconds,
+                        "entry_mode": entry_mode,
+                        "candidate_symbol": candidate.contract.tradingsymbol,
+                        "candidate_score": candidate.total_score,
+                        "opportunity_score": opportunity.opportunity_score,
+                        "structure_score": opportunity.structure_score,
+                        "momentum_score": opportunity.momentum_score,
+                        "reward_score": opportunity.reward_score,
+                        "option_health_score": opportunity.option_health_score,
+                        "market_context_score": opportunity.market_context_score,
+                        "time_score": opportunity.time_score,
+                        "reward_remaining_pct": opportunity.reward_remaining_pct,
+                        "move_consumed_pct": opportunity.move_consumed_pct,
+                        "structure_valid": opportunity.structure_valid,
+                        "opposite_red_bar": opportunity.opposite_red_bar,
+                        "eligible": opportunity.eligible,
+                        "decision": opportunity.decision,
+                        "reason": opportunity.reason,
+                        "evaluated_at": now.isoformat(),
+                    })
+                    selection = self.selection_engine.evaluate(
+                        candidate=candidate,
+                        candidate_rank=rank,
+                        opportunity=opportunity,
+                        historical_orders=historical_orders,
+                        entry_mode=entry_mode,
+                        minimum_candidate_score=self.minimum_candidate_score,
+                        stop_loss_pct=self.stop_loss_pct,
+                        target_pct=self.target_pct,
+                        require_opportunity_gate=stale_for_extension,
+                    )
+                    duplicate = self.database.paper_execution_exists_for_candidate(
+                        signal_id=signal_id,
+                        account_id=self.engine.account_id,
+                        instrument_token=candidate.contract.instrument_token,
+                    )
+                    candidate_lifecycle = self.lifecycle_manager.evaluate(
+                        signal_id=signal_id,
+                        confirmation_timestamp=confirmation_timestamp,
+                        now=now,
+                        candidate=candidate,
+                        duplicate=duplicate,
+                        replacement_signal_id=newer_signal_id,
+                    )
+                    self.database.upsert_candidate_lifecycle({
+                        **candidate_lifecycle.__dict__,
+                        "trading_date": trading_date,
+                        "created_at": now.isoformat(),
+                        "updated_at": now.isoformat(),
+                    })
+                    if candidate_lifecycle.state == "EXPIRED" and not self.allow_stale_signals:
+                        self._record_state(
+                            signal_id=signal_id, state="CANDIDATE_EXPIRED",
+                            detail=(f"candidate={candidate.contract.tradingsymbol}; "
+                                    f"{candidate_lifecycle.reason}; action={candidate_lifecycle.action}"),
+                            score=candidate_lifecycle.health_score,
+                        )
+                        continue
+                    if duplicate:
+                        selection = type(selection)(
+                            **{
+                                **selection.__dict__,
+                                "eligible": False,
+                                "decision": "SKIP",
+                                "reason": (
+                                    selection.reason + " | DUPLICATE_CANDIDATE"
+                                    if selection.reason != "ALL_SELECTION_GATES_PASS"
+                                    else "DUPLICATE_CANDIDATE"
+                                ),
+                            }
+                        )
+                    h = selection.historical
+                    self.database.insert_trade_selection_evaluation({
+                        "scan_id": scan_id,
+                        "signal_id": signal_id,
+                        "trading_date": trading_date,
+                        "direction": signal.get("direction"),
+                        "candidate_rank": rank,
+                        "candidate_symbol": candidate.contract.tradingsymbol,
+                        "instrument_token": candidate.contract.instrument_token,
+                        "candidate_score": candidate.total_score,
+                        "opportunity_score": opportunity.opportunity_score,
+                        "reward_remaining_pct": opportunity.reward_remaining_pct,
+                        "reward_risk_ratio": selection.reward_risk_ratio,
+                        "execution_quality_score": selection.execution_quality_score,
+                        "history_sample_size": h.sample_size,
+                        "history_win_rate_pct": h.win_rate_pct,
+                        "history_profit_factor": h.profit_factor,
+                        "history_expectancy_pct": h.expectancy_pct,
+                        "history_avg_mfe_pct": h.average_mfe_pct,
+                        "history_avg_mae_pct": h.average_mae_pct,
+                        "historical_score": selection.historical_score,
+                        "selection_score": selection.selection_score,
+                        "evidence_ready": h.evidence_ready,
+                        "eligible": selection.eligible,
+                        "decision": selection.decision,
+                        "reason": selection.reason,
+                        "evaluated_at": now.isoformat(),
+                    })
+                    committee = self.execution_committee.evaluate(
+                        candidate=candidate,
+                        selection=selection,
+                        opportunity=opportunity,
+                        historical_orders=historical_orders,
+                        current_shadow=current_shadow,
+                        historical_shadow=historical_shadow,
+                        stop_loss_pct=self.stop_loss_pct,
+                        target_pct=self.target_pct,
+                    )
+                    self.database.insert_institutional_execution_evaluation({
+                        "scan_id": scan_id,
+                        "signal_id": signal_id,
+                        "trading_date": trading_date,
+                        "direction": signal.get("direction"),
+                        "candidate_rank": rank,
+                        "candidate_symbol": candidate.contract.tradingsymbol,
+                        "instrument_token": candidate.contract.instrument_token,
+                        "option_type": candidate.contract.option_type,
+                        "execution_probability_pct": committee.execution_probability_pct,
+                        "expected_value_pct": committee.expected_value_pct,
+                        "expectancy_pct": committee.expectancy_pct,
+                        "expected_win_pct": committee.expected_win_pct,
+                        "expected_loss_pct": committee.expected_loss_pct,
+                        "expectancy_source": committee.expectancy_source,
+                        "expectancy_confidence_pct": committee.expectancy_confidence_pct,
+                        "kelly_fraction_pct": committee.kelly_fraction_pct,
+                        "expected_reward_pct": committee.expected_reward_pct,
+                        "expected_risk_pct": committee.expected_risk_pct,
+                        "intelligence_score": committee.intelligence_score,
+                        "adaptive_history_weight_pct": committee.adaptive_history_weight_pct,
+                        "rule_quality_score": committee.rule_quality_score,
+                        "opportunity_score": committee.opportunity_score,
+                        "historical_score": committee.historical_score,
+                        "selection_score": committee.selection_score,
+                        "primary_decision": committee.primary_decision,
+                        "primary_confidence_pct": committee.primary_confidence_pct,
+                        "shadow_decision": committee.shadow_decision,
+                        "shadow_confidence_pct": committee.shadow_confidence_pct,
+                        "agreement": committee.agreement,
+                        "shadow_adjustment_pct": committee.shadow_adjustment_pct,
+                        "evidence_sample_size": committee.evidence_sample_size,
+                        "evidence_ready": committee.evidence_ready,
+                        "modules": [item.as_dict() for item in committee.modules],
+                        "expert_votes": [item.as_dict() for item in committee.expert_votes],
+                        "eligible": committee.eligible,
+                        "decision": committee.decision,
+                        "reason": committee.reason,
+                        "evaluated_at": now.isoformat(),
+                    })
+                    queue_status = (
+                        "QUALIFIED" if committee.eligible
+                        else "WAITING" if committee.decision == "WAIT"
+                        else "REJECTED"
+                    )
+                    self.database.upsert_execution_queue_item({
+                        "queue_id": f"Q-{signal_id}-{candidate.contract.instrument_token}",
+                        "signal_id": signal_id,
+                        "trading_date": trading_date,
+                        "direction": signal.get("direction"),
+                        "candidate_rank": rank,
+                        "candidate_symbol": candidate.contract.tradingsymbol,
+                        "instrument_token": candidate.contract.instrument_token,
+                        "exchange": candidate.contract.exchange,
+                        "option_type": candidate.contract.option_type,
+                        "strike": candidate.contract.strike,
+                        "expiry": str(candidate.contract.expiry),
+                        "lot_size": candidate.contract.lot_size,
+                        "quantity": int(lots) * candidate.contract.lot_size,
+                        "candidate_score": candidate.total_score,
+                        "selection_score": selection.selection_score,
+                        "execution_probability_pct": committee.execution_probability_pct,
+                        "expected_value_pct": committee.expected_value_pct,
+                        "opportunity_score": opportunity.opportunity_score,
+                        "entry_mode": entry_mode,
+                        "signal_age_seconds": age_seconds,
+                        "status": queue_status,
+                        "reason": committee.reason,
+                        "created_at": now.isoformat(),
+                        "updated_at": now.isoformat(),
+                    })
+                    self._record_state(
+                        signal_id=signal_id,
+                        state=("QUEUED" if committee.eligible else "DECISION_RECORDED"),
+                        detail=(
+                            f"candidate={candidate.contract.tradingsymbol}; rank={rank}; "
+                            f"queue_status={queue_status}; prob={committee.execution_probability_pct:.2f}%; "
+                            f"ev={committee.expected_value_pct:.3f}%; reason={committee.reason}"
+                        ),
+                        score=committee.execution_probability_pct,
+                    )
+                    evaluations.append((committee, selection, candidate, opportunity))
+                    self._record_state(
+                        signal_id=signal_id,
+                        state="EXECUTION_COMMITTEE",
+                        detail=(
+                            f"candidate={candidate.contract.tradingsymbol}; rank={rank}; "
+                            f"prob={committee.execution_probability_pct:.2f}%; "
+                            f"ev={committee.expected_value_pct:.3f}%; "
+                            f"intel={committee.intelligence_score:.2f}; "
+                            f"decision={committee.decision}; reason={committee.reason}"
+                        ),
+                        score=committee.execution_probability_pct,
+                    )
+
+                # Execute strongest positive-EV opportunities first. This is an
+                # ordering rule, not a count limit.
+                evaluations.sort(
+                    key=lambda item: (
+                        item[0].expected_value_pct,
+                        item[0].execution_probability_pct,
+                        item[1].selection_score,
+                    ),
+                    reverse=True,
+                )
+                # RB-1.5.0 portfolio admission: committee-qualified candidates are
+                # independently tradable; rank is priority only, never a Rank #1 gate.
+                open_orders = self.database.read_open_paper_execution_orders(self.engine.account_id)
+                current_risk = sum(
+                    max(0.0, (_num(r.get("entry_price")) - _num(r.get("stop_price"))) * int(r.get("quantity") or 0))
+                    for r in open_orders
+                )
+                current_ce = sum(1 for r in open_orders if str(r.get("option_type") or "").upper() == "CE")
+                current_pe = sum(1 for r in open_orders if str(r.get("option_type") or "").upper() == "PE")
+                portfolio_summary = self.engine.portfolio_summary()
+                portfolio_candidates = []
+                for comm, sel, cand, opp in evaluations:
+                    if not comm.eligible:
+                        continue
+                    ref = _num(cand.best_ask or cand.ltp, 0.0)
+                    portfolio_candidates.append(PortfolioCandidate(
+                        queue_id=f"Q-{signal_id}-{cand.contract.instrument_token}",
+                        signal_id=signal_id, symbol=cand.contract.tradingsymbol,
+                        option_type=cand.contract.option_type, rank=sel.candidate_rank,
+                        candidate_score=cand.total_score, opportunity_health=opp.opportunity_score,
+                        expectancy_pct=comm.expected_value_pct, reference_price=ref,
+                        stop_loss_pct=self.stop_loss_pct, quantity=int(lots) * cand.contract.lot_size,
+                    ))
+                admissions = self.portfolio_manager.admit(
+                    portfolio_candidates, initial_capital=self.initial_capital,
+                    current_open_trades=portfolio_summary.open_positions,
+                    current_deployed_capital=portfolio_summary.deployed_capital,
+                    current_risk=current_risk, current_ce=current_ce, current_pe=current_pe,
+                )
+                portfolio_admission = {a.queue_id: a for a in admissions}
+                for admission in admissions:
+                    self.database.update_execution_queue_status(
+                        queue_id=admission.queue_id, status=admission.status, reason=admission.reason
+                    )
+                    self._record_state(
+                        signal_id=signal_id,
+                        state="PORTFOLIO_APPROVED" if admission.admitted else "PORTFOLIO_WATCHLIST",
+                        detail=(f"queue={admission.queue_id}; {admission.reason}; "
+                                f"risk_used={admission.risk_used:.2f}; capital_used={admission.capital_used:.2f}"),
+                    )
+
+                if stale_for_extension:
+                    if any(comm.eligible for comm, _, _, _ in evaluations):
+                        self._record_state(
+                            signal_id=signal_id,
+                            state="OPPORTUNITY_EXTENSION_APPROVED",
+                            detail=(
+                                "At least one candidate cleared the guarded "
+                                "opportunity + performance selection gates."
+                            ),
+                        )
+                    else:
+                        self._record_state(
+                            signal_id=signal_id,
+                            state="SKIPPED_OPPORTUNITY",
+                            detail=(
+                                "No candidate cleared the guarded opportunity "
+                                "extension + performance selection gates."
+                            ),
+                        )
+                opened_for_signal = 0
+                blocked: list[str] = []
+                if queue_only:
+                    approved_count = sum(1 for a in admissions if a.admitted)
+                    diagnostic["final_decision"] = (
+                        "QUEUED" if approved_count else "WAIT"
+                    )
+                    diagnostic["reason"] = (
+                        f"FOREGROUND_COMMITTEE_APPROVED={approved_count}; "
+                        f"CANDIDATES={len(evaluations)}"
+                    )
+                    already_executed = self.database.paper_execution_exists_for_signal(
+                        signal_id=signal_id, account_id=self.engine.account_id,
+                    )
+                    self.database.upsert_paper_candidate_decision({
+                        "signal_id": signal_id,
+                        "trading_date": trading_date,
+                        "direction": signal["direction"],
+                        "tradingsymbol": best.contract.tradingsymbol,
+                        "instrument_token": best.contract.instrument_token,
+                        "option_type": best.contract.option_type,
+                        "strike": best.contract.strike,
+                        "expiry": str(best.contract.expiry),
+                        "candidate_score": best.total_score,
+                        "score_detail": "RB093_FOREGROUND_COMMITTEE; see execution_queue",
+                        "decision": (
+                            "PAPER_BUY_MULTI" if already_executed
+                            else "QUEUED" if approved_count else "WAIT"
+                        ),
+                    })
+                    self.database.insert_paper_signal_diagnostic(diagnostic)
+                    if not approved_count:
+                        skipped += 1
+                    continue
+
+                for committee, selection, candidate, opportunity in evaluations:
+                    if not committee.eligible:
+                        continue
+                    queue_id = f"Q-{signal_id}-{candidate.contract.instrument_token}"
+                    admission = portfolio_admission.get(queue_id)
+                    if admission is None or not admission.admitted:
+                        blocked.append(f"{candidate.contract.tradingsymbol}:PORTFOLIO_WAITLIST")
+                        continue
+                    key = f"{candidate.contract.exchange}:{candidate.contract.tradingsymbol}"
+                    q = self.zerodha.quote([key]).get(key) or {}
+                    reference = _num(candidate.best_ask or q.get("last_price"), 0.0)
+                    if reference <= 0:
+                        blocked.append(f"{candidate.contract.tradingsymbol}:NO_PRICE")
+                        continue
+                    stop = reference * (1.0 - self.stop_loss_pct / 100.0)
+                    target = reference * (1.0 + self.target_pct / 100.0)
+                    quantity = int(lots) * candidate.contract.lot_size
+                    h = selection.historical
+                    entry_reason = (
+                        ("AUTO_OPPORTUNITY_EXTENSION " if stale_for_extension else "")
+                        + "AUTO_PERFORMANCE_SELECTED "
+                        f"RANK={selection.candidate_rank} "
+                        f"CANDIDATE={candidate.total_score:.2f} "
+                        f"TSS={selection.selection_score:.2f} "
+                        f"PROB={committee.execution_probability_pct:.2f} "
+                        f"EV={committee.expected_value_pct:.3f} "
+                        f"INTEL={committee.intelligence_score:.2f} "
+                        f"HIST_N={h.sample_size} "
+                        f"HIST_WR={h.win_rate_pct if h.win_rate_pct is not None else 'NA'} "
+                        f"PF={h.profit_factor if h.profit_factor is not None else 'NA'} "
+                        f"EV={h.expectancy_pct if h.expectancy_pct is not None else 'NA'} "
+                        f"MODE={entry_mode}"
+                    )
+                    self.database.update_execution_queue_status(
+                        queue_id=queue_id, status="EXECUTING",
+                        reason="PAPER_EXECUTION_STARTED",
+                    )
+                    self._record_state(
+                        signal_id=signal_id, state="EXECUTING",
+                        detail=f"candidate={candidate.contract.tradingsymbol}; rank={selection.candidate_rank}",
+                        score=committee.execution_probability_pct,
+                    )
+                    try:
+                        opened_row = self.engine.open_long_option(
+                            zerodha=self.zerodha,
+                            contract=candidate.contract,
+                            quantity=quantity,
+                            signal_id=signal_id,
+                            underlying_name=self.underlying_name,
+                            underlying_price=float(spot),
+                            stop_price=round(stop, 2),
+                            target1_price=round(target, 2),
+                            target2_price=None,
+                            reason=entry_reason,
+                        )
+                    except Exception as exc:
+                        blocked.append(
+                            f"{candidate.contract.tradingsymbol}:{type(exc).__name__}:{exc}"
+                        )
+                        continue
+                    self.database.update_execution_queue_status(
+                        queue_id=queue_id, status="ACTIVE",
+                        reason="PAPER_POSITION_OPEN",
+                        order_id=str(opened_row["order_id"]),
+                        executed_at=datetime.now(IST).isoformat(),
+                    )
+                    self.database.update_paper_entry_intelligence(
+                        order_id=str(opened_row["order_id"]),
+                        entry_mode=entry_mode,
+                        signal_age_at_entry=float(age_seconds),
+                        opportunity_score=opportunity.opportunity_score,
+                        reward_remaining_pct=opportunity.reward_remaining_pct,
+                        candidate_rank=selection.candidate_rank,
+                        candidate_score=candidate.total_score,
+                        selection_score=selection.selection_score,
+                        historical_win_rate_pct=h.win_rate_pct,
+                        historical_profit_factor=h.profit_factor,
+                        historical_expectancy_pct=h.expectancy_pct,
+                        historical_sample_size=h.sample_size,
+                        execution_probability_pct=committee.execution_probability_pct,
+                        expected_value_pct=committee.expected_value_pct,
+                        intelligence_score=committee.intelligence_score,
+                    )
+                    opened += 1
+                    opened_for_signal += 1
+                    self._record_state(
+                        signal_id=signal_id,
+                        order_id=str(opened_row["order_id"]),
+                        state="OPEN",
+                        detail=(
+                            f"{candidate.contract.tradingsymbol}; rank={selection.candidate_rank}; "
+                            f"candidate={candidate.total_score:.2f}; "
+                            f"selection={selection.selection_score:.2f}; "
+                            f"prob={committee.execution_probability_pct:.2f}%; "
+                            f"ev={committee.expected_value_pct:.3f}%; "
+                            f"intel={committee.intelligence_score:.2f}; mode={entry_mode}; "
+                            f"hist_n={h.sample_size}; hist_wr={h.win_rate_pct}; "
+                            f"pf={h.profit_factor}; ev={h.expectancy_pct}"
+                        ),
+                        score=selection.selection_score,
+                    )
+
+                # Preserve the legacy single best-candidate record for existing UI
+                # compatibility while the new table contains every candidate.
+                self.database.upsert_paper_candidate_decision({
+                    "signal_id": signal_id,
+                    "trading_date": trading_date,
+                    "direction": signal["direction"],
+                    "tradingsymbol": best.contract.tradingsymbol,
+                    "instrument_token": best.contract.instrument_token,
+                    "option_type": best.contract.option_type,
+                    "strike": best.contract.strike,
+                    "expiry": str(best.contract.expiry),
+                    "candidate_score": best.total_score,
+                    "score_detail": "MULTI_PERFORMANCE_SELECTION; see trade_selection_evaluations",
+                    "decision": (
+                        "PAPER_BUY_MULTI"
+                        if opened_for_signal
+                        or self.database.paper_execution_exists_for_signal(
+                            signal_id=signal_id,
+                            account_id=self.engine.account_id,
+                        )
+                        else "WAIT"
+                    ),
+                })
+                if opened_for_signal:
+                    diagnostic["final_decision"] = "OPENED"
+                    diagnostic["reason"] = (
+                        f"PERFORMANCE_SELECTION_OPENED={opened_for_signal}; "
+                        f"QUALIFIED={sum(1 for x,_,_,_ in evaluations if x.eligible)}"
+                        + (f"; BLOCKED={' || '.join(blocked)}" if blocked else "")
+                    )
+                else:
+                    diagnostic["final_decision"] = "WAIT"
+                    reasons = sorted({x.reason for x,_,_,_ in evaluations})
+                    diagnostic["reason"] = "NO_CANDIDATE_CLEARED_SELECTION: " + " || ".join(reasons)
+                    if blocked:
+                        diagnostic["reason"] += "; BLOCKED=" + " || ".join(blocked)
+                    skipped += 1
+                self.database.insert_paper_signal_diagnostic(diagnostic)
+
+            except Exception as exc:
+                skipped += 1
+                diagnostic["final_decision"] = "ERROR"
+                diagnostic["reason"] = f"{type(exc).__name__}: {exc}"
+                self.database.insert_paper_signal_diagnostic(diagnostic)
+                errors.append(f"{signal_id}: {type(exc).__name__}: {exc}")
+                self._record_state(
+                    signal_id=signal_id,
+                    state="ERROR",
+                    detail=f"{type(exc).__name__}: {exc}",
+                )
+
+        return opened, skipped, scored_count, errors
+
+    def execute_approved_queue(
+        self, *, trading_date: str, lots: int = 1,
+    ) -> tuple[int, list[str]]:
+        """Consume RB-0.9.3 APPROVED decisions without re-scoring them.
+
+        The committee owns approval. This method is intentionally execution-only:
+        it validates duplicate/price/capital through the existing paper engine,
+        opens the paper position, and advances lifecycle/queue state.
+        """
+        opened = 0
+        errors: list[str] = []
+        try:
+            quote_key = _underlying_quote_key(self.underlying_name)
+            spot = _num(self.zerodha.ltp([quote_key]).get(quote_key), 0.0)
+        except Exception as exc:
+            return 0, [f"queue-underlying: {exc}"]
+        if spot <= 0:
+            return 0, ["queue-underlying: LTP unavailable"]
+
+        instrument_key = (
+            "NSE_INDEX|Nifty 50"
+            if self.underlying_name == "NIFTY 50"
+            else "NSE_INDEX|Nifty Bank"
+        )
+        signal_rows = self.database.read_signal_attempts(instrument_key, trading_date)
+        signal_meta = {str(item.get("signal_id") or ""): item for item in signal_rows}
+        queue_rows = self.database.read_execution_queue(
+            status="APPROVED", trading_date=trading_date, limit=500
+        )
+        for row in queue_rows:
+            queue_id = str(row.get("queue_id") or "")
+            signal_id = str(row.get("signal_id") or "")
+            symbol = str(row.get("candidate_symbol") or "")
+            token = int(row.get("instrument_token") or 0)
+            if not queue_id or not signal_id or not symbol or token <= 0:
+                continue
+            if self.database.paper_execution_exists_for_candidate(
+                signal_id=signal_id, account_id=self.engine.account_id,
+                instrument_token=token,
+            ):
+                self.database.update_execution_queue_status(
+                    queue_id=queue_id, status="ACTIVE",
+                    reason="ALREADY_OPEN_OR_EXECUTED",
+                )
+                continue
+            try:
+                contract = PaperContract(
+                    instrument_token=token,
+                    tradingsymbol=symbol,
+                    exchange=str(row.get("exchange") or "NFO"),
+                    option_type=str(row.get("option_type") or ""),
+                    strike=float(row.get("strike") or 0.0),
+                    expiry=pd.Timestamp(str(row.get("expiry"))).date(),
+                    lot_size=int(row.get("lot_size") or 1),
+                )
+                key = f"{contract.exchange}:{contract.tradingsymbol}"
+                q = self.zerodha.quote([key]).get(key) or {}
+                reference = _num(q.get("best_ask") or q.get("last_price"), 0.0)
+                if reference <= 0:
+                    self.database.update_execution_queue_status(
+                        queue_id=queue_id, status="WAITING",
+                        reason="NO_EXECUTABLE_PRICE",
+                    )
+                    continue
+                quantity = int(row.get("quantity") or 0)
+                if quantity <= 0:
+                    quantity = max(1, int(lots)) * contract.lot_size
+                stop = reference * (1.0 - self.stop_loss_pct / 100.0)
+                target = reference * (1.0 + self.target_pct / 100.0)
+                self.database.update_execution_queue_status(
+                    queue_id=queue_id, status="EXECUTING",
+                    reason="PAPER_EXECUTION_STARTED",
+                )
+                self._record_state(
+                    signal_id=signal_id, state="EXECUTING",
+                    detail=(f"candidate={symbol}; rank={row.get('candidate_rank')}; "
+                            f"queue={queue_id}"),
+                    score=_num(row.get("execution_probability_pct"), 0.0),
+                )
+                reason = (
+                    f"RB093_QUEUE_APPROVED RANK={row.get('candidate_rank')} "
+                    f"TSS={_num(row.get('selection_score')):.2f} "
+                    f"PROB={_num(row.get('execution_probability_pct')):.2f} "
+                    f"EV={_num(row.get('expected_value_pct')):.3f} "
+                    f"MODE={row.get('entry_mode') or 'FRESH_SIGNAL'}"
+                )
+                opened_row = self.engine.open_long_option(
+                    zerodha=self.zerodha, contract=contract, quantity=quantity,
+                    signal_id=signal_id, underlying_name=self.underlying_name,
+                    underlying_price=float(spot), stop_price=round(stop, 2),
+                    target1_price=round(target, 2), target2_price=None, reason=reason,
+                )
+                order_id = str(opened_row["order_id"])
+                self.database.update_execution_queue_status(
+                    queue_id=queue_id, status="ACTIVE",
+                    reason="PAPER_POSITION_OPEN", order_id=order_id,
+                    executed_at=datetime.now(IST).isoformat(),
+                )
+                self.database.update_paper_entry_intelligence(
+                    order_id=order_id,
+                    entry_mode=str(row.get("entry_mode") or "FRESH_SIGNAL"),
+                    signal_age_at_entry=_num(row.get("signal_age_seconds"), 0.0),
+                    opportunity_score=_num(row.get("opportunity_score"), 0.0),
+                    reward_remaining_pct=None,
+                    candidate_rank=int(row.get("candidate_rank") or 0),
+                    candidate_score=_num(row.get("candidate_score"), 0.0),
+                    selection_score=_num(row.get("selection_score"), 0.0),
+                    execution_probability_pct=_num(row.get("execution_probability_pct"), 0.0),
+                    expected_value_pct=_num(row.get("expected_value_pct"), 0.0),
+                )
+                self._record_state(
+                    signal_id=signal_id, order_id=order_id, state="OPEN",
+                    detail=(f"{symbol}; queue={queue_id}; "
+                            f"prob={_num(row.get('execution_probability_pct')):.2f}%; "
+                            f"ev={_num(row.get('expected_value_pct')):.3f}%"),
+                    score=_num(row.get("selection_score"), 0.0),
+                )
+                self.database.upsert_paper_candidate_decision({
+                    "signal_id": signal_id,
+                    "trading_date": trading_date,
+                    "direction": row.get("direction") or "",
+                    "tradingsymbol": symbol,
+                    "instrument_token": token,
+                    "option_type": row.get("option_type"),
+                    "strike": row.get("strike"),
+                    "expiry": row.get("expiry"),
+                    "candidate_score": row.get("candidate_score"),
+                    "score_detail": "RB093_QUEUE_EXECUTED; see execution_queue",
+                    "decision": "PAPER_BUY_MULTI",
+                })
+                self.database.insert_paper_signal_diagnostic({
+                    "scan_id": f"EXEC-{uuid4().hex[:10].upper()}",
+                    "signal_id": signal_id,
+                    "signal_state": (signal_meta.get(signal_id, {}).get("state") or "CONFIRMED"),
+                    "direction": row.get("direction"),
+                    "confirmation_timestamp": signal_meta.get(signal_id, {}).get("confirmation_timestamp"),
+                    "signal_age_seconds": row.get("signal_age_seconds"),
+                    "market_hours_ok": True,
+                    "freshness_ok": True,
+                    "duplicate_free": True,
+                    "candidate_available": True,
+                    "best_candidate": symbol,
+                    "best_score": row.get("candidate_score"),
+                    "minimum_score": self.minimum_candidate_score,
+                    "score_ok": True,
+                    "final_decision": "OPENED",
+                    "reason": "RB093_APPROVED_QUEUE_EXECUTED",
+                    "timestamp": datetime.now(IST).isoformat(),
+                })
+                opened += 1
+            except Exception as exc:
+                self.database.update_execution_queue_status(
+                    queue_id=queue_id, status="WAITING",
+                    reason=f"EXECUTION_BLOCKED:{type(exc).__name__}:{exc}",
+                )
+                errors.append(f"{symbol}: {type(exc).__name__}: {exc}")
+        return opened, errors
+
+    def monitor_and_exit(self) -> tuple[int, list[str]]:
+        """Manage open CE/PE paper positions.
+
+        Operational hierarchy:
+        hard/effective premium stop -> target -> EOD -> NIFTY thesis
+        invalidation -> opposite Red Bar -> option technical breakdown.
+
+        Breakeven and trailing protection update the paper stop. OI/PCR/Greeks
+        remain shadow-only in RB-0.7.9.
+        """
+        errors: list[str] = []
+        closed = 0
+
+        current_underlying = None
+        try:
+            quote_key = _underlying_quote_key(self.underlying_name)
+            ltp_map = self.zerodha.ltp([quote_key])
+            current_underlying = _num(ltp_map.get(quote_key), 0.0)
+        except Exception as exc:
+            errors.append(f"underlying-mark: {exc}")
+
+        try:
+            self.engine.refresh_open_positions(
+                zerodha=self.zerodha,
+                underlying_prices=(
+                    {self.underlying_name: current_underlying}
+                    if current_underlying else None
+                ),
+            )
+        except Exception as exc:
+            errors.append(f"mark: {exc}")
+
+        open_rows = self.database.read_open_paper_execution_orders(
+            self.engine.account_id
+        )
+        now = datetime.now(IST)
+        trading_date = now.date().isoformat()
+        all_signals = self.database.read_signal_attempts(
+            (
+                "NSE_INDEX|Nifty 50"
+                if self.underlying_name == "NIFTY 50"
+                else "NSE_INDEX|Nifty Bank"
+            ),
+            trading_date,
+        )
+        exit_engine = PaperExitEngine()
+
+        for row in open_rows:
+            try:
+                signal_id = str(row.get("signal_id") or "")
+                signal = (
+                    self.database.read_signal_attempt_by_id(signal_id)
+                    if signal_id else None
+                )
+
+                # Opposite confirmed Red Bar after this position's entry.
+                entry_ts = str(row.get("entry_timestamp") or "")
+                original_direction = str(
+                    (signal or {}).get("direction") or ""
+                ).upper()
+                opposite_direction = (
+                    "BULLISH" if original_direction == "BEARISH"
+                    else "BEARISH" if original_direction == "BULLISH"
+                    else ""
+                )
+                opposite_confirmed = any(
+                    str(item.get("direction") or "").upper()
+                    == opposite_direction
+                    and bool(item.get("confirmation_timestamp"))
+                    and str(item.get("confirmation_timestamp") or "")
+                    > entry_ts
+                    for item in all_signals
+                )
+
+                # Actual CE/PE technical state.
+                option_candle = None
+                try:
+                    candles = self.engine.option_candles(
+                        zerodha=self.zerodha,
+                        instrument_token=int(row["instrument_token"]),
+                        date_from=trading_date,
+                        date_to=trading_date,
+                        interval="minute",
+                    )
+                    if not candles.empty:
+                        last = candles.iloc[-1]
+                        close = _num(
+                            last.get("close"),
+                            _num(row.get("current_price")),
+                        )
+                        lookback = min(5, max(1, len(candles) - 1))
+                        momentum_pct = 0.0
+                        if len(candles) >= 2:
+                            previous = _num(
+                                candles.iloc[-1 - lookback].get("close"),
+                                close,
+                            )
+                            if previous:
+                                momentum_pct = (
+                                    (close - previous) / previous * 100.0
+                                )
+                        recent_volume = pd.to_numeric(
+                            candles["volume"],
+                            errors="coerce",
+                        ).fillna(0.0)
+                        base = (
+                            float(recent_volume.tail(20).mean())
+                            if len(recent_volume) else 0.0
+                        )
+                        relative_volume = (
+                            _num(last.get("volume")) / base
+                            if base > 0 else None
+                        )
+                        option_candle = {
+                            "close": close,
+                            "vwap": _num(last.get("vwap"), close),
+                            "ema9": _num(last.get("ema9"), close),
+                            "ema21": _num(last.get("ema21"), close),
+                            "momentum_pct": momentum_pct,
+                            "relative_volume": relative_volume,
+                        }
+                except Exception as exc:
+                    errors.append(
+                        f"{row.get('order_id')}: candle-health: {exc}"
+                    )
+
+                exit_health = exit_engine.evaluate(
+                    position=row,
+                    option_candle=option_candle,
+                    signal=signal,
+                    current_underlying=(
+                        current_underlying
+                        if current_underlying else None
+                    ),
+                    opposite_red_bar_confirmed=opposite_confirmed,
+                    eod_due=now.time() >= self.eod_exit_time,
+                )
+
+                # Never loosen protection.
+                existing_stop = _num(row.get("stop_price"), 0.0)
+                effective_stop = exit_health.effective_stop
+                if effective_stop is not None and existing_stop > 0:
+                    effective_stop = max(existing_stop, effective_stop)
+
+                # Record protection milestones only when state changes.
+                was_breakeven = bool(row.get("breakeven_armed"))
+                was_trailing = bool(row.get("trailing_active"))
+                previous_trail = _num(
+                    row.get("trailing_stop_price"),
+                    0.0,
+                )
+
+                if exit_health.breakeven_armed and not was_breakeven:
+                    self._record_state(
+                        signal_id=signal_id,
+                        order_id=str(row["order_id"]),
+                        state="BREAKEVEN_ARMED",
+                        detail=(
+                            f"+15% peak reached; entry="
+                            f"{_num(row.get('entry_price')):.2f}; "
+                            f"peak={exit_health.peak_price:.2f}; "
+                            f"effective_stop={effective_stop}"
+                        ),
+                    )
+
+                if exit_health.trailing_active and not was_trailing:
+                    self._record_state(
+                        signal_id=signal_id,
+                        order_id=str(row["order_id"]),
+                        state="TRAILING_ACTIVATED",
+                        detail=(
+                            f"+20% peak reached; peak="
+                            f"{exit_health.peak_price:.2f}; "
+                            f"trail={exit_health.trailing_stop}"
+                        ),
+                    )
+                elif (
+                    exit_health.trailing_active
+                    and exit_health.trailing_stop is not None
+                    and previous_trail > 0
+                    and exit_health.trailing_stop > previous_trail + 0.01
+                ):
+                    self._record_state(
+                        signal_id=signal_id,
+                        order_id=str(row["order_id"]),
+                        state="TRAIL_UPDATED",
+                        detail=(
+                            f"trail {previous_trail:.2f} -> "
+                            f"{exit_health.trailing_stop:.2f}; "
+                            f"peak={exit_health.peak_price:.2f}"
+                        ),
+                    )
+
+                self.database.update_paper_exit_protection(
+                    order_id=str(row["order_id"]),
+                    effective_stop=effective_stop,
+                    breakeven_armed=exit_health.breakeven_armed,
+                    trailing_active=exit_health.trailing_active,
+                    trailing_stop_price=exit_health.trailing_stop,
+                    exit_health_score=exit_health.health_score,
+                    exit_action=exit_health.action,
+                    exit_detail=" | ".join(exit_health.reasons),
+                )
+
+                if exit_health.hard_exit_reason:
+                    reason = (
+                        "AUTO_TARGET"
+                        if exit_health.hard_exit_reason == "TARGET_1"
+                        else f"AUTO_{exit_health.hard_exit_reason}"
+                    )
+                    confirmations = []
+                    if exit_health.nifty_thesis == "INVALID":
+                        confirmations.append("NIFTY_INVALIDATION")
+                    if exit_health.opposite_red_bar == "YES":
+                        confirmations.append("OPPOSITE_RED_BAR")
+                    if exit_health.option_vwap == "FAIL":
+                        confirmations.append("VWAP_LOST")
+                    if exit_health.option_ema == "FAIL":
+                        confirmations.append("EMA_BEARISH")
+                    if exit_health.option_momentum == "FAIL":
+                        confirmations.append("MOMENTUM_NEGATIVE")
+                    if exit_health.volume_health == "WEAK":
+                        confirmations.append("VOLUME_WEAK")
+
+                    combined_reason = " + ".join(
+                        dict.fromkeys(
+                            [exit_health.hard_exit_reason]
+                            + confirmations
+                        )
+                    )
+
+                    self._record_state(
+                        signal_id=signal_id,
+                        order_id=str(row["order_id"]),
+                        state="EXIT_TRIGGERED",
+                        detail=(
+                            f"{reason}; combined={combined_reason}; "
+                            f"health={exit_health.health_score:.1f}; "
+                            f"stop={effective_stop}"
+                        ),
+                    )
+                    closed_row = self.engine.close_position(
+                        zerodha=self.zerodha,
+                        order_id=str(row["order_id"]),
+                        exit_reason=reason,
+                    )
+                    self.database.update_execution_queue_for_order(
+                        order_id=str(row["order_id"]), status="CLOSED",
+                        reason=f"{reason}; PNL={_num(closed_row.get('realized_pnl')):+.2f}",
+                    )
+                    self._record_state(
+                        signal_id=signal_id,
+                        order_id=str(row["order_id"]),
+                        state="CLOSED",
+                        detail=(
+                            f"{reason}; pnl="
+                            f"{_num(closed_row.get('realized_pnl')):+.2f}"
+                        ),
+                    )
+                    closed += 1
+                else:
+                    self._record_state(
+                        signal_id=signal_id,
+                        order_id=str(row["order_id"]),
+                        state="EXIT_MONITOR",
+                        detail=(
+                            f"action={exit_health.action}; "
+                            f"health={exit_health.health_score:.1f}; "
+                            f"stop={effective_stop}; "
+                            f"thesis={exit_health.nifty_thesis}; "
+                            f"technical_failures={exit_health.technical_failures}"
+                        ),
+                    )
+            except Exception as exc:
+                errors.append(f"{row.get('order_id')}: {exc}")
+
+        return closed, errors
+    def run_cycle(
+        self,
+        *,
+        trading_date: str,
+        lots: int = 1,
+    ) -> AutomationReport:
+        _, skipped, scored, decision_errors = self.process_new_signals(
+            trading_date=trading_date, lots=lots, queue_only=True,
+        )
+        opened, queue_errors = self.execute_approved_queue(
+            trading_date=trading_date, lots=lots,
+        )
+        closed, exit_errors = self.monitor_and_exit()
+        signal_count = len(
+            self.database.read_signal_attempts(
+                (
+                    "NSE_INDEX|Nifty 50"
+                    if self.underlying_name == "NIFTY 50"
+                    else "NSE_INDEX|Nifty Bank"
+                ),
+                trading_date,
+            )
+        )
+        return AutomationReport(
+            signals_seen=signal_count,
+            candidates_scored=scored,
+            paper_orders_opened=opened,
+            paper_orders_closed=closed,
+            skipped=skipped,
+            errors=tuple(decision_errors + queue_errors + exit_errors),
+        )
