@@ -84,13 +84,17 @@ def test_live_available_dates_backfills_previous_sessions_for_pd_levels(tmp_path
     available = service.available_dates(instrument, interval_minutes=1)
     previous_dates = [day for day in available if day < today]
 
-    assert len(previous_dates) == 10
+    # The bounded backfill may cache more than ten valid trading sessions from
+    # its 30-calendar-day lookback. PD construction intentionally consumes only
+    # the latest ten sessions; available_dates() remains a complete cache index.
+    assert len(previous_dates) >= 10
     assert provider.historical_calls
+    pd_dates = previous_dates[-10:]
 
     current = service.read_day(instrument, today, interval_minutes=1)
     previous = [
         (day, service.read_day(instrument, day, interval_minutes=1))
-        for day in previous_dates
+        for day in pd_dates
     ]
     levels = build_daily_levels(today, current, previous, previous_days=10)
 
