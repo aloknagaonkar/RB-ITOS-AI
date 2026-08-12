@@ -92,7 +92,6 @@ def _first_consumed_row(
 
 def build_all_candidate_contract_price_trace(
     *,
-    engine,
     market,
     underlying_name: str,
     trading_date: str,
@@ -149,12 +148,12 @@ def build_all_candidate_contract_price_trace(
             continue
         try:
             token = int(contract.get("instrument_token"))
-            candles = engine.option_candles(
-                zerodha=market,
+            candles = market.historical_candles(
                 instrument_token=token,
+                interval="minute",
                 date_from=trading_date,
                 date_to=trading_date,
-                interval="minute",
+                include_oi=True,
             )
         except Exception as exc:
             result.append({
