@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+import gc
 import sqlite3
 import threading
 import time
@@ -21,6 +22,21 @@ def _db(tmp_path):
     return settings, database
 
 
+def _unlink_with_windows_retry(path, attempts: int = 20, delay_seconds: float = 0.025):
+    """Delete a SQLite test file after transient Windows handle release."""
+    last_error = None
+    for _ in range(attempts):
+        try:
+            path.unlink()
+            return
+        except PermissionError as exc:
+            last_error = exc
+            gc.collect()
+            time.sleep(delay_seconds)
+    if last_error is not None:
+        raise last_error
+
+
 def test_rb132_initialize_skips_schema_but_self_heals_deleted_file(tmp_path):
     _, database = _db(tmp_path)
     assert database._initialized is True
@@ -28,7 +44,7 @@ def test_rb132_initialize_skips_schema_but_self_heals_deleted_file(tmp_path):
     database.initialize()  # hot path: no migration rerun
     assert original.exists()
 
-    original.unlink()
+    _unlink_with_windows_retry(original)
     database.initialize()  # self-heal path must recreate the DB
     assert original.exists()
     with sqlite3.connect(original) as conn:
