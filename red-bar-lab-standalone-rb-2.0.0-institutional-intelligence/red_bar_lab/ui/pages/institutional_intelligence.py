@@ -68,6 +68,22 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         )
         st.info(strength.reason)
 
+        st.markdown("#### Contract Quality Weighting")
+        quality_rows = [row.as_dict() for row in snapshot.contract_quality]
+        qualified = sum(1 for row in snapshot.contract_quality if row.eligible)
+        q1, q2, q3, q4 = st.columns(4)
+        q1.metric("Contracts Assessed", len(snapshot.contract_quality))
+        q2.metric("Qualified", qualified)
+        q3.metric("Low Quality", max(0, len(snapshot.contract_quality) - qualified))
+        inferred_atm = next((row.inferred_atm for row in snapshot.contract_quality if row.inferred_atm is not None), None)
+        q4.metric("Inferred ATM", f"{inferred_atm:.0f}" if inferred_atm is not None else "—")
+        st.caption(
+            "Raw OI and Premium Velocity remain unchanged. Contract Quality only weights each contract's contribution "
+            "to Buying/Selling Strength and ICI using ATM proximity, premium, OI and volume. Execution impact remains NONE."
+        )
+        quality_rows.sort(key=lambda row: float(row.get("Contract Quality %") or 0.0), reverse=True)
+        st.dataframe(_arrow_safe_rows(quality_rows[:50]), width="stretch", hide_index=True)
+
         st.markdown("#### Strike Rotation")
         rotation = snapshot.rotation
         r1, r2, r3, r4 = st.columns(4)
@@ -101,11 +117,12 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
 
         with st.expander("How Sprint 2 is used", expanded=False):
             st.markdown(
+                "- **Contract Quality** weights aggregate contribution using ATM proximity, premium, OI and volume; raw velocity remains unchanged.\n"
                 "- **OI Velocity** measures 1m/5m/15m changes and acceleration.\n"
                 "- **Premium Flow** identifies expansion, compression, decay, exhaustion and reversal expansion.\n"
                 "- **Strike Rotation** measures migration of call/put OI concentration.\n"
-                "- **Buying/Selling Strength** combines Sprint-1 directional evidence with OI velocity alignment.\n"
-                "- **ICI** combines directional edge, OI velocity, premium flow, rotation and breadth.\n\n"
+                "- **Buying/Selling Strength** combines Sprint-1 directional evidence with OI velocity alignment and contract quality.\n"
+                "- **ICI** combines directional edge, quality-weighted OI velocity, quality-weighted premium flow, rotation and breadth.\n\n"
                 "All Sprint-2 outputs are **informational only** and have execution impact = NONE."
             )
     except Exception as exc:
