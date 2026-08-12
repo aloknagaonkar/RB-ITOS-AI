@@ -50,7 +50,7 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         f"{float(trace.get('execution_probability_pct') or 0.0):.1f}%",
     )
     c4.metric(
-        "Expectancy",
+        "Expectancy (Info)",
         f"{float(trace.get('expectancy_pct') or 0.0):+.3f}%",
     )
     c5.metric("Gate Parity", "PASS" if trace.get("parity") else "MISMATCH")
@@ -101,6 +101,7 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
 
     st.caption(
         "Authoritative blockers mirror the current Committee implementation: Performance hard-block, "
-        "terminal opportunity invalidity, execution probability < 70%, and expectancy <= 0. "
-        "Shadow Intelligence, expectancy confidence, historical score, and Half-Kelly are informational/evidence only."
+        "terminal opportunity invalidity, and execution probability below the configured minimum. "
+        "Expected Value / Expectancy / Expected Win / Expected Loss, Shadow Intelligence, expectancy confidence, "
+        "historical score, and Half-Kelly are informational/evidence only."
     )
