@@ -18,7 +18,21 @@ class InstitutionalConfidenceEngine:
     """Headline advisory confidence for Sprint 2. Never modifies execution state."""
 
     @staticmethod
-    def evaluate(strength, flow_rows, velocity_rows, premium_rows, rotation) -> InstitutionalConfidence:
+    def evaluate(
+        strength,
+        flow_rows,
+        velocity_rows,
+        premium_rows,
+        rotation,
+        quality_by_key: dict[tuple[float, str], object] | None = None,
+    ) -> InstitutionalConfidence:
+        quality_by_key = quality_by_key or {}
+
+        def weight_for(row) -> float:
+            key = (float(getattr(row, "strike", 0.0)), str(getattr(row, "option_type", "")))
+            quality = quality_by_key.get(key)
+            return float(getattr(quality, "weight", 1.0)) if quality is not None else 1.0
+
         directional_edge = abs(float(getattr(strength, "net_strength", 0.0)))
         direction = (
             "BULLISH" if strength.net_strength > 5
@@ -30,26 +44,26 @@ class InstitutionalConfidenceEngine:
         velocity_known = [r for r in velocity_rows if getattr(r, "change_5m_pct", None) is not None]
         velocity_component = 0.0
         if velocity_known:
-            accelerating = sum(
-                1 for r in velocity_known
-                if str(getattr(r, "state", "")).startswith("ACCELERATING")
-            )
-            moving = sum(
-                1 for r in velocity_known
-                if getattr(r, "state", "") not in {"UNKNOWN", "STABLE"}
-            )
-            velocity_component = min(
-                100.0,
-                (accelerating * 1.5 + moving) / max(1, len(velocity_known)) * 70.0,
-            )
+            weighted_value = weighted_total = 0.0
+            for row in velocity_known:
+                row_weight = weight_for(row)
+                state = str(getattr(row, "state", ""))
+                activity = 0.0 if state in {"UNKNOWN", "STABLE"} else 70.0
+                if state.startswith("ACCELERATING"):
+                    activity = 100.0
+                weighted_value += activity * row_weight
+                weighted_total += row_weight
+            velocity_component = weighted_value / max(1e-9, weighted_total)
 
         premium_known = [r for r in premium_rows if getattr(r, "change_5m_pct", None) is not None]
         premium_component = 0.0
         if premium_known:
-            premium_component = sum(
-                min(100.0, float(getattr(r, "strength_pct", 0.0)))
-                for r in premium_known
-            ) / len(premium_known)
+            weighted_value = weighted_total = 0.0
+            for row in premium_known:
+                row_weight = weight_for(row)
+                weighted_value += min(100.0, float(getattr(row, "strength_pct", 0.0))) * row_weight
+                weighted_total += row_weight
+            premium_component = weighted_value / max(1e-9, weighted_total)
 
         rotation_component = min(100.0, float(getattr(rotation, "confidence_pct", 0.0)))
         directional_flow = [
