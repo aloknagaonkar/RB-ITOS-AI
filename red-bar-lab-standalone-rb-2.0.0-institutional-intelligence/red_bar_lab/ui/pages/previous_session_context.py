@@ -73,11 +73,13 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     st.markdown("### Opening Narrative")
     st.info(context.opening_narrative)
     st.markdown("### Carry-Forward Interpretation")
+    # Keep the display column type homogeneous. Mixing a float PCR value with text
+    # labels causes PyArrow/Streamlit serialization warnings on Windows/Python 3.13.
     rows = [
-        {"Evidence": "Closing Strength", "Value": context.closing_bias, "Role": "Vote 1"},
-        {"Evidence": "Closing PCR", "Value": context.closing_pcr, "Role": "Vote 2"},
+        {"Evidence": "Closing Strength", "Value": str(context.closing_bias), "Role": "Vote 1"},
+        {"Evidence": "Closing PCR", "Value": f"{context.closing_pcr:.4f}" if context.closing_pcr is not None else "—", "Role": "Vote 2"},
         {"Evidence": "Dominant OI", "Value": f"{context.dominant_strike:.0f} {context.dominant_side}" if context.dominant_strike is not None else "—", "Role": "Vote 3"},
-        {"Evidence": "Carry-Forward", "Value": context.carry_forward_bias, "Role": "Consensus"},
+        {"Evidence": "Carry-Forward", "Value": str(context.carry_forward_bias), "Role": "Consensus"},
     ]
     st.dataframe(_arrow_safe_rows(rows), width="stretch", hide_index=True)
     st.caption(
