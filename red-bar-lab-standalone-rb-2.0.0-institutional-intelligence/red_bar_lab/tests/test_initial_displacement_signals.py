@@ -125,8 +125,8 @@ def test_pd_level_uses_first_completed_current_session_5m_for_initial_setup():
 def test_initial_displacement_fires_only_once_but_later_recross_still_allowed():
     rows = []
     rows += expand_bucket("2026-08-12 09:15", 5, 101, 102, 98, 99)  # direct bearish
-    rows += expand_bucket("2026-08-12 09:20", 99, 99, 97, 98)
-    rows += expand_bucket("2026-08-12 09:25", 98, 103, 98, 101)  # later bullish recross
+    rows += expand_bucket("2026-08-12 09:20", 5, 99, 99, 97, 98)
+    rows += expand_bucket("2026-08-12 09:25", 5, 98, 103, 98, 101)  # later bullish recross
     rows += [
         ("2026-08-12 09:30", 101, 103.5, 101, 103),
     ]
