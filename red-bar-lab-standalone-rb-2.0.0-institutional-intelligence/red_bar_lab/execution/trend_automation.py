@@ -128,7 +128,12 @@ class TrendAwareDatabaseProxy:
         account_id: str,
         instrument_token: int,
     ) -> bool:
-        """OPEN/PENDING same contract blocks; CLOSED contract can be reconsidered."""
+        """OPEN/PENDING same contract blocks; CLOSED contract can be reconsidered.
+
+        The current signal's own queue row is not treated as its duplicate, so an
+        APPROVED queue item can execute. A pending row for another signal still
+        blocks stacking the same option contract.
+        """
         token = int(instrument_token)
         open_rows = self._database.read_open_paper_execution_orders(account_id)
         if any(
@@ -143,6 +148,8 @@ class TrendAwareDatabaseProxy:
             queue_rows = self._database.read_execution_queue()
         for row in queue_rows or []:
             if int(row.get("instrument_token") or 0) != token:
+                continue
+            if str(row.get("signal_id") or "") == str(signal_id):
                 continue
             if str(row.get("status") or "").upper() in self.ACTIVE_QUEUE_STATUSES:
                 return True
