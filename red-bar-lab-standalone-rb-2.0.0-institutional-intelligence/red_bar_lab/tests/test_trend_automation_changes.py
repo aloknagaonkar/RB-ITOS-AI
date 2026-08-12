@@ -4,11 +4,11 @@ from red_bar_lab.execution.institutional_execution import InstitutionalExecution
 from red_bar_lab.execution.paper_engine import PaperContract
 from red_bar_lab.execution.performance_selection import (
     HistoricalPerformance,
+    PerformanceTradeSelectionEngine,
     TradeSelectionEvaluation,
 )
 from red_bar_lab.execution.trend_automation import (
     EMA10OpportunityIntelligenceEngine,
-    NoRewardRiskPerformanceTradeSelectionEngine,
     TrendAwareDatabaseProxy,
 )
 
@@ -54,7 +54,7 @@ def test_change1_reward_consumed_no_longer_blocks_when_bearish_ema10_holds():
     result = engine.evaluate(
         signal=_signal("BEARISH", 80.0, 85.0),
         candidate=_candidate(),
-        spot_price=50.0,  # old two-range model is fully consumed
+        spot_price=50.0,
         signal_age_seconds=900,
         opposite_red_bar_confirmed=False,
     )
@@ -92,7 +92,7 @@ def test_change1_bullish_ema10_loss_blocks_new_ce_entry():
 
 
 def test_change2_reward_risk_does_not_change_selection_score():
-    engine = NoRewardRiskPerformanceTradeSelectionEngine(minimum_selection_score=0)
+    engine = PerformanceTradeSelectionEngine(minimum_selection_score=0)
     opportunity = SimpleNamespace(
         opportunity_score=80.0,
         reward_remaining_pct=5.0,
@@ -133,7 +133,7 @@ def _history():
     )
 
 
-def test_change3_negative_expectancy_can_be_informational_only():
+def test_change3_negative_expectancy_is_informational_only():
     selection = TradeSelectionEvaluation(
         candidate_rank=1,
         candidate_symbol="NIFTYTESTPE",
@@ -157,7 +157,7 @@ def test_change3_negative_expectancy_can_be_informational_only():
     )
     committee = InstitutionalExecutionCommittee(
         minimum_execution_probability_pct=0,
-        minimum_expected_value_pct=-1_000_000.0,
+        minimum_expected_value_pct=9999.0,
     )
     result = committee.evaluate(
         candidate=_candidate(total=80.0),
@@ -170,6 +170,7 @@ def test_change3_negative_expectancy_can_be_informational_only():
         target_pct=1.0,
     )
     assert result.expectancy_pct < 0
+    assert result.expected_value_pct == 0.0
     assert result.eligible is True
     assert "EXPECTANCY=" not in result.reason
 
