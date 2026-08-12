@@ -12,6 +12,7 @@ from red_bar_lab.ui.pages import (
     paper_trading,
     pd_readiness,
     performance_diagnostics,
+    previous_session_context,
     red_bar_diagnostics,
     research_lab,
     signal_explorer,
@@ -28,6 +29,7 @@ _PAGE_MODULES = {
     "Signal Explorer": signal_explorer,
     "Level Explorer": level_explorer,
     "PD Startup Readiness": pd_readiness,
+    "Previous Session Context": previous_session_context,
     "Red Bar Diagnostics": red_bar_diagnostics,
     "Committee Gate Trace": committee_diagnostics,
     "Performance Hard Block Trace": performance_diagnostics,
@@ -55,7 +57,7 @@ def render(settings: RedBarSettings) -> None:
     st.sidebar.subheader("Workspace")
     workspace_pages = (
         "Operations Center", "Live Trading", "Paper Trading", "Research Lab",
-        "Signal Explorer", "Level Explorer", "PD Startup Readiness", "Red Bar Diagnostics",
+        "Signal Explorer", "Level Explorer", "PD Startup Readiness", "Previous Session Context", "Red Bar Diagnostics",
         "Committee Gate Trace", "Performance Hard Block Trace", "Opportunity Reward Trace",
         "Trade History", "Institutional Intelligence", "Intelligence",
     )
