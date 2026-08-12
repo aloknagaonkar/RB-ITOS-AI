@@ -205,16 +205,36 @@ def test_change4_same_contract_open_is_duplicate_across_signals():
     ) is True
 
 
-def test_change4_pending_contract_is_duplicate():
-    db = _FakeDatabase(queue_rows=[{"instrument_token": 101, "status": "APPROVED"}])
+def test_change4_pending_contract_from_other_signal_is_duplicate():
+    db = _FakeDatabase(queue_rows=[{
+        "instrument_token": 101,
+        "status": "APPROVED",
+        "signal_id": "OTHER-SIGNAL",
+    }])
     proxy = TrendAwareDatabaseProxy(db, _trend)
     assert proxy.paper_execution_exists_for_candidate(
         signal_id="S1", account_id="PAPER-STD", instrument_token=101
     ) is True
 
 
+def test_change4_own_approved_queue_row_does_not_self_block_execution():
+    db = _FakeDatabase(queue_rows=[{
+        "instrument_token": 101,
+        "status": "APPROVED",
+        "signal_id": "S1",
+    }])
+    proxy = TrendAwareDatabaseProxy(db, _trend)
+    assert proxy.paper_execution_exists_for_candidate(
+        signal_id="S1", account_id="PAPER-STD", instrument_token=101
+    ) is False
+
+
 def test_change4_closed_contract_can_be_reconsidered():
-    db = _FakeDatabase(queue_rows=[{"instrument_token": 101, "status": "CLOSED"}])
+    db = _FakeDatabase(queue_rows=[{
+        "instrument_token": 101,
+        "status": "CLOSED",
+        "signal_id": "S1",
+    }])
     proxy = TrendAwareDatabaseProxy(db, _trend)
     assert proxy.paper_execution_exists_for_candidate(
         signal_id="S1", account_id="PAPER-STD", instrument_token=101
