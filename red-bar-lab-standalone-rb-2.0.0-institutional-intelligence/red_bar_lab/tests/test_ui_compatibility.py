@@ -872,8 +872,8 @@ def test_rb090_opportunity_extension_ui_and_execution_wiring():
 
 
 def test_rb_0_9_4_execution_committee_dashboard_copy_present():
-    from pathlib import Path
-    text = Path(__file__).resolve().parents[1].joinpath("ui", "_shared.py").read_text()
+    text = _ui_source()
+
     assert "Execution Committee Dashboard" in text
     assert "Institutional Execution Committee — Candidate Detail" in text
     assert "Rank is discovery order only" in text

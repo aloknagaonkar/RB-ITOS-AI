@@ -10,6 +10,7 @@ from red_bar_lab.ui.pages import (
     operations_center,
     opportunity_reward_diagnostics,
     paper_trading,
+    pd_readiness,
     performance_diagnostics,
     red_bar_diagnostics,
     research_lab,
@@ -17,13 +18,7 @@ from red_bar_lab.ui.pages import (
     trade_history,
 )
 
-# The Paper Exit panel is implemented in ui._shared and resolves
-# PaperExitEngine from that module's global namespace. UI modularization
-# removed the original binding, causing NameError only when an open paper
-# position reached the exit panel. Restore the dependency explicitly at
-# workspace bootstrap without changing any exit-engine behavior.
 shared_ui.PaperExitEngine = PaperExitEngine
-
 
 _PAGE_MODULES = {
     "Operations Center": operations_center,
@@ -32,6 +27,7 @@ _PAGE_MODULES = {
     "Research Lab": research_lab,
     "Signal Explorer": signal_explorer,
     "Level Explorer": level_explorer,
+    "PD Startup Readiness": pd_readiness,
     "Red Bar Diagnostics": red_bar_diagnostics,
     "Committee Gate Trace": committee_diagnostics,
     "Performance Hard Block Trace": performance_diagnostics,
@@ -59,7 +55,7 @@ def render(settings: RedBarSettings) -> None:
     st.sidebar.subheader("Workspace")
     workspace_pages = (
         "Operations Center", "Live Trading", "Paper Trading", "Research Lab",
-        "Signal Explorer", "Level Explorer", "Red Bar Diagnostics",
+        "Signal Explorer", "Level Explorer", "PD Startup Readiness", "Red Bar Diagnostics",
         "Committee Gate Trace", "Performance Hard Block Trace", "Opportunity Reward Trace",
         "Trade History", "Institutional Intelligence", "Intelligence",
     )
