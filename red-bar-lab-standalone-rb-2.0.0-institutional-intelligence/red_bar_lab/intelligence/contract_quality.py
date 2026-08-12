@@ -20,8 +20,12 @@ class ContractQualityMetric:
 
     @property
     def weight(self) -> float:
-        # Keep low-quality contracts visible but prevent them from dominating
-        # aggregated institutional intelligence.
+        # Keep low-quality contracts visible for research, but once a contract
+        # falls below the qualification threshold its aggregate contribution is
+        # clamped to the minimum advisory weight. Qualified contracts continue
+        # to scale proportionally with their quality score.
+        if not self.eligible:
+            return 0.10
         return max(0.10, min(1.0, self.quality_score / 100.0))
 
     def as_dict(self) -> dict[str, object]:
