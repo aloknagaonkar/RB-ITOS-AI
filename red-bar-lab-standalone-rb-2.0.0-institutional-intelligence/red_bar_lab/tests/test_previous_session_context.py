@@ -8,6 +8,7 @@ from red_bar_lab.intelligence.previous_session_context import (
     PreviousSessionContextService,
     PreviousSessionHistoricalAdapter,
 )
+from red_bar_lab.intelligence.previous_session_readiness import PreviousSessionReadinessResolver
 
 
 class _Database:
@@ -102,7 +103,7 @@ def test_historical_artifact_adapter_persists_final_two_chain_snapshots(tmp_path
 
     database = _Database([])
     layout = SimpleNamespace(settings=SimpleNamespace(historical_root=tmp_path))
-    readiness = PreviousSessionHistoricalAdapter(database, layout).ensure_previous_session(
+    readiness = PreviousSessionReadinessResolver(database, layout).ensure_previous_session(
         instrument, "2026-08-12"
     )
 
@@ -120,10 +121,58 @@ def test_historical_artifact_adapter_persists_final_two_chain_snapshots(tmp_path
     assert context.previous_trading_date == "2026-08-11"
 
 
+def test_readiness_ignores_current_or_future_online_rows_even_if_database_returns_them(tmp_path):
+    chain = tmp_path / "today.csv"
+    _write_chain(chain, pe_oi=1200000, pe_ltp=85)
+    rows = [
+        {
+            "collector_mode": "ONLINE",
+            "trading_date": "2026-08-11",
+            "snapshot_timestamp": "2026-08-12T09:20:00+05:30",
+            "chain_artifact_path": str(chain),
+            "option_expiry": "2026-08-18",
+        }
+        for _ in range(653)
+    ]
+    database = _Database(rows)
+    layout = SimpleNamespace(settings=SimpleNamespace(historical_root=tmp_path / "history"))
+
+    readiness = PreviousSessionReadinessResolver(database, layout).ensure_previous_session(
+        "NSE_INDEX|Nifty 50", "2026-08-12"
+    )
+
+    assert readiness.status == "BACKFILL_REQUIRED"
+    assert readiness.online_snapshots == 0
+    assert readiness.historical_snapshots == 0
+    assert readiness.previous_artifact_date is None
+
+
+def test_readiness_counts_only_latest_completed_usable_session(tmp_path):
+    old = _rows(tmp_path, "ONLINE")
+    extra_path = tmp_path / "old.csv"
+    _write_chain(extra_path, pe_oi=1000000, pe_ltp=90)
+    old.append({
+        "collector_mode": "ONLINE",
+        "snapshot_timestamp": "2026-08-10T15:29:00+05:30",
+        "chain_artifact_path": str(extra_path),
+        "option_expiry": "2026-08-18",
+    })
+    database = _Database(old)
+    layout = SimpleNamespace(settings=SimpleNamespace(historical_root=tmp_path / "history"))
+
+    readiness = PreviousSessionReadinessResolver(database, layout).ensure_previous_session(
+        "NSE_INDEX|Nifty 50", "2026-08-12"
+    )
+
+    assert readiness.status == "READY"
+    assert readiness.previous_artifact_date == "2026-08-11"
+    assert readiness.online_snapshots == 2
+
+
 def test_historical_artifact_adapter_reports_backfill_required_without_artifacts(tmp_path):
     database = _Database([])
     layout = SimpleNamespace(settings=SimpleNamespace(historical_root=tmp_path))
-    readiness = PreviousSessionHistoricalAdapter(database, layout).ensure_previous_session(
+    readiness = PreviousSessionReadinessResolver(database, layout).ensure_previous_session(
         "NSE_INDEX|Nifty 50", "2026-08-12"
     )
     assert readiness.status == "BACKFILL_REQUIRED"
@@ -142,6 +191,8 @@ def test_previous_session_context_ui_is_advisory_and_navigable():
     workspace = (root / "ui" / "workspace.py").read_text(encoding="utf-8")
     assert "Previous Session Context" in workspace
     assert "Previous Session Data Readiness" in page
+    assert "Selected Trading Date" in page
+    assert "Previous Session Found" in page
     assert "Adapted Snapshots" in page
     assert "Data Source" in page
     assert "validated historical snapshots" in page
