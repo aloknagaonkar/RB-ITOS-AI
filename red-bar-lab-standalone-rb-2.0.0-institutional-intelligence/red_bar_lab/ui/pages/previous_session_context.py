@@ -1,7 +1,10 @@
 from datetime import date
 
 from red_bar_lab.ui._shared import *
-from red_bar_lab.intelligence.previous_session_context import PreviousSessionContextService
+from red_bar_lab.intelligence.previous_session_context import (
+    PreviousSessionContextService,
+    PreviousSessionHistoricalAdapter,
+)
 
 
 def render_page(settings, layout, database, token, underlying_name, instrument_key, interval) -> None:
@@ -16,6 +19,26 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     )
 
     trading_date = st.date_input("Trading date", value=date.today()).isoformat()
+
+    readiness = PreviousSessionHistoricalAdapter(database, layout).ensure_previous_session(
+        instrument_key, trading_date
+    )
+    st.markdown("### Previous Session Data Readiness")
+    r1, r2, r3, r4 = st.columns(4)
+    r1.metric("Readiness", readiness.status)
+    r2.metric("ONLINE Snapshots", readiness.online_snapshots)
+    r3.metric("HISTORICAL Snapshots", readiness.historical_snapshots)
+    r4.metric("Adapted Snapshots", readiness.adapted_snapshots)
+    r5, r6 = st.columns(2)
+    r5.metric("Historical Artifact Date", readiness.previous_artifact_date or "—")
+    r6.metric("Artifact Contracts", readiness.artifact_contracts)
+    if readiness.status in {"READY", "ADAPTED"}:
+        st.success(readiness.detail)
+    elif readiness.status == "ARTIFACTS_INCOMPLETE":
+        st.warning(readiness.detail)
+    else:
+        st.info(readiness.detail)
+
     context = PreviousSessionContextService(database).latest_before(instrument_key, trading_date)
     if context.status == "WAITING":
         st.info(context.reason)
