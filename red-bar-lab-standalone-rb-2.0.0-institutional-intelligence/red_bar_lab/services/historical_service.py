@@ -12,6 +12,8 @@ from red_bar_lab.services.upstox_service import RedBarUpstoxService
 
 EXPECTED_COLUMNS = ("timestamp", "open", "high", "low", "close", "volume")
 INDIA_TZ = ZoneInfo("Asia/Kolkata")
+MINIMUM_PREVIOUS_SESSIONS = 10
+PREVIOUS_SESSION_LOOKBACK_DAYS = 30
 
 
 def india_today() -> date:
@@ -136,8 +138,10 @@ class RedBarHistoricalService:
             return pd.DataFrame(columns=EXPECTED_COLUMNS)
         return normalize_candles(pd.read_csv(path))
 
-    def available_dates(
-        self, instrument_key: str, interval_minutes: int = 1
+    def _cached_dates(
+        self,
+        instrument_key: str,
+        interval_minutes: int = 1,
     ) -> tuple[date, ...]:
         sample = self.layout.candle_path(
             self.provider_name, instrument_key, interval_minutes, "2000-01-01"
@@ -152,3 +156,68 @@ class RedBarHistoricalService:
             except ValueError:
                 continue
         return tuple(sorted(result))
+
+    def ensure_previous_sessions(
+        self,
+        instrument_key: str,
+        *,
+        trading_date: date | None = None,
+        interval_minutes: int = 1,
+        minimum_sessions: int = MINIMUM_PREVIOUS_SESSIONS,
+    ) -> tuple[date, ...]:
+        """Ensure enough completed underlying sessions exist for PD levels.
+
+        Live refresh previously downloaded only today's candles, then asked the
+        local cache for prior dates. On a fresh runtime/cache that returned no
+        history, so PD1_315..PD10_315 could not be built at all. This method
+        performs a bounded, cache-aware backfill only when prior sessions are
+        missing. Existing completed files remain immutable and are not fetched
+        again.
+        """
+        target_date = trading_date or india_today()
+        cached = self._cached_dates(instrument_key, interval_minutes)
+        previous = [day for day in cached if day < target_date]
+        if len(previous) >= int(minimum_sessions):
+            return tuple(previous[-int(minimum_sessions):])
+
+        end_date = target_date - timedelta(days=1)
+        start_date = target_date - timedelta(days=PREVIOUS_SESSION_LOOKBACK_DAYS)
+        try:
+            self.load_or_download(
+                instrument_key,
+                start_date,
+                end_date,
+                interval_minutes=interval_minutes,
+                force=False,
+            )
+        except Exception:
+            # History enrichment must not break the live page. The caller can
+            # continue with whatever cache is already available.
+            pass
+
+        cached = self._cached_dates(instrument_key, interval_minutes)
+        previous = [day for day in cached if day < target_date]
+        return tuple(previous[-int(minimum_sessions):])
+
+    def available_dates(
+        self, instrument_key: str, interval_minutes: int = 1
+    ) -> tuple[date, ...]:
+        cached = self._cached_dates(instrument_key, interval_minutes)
+        today = india_today()
+
+        # If today's session is present, this call is part of the live/current
+        # workflow. Ensure the historical context required for PD1..PD10 exists
+        # before returning the available date list. Historical-only callers that
+        # do not have a current-session file keep the original read-only behavior.
+        if today in cached:
+            previous = [day for day in cached if day < today]
+            if len(previous) < MINIMUM_PREVIOUS_SESSIONS:
+                self.ensure_previous_sessions(
+                    instrument_key,
+                    trading_date=today,
+                    interval_minutes=interval_minutes,
+                    minimum_sessions=MINIMUM_PREVIOUS_SESSIONS,
+                )
+                cached = self._cached_dates(instrument_key, interval_minutes)
+
+        return cached
