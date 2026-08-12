@@ -1,5 +1,6 @@
 from red_bar_lab.ui._shared import *
 from red_bar_lab.ui.pages import (
+    committee_diagnostics,
     institutional_intelligence,
     intelligence,
     level_explorer,
@@ -21,6 +22,7 @@ _PAGE_MODULES = {
     "Signal Explorer": signal_explorer,
     "Level Explorer": level_explorer,
     "Red Bar Diagnostics": red_bar_diagnostics,
+    "Committee Gate Trace": committee_diagnostics,
     "Trade History": trade_history,
     "Institutional Intelligence": institutional_intelligence,
     "Intelligence": intelligence,
@@ -65,6 +67,7 @@ def render(settings: RedBarSettings) -> None:
         "Signal Explorer",
         "Level Explorer",
         "Red Bar Diagnostics",
+        "Committee Gate Trace",
         "Trade History",
         "Institutional Intelligence",
         "Intelligence",
