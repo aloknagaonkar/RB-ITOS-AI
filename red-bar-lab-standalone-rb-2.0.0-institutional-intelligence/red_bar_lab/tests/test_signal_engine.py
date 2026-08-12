@@ -43,8 +43,10 @@ def expand_five(start, o, h, l, c):
 
 
 def level(value=100.0, source="2026-08-05 09:15"):
+    # Generic level keeps the original re-cross tests isolated from the new
+    # initial-displacement paths, which are covered in dedicated tests.
     return ReferenceLevel(
-        level_type="FIRST_CANDLE",
+        level_type="TEST_LEVEL",
         value=value,
         source_timestamp=pd.Timestamp(source, tz=IST).to_pydatetime(),
         source_high=102,
@@ -119,7 +121,6 @@ def test_incomplete_confirmation_window_remains_awaiting():
 def test_partial_current_five_minute_bucket_is_not_setup_candle():
     rows = []
     rows += expand_five("2026-08-05 09:15", 99, 100, 98, 99)
-    # only 3 rows in 09:20 setup bucket -> must not be treated as completed A
     rows += [
         ("2026-08-05 09:20", 99, 101, 99, 100.5),
         ("2026-08-05 09:21", 100.5, 102, 100, 101),
@@ -138,7 +139,7 @@ def test_wick_cross_of_midpoint_without_five_minute_close_is_ignored():
 
 def test_level_not_used_before_source_candle_complete():
     late = ReferenceLevel(
-        level_type="MID_SESSION_1245",
+        level_type="TEST_LEVEL",
         value=100,
         source_timestamp=pd.Timestamp("2026-08-05 12:45", tz=IST).to_pydatetime(),
         source_high=102,
