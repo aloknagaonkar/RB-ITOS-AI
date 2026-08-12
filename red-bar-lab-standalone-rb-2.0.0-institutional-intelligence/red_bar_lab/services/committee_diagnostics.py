@@ -18,24 +18,19 @@ def build_committee_gate_trace(
 ) -> dict[str, object]:
     """Explain the persisted Committee decision without changing it.
 
-    The trace mirrors the authoritative blockers in
-    InstitutionalExecutionCommittee.evaluate(): performance hard-block,
-    terminal opportunity invalidity, minimum execution probability, and
-    positive expectancy. Shadow, history score, expectancy confidence and
-    Half-Kelly are shown as context only and never treated as blockers here.
+    Authoritative blockers are Performance hard-block, terminal opportunity
+    invalidity, and minimum execution probability. Expected Value, Expectancy,
+    Expected Win/Loss, Shadow, history score, expectancy confidence and
+    Half-Kelly are informational-only.
     """
     reason = str(evaluation.get("reason") or "")
     reason_upper = reason.upper()
     probability = _num(evaluation.get("execution_probability_pct"))
-    expectancy = _num(
-        evaluation.get("expectancy_pct"),
-        _num(evaluation.get("expected_value_pct")),
-    )
+    expectancy = _num(evaluation.get("expectancy_pct"))
 
     performance_blocked = "PERFORMANCE_HARD_BLOCK[" in reason_upper
     terminal_blocked = "OPPORTUNITY_TERMINAL[" in reason_upper
     probability_blocked = probability < float(minimum_execution_probability_pct)
-    expectancy_blocked = expectancy <= float(minimum_expected_value_pct)
 
     gates = [
         {
@@ -54,7 +49,7 @@ def build_committee_gate_trace(
             "gate": "Opportunity terminal validity",
             "authority": "HARD",
             "actual": "TERMINAL" if terminal_blocked else "VALID",
-            "threshold": "No REWARD_CONSUMED / OPPOSITE_RED_BAR / STRUCTURE_INVALID",
+            "threshold": "No STRUCTURE_INVALID / OPPOSITE_RED_BAR / EMA10 trend loss",
             "status": "BLOCK" if terminal_blocked else "PASS",
             "detail": (
                 "Persisted reason contains OPPORTUNITY_TERMINAL."
@@ -75,16 +70,16 @@ def build_committee_gate_trace(
             ),
         },
         {
-            "gate": "Expectancy",
-            "authority": "HARD",
-            "actual": round(expectancy, 3),
-            "threshold": f"> {float(minimum_expected_value_pct):.3f}%",
-            "status": "BLOCK" if expectancy_blocked else "PASS",
-            "detail": (
-                f"Expectancy {expectancy:.3f}% is not positive."
-                if expectancy_blocked
-                else f"Expectancy {expectancy:.3f}% is positive."
+            "gate": "Expected Value / Expectancy / Expected Win / Expected Loss",
+            "authority": "INFORMATIONAL",
+            "actual": (
+                f"Expectancy={expectancy:.3f}%; "
+                f"Expected Win={evaluation.get('expected_win_pct')}; "
+                f"Expected Loss={evaluation.get('expected_loss_pct')}"
             ),
+            "threshold": "NONE",
+            "status": "INFO",
+            "detail": "Payoff metrics are retained for research only and cannot approve, reject, rank or size execution.",
         },
         {
             "gate": "Shadow Intelligence",
