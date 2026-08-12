@@ -1,5 +1,6 @@
 from red_bar_lab.ui._shared import *
 from red_bar_lab.ui.pages import (
+    institutional_intelligence,
     intelligence,
     level_explorer,
     live_trading,
@@ -19,6 +20,7 @@ _PAGE_MODULES = {
     "Signal Explorer": signal_explorer,
     "Level Explorer": level_explorer,
     "Trade History": trade_history,
+    "Institutional Intelligence": institutional_intelligence,
     "Intelligence": intelligence,
 }
 
@@ -61,6 +63,7 @@ def render(settings: RedBarSettings) -> None:
         "Signal Explorer",
         "Level Explorer",
         "Trade History",
+        "Institutional Intelligence",
         "Intelligence",
     )
     saved_page = st.query_params.get("page", "Operations Center")
