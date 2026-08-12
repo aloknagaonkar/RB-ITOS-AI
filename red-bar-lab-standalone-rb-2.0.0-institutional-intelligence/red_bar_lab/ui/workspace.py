@@ -1,3 +1,5 @@
+import red_bar_lab.ui._shared as shared_ui
+from red_bar_lab.execution.exit_engine import PaperExitEngine
 from red_bar_lab.ui._shared import *
 from red_bar_lab.ui.pages import (
     committee_diagnostics,
@@ -14,6 +16,13 @@ from red_bar_lab.ui.pages import (
     signal_explorer,
     trade_history,
 )
+
+# The Paper Exit panel is implemented in ui._shared and resolves
+# PaperExitEngine from that module's global namespace. UI modularization
+# removed the original binding, causing NameError only when an open paper
+# position reached the exit panel. Restore the dependency explicitly at
+# workspace bootstrap without changing any exit-engine behavior.
+shared_ui.PaperExitEngine = PaperExitEngine
 
 
 _PAGE_MODULES = {
