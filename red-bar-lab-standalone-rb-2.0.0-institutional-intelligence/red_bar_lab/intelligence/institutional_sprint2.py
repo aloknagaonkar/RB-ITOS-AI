@@ -10,6 +10,7 @@ from red_bar_lab.intelligence.oi_velocity import OIVelocityEngine, OIVelocityMet
 from red_bar_lab.intelligence.premium_flow import PremiumFlowEngine, PremiumFlowMetric
 from red_bar_lab.intelligence.strike_rotation import StrikeRotationEngine, StrikeRotationResult
 from red_bar_lab.intelligence.buy_sell_strength import BuySellStrengthEngine, BuySellStrength
+from red_bar_lab.intelligence.contract_quality import ContractQualityEngine, ContractQualityMetric
 from red_bar_lab.intelligence.institutional_confidence import (
     InstitutionalConfidenceEngine,
     InstitutionalConfidence,
@@ -24,6 +25,7 @@ class InstitutionalSprint2Snapshot:
     flow: object
     oi_velocity: tuple[OIVelocityMetric, ...]
     premium_flow: tuple[PremiumFlowMetric, ...]
+    contract_quality: tuple[ContractQualityMetric, ...]
     rotation: StrikeRotationResult
     strength: BuySellStrength
     confidence: InstitutionalConfidence
@@ -89,17 +91,8 @@ class InstitutionalSprint2Service:
                 strength, (), (), (), rotation
             )
             return InstitutionalSprint2Snapshot(
-                None,
-                None,
-                None,
-                empty_flow,
-                (),
-                (),
-                rotation,
-                strength,
-                confidence,
-                len(snapshots),
-                "WAITING",
+                None, None, None, empty_flow, (), (), (), rotation, strength,
+                confidence, len(snapshots), "WAITING",
                 "At least two ONLINE option-chain snapshots are required; 5-15 minutes of history improves velocity confidence.",
             )
 
@@ -115,27 +108,22 @@ class InstitutionalSprint2Service:
         time_series = [(ts, frame) for ts, _, frame in snapshots]
         velocity = OIVelocityEngine.evaluate(time_series)
         premium = PremiumFlowEngine.evaluate(time_series)
+        quality = ContractQualityEngine.evaluate(current)
         rotation = StrikeRotationEngine.evaluate(current, previous)
         velocity_by_key = {(r.strike, r.option_type): r for r in velocity}
-        strength = BuySellStrengthEngine.evaluate(flow.rows, velocity_by_key)
+        quality_by_key = {(r.strike, r.option_type): r for r in quality}
+        strength = BuySellStrengthEngine.evaluate(flow.rows, velocity_by_key, quality_by_key)
         confidence = InstitutionalConfidenceEngine.evaluate(
             strength,
             flow.rows,
             velocity,
             premium,
             rotation,
+            quality_by_key,
         )
         return InstitutionalSprint2Snapshot(
-            current_ts.isoformat(),
-            previous_ts.isoformat(),
-            flow.option_expiry,
-            flow,
-            velocity,
-            premium,
-            rotation,
-            strength,
-            confidence,
-            len(snapshots),
-            "READY" if flow.status == "READY" else "WAITING",
-            f"Used {len(snapshots)} ONLINE snapshots; execution impact remains NONE.",
+            current_ts.isoformat(), previous_ts.isoformat(), flow.option_expiry,
+            flow, velocity, premium, quality, rotation, strength, confidence,
+            len(snapshots), "READY" if flow.status == "READY" else "WAITING",
+            f"Used {len(snapshots)} ONLINE snapshots; contract-quality weighting is advisory and execution impact remains NONE.",
         )
