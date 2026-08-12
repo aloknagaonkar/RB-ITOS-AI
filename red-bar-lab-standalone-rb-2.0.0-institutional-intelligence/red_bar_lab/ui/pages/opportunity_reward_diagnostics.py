@@ -10,8 +10,9 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     )
 
     selected_date = st.date_input("Trading date", value=date.today(), key="opportunity_reward_date")
+    trading_date = selected_date.isoformat()
     rows = database.read_opportunity_evaluations(limit=500)
-    rows = [row for row in rows if str(row.get("trading_date") or "") == selected_date.isoformat()]
+    rows = [row for row in rows if str(row.get("trading_date") or "") == trading_date]
     if not rows:
         st.info("No Opportunity Health evaluations are stored for this date yet.")
         return
@@ -28,7 +29,7 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     selected_label = st.selectbox("Inspect Opportunity evaluation", list(options.keys()), key="opportunity_reward_candidate")
     opportunity = options[selected_label]
     signal_id = str(opportunity.get("signal_id") or "")
-    signal_rows = database.read_signal_attempts()
+    signal_rows = database.read_signal_attempts(instrument_key, trading_date)
     signal = next((row for row in signal_rows if str(row.get("signal_id") or "") == signal_id), None)
     trace = build_opportunity_reward_trace(opportunity, signal)
 
