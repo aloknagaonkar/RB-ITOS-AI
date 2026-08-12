@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Iterable
 
 import pandas as pd
@@ -56,8 +55,6 @@ def _price_at_or_before(candles: pd.DataFrame, when) -> tuple[float | None, str 
         return None, None
     eligible = candles[candles["_trace_timestamp"] <= target]
     if eligible.empty:
-        # If the provider labels the candle by close/end time, accept the first
-        # candle within one minute after the target rather than returning nothing.
         later = candles[candles["_trace_timestamp"] > target]
         if later.empty:
             return None, None
@@ -95,6 +92,7 @@ def _first_consumed_row(
 
 def build_all_candidate_contract_price_trace(
     *,
+    engine,
     market,
     underlying_name: str,
     trading_date: str,
@@ -104,8 +102,9 @@ def build_all_candidate_contract_price_trace(
 ) -> list[dict[str, object]]:
     """Pull same-contract premium history for every candidate in one scan.
 
-    Prices are sourced from the market provider's one-minute historical option
-    candles. No trade rule or persisted execution decision is changed.
+    Prices come from the same market provider's historical one-minute option
+    candles. The exact candidate symbol is kept fixed across signal, consumed,
+    and evaluation timestamps, so comparisons never substitute a later contract.
     """
     if not scan_rows:
         return []
@@ -150,31 +149,20 @@ def build_all_candidate_contract_price_trace(
             continue
         try:
             token = int(contract.get("instrument_token"))
-            candles = market.option_candles(
+            candles = engine.option_candles(
                 zerodha=market,
                 instrument_token=token,
                 date_from=trading_date,
                 date_to=trading_date,
                 interval="minute",
-            ) if hasattr(market, "option_candles") else None
-        except TypeError:
-            try:
-                candles = market.option_candles(
-                    instrument_token=token,
-                    date_from=trading_date,
-                    date_to=trading_date,
-                    interval="minute",
-                )
-            except Exception as exc:
-                result.append({
-                    "candidate_symbol": symbol,
-                    "status": f"CANDLE_FETCH_FAILED[{type(exc).__name__}]",
-                })
-                continue
+            )
         except Exception as exc:
             result.append({
                 "candidate_symbol": symbol,
                 "status": f"CANDLE_FETCH_FAILED[{type(exc).__name__}]",
+                "signal_price": None,
+                "first_consumed_price": None,
+                "evaluation_price": None,
             })
             continue
 
@@ -192,7 +180,6 @@ def build_all_candidate_contract_price_trace(
 
         result.append({
             "candidate_symbol": symbol,
-            "candidate_rank": row.get("candidate_rank"),
             "instrument_token": token,
             "option_type": contract.get("instrument_type"),
             "strike": contract.get("strike"),
