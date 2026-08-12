@@ -98,7 +98,7 @@ def test_stale_candidate_opportunity_failure_is_soft_evidence():
 def test_tss_below_reference_does_not_veto_when_execution_quality_is_valid():
     engine = PerformanceTradeSelectionEngine(minimum_selection_score=70)
     result = engine.evaluate(
-        candidate=_candidate(score=88.89),
+        candidate=_candidate(score=86.0),
         candidate_rank=1,
         opportunity=_opportunity(score=50.0),
         historical_orders=[],
@@ -112,6 +112,7 @@ def test_tss_below_reference_does_not_veto_when_execution_quality_is_valid():
     assert result.eligible is True
     assert "TSS=" in result.reason
     assert "NO_HARD_PERFORMANCE_BLOCKERS" in result.reason
+    assert "REWARD_RISK_INFORMATIONAL_ONLY" in result.reason
 
 
 def test_spread_remains_a_hard_blocker():
