@@ -52,12 +52,18 @@ class TradeSelectionEvaluation:
 
 
 class PerformanceTradeSelectionEngine:
-    """Deterministic multi-candidate execution committee.
+    """Deterministic multi-candidate performance selection.
 
-    There is intentionally no maximum trade count. Each candidate independently
-    earns execution authority. Capital and existing execution safety checks remain
-    authoritative at order-open time.
+    Reward/Risk is retained as informational data only. Selection authority is
+    based on Candidate quality, current Opportunity quality, Historical evidence
+    and Execution quality. There is intentionally no maximum trade count here;
+    Portfolio Risk remains authoritative later in the pipeline.
     """
+
+    CANDIDATE_WEIGHT = 35.0 / 90.0
+    OPPORTUNITY_WEIGHT = 20.0 / 90.0
+    HISTORICAL_WEIGHT = 25.0 / 90.0
+    EXECUTION_WEIGHT = 10.0 / 90.0
 
     def __init__(
         self,
@@ -160,11 +166,12 @@ class PerformanceTradeSelectionEngine:
             entry_mode=entry_mode,
         )
         historical_score = self._historical_score(history)
+
+        # Retained only for backward-compatible reporting / historical comparison.
         rr = (
             float(target_pct) / float(stop_loss_pct)
             if float(stop_loss_pct) > 0 else 0.0
         )
-        rr_score = min(100.0, rr / 3.0 * 100.0)
         execution_quality = min(
             100.0,
             (
@@ -176,18 +183,13 @@ class PerformanceTradeSelectionEngine:
         reward_remaining = _num(opportunity.reward_remaining_pct, 100.0)
 
         selection_score = round(
-            min(100.0, _num(candidate.total_score)) * 0.35
-            + min(100.0, opportunity_score) * 0.20
-            + rr_score * 0.10
-            + historical_score * 0.25
-            + execution_quality * 0.10,
+            min(100.0, _num(candidate.total_score)) * self.CANDIDATE_WEIGHT
+            + min(100.0, opportunity_score) * self.OPPORTUNITY_WEIGHT
+            + historical_score * self.HISTORICAL_WEIGHT
+            + execution_quality * self.EXECUTION_WEIGHT,
             2,
         )
 
-        # RB-0.9.5: Performance metrics are evidence, not independent vetoes.
-        # Only execution-quality failures remain hard blockers in this layer.
-        # Operational safety (duplicate, market hours, capital and contract validity)
-        # remains authoritative in the surrounding execution engine.
         hard_blockers: list[str] = []
         soft_evidence: list[str] = []
 
@@ -233,7 +235,8 @@ class PerformanceTradeSelectionEngine:
             parts.append("SOFT_EVIDENCE:" + "; ".join(soft_evidence))
         else:
             parts.append("SOFT_EVIDENCE:ALL_REFERENCE_LEVELS_MET")
-        reason = " | ".join(parts)
+        parts.append("REWARD_RISK_INFORMATIONAL_ONLY")
+
         return TradeSelectionEvaluation(
             candidate_rank=int(candidate_rank),
             candidate_symbol=candidate.contract.tradingsymbol,
@@ -247,5 +250,5 @@ class PerformanceTradeSelectionEngine:
             historical=history,
             eligible=eligible,
             decision=(f"BUY {candidate.contract.option_type}" if eligible else "SKIP"),
-            reason=reason,
+            reason=" | ".join(parts),
         )
