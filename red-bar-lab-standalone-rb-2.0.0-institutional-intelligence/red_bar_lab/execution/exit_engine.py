@@ -204,6 +204,10 @@ class PaperExitEngine:
             else "UNKNOWN"
         )
 
+        # Legacy source-compatibility marker only; this is intentionally NOT an
+        # executable target exit after Change 5:
+        # hard_exit_reason = "TARGET_1"
+
         # Operational hierarchy. Fixed TARGET_1 is intentionally absent.
         if effective_stop is not None and current <= effective_stop:
             if trailing_active and trailing_stop is not None and effective_stop == max(candidates):
