@@ -128,6 +128,25 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         ]
         st.dataframe(_arrow_safe_rows(component_rows), width="stretch", hide_index=True)
 
+        st.markdown("#### ICI Explanation / Audit Trace")
+        st.caption(
+            "Read-only reconstruction of the existing Institutional Confidence Index. "
+            "Raw component scores, fixed Sprint-2 weights and the data-coverage multiplier are shown explicitly; scoring and execution are unchanged."
+        )
+        i1, i2, i3, i4 = st.columns(4)
+        i1.metric("Displayed ICI", f"{ici.score:.2f}%")
+        i2.metric("Reconstructed ICI", f"{ici.reconstructed_score:.2f}%")
+        i3.metric("Coverage Multiplier", f"{ici.coverage_multiplier:.3f}")
+        i4.metric("Execution Impact", ici.execution_impact)
+        st.info(ici.explanation)
+        st.dataframe(_arrow_safe_rows(list(ici.component_audit)), width="stretch", hide_index=True)
+        if abs(float(ici.score) - float(ici.reconstructed_score)) <= 0.06:
+            st.success("ICI audit parity PASS: reconstructed score matches the displayed ICI within rounding tolerance.")
+        else:
+            st.warning(
+                f"ICI audit parity CHECK: displayed={ici.score:.2f}% vs reconstructed={ici.reconstructed_score:.2f}%."
+            )
+
         st.markdown("#### OI Velocity")
         velocity_rows = [row.as_dict() for row in snapshot.oi_velocity]
         velocity_rows.sort(
