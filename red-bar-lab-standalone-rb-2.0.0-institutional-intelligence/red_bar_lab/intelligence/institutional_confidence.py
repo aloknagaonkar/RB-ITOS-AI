@@ -3,6 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+ICI_WEIGHTS = {
+    "Directional Edge": 0.35,
+    "OI Velocity": 0.20,
+    "Premium Flow": 0.20,
+    "Strike Rotation": 0.10,
+    "Breadth": 0.15,
+}
+
+
 @dataclass(frozen=True)
 class InstitutionalConfidence:
     score: float
@@ -12,6 +21,51 @@ class InstitutionalConfidence:
     data_coverage_pct: float
     components: dict[str, float]
     execution_impact: str = "NONE"
+
+    @property
+    def coverage_multiplier(self) -> float:
+        return round(0.60 + 0.40 * (self.data_coverage_pct / 100.0), 6)
+
+    @property
+    def component_audit(self) -> tuple[dict[str, object], ...]:
+        rows = []
+        for name, raw_score in self.components.items():
+            weight = ICI_WEIGHTS[name]
+            pre_coverage = float(raw_score) * weight
+            final_contribution = pre_coverage * self.coverage_multiplier
+            interpretation = (
+                "VERY_STRONG" if raw_score >= 80
+                else "STRONG" if raw_score >= 65
+                else "MODERATE" if raw_score >= 50
+                else "WEAK" if raw_score >= 30
+                else "VERY_WEAK"
+            )
+            rows.append({
+                "Component": name,
+                "Raw Score %": round(float(raw_score), 2),
+                "Weight %": round(weight * 100.0, 2),
+                "Pre-Coverage Contribution": round(pre_coverage, 2),
+                "Coverage Multiplier": round(self.coverage_multiplier, 4),
+                "Final ICI Contribution": round(final_contribution, 2),
+                "Interpretation": interpretation,
+            })
+        return tuple(rows)
+
+    @property
+    def reconstructed_score(self) -> float:
+        return round(sum(float(row["Final ICI Contribution"]) for row in self.component_audit), 2)
+
+    @property
+    def explanation(self) -> str:
+        strongest = max(self.components.items(), key=lambda item: item[1])
+        weakest = min(self.components.items(), key=lambda item: item[1])
+        return (
+            f"ICI {self.score:.1f}% is {self.direction} / {self.quality}. "
+            f"Strongest component is {strongest[0]} at {strongest[1]:.1f}%; "
+            f"weakest is {weakest[0]} at {weakest[1]:.1f}%. "
+            f"Data coverage is {self.data_coverage_pct:.1f}%, applying a {self.coverage_multiplier:.3f} coverage multiplier. "
+            "This is an advisory explanation only; execution impact remains NONE."
+        )
 
 
 class InstitutionalConfidenceEngine:
@@ -84,13 +138,7 @@ class InstitutionalConfidenceEngine:
             "Strike Rotation": round(rotation_component, 2),
             "Breadth": round(breadth_component, 2),
         }
-        score = (
-            flow_component * 0.35
-            + velocity_component * 0.20
-            + premium_component * 0.20
-            + rotation_component * 0.10
-            + breadth_component * 0.15
-        )
+        score = sum(components[name] * ICI_WEIGHTS[name] for name in ICI_WEIGHTS)
         score *= 0.60 + 0.40 * (data_coverage / 100.0)
         score = round(min(100.0, max(0.0, score)), 2)
 
