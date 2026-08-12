@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
+
+import pandas as pd
+
+
+IST = "Asia/Kolkata"
 
 
 def _sort_time(value):
@@ -10,6 +15,139 @@ def _sort_time(value):
         return datetime.fromisoformat(str(value))
     except Exception:
         return datetime.min
+
+
+def _to_ist(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame is None or frame.empty:
+        return pd.DataFrame(
+            columns=("timestamp", "open", "high", "low", "close", "volume")
+        )
+    result = frame.copy()
+    ts = pd.to_datetime(result["timestamp"], errors="coerce", utc=True)
+    result = result.loc[ts.notna()].copy()
+    result["timestamp"] = ts.loc[ts.notna()].dt.tz_convert(IST)
+    return (
+        result.sort_values("timestamp")
+        .drop_duplicates("timestamp", keep="last")
+        .reset_index(drop=True)
+    )
+
+
+def _completed_five_minute_bars(frame: pd.DataFrame) -> pd.DataFrame:
+    """Build the same complete 5-minute buckets used by the signal scanner."""
+    source = _to_ist(frame)
+    if source.empty:
+        return pd.DataFrame()
+
+    bars = source.set_index("timestamp").resample(
+        "5min",
+        origin="start_day",
+        offset="15min",
+        label="left",
+        closed="left",
+    ).agg(
+        open=("open", "first"),
+        high=("high", "max"),
+        low=("low", "min"),
+        close=("close", "last"),
+        volume=("volume", "sum"),
+        source_rows=("close", "count"),
+    )
+    bars = bars.dropna(subset=["open", "high", "low", "close"])
+    bars = bars[bars["source_rows"] >= 5]
+    return bars.reset_index()
+
+
+def build_red_bar_cross_trace(
+    one_minute: pd.DataFrame,
+    lifecycle: dict[str, object],
+) -> list[dict[str, object]]:
+    """Explain every completed 5-minute cross evaluation after Red Bar creation.
+
+    This is diagnostic-only and mirrors the existing signal-engine crossing rule:
+      bullish: previous close <= midpoint < current close
+      bearish: previous close >= midpoint > current close
+
+    No levels, signal attempts, decisions, or execution state are changed.
+    """
+    if not lifecycle.get("reference_persisted"):
+        return []
+    midpoint = lifecycle.get("midpoint")
+    source_timestamp = lifecycle.get("source_timestamp")
+    interval_minutes = lifecycle.get("interval_minutes")
+    if midpoint is None or not source_timestamp or interval_minutes is None:
+        return []
+
+    try:
+        midpoint_value = float(midpoint)
+        available_from = pd.Timestamp(source_timestamp)
+        if available_from.tzinfo is None:
+            available_from = available_from.tz_localize(IST)
+        else:
+            available_from = available_from.tz_convert(IST)
+        available_from += pd.Timedelta(minutes=int(interval_minutes))
+    except Exception:
+        return []
+
+    bars = _completed_five_minute_bars(one_minute)
+    if bars.empty or len(bars) < 2:
+        return []
+
+    rows: list[dict[str, object]] = []
+    for index in range(1, len(bars)):
+        previous = bars.iloc[index - 1]
+        current = bars.iloc[index]
+        timestamp = pd.Timestamp(current["timestamp"])
+        if timestamp < available_from:
+            continue
+
+        previous_close = float(previous["close"])
+        current_close = float(current["close"])
+        bullish = previous_close <= midpoint_value < current_close
+        bearish = previous_close >= midpoint_value > current_close
+
+        if bullish:
+            result = "BULLISH_CROSS"
+            reason = (
+                f"PASS: previous close {previous_close:.2f} <= midpoint "
+                f"{midpoint_value:.2f} < current close {current_close:.2f}."
+            )
+        elif bearish:
+            result = "BEARISH_CROSS"
+            reason = (
+                f"PASS: previous close {previous_close:.2f} >= midpoint "
+                f"{midpoint_value:.2f} > current close {current_close:.2f}."
+            )
+        elif previous_close > midpoint_value and current_close > midpoint_value:
+            result = "NO_CROSS"
+            reason = "Both previous and current 5m closes are above the midpoint."
+        elif previous_close < midpoint_value and current_close < midpoint_value:
+            result = "NO_CROSS"
+            reason = "Both previous and current 5m closes are below the midpoint."
+        else:
+            result = "NO_CROSS"
+            reason = (
+                "The two closes touch/straddle the midpoint but do not satisfy "
+                "the engine's strict close-cross inequality."
+            )
+
+        rows.append(
+            {
+                "timestamp": timestamp.to_pydatetime(),
+                "previous_timestamp": pd.Timestamp(previous["timestamp"]).to_pydatetime(),
+                "previous_close": previous_close,
+                "open": float(current["open"]),
+                "high": float(current["high"]),
+                "low": float(current["low"]),
+                "close": current_close,
+                "midpoint": midpoint_value,
+                "bullish_condition": bullish,
+                "bearish_condition": bearish,
+                "evaluation": result,
+                "reason": reason,
+            }
+        )
+    return rows
 
 
 def build_red_bar_lifecycle(

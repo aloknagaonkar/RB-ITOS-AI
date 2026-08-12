@@ -1,5 +1,8 @@
 from red_bar_lab.ui._shared import *
-from red_bar_lab.services.red_bar_diagnostics import build_red_bar_lifecycle
+from red_bar_lab.services.red_bar_diagnostics import (
+    build_red_bar_cross_trace,
+    build_red_bar_lifecycle,
+)
 
 
 def render_page(settings, layout, database, token, underlying_name, instrument_key, interval) -> None:
@@ -58,6 +61,55 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         st.warning(
             "NEXT_RED_CANDLE is not present in reference_levels for this session. "
             "That means the issue is before signal confirmation."
+        )
+
+    st.markdown("#### 5-minute cross evaluation trace")
+    st.caption(
+        "Read-only replay of the existing signal-engine midpoint-cross condition over "
+        "completed 5-minute candles after the Red Bar becomes available."
+    )
+    candle_path = layout.candle_path("upstox", instrument_key, 1, trading_date)
+    if candle_path.exists():
+        try:
+            one_minute = pd.read_csv(candle_path)
+            cross_trace = build_red_bar_cross_trace(one_minute, lifecycle)
+        except Exception as exc:
+            cross_trace = []
+            st.warning(f"Could not evaluate cached 1-minute candles: {exc}")
+    else:
+        cross_trace = []
+        st.caption(
+            "No cached 1-minute candle file is available for the selected date. "
+            "Refresh Live Trading first."
+        )
+
+    if cross_trace:
+        st.dataframe(
+            _arrow_safe_rows(cross_trace),
+            width="stretch",
+            hide_index=True,
+        )
+        passing = [
+            row for row in cross_trace
+            if row.get("evaluation") in {"BULLISH_CROSS", "BEARISH_CROSS"}
+        ]
+        if passing:
+            first = passing[0]
+            st.success(
+                "A qualifying 5-minute cross exists in the cached candles: "
+                f"{first.get('evaluation')} at {first.get('timestamp')}. "
+                "If no NEXT_RED_CANDLE signal attempt is persisted, the next check "
+                "is signal-scanner/persistence parity."
+            )
+        elif lifecycle.get("reference_persisted"):
+            st.info(
+                "Every completed post-Red-Bar 5-minute candle was evaluated, but none "
+                "satisfied the current midpoint close-cross rule."
+            )
+    elif lifecycle.get("reference_persisted"):
+        st.caption(
+            "No completed 5-minute candle is available yet after the Red Bar reference "
+            "became eligible for signal scanning."
         )
 
     st.markdown("#### Persisted Red Bar signal attempts")
