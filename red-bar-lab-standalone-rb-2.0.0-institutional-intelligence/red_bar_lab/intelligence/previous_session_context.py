@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, timedelta
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -11,6 +12,22 @@ from red_bar_lab.intelligence.contract_quality import ContractQualityEngine
 from red_bar_lab.intelligence.institutional_flow import InstitutionalOptionFlowEngine
 from red_bar_lab.intelligence.oi_velocity import OIVelocityEngine
 from red_bar_lab.options.context import _max_pain_strike
+
+
+def _safe_path_part(value: object) -> str:
+    return str(value or "").replace("|", "_").replace("/", "_").replace("\\", "_").replace(" ", "_")
+
+
+@dataclass(frozen=True)
+class PreviousSessionReadiness:
+    target_trading_date: str
+    previous_artifact_date: str | None
+    online_snapshots: int
+    historical_snapshots: int
+    artifact_contracts: int
+    adapted_snapshots: int
+    status: str
+    detail: str
 
 
 @dataclass(frozen=True)
@@ -33,6 +50,195 @@ class PreviousSessionContext:
     reason: str
     execution_impact: str = "NONE"
     data_source: str = "NONE"
+
+
+class PreviousSessionHistoricalAdapter:
+    """Convert validated local expired-option candles into HISTORICAL chain snapshots.
+
+    This is a local artifact adapter only. It performs no provider/network call and
+    never labels reconstructed historical data as ONLINE. The latest two sufficiently
+    populated one-minute timestamps are persisted for Sprint-3 closing-context use.
+    """
+
+    def __init__(self, database, layout) -> None:
+        self.database = database
+        self.layout = layout
+
+    def _root(self, instrument_key: str, trading_day: date) -> Path:
+        return (
+            self.layout.settings.historical_root
+            / "upstox"
+            / "options"
+            / _safe_path_part(instrument_key)
+            / trading_day.isoformat()
+        )
+
+    @staticmethod
+    def _contract_key(row: dict[str, object]) -> str:
+        for key in ("instrument_key", "instrument_token", "expired_instrument_key"):
+            if row.get(key):
+                return str(row[key])
+        return ""
+
+    @staticmethod
+    def _side(row: dict[str, object]) -> str:
+        raw = str(row.get("instrument_type") or row.get("option_type") or row.get("type") or "").upper()
+        symbol = str(row.get("trading_symbol") or row.get("tradingsymbol") or row.get("symbol") or "").upper()
+        if raw.endswith("CE") or raw == "CE" or "CALL" in raw:
+            return "CE"
+        if raw.endswith("PE") or raw == "PE" or "PUT" in raw:
+            return "PE"
+        if "CE" in symbol[-5:]:
+            return "CE"
+        if "PE" in symbol[-5:]:
+            return "PE"
+        return raw
+
+    @staticmethod
+    def _strike(row: dict[str, object]) -> float | None:
+        try:
+            value = row.get("strike_price", row.get("strike"))
+            return float(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    def _manifest(self, instrument_key: str, trading_day: date) -> dict[str, object]:
+        path = self._root(instrument_key, trading_day) / "contracts.json"
+        if not path.exists():
+            return {"expiry": None, "contracts": []}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            return payload if isinstance(payload, dict) else {"expiry": None, "contracts": []}
+        except Exception:
+            return {"expiry": None, "contracts": []}
+
+    def _find_previous_artifact_day(self, instrument_key: str, target: date) -> tuple[date | None, dict[str, object]]:
+        for offset in range(1, 22):
+            day = target - timedelta(days=offset)
+            manifest = self._manifest(instrument_key, day)
+            contracts = [row for row in manifest.get("contracts", []) if isinstance(row, dict)]
+            if contracts:
+                return day, manifest
+        return None, {"expiry": None, "contracts": []}
+
+    def _build_timestamp_chains(
+        self,
+        instrument_key: str,
+        trading_day: date,
+        contracts: list[dict[str, object]],
+    ) -> dict[pd.Timestamp, pd.DataFrame]:
+        by_timestamp: dict[pd.Timestamp, dict[float, dict[str, object]]] = {}
+        candles_root = self._root(instrument_key, trading_day) / "candles"
+        for contract in contracts:
+            key = self._contract_key(contract)
+            strike = self._strike(contract)
+            side = self._side(contract)
+            if not key or strike is None or side not in {"CE", "PE"}:
+                continue
+            path = candles_root / f"{_safe_path_part(key)}.csv"
+            if not path.exists():
+                continue
+            try:
+                frame = pd.read_csv(path)
+            except Exception:
+                continue
+            if frame.empty or "timestamp" not in frame.columns:
+                continue
+            frame["timestamp"] = pd.to_datetime(frame["timestamp"], errors="coerce", utc=True)
+            frame = frame.dropna(subset=["timestamp"])
+            prefix = "call" if side == "CE" else "put"
+            for _, candle in frame.iterrows():
+                ts = pd.Timestamp(candle["timestamp"]).tz_convert("Asia/Kolkata").floor("min")
+                if ts.date() != trading_day:
+                    continue
+                strike_row = by_timestamp.setdefault(ts, {}).setdefault(float(strike), {"strike": float(strike)})
+                strike_row[f"{prefix}_ltp"] = candle.get("close")
+                strike_row[f"{prefix}_oi"] = candle.get("oi")
+                strike_row[f"{prefix}_volume"] = candle.get("volume")
+
+        chains: dict[pd.Timestamp, pd.DataFrame] = {}
+        for ts, strikes in by_timestamp.items():
+            chain = pd.DataFrame(strikes.values()).sort_values("strike").reset_index(drop=True)
+            if chain.empty:
+                continue
+            # Require both option sides to be represented before treating a minute as
+            # a trustworthy chain snapshot. Missing individual strikes remain visible
+            # as NaN rather than being fabricated.
+            has_ce = "call_oi" in chain.columns and pd.to_numeric(chain["call_oi"], errors="coerce").notna().any()
+            has_pe = "put_oi" in chain.columns and pd.to_numeric(chain["put_oi"], errors="coerce").notna().any()
+            if has_ce and has_pe:
+                chains[ts] = chain
+        return chains
+
+    def _persist_snapshot(
+        self,
+        instrument_key: str,
+        trading_day: date,
+        expiry: str | None,
+        ts: pd.Timestamp,
+        chain: pd.DataFrame,
+    ) -> None:
+        output = self._root(instrument_key, trading_day) / "sprint3_snapshots" / f"{ts.strftime('%H%M%S')}.csv"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        chain.to_csv(output, index=False)
+        snapshot_key = f"SPRINT3_HISTORICAL|{instrument_key}|{trading_day.isoformat()}|{ts.isoformat()}"
+        self.database.upsert_option_chain_history({
+            "snapshot_key": snapshot_key,
+            "instrument_key": instrument_key,
+            "trading_date": trading_day.isoformat(),
+            "option_expiry": expiry,
+            "snapshot_timestamp": ts.isoformat(),
+            "collector_mode": "HISTORICAL",
+            "chain_artifact_path": str(output),
+        })
+
+    def ensure_previous_session(self, instrument_key: str, trading_date: str) -> PreviousSessionReadiness:
+        target = date.fromisoformat(str(trading_date))
+        history = self.database.read_option_chain_history(
+            instrument_key,
+            (target - timedelta(days=21)).isoformat(),
+            (target - timedelta(days=1)).isoformat(),
+            limit=5000,
+        )
+        online = [row for row in history if str(row.get("collector_mode") or "").upper() == "ONLINE"]
+        historical = [
+            row for row in history
+            if str(row.get("collector_mode") or "").upper() in PreviousSessionContextService.TRUSTED_HISTORICAL_MODES
+        ]
+        if online or historical:
+            return PreviousSessionReadiness(
+                target.isoformat(), None, len(online), len(historical), 0, 0, "READY",
+                "Trustworthy persisted previous-session snapshots already exist; no artifact adaptation was required.",
+            )
+
+        artifact_day, manifest = self._find_previous_artifact_day(instrument_key, target)
+        contracts = [row for row in manifest.get("contracts", []) if isinstance(row, dict)]
+        if artifact_day is None or not contracts:
+            return PreviousSessionReadiness(
+                target.isoformat(), None, 0, 0, 0, 0, "BACKFILL_REQUIRED",
+                "No persisted snapshots and no local historical option-contract artifacts were found. Run Historical Option Sync for a prior trading session.",
+            )
+
+        chains = self._build_timestamp_chains(instrument_key, artifact_day, contracts)
+        if len(chains) < 2:
+            return PreviousSessionReadiness(
+                target.isoformat(), artifact_day.isoformat(), 0, 0, len(contracts), 0, "ARTIFACTS_INCOMPLETE",
+                "Historical contracts exist, but fewer than two complete CE/PE one-minute chain timestamps could be reconstructed.",
+            )
+
+        selected = sorted(chains)[-2:]
+        for ts in selected:
+            self._persist_snapshot(
+                instrument_key,
+                artifact_day,
+                str(manifest.get("expiry") or "") or None,
+                ts,
+                chains[ts],
+            )
+        return PreviousSessionReadiness(
+            target.isoformat(), artifact_day.isoformat(), 0, 2, len(contracts), 2, "ADAPTED",
+            f"Adapted the final two trustworthy one-minute historical option-chain snapshots from {artifact_day.isoformat()} and persisted them as HISTORICAL.",
+        )
 
 
 class PreviousSessionContextService:
