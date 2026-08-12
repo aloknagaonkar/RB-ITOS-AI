@@ -68,6 +68,35 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         )
         st.info(strength.reason)
 
+        st.markdown("#### Buying / Selling Strength Explanation")
+        st.caption(
+            "Read-only audit trace of the existing strength calculation: base Sprint-1 confidence × OI-velocity alignment × contract-quality weight. "
+            "This section explains the current Buying/Selling Strength; it does not change the calculation or execution."
+        )
+        contribution_rows = [row.as_dict() for row in strength.contributions]
+        bullish_rows = [row for row in contribution_rows if row.get("Direction") == "BULLISH"]
+        bearish_rows = [row for row in contribution_rows if row.get("Direction") == "BEARISH"]
+        bullish_rows.sort(key=lambda row: float(row.get("Weighted Contribution") or 0.0), reverse=True)
+        bearish_rows.sort(key=lambda row: float(row.get("Weighted Contribution") or 0.0), reverse=True)
+        e1, e2, e3, e4 = st.columns(4)
+        e1.metric("Buying Strength", f"{strength.buying_strength_pct:.1f}%")
+        e2.metric("Selling Strength", f"{strength.selling_strength_pct:.1f}%")
+        e3.metric("Net Institutional Strength", f"{strength.net_strength:+.1f}")
+        e4.metric("Directional Breadth", f"{strength.breadth_pct:.1f}%")
+        left, right = st.columns(2)
+        with left:
+            st.markdown("##### Top Buying Contributors")
+            if bullish_rows:
+                st.dataframe(_arrow_safe_rows(bullish_rows[:15]), width="stretch", hide_index=True)
+            else:
+                st.info("No bullish institutional contributors in the current snapshot.")
+        with right:
+            st.markdown("##### Top Selling Contributors")
+            if bearish_rows:
+                st.dataframe(_arrow_safe_rows(bearish_rows[:15]), width="stretch", hide_index=True)
+            else:
+                st.info("No bearish institutional contributors in the current snapshot.")
+
         st.markdown("#### Contract Quality Weighting")
         quality_rows = [row.as_dict() for row in snapshot.contract_quality]
         qualified = sum(1 for row in snapshot.contract_quality if row.eligible)
