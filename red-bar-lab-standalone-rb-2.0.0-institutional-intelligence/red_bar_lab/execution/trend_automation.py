@@ -3,18 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from time import monotonic
-from typing import Any, Iterable
 
 import pandas as pd
 
 from red_bar_lab.execution.automation import RedBarPaperAutomationService
 from red_bar_lab.execution.opportunity_engine import OpportunityIntelligenceEngine
 from red_bar_lab.execution.paper_engine import RedBarPaperExecutionEngine
-from red_bar_lab.execution.performance_selection import (
-    PerformanceTradeSelectionEngine,
-    TradeSelectionEvaluation,
-    _num as _selection_num,
-)
 
 
 @dataclass(frozen=True)
@@ -27,17 +21,7 @@ class EMA10TrendSnapshot:
 
 
 class EMA10OpportunityIntelligenceEngine(OpportunityIntelligenceEngine):
-    """Opportunity engine where NIFTY 5m EMA10 owns continuation validity.
-
-    Reward Remaining / Move Consumed are still calculated and persisted by the
-    parent engine for historical comparison, but REWARD_CONSUMED is disabled as
-    an execution blocker. A completed underlying 5-minute close across EMA10 is
-    the replacement continuation invalidation rule.
-    """
-
-    def __init__(self, **kwargs):
-        kwargs["minimum_reward_remaining_pct"] = -1.0
-        super().__init__(**kwargs)
+    """Add completed-underlying 5m EMA10 continuation to Opportunity Health."""
 
     def evaluate(self, **kwargs):
         result = super().evaluate(**kwargs)
@@ -47,13 +31,16 @@ class EMA10OpportunityIntelligenceEngine(OpportunityIntelligenceEngine):
         close = signal.get("_ema10_5m_close")
         ema10 = signal.get("_ema10_5m_value")
 
-        blockers: list[str] = []
-        if result.reason and result.reason != "OPPORTUNITY_HEALTH_PASS":
-            blockers.extend(
-                item.strip()
-                for item in str(result.reason).split("|")
-                if item.strip() and item.strip() != "REWARD_CONSUMED"
-            )
+        informational_tokens = {
+            "OPPORTUNITY_HEALTH_PASS",
+            "REWARD_METRICS_INFORMATIONAL_ONLY",
+            "REWARD_CONSUMED",
+        }
+        blockers = [
+            item.strip()
+            for item in str(result.reason or "").split("|")
+            if item.strip() and item.strip() not in informational_tokens
+        ]
 
         if not ready or close is None or ema10 is None:
             blockers.append("EMA10_DATA_UNAVAILABLE")
@@ -67,141 +54,25 @@ class EMA10OpportunityIntelligenceEngine(OpportunityIntelligenceEngine):
             elif direction not in {"BULLISH", "BEARISH"}:
                 blockers.append("EMA10_DIRECTION_UNKNOWN")
 
+        blockers = list(dict.fromkeys(blockers))
         eligible = not blockers
-        reason = (
-            "OPPORTUNITY_HEALTH_PASS | EMA10_TREND_VALID"
-            if eligible
-            else " | ".join(dict.fromkeys(blockers))
-        )
         return replace(
             result,
             eligible=eligible,
-            decision=(f"BUY {kwargs['candidate'].contract.option_type}" if eligible else "SKIP"),
-            reason=reason,
-        )
-
-
-class NoRewardRiskPerformanceTradeSelectionEngine(PerformanceTradeSelectionEngine):
-    """Selection model with Reward/Risk retained as information only.
-
-    The former 10% Reward/Risk weight is redistributed proportionally across the
-    remaining four components so the published Selection Score remains 0-100:
-      Candidate 38.89%, Opportunity 22.22%, Historical 27.78%, Execution 11.11%.
-    """
-
-    CANDIDATE_WEIGHT = 35.0 / 90.0
-    OPPORTUNITY_WEIGHT = 20.0 / 90.0
-    HISTORICAL_WEIGHT = 25.0 / 90.0
-    EXECUTION_WEIGHT = 10.0 / 90.0
-
-    def evaluate(
-        self,
-        *,
-        candidate,
-        candidate_rank: int,
-        opportunity,
-        historical_orders: Iterable[dict[str, object]],
-        entry_mode: str,
-        minimum_candidate_score: float,
-        stop_loss_pct: float,
-        target_pct: float,
-        require_opportunity_gate: bool,
-    ) -> TradeSelectionEvaluation:
-        history = self.historical_performance(
-            historical_orders,
-            option_type=candidate.contract.option_type,
-            entry_mode=entry_mode,
-        )
-        historical_score = self._historical_score(history)
-
-        # Legacy configured R:R is preserved for storage/UI compatibility only.
-        rr = (
-            float(target_pct) / float(stop_loss_pct)
-            if float(stop_loss_pct) > 0 else 0.0
-        )
-        execution_quality = min(
-            100.0,
-            (
-                min(1.0, _selection_num(candidate.spread_score) / 15.0) * 45.0
-                + min(1.0, _selection_num(candidate.liquidity_score) / 20.0) * 55.0
+            decision=(
+                f"BUY {kwargs['candidate'].contract.option_type}"
+                if eligible else "SKIP"
             ),
-        )
-        opportunity_score = _selection_num(opportunity.opportunity_score, 50.0)
-        reward_remaining = _selection_num(opportunity.reward_remaining_pct, 100.0)
-
-        selection_score = round(
-            min(100.0, _selection_num(candidate.total_score)) * self.CANDIDATE_WEIGHT
-            + min(100.0, opportunity_score) * self.OPPORTUNITY_WEIGHT
-            + historical_score * self.HISTORICAL_WEIGHT
-            + execution_quality * self.EXECUTION_WEIGHT,
-            2,
-        )
-
-        hard_blockers: list[str] = []
-        soft_evidence: list[str] = []
-        if _selection_num(candidate.spread_score) <= 0:
-            hard_blockers.append("SPREAD")
-        if _selection_num(candidate.liquidity_score) <= 0:
-            hard_blockers.append("LIQUIDITY")
-
-        if _selection_num(candidate.total_score) < float(minimum_candidate_score):
-            soft_evidence.append(
-                f"CANDIDATE_SCORE={_selection_num(candidate.total_score):.2f}<MIN={float(minimum_candidate_score):.2f}"
-            )
-        if require_opportunity_gate and not bool(opportunity.eligible):
-            soft_evidence.append(
-                f"OPPORTUNITY_EXTENSION={str(getattr(opportunity, 'reason', 'NOT_ELIGIBLE'))}"
-            )
-        if selection_score < self.minimum_selection_score:
-            soft_evidence.append(
-                f"TSS={selection_score:.2f}<REFERENCE={self.minimum_selection_score:.2f}"
-            )
-
-        if history.evidence_ready:
-            if _selection_num(history.win_rate_pct) < self.minimum_historical_win_rate_pct:
-                soft_evidence.append(
-                    f"HISTORICAL_WIN_RATE={_selection_num(history.win_rate_pct):.2f}<REFERENCE={self.minimum_historical_win_rate_pct:.2f}"
-                )
-            if history.profit_factor is None or _selection_num(history.profit_factor) < self.minimum_profit_factor:
-                soft_evidence.append(
-                    f"PROFIT_FACTOR={_selection_num(history.profit_factor):.3f}<REFERENCE={self.minimum_profit_factor:.3f}"
-                )
-            if history.expectancy_pct is None or _selection_num(history.expectancy_pct) <= self.minimum_expectancy_pct:
-                soft_evidence.append(
-                    f"EXPECTANCY={_selection_num(history.expectancy_pct):.3f}<=REFERENCE={self.minimum_expectancy_pct:.3f}"
-                )
-
-        eligible = not hard_blockers
-        parts: list[str] = []
-        if hard_blockers:
-            parts.append("HARD_BLOCK:" + ",".join(hard_blockers))
-        else:
-            parts.append("NO_HARD_PERFORMANCE_BLOCKERS")
-        if soft_evidence:
-            parts.append("SOFT_EVIDENCE:" + "; ".join(soft_evidence))
-        else:
-            parts.append("SOFT_EVIDENCE:ALL_REFERENCE_LEVELS_MET")
-        parts.append("REWARD_RISK_INFORMATIONAL_ONLY")
-
-        return TradeSelectionEvaluation(
-            candidate_rank=int(candidate_rank),
-            candidate_symbol=candidate.contract.tradingsymbol,
-            candidate_score=round(_selection_num(candidate.total_score), 2),
-            opportunity_score=round(opportunity_score, 2),
-            reward_remaining_pct=round(reward_remaining, 2),
-            reward_risk_ratio=round(rr, 3),
-            execution_quality_score=round(execution_quality, 2),
-            historical_score=historical_score,
-            selection_score=selection_score,
-            historical=history,
-            eligible=eligible,
-            decision=(f"BUY {candidate.contract.option_type}" if eligible else "SKIP"),
-            reason=" | ".join(parts),
+            reason=(
+                "OPPORTUNITY_HEALTH_PASS | EMA10_TREND_VALID | "
+                "REWARD_METRICS_INFORMATIONAL_ONLY"
+                if eligible else " | ".join(blockers)
+            ),
         )
 
 
 class NoTargetPaperExecutionEngine(RedBarPaperExecutionEngine):
-    """Paper engine that keeps the hard stop but disables fixed profit targets."""
+    """Keep hard risk stop while disabling fixed profit targets."""
 
     def open_long_option(self, **kwargs):
         kwargs["target1_price"] = None
@@ -210,7 +81,7 @@ class NoTargetPaperExecutionEngine(RedBarPaperExecutionEngine):
 
 
 class TrendAwareDatabaseProxy:
-    """Read-through DB proxy for EMA context and active-contract duplicate checks."""
+    """DB proxy adding EMA context and account-wide active-contract deduplication."""
 
     ACTIVE_QUEUE_STATUSES = {
         "QUALIFIED",
@@ -230,21 +101,25 @@ class TrendAwareDatabaseProxy:
     def _enrich(self, row):
         if not row:
             return row
-        snapshot = self._trend_provider()
+        trend = self._trend_provider()
         enriched = dict(row)
-        enriched["_ema10_5m_ready"] = snapshot.ready
-        enriched["_ema10_5m_close"] = snapshot.close
-        enriched["_ema10_5m_value"] = snapshot.ema10
-        enriched["_ema10_5m_timestamp"] = snapshot.timestamp
-        enriched["_ema10_5m_reason"] = snapshot.reason
+        enriched["_ema10_5m_ready"] = trend.ready
+        enriched["_ema10_5m_close"] = trend.close
+        enriched["_ema10_5m_value"] = trend.ema10
+        enriched["_ema10_5m_timestamp"] = trend.timestamp
+        enriched["_ema10_5m_reason"] = trend.reason
         return enriched
 
     def read_signal_attempts(self, *args, **kwargs):
-        rows = self._database.read_signal_attempts(*args, **kwargs)
-        return [self._enrich(row) for row in rows]
+        return [
+            self._enrich(row)
+            for row in self._database.read_signal_attempts(*args, **kwargs)
+        ]
 
     def read_signal_attempt_by_id(self, *args, **kwargs):
-        return self._enrich(self._database.read_signal_attempt_by_id(*args, **kwargs))
+        return self._enrich(
+            self._database.read_signal_attempt_by_id(*args, **kwargs)
+        )
 
     def paper_execution_exists_for_candidate(
         self,
@@ -253,16 +128,13 @@ class TrendAwareDatabaseProxy:
         account_id: str,
         instrument_token: int,
     ) -> bool:
-        """Block the same contract only while OPEN or pending/active in queue.
-
-        A CLOSED position is intentionally not a duplicate. It may be considered
-        again by the full pipeline if the underlying EMA10 opportunity still holds.
-        The check is account+instrument scoped, not signal scoped, so a second
-        signal cannot stack the exact same open contract.
-        """
+        """OPEN/PENDING same contract blocks; CLOSED contract can be reconsidered."""
         token = int(instrument_token)
         open_rows = self._database.read_open_paper_execution_orders(account_id)
-        if any(int(row.get("instrument_token") or 0) == token for row in open_rows):
+        if any(
+            int(row.get("instrument_token") or 0) == token
+            for row in open_rows
+        ):
             return True
 
         try:
@@ -272,21 +144,13 @@ class TrendAwareDatabaseProxy:
         for row in queue_rows or []:
             if int(row.get("instrument_token") or 0) != token:
                 continue
-            status = str(row.get("status") or "").upper()
-            if status in self.ACTIVE_QUEUE_STATUSES:
+            if str(row.get("status") or "").upper() in self.ACTIVE_QUEUE_STATUSES:
                 return True
         return False
 
 
 class TrendAwarePaperAutomationService(RedBarPaperAutomationService):
-    """RB execution service implementing agreed Changes 1-5.
-
-    Change 1: EMA10 continuation replaces Reward Remaining / Move Consumed gate.
-    Change 2: Reward/Risk has zero Selection Score weight.
-    Change 3: Expected Value/Expectancy/Expected Win/Loss stay informational.
-    Change 4: same contract blocked only while OPEN/PENDING; CLOSED can re-enter.
-    Change 5: no fixed target; exit is driven by completed NIFTY 5m EMA10 loss.
-    """
+    """Paper automation implementing agreed execution Changes 1-5."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -295,30 +159,29 @@ class TrendAwarePaperAutomationService(RedBarPaperAutomationService):
             False, None, None, None, "NOT_LOADED"
         )
         self._raw_database = self.database
-        proxy = TrendAwareDatabaseProxy(self._raw_database, self._ema10_snapshot)
+        proxy = TrendAwareDatabaseProxy(
+            self._raw_database,
+            self._ema10_snapshot,
+        )
         self.database = proxy
 
         old_opportunity = self.opportunity_engine
         self.opportunity_engine = EMA10OpportunityIntelligenceEngine(
             minimum_opportunity_score=old_opportunity.minimum_opportunity_score,
-            minimum_extended_candidate_score=old_opportunity.minimum_extended_candidate_score,
+            minimum_extended_candidate_score=(
+                old_opportunity.minimum_extended_candidate_score
+            ),
+            minimum_reward_remaining_pct=(
+                old_opportunity.minimum_reward_remaining_pct
+            ),
             minimum_liquidity_score=old_opportunity.minimum_liquidity_score,
             minimum_spread_score=old_opportunity.minimum_spread_score,
             minimum_momentum_score=old_opportunity.minimum_momentum_score,
         )
 
-        old_selection = self.selection_engine
-        self.selection_engine = NoRewardRiskPerformanceTradeSelectionEngine(
-            minimum_selection_score=old_selection.minimum_selection_score,
-            minimum_history_samples=old_selection.minimum_history_samples,
-            minimum_historical_win_rate_pct=old_selection.minimum_historical_win_rate_pct,
-            minimum_profit_factor=old_selection.minimum_profit_factor,
-            minimum_expectancy_pct=old_selection.minimum_expectancy_pct,
-        )
-
-        # Change 3: payoff/expectancy metrics remain calculated/persisted, but the
-        # expected-value threshold is disabled as execution authority.
-        self.execution_committee.minimum_expected_value_pct = -1_000_000.0
+        # PerformanceTradeSelectionEngine is globally updated so R:R is already
+        # informational-only. The Committee is also globally updated so payoff
+        # metrics have zero execution authority.
 
         old_engine = self.engine
         self.engine = NoTargetPaperExecutionEngine(
@@ -333,10 +196,9 @@ class TrendAwarePaperAutomationService(RedBarPaperAutomationService):
         now_mono = monotonic()
         if now_mono - self._trend_cache_at <= 10.0:
             return self._trend_cache
-        snapshot = self._load_ema10_snapshot()
-        self._trend_cache = snapshot
+        self._trend_cache = self._load_ema10_snapshot()
         self._trend_cache_at = now_mono
-        return snapshot
+        return self._trend_cache
 
     def _load_ema10_snapshot(self) -> EMA10TrendSnapshot:
         adapter = self.zerodha
@@ -344,23 +206,25 @@ class TrendAwarePaperAutomationService(RedBarPaperAutomationService):
         underlying_key = getattr(adapter, "underlying_key", None)
         if provider is None or not underlying_key:
             return EMA10TrendSnapshot(
-                False, None, None, None, "UNDERLYING_CANDLE_PROVIDER_UNAVAILABLE"
+                False,
+                None,
+                None,
+                None,
+                "UNDERLYING_CANDLE_PROVIDER_UNAVAILABLE",
             )
 
         today = date.today()
         frames: list[pd.DataFrame] = []
         try:
-            historical = provider.historical_candles(
+            history = provider.historical_candles(
                 underlying_key,
                 today - timedelta(days=7),
                 today - timedelta(days=1),
                 interval_minutes=1,
             )
-            if historical is not None and not historical.empty:
-                frames.append(historical)
+            if history is not None and not history.empty:
+                frames.append(history)
         except Exception:
-            # Prior history improves EMA warm-up but today's completed candles are
-            # still usable if the provider cannot serve the lookback temporarily.
             pass
 
         try:
@@ -372,23 +236,45 @@ class TrendAwarePaperAutomationService(RedBarPaperAutomationService):
                 frames.append(intraday)
         except Exception as exc:
             return EMA10TrendSnapshot(
-                False, None, None, None, f"INTRADAY_CANDLES_UNAVAILABLE:{type(exc).__name__}"
+                False,
+                None,
+                None,
+                None,
+                f"INTRADAY_CANDLES_UNAVAILABLE:{type(exc).__name__}",
             )
 
         if not frames:
-            return EMA10TrendSnapshot(False, None, None, None, "NO_UNDERLYING_CANDLES")
+            return EMA10TrendSnapshot(
+                False, None, None, None, "NO_UNDERLYING_CANDLES"
+            )
 
         frame = pd.concat(frames, ignore_index=True)
         if "timestamp" not in frame.columns or "close" not in frame.columns:
-            return EMA10TrendSnapshot(False, None, None, None, "UNDERLYING_CANDLE_COLUMNS_MISSING")
+            return EMA10TrendSnapshot(
+                False, None, None, None, "UNDERLYING_CANDLE_COLUMNS_MISSING"
+            )
 
-        ts = pd.to_datetime(frame["timestamp"], errors="coerce", utc=True)
-        close = pd.to_numeric(frame["close"], errors="coerce")
-        source = pd.DataFrame({"timestamp": ts, "close": close}).dropna()
+        timestamps = pd.to_datetime(
+            frame["timestamp"],
+            errors="coerce",
+            utc=True,
+        )
+        closes = pd.to_numeric(frame["close"], errors="coerce")
+        source = pd.DataFrame(
+            {"timestamp": timestamps, "close": closes}
+        ).dropna()
         if source.empty:
-            return EMA10TrendSnapshot(False, None, None, None, "NO_VALID_UNDERLYING_CANDLES")
-        source["timestamp"] = source["timestamp"].dt.tz_convert("Asia/Kolkata")
-        source = source.sort_values("timestamp").drop_duplicates("timestamp", keep="last")
+            return EMA10TrendSnapshot(
+                False, None, None, None, "NO_VALID_UNDERLYING_CANDLES"
+            )
+
+        source["timestamp"] = source["timestamp"].dt.tz_convert(
+            "Asia/Kolkata"
+        )
+        source = (
+            source.sort_values("timestamp")
+            .drop_duplicates("timestamp", keep="last")
+        )
 
         bars = (
             source.set_index("timestamp")
@@ -399,20 +285,30 @@ class TrendAwarePaperAutomationService(RedBarPaperAutomationService):
                 label="left",
                 closed="left",
             )
-            .agg(close=("close", "last"), source_rows=("close", "count"))
+            .agg(
+                close=("close", "last"),
+                source_rows=("close", "count"),
+            )
             .dropna(subset=["close"])
         )
         bars = bars[bars["source_rows"] >= 5].copy()
         if bars.empty:
-            return EMA10TrendSnapshot(False, None, None, None, "NO_COMPLETED_5M_CANDLES")
+            return EMA10TrendSnapshot(
+                False, None, None, None, "NO_COMPLETED_5M_CANDLES"
+            )
 
-        bars["ema10"] = bars["close"].ewm(span=10, adjust=False).mean()
-        current_day = bars[bars.index.date == today]
-        if current_day.empty:
-            return EMA10TrendSnapshot(False, None, None, None, "NO_COMPLETED_5M_CANDLE_TODAY")
+        bars["ema10"] = bars["close"].ewm(
+            span=10,
+            adjust=False,
+        ).mean()
+        today_bars = bars[bars.index.date == today]
+        if today_bars.empty:
+            return EMA10TrendSnapshot(
+                False, None, None, None, "NO_COMPLETED_5M_CANDLE_TODAY"
+            )
 
-        latest = current_day.iloc[-1]
-        timestamp = current_day.index[-1]
+        latest = today_bars.iloc[-1]
+        timestamp = today_bars.index[-1]
         return EMA10TrendSnapshot(
             True,
             round(float(latest["close"]), 4),
@@ -422,5 +318,4 @@ class TrendAwarePaperAutomationService(RedBarPaperAutomationService):
         )
 
 
-# Friendly alias used by the production paper monitor.
 RedBarTrendAutomationService = TrendAwarePaperAutomationService
