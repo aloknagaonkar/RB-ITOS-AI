@@ -1,5 +1,6 @@
 from red_bar_lab.ui._shared import *
 from red_bar_lab.services.opportunity_reward_diagnostics import build_opportunity_reward_trace
+from red_bar_lab.services.candidate_contract_price_trace import build_all_candidate_contract_price_trace
 
 
 def render_page(settings, layout, database, token, underlying_name, instrument_key, interval) -> None:
@@ -85,7 +86,90 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     }]
     st.dataframe(_arrow_safe_rows(context), width="stretch", hide_index=True)
     st.info(str(trace.get("spot_persistence_note") or ""))
+
+    st.markdown("#### All Selected Candidates — Contract Premium Lifecycle")
+    st.caption(
+        "For every candidate evaluated in the same scan, this keeps the exact same option contract fixed and pulls its "
+        "1-minute premium at signal confirmation, first REWARD_CONSUMED evaluation, and the selected evaluation time."
+    )
+    scan_id = str(opportunity.get("scan_id") or "")
+    scan_rows = [
+        row for row in rows
+        if str(row.get("scan_id") or "") == scan_id
+        and str(row.get("signal_id") or "") == signal_id
+    ]
+    if not signal:
+        st.warning("Signal details are unavailable, so signal-time contract premiums cannot be resolved.")
+    else:
+        try:
+            access_token = resolve_access_token(token)
+            _, _, paper_market = _cached_paper_market_stack(
+                access_token,
+                underlying_name,
+                instrument_key,
+            )
+            premium_rows = build_all_candidate_contract_price_trace(
+                market=paper_market,
+                underlying_name=underlying_name,
+                trading_date=trading_date,
+                signal=signal,
+                scan_rows=scan_rows,
+                all_day_rows=rows,
+            )
+            selection_rows = database.read_trade_selection_evaluations(
+                signal_id=signal_id,
+                limit=500,
+            )
+            rank_map = {
+                str(row.get("candidate_symbol") or ""): row.get("candidate_rank")
+                for row in selection_rows
+                if str(row.get("evaluated_at") or "") == str(opportunity.get("evaluated_at") or "")
+            }
+            for item in premium_rows:
+                item["candidate_rank"] = rank_map.get(str(item.get("candidate_symbol") or ""))
+            premium_rows = sorted(
+                premium_rows,
+                key=lambda item: int(item.get("candidate_rank") or 999),
+            )
+            display_rows = [{
+                "Rank": item.get("candidate_rank"),
+                "Contract": item.get("candidate_symbol"),
+                "Type": item.get("option_type"),
+                "Strike": item.get("strike"),
+                "Signal Time": item.get("signal_time"),
+                "Signal Premium ₹": item.get("signal_price"),
+                "First Consumed Time": item.get("first_consumed_time"),
+                "Consumed Premium ₹": item.get("first_consumed_price"),
+                "Premium Move to Consumed %": item.get("signal_to_consumed_change_pct"),
+                "Evaluation Time": item.get("evaluation_time"),
+                "Evaluation Premium ₹": item.get("evaluation_price"),
+                "Premium Move to Evaluation %": item.get("signal_to_evaluation_change_pct"),
+                "Reward Remaining %": item.get("reward_remaining_pct"),
+                "Move Consumed %": item.get("move_consumed_pct"),
+                "Decision": item.get("decision"),
+                "Reason": item.get("reason"),
+                "Price Status": item.get("status"),
+            } for item in premium_rows]
+            st.dataframe(_arrow_safe_rows(display_rows), width="stretch", hide_index=True)
+            good = [item for item in premium_rows if item.get("signal_price") is not None]
+            if good:
+                best_move = max(
+                    good,
+                    key=lambda item: float(item.get("signal_to_evaluation_change_pct") or -9999.0),
+                )
+                st.caption(
+                    f"Same-contract comparison enabled for {len(good)}/{len(premium_rows)} candidates. "
+                    f"Largest signal→evaluation premium move in this scan: "
+                    f"{best_move.get('candidate_symbol')} "
+                    f"{float(best_move.get('signal_to_evaluation_change_pct') or 0.0):+.2f}%."
+                )
+        except MissingAccessToken:
+            st.info("Enter/resolve the Upstox access token to pull historical contract premiums for all candidates.")
+        except Exception as exc:
+            st.warning(f"Contract premium lifecycle is temporarily unavailable: {type(exc).__name__}: {exc}")
+
     st.caption(
         "Current production model treats two confirmation-candle ranges beyond the confirmation close as "
-        "100% consumed and blocks when less than 40% reward remains. This page mirrors that rule only; it does not modify it."
+        "100% consumed and blocks when less than 40% reward remains. Contract premium tracing is diagnostic-only "
+        "and does not modify Opportunity, Committee, ranking, or execution decisions."
     )
