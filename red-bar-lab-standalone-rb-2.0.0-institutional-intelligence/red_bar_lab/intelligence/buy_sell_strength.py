@@ -32,20 +32,33 @@ class BuySellStrengthEngine:
         )
         return 1.15 if aligned else 0.90
 
+    @staticmethod
+    def _quality_weight(quality) -> float:
+        if quality is None:
+            return 1.0
+        return float(getattr(quality, "weight", 1.0))
+
     @classmethod
     def evaluate(
         cls,
         flow_rows: Iterable,
         velocity_by_key: dict[tuple[float, str], object] | None = None,
+        quality_by_key: dict[tuple[float, str], object] | None = None,
     ) -> BuySellStrength:
         velocity_by_key = velocity_by_key or {}
+        quality_by_key = quality_by_key or {}
         bullish = bearish = neutral = 0.0
         directional_rows = total_rows = 0
+        qualified_rows = 0
         for row in flow_rows:
             total_rows += 1
             base = max(1.0, float(getattr(row, "confidence_pct", 0.0)))
             key = (float(getattr(row, "strike", 0.0)), str(getattr(row, "option_type", "")))
-            score = base * cls._velocity_alignment(row, velocity_by_key.get(key))
+            quality = quality_by_key.get(key)
+            quality_weight = cls._quality_weight(quality)
+            if quality is None or bool(getattr(quality, "eligible", True)):
+                qualified_rows += 1
+            score = base * cls._velocity_alignment(row, velocity_by_key.get(key)) * quality_weight
             bias = str(getattr(row, "directional_bias", "NEUTRAL"))
             if bias == "BULLISH":
                 bullish += score
@@ -79,8 +92,12 @@ class BuySellStrengthEngine:
             conviction = "LOW"
         breadth = directional_rows / total_rows * 100.0 if total_rows else 0.0
         leader = "buying" if net > 0 else "selling" if net < 0 else "balanced"
+        quality_note = (
+            f" Quality-weighted contribution used; {qualified_rows}/{total_rows} contracts meet the advisory quality threshold."
+            if quality_by_key else ""
+        )
         return BuySellStrength(
             round(buy, 2), round(sell, 2), round(neu, 2), round(net, 2), conviction,
             round(breadth, 2),
-            f"Institutional {leader} evidence leads by {abs(net):.1f} percentage points across {directional_rows}/{total_rows} directional samples.",
+            f"Institutional {leader} evidence leads by {abs(net):.1f} percentage points across {directional_rows}/{total_rows} directional samples.{quality_note}",
         )
