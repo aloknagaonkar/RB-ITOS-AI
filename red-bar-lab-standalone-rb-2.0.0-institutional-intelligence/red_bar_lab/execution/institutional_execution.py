@@ -89,14 +89,11 @@ class InstitutionalExecutionEvaluation:
 
 
 class InstitutionalExecutionCommittee:
-    """Primary-only execution committee with Shadow intelligence informational-only.
+    """Primary-only execution committee; payoff metrics are research evidence.
 
-    RB-1.4.1 keeps the existing committee, expectancy, lifecycle and safety controls
-    unchanged, but removes Shadow Intelligence from execution authority:
-      * the Rule Engine remains PRIMARY and supplies execution confidence,
-      * Shadow Intelligence is stored/displayed for research only,
-      * Shadow contributes zero bonus and zero penalty,
-      * expectancy and existing hard safety controls still authorize execution.
+    Execution authority is held by the Primary Rule Engine plus deterministic
+    safety/validity gates. Shadow Intelligence and payoff projections remain
+    calculated, persisted and displayed, but contribute zero execution authority.
     """
 
     def __init__(
@@ -111,6 +108,8 @@ class InstitutionalExecutionCommittee:
         self.minimum_execution_probability_pct = float(
             minimum_execution_probability_pct
         )
+        # Backward-compatible configuration only. Expected Value/Expectancy no
+        # longer have execution authority.
         self.minimum_expected_value_pct = float(minimum_expected_value_pct)
         self.minimum_module_samples = int(minimum_module_samples)
         self.probability_prior_pct = float(probability_prior_pct)
@@ -194,8 +193,6 @@ class InstitutionalExecutionCommittee:
                 bucket["samples"] += 1
                 if supportive:
                     bucket["supportive"] += 1
-                    # A module is credited when it supported the executed side and
-                    # the corresponding closed trade produced a positive return.
                     if any(
                         (self._trade_return_pct(order) or 0.0) > 0
                         for order in orders_by_signal[signal_id]
@@ -213,7 +210,6 @@ class InstitutionalExecutionCommittee:
             supportive = int(bucket["supportive"])
             wins = int(bucket["wins"])
             wr = (wins / supportive * 100.0) if supportive else None
-            # Bayesian shrinkage to 50%; sample confidence gradually increases.
             posterior = (
                 (wins + self.probability_prior_strength * 0.5)
                 / (supportive + self.probability_prior_strength)
@@ -222,7 +218,6 @@ class InstitutionalExecutionCommittee:
             sample_confidence = min(1.0, supportive / max(1, self.minimum_module_samples))
             reliability = 50.0 + (posterior - 50.0) * sample_confidence
             current_conf = _clamp(_num(current_modules.get(name, {}).get("confidence"), 0.0))
-            # No current observation -> no vote in current intelligence score.
             raw_weight = max(0.05, reliability / 100.0) if current_conf > 0 else 0.0
             raw_weights[name] = raw_weight
             reliability_rows[name] = (
@@ -268,9 +263,7 @@ class InstitutionalExecutionCommittee:
                 vote = item.current_confidence
             elif item.current_support == "OPPOSE":
                 vote = 100.0 - item.current_confidence
-            # Neutral/informational modules stay at neutral 50.
             score += vote * item.adaptive_weight / 100.0
-        # Weights sum across active modules because inactive modules receive zero.
         active_weight = sum(item.adaptive_weight for item in active)
         if active_weight <= 0:
             return 50.0
@@ -306,9 +299,6 @@ class InstitutionalExecutionCommittee:
         selection_score = _clamp(_num(selection.selection_score, 50.0))
         n = int(history.sample_size or 0)
 
-        # RB-1.4.1 Primary-Only Execution Authority.
-        # Shadow Intelligence is informational-only. It remains calculated,
-        # persisted and displayed, but has ZERO effect on execution confidence.
         primary_decision = f"BUY {candidate.contract.option_type}"
         primary_confidence = round(rule_quality, 2)
 
@@ -333,8 +323,6 @@ class InstitutionalExecutionCommittee:
         intelligence_score = self._intelligence_score(modules)
         history_weight = 0.05 if n == 0 else min(0.20, 0.05 + n / 50.0 * 0.15)
 
-        # Preserve payload compatibility. Shadow remains observable but contributes
-        # zero points to the authoritative execution confidence.
         expert_votes = (
             ExpertVote(
                 expert="Primary Rule Engine",
@@ -368,17 +356,8 @@ class InstitutionalExecutionCommittee:
             ),
         )
 
-        # RB-1.0.0 Expectancy Engine. Keep payoff geometry intact. Opportunity
-        # quality influences the probability gently; it no longer shrinks the
-        # target itself. Historical average winner/loss gradually replace the
-        # configured target/stop only after evidence becomes available.
         configured_target = max(0.0, float(target_pct))
         configured_stop = max(0.0, float(stop_loss_pct))
-        reward_remaining_pct = _clamp(
-            _num(getattr(opportunity, "reward_remaining_pct", 100.0), 100.0)
-        )
-        # Opportunity is already an explicit expert vote. Do not apply a second
-        # hidden multiplier here. Payoff geometry stays unchanged.
         adjusted_probability = probability
 
         hist_win = _num(getattr(history, "average_winner_pct", None), configured_target)
@@ -388,7 +367,6 @@ class InstitutionalExecutionCommittee:
         if hist_loss <= 0:
             hist_loss = configured_stop
 
-        # Historical payoff authority grows to 60% by 50 comparable closed trades.
         payoff_history_weight = min(0.60, n / 50.0 * 0.60)
         expected_win = (
             configured_target * (1.0 - payoff_history_weight)
@@ -399,30 +377,32 @@ class InstitutionalExecutionCommittee:
             + hist_loss * payoff_history_weight
         )
         p = adjusted_probability / 100.0
-        expectancy = p * expected_win - (1.0 - p) * expected_loss
-        expectancy = round(expectancy, 3)
+        expectancy = round(
+            p * expected_win - (1.0 - p) * expected_loss,
+            3,
+        )
 
-        # Half-Kelly is displayed as research guidance only; execution sizing is
-        # intentionally unchanged in RB-1.0.0.
         payoff_ratio = expected_win / expected_loss if expected_loss > 0 else 0.0
         kelly = ((payoff_ratio * p - (1.0 - p)) / payoff_ratio) if payoff_ratio > 0 else 0.0
         half_kelly_pct = round(max(0.0, min(0.25, kelly * 0.5)) * 100.0, 2)
         expectancy_confidence = round(min(100.0, 20.0 + min(1.0, n / 50.0) * 80.0), 2)
         expectancy_source = "HISTORICAL_BLEND" if n > 0 else "CONFIGURED_PAYOFF_PRIOR"
-        # Backward-compatible alias. Existing storage/reporting continues to use
-        # expected_value_pct, but its value is now the RB-1.0.0 expectancy.
-        expected_value = expectancy
+
+        # Change 3: Expected Value is neutral in execution ordering/portfolio.
+        # Actual calculated expectancy is retained in expectancy_pct for research.
+        expected_value = 0.0
         probability = adjusted_probability
 
         blockers: list[str] = []
         if not bool(selection.eligible):
             blockers.append(f"PERFORMANCE_HARD_BLOCK[{selection.reason}]")
-        # Terminal opportunity-invalidity remains authoritative even in the
-        # voting model. These are not weak-confidence signals; they mean the
-        # original setup is structurally gone or its reward has been consumed.
+
+        # Reward consumption is no longer terminal. EMA10 continuation is owned by
+        # the trend-aware Opportunity Engine. Structural/opposite-signal failures
+        # remain authoritative.
         opportunity_reason = str(getattr(opportunity, "reason", "") or "").upper()
         terminal_opportunity = [
-            code for code in ("REWARD_CONSUMED", "OPPOSITE_RED_BAR", "STRUCTURE_INVALID")
+            code for code in ("OPPOSITE_RED_BAR", "STRUCTURE_INVALID", "BEARISH_EMA10_LOST", "BULLISH_EMA10_LOST", "EMA10_DATA_UNAVAILABLE")
             if code in opportunity_reason
         ]
         if terminal_opportunity:
@@ -431,16 +411,13 @@ class InstitutionalExecutionCommittee:
             blockers.append(
                 f"EXECUTION_PROBABILITY={probability:.2f}<MIN={self.minimum_execution_probability_pct:.2f}"
             )
-        if expected_value <= self.minimum_expected_value_pct:
-            blockers.append(
-                f"EXPECTANCY={expected_value:.3f}<=MIN={self.minimum_expected_value_pct:.3f}"
-            )
 
         eligible = not blockers
         committee_reason = (
-            f"EXECUTION_COMMITTEE_APPROVED | {selection.reason}"
+            f"EXECUTION_COMMITTEE_APPROVED | {selection.reason} | PAYOFF_METRICS_INFORMATIONAL_ONLY"
             if eligible
-            else " | ".join(blockers) + f" | PERFORMANCE_DETAIL[{selection.reason}]"
+            else " | ".join(blockers)
+            + f" | PERFORMANCE_DETAIL[{selection.reason}] | PAYOFF_METRICS_INFORMATIONAL_ONLY"
         )
         return InstitutionalExecutionEvaluation(
             execution_probability_pct=probability,
