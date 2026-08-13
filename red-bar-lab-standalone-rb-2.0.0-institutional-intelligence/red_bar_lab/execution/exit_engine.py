@@ -111,15 +111,24 @@ class PaperExitEngine:
                 1.0 - self.trailing_distance_pct / 100.0
             )
 
-        candidates = [
-            value for value in (
-                configured_stop if configured_stop > 0 else None,
-                breakeven_price,
-                trailing_stop,
+        # Keep both the stop value and its source so the audit reason matches
+        # the protection level that actually became binding. On an exact tie,
+        # prefer the more advanced protection stage: TRAILING > BREAKEVEN > HARD.
+        stop_candidates: list[tuple[str, float, int]] = []
+        if configured_stop > 0:
+            stop_candidates.append(("HARD_STOP", configured_stop, 0))
+        if breakeven_price is not None and breakeven_price > 0:
+            stop_candidates.append(("BREAKEVEN_STOP", breakeven_price, 1))
+        if trailing_stop is not None and trailing_stop > 0:
+            stop_candidates.append(("TRAILING_STOP", trailing_stop, 2))
+
+        effective_stop_reason = None
+        effective_stop = None
+        if stop_candidates:
+            effective_stop_reason, effective_stop, _ = max(
+                stop_candidates,
+                key=lambda item: (item[1], item[2]),
             )
-            if value is not None and value > 0
-        ]
-        effective_stop = max(candidates) if candidates else None
 
         reasons: list[str] = []
         hard_exit_reason = None
@@ -210,12 +219,7 @@ class PaperExitEngine:
 
         # Operational hierarchy. Fixed TARGET_1 is intentionally absent.
         if effective_stop is not None and current <= effective_stop:
-            if trailing_active and trailing_stop is not None and effective_stop == max(candidates):
-                hard_exit_reason = "TRAILING_STOP"
-            elif breakeven_armed and breakeven_price is not None and effective_stop >= breakeven_price:
-                hard_exit_reason = "BREAKEVEN_STOP"
-            else:
-                hard_exit_reason = "HARD_STOP"
+            hard_exit_reason = effective_stop_reason
         elif eod_due:
             hard_exit_reason = "EOD_EXIT"
         elif ema10_exit_reason:

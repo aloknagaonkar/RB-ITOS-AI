@@ -65,17 +65,67 @@ class InstitutionalSprint2Service:
             trading_date,
             limit=2000,
         )
-        usable = []
+
+        # Read cheap SQLite metadata for the session first. OI Velocity and
+        # Premium Flow only require latest/previous plus point-in-time frames at
+        # 1m, 5m and 15m lookbacks, so parsing every ONLINE CSV is unnecessary.
+        metadata: list[tuple[pd.Timestamp, dict[str, object]]] = []
         for meta in history:
             if str(meta.get("collector_mode") or "").upper() != "ONLINE":
                 continue
-            frame = self._artifact(meta.get("chain_artifact_path"))
-            if frame.empty:
+            try:
+                ts = pd.Timestamp(meta.get("snapshot_timestamp"))
+            except Exception:
                 continue
-            ts = pd.Timestamp(meta.get("snapshot_timestamp"))
             if pd.isna(ts):
                 continue
-            usable.append((ts, dict(meta), frame))
+            metadata.append((ts, dict(meta)))
+        metadata.sort(key=lambda item: item[0])
+        if not metadata:
+            return []
+
+        artifact_cache: dict[int, pd.DataFrame] = {}
+
+        def load(index: int) -> pd.DataFrame:
+            if index not in artifact_cache:
+                artifact_cache[index] = self._artifact(
+                    metadata[index][1].get("chain_artifact_path")
+                )
+            return artifact_cache[index]
+
+        def usable_at_or_before(
+            start_index: int,
+            target: pd.Timestamp | None = None,
+        ) -> int | None:
+            for index in range(start_index, -1, -1):
+                if target is not None and metadata[index][0] > target:
+                    continue
+                if not load(index).empty:
+                    return index
+            return None
+
+        latest_index = usable_at_or_before(len(metadata) - 1)
+        if latest_index is None:
+            return []
+
+        selected = {latest_index}
+        previous_index = usable_at_or_before(latest_index - 1)
+        if previous_index is not None:
+            selected.add(previous_index)
+
+        latest_ts = metadata[latest_index][0]
+        for minutes in (1, 5, 15):
+            reference_index = usable_at_or_before(
+                latest_index - 1,
+                latest_ts - pd.Timedelta(minutes=minutes),
+            )
+            if reference_index is not None:
+                selected.add(reference_index)
+
+        usable = [
+            (metadata[index][0], metadata[index][1], load(index))
+            for index in sorted(selected)
+        ]
         usable.sort(key=lambda item: item[0])
         return usable
 
