@@ -36,6 +36,15 @@ def _outcome(*, trade_id, exit_model, model_parameter):
         mfe=22.0,
         mae=5.0,
         holding_minutes=30,
+        session_mfe_points=25.0,
+        session_mae_points=5.0,
+        session_extreme_price=125.0,
+        session_extreme_timestamp=datetime(
+            2026, 8, 5, 10, 15, tzinfo=ist
+        ),
+        move_after_target_points=5.0,
+        minutes_from_target_to_extreme=15,
+        giveback_from_extreme_points=2.0,
     )
 
 
