@@ -49,6 +49,7 @@ def aggregate_candles(frame: pd.DataFrame, minutes: int) -> pd.DataFrame:
         low=("low", "min"),
         close=("close", "last"),
         volume=("volume", "sum"),
+        source_rows=("close", "count"),
     )
     return result.dropna(subset=["open", "high", "low", "close"]).reset_index()
 
@@ -66,7 +67,7 @@ def _level(level_type: str, row: pd.Series, interval_minutes: int) -> ReferenceL
 
 def build_previous_315_level(frame: pd.DataFrame, rank: int) -> ReferenceLevel | None:
     bars = aggregate_candles(frame, 15)
-    selected = bars[bars["timestamp"].dt.time == time(15, 15)]
+    selected = bars[(bars["timestamp"].dt.time == time(15, 15)) & (bars["source_rows"] >= 15)]
     if selected.empty:
         return None
     return _level(f"PD{rank}_315", selected.iloc[-1], 15)
@@ -74,7 +75,7 @@ def build_previous_315_level(frame: pd.DataFrame, rank: int) -> ReferenceLevel |
 
 def build_first_candle_level(frame: pd.DataFrame) -> ReferenceLevel | None:
     bars = aggregate_candles(frame, 5)
-    selected = bars[bars["timestamp"].dt.time == time(9, 15)]
+    selected = bars[(bars["timestamp"].dt.time == time(9, 15)) & (bars["source_rows"] >= 5)]
     if selected.empty:
         return None
     return _level("FIRST_CANDLE", selected.iloc[0], 5)
@@ -84,6 +85,7 @@ def build_next_red_candle_level(frame: pd.DataFrame) -> ReferenceLevel | None:
     bars = aggregate_candles(frame, 5)
     selected = bars[
         (bars["timestamp"].dt.time >= time(9, 20))
+        & (bars["source_rows"] >= 5)
         & (bars["close"] < bars["open"])
     ]
     if selected.empty:
@@ -92,8 +94,17 @@ def build_next_red_candle_level(frame: pd.DataFrame) -> ReferenceLevel | None:
 
 
 def build_mid_session_level(frame: pd.DataFrame) -> ReferenceLevel | None:
+    """Return the completed 12:45-13:15 reference candle only.
+
+    A partial bar is intentionally unavailable. Because this function is
+    stateless, every subsequent scan retries automatically until all 30 one-
+    minute rows are present; delayed provider data cannot permanently drop it.
+    """
     bars = aggregate_candles(frame, 30)
-    selected = bars[bars["timestamp"].dt.time == time(12, 45)]
+    selected = bars[
+        (bars["timestamp"].dt.time == time(12, 45))
+        & (bars["source_rows"] >= 30)
+    ]
     if selected.empty:
         return None
     return _level("MID_SESSION_1245", selected.iloc[0], 30)
