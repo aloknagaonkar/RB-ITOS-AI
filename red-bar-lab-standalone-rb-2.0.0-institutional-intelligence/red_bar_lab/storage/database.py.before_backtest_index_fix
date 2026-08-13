@@ -118,13 +118,7 @@ CREATE TABLE IF NOT EXISTS paper_trade_outcomes (
     updated_at TEXT NOT NULL
 );
 
--- Historical backtest exit models may legitimately share the same
--- numeric target_points for the same signal (for example FIXED_TARGET
--- 20pt and RISK_REWARD 1R when risk is 20 points). trade_id already
--- uniquely identifies signal + exit model + model parameter.
-DROP INDEX IF EXISTS uq_paper_trade_signal_target;
-
-CREATE INDEX IF NOT EXISTS idx_paper_trade_signal_target
+CREATE UNIQUE INDEX IF NOT EXISTS uq_paper_trade_signal_target
 ON paper_trade_outcomes(signal_id, target_points);
 
 
