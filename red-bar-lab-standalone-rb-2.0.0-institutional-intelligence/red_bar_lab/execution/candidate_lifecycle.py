@@ -66,16 +66,16 @@ class CandidateLifecycleEvaluation:
 
 
 class CandidateLifecycleManager:
-    """Owns candidate validity before the execution committee.
+    """Evaluate whether a candidate is currently eligible for execution.
 
-    Signal creation remains the Red Bar detector's responsibility. This manager
-    only keeps current candidates alive, retires expired/drifted candidates, and
-    requests a replacement when a newer confirmed signal exists or a new Red Bar
-    is required.
+    Signal age and session transitions are informational. A candidate is either
+    still eligible for evaluation or is finalized as NOT_ELIGIBLE with an exact
+    reason. The lifecycle never parks candidates in EXPIRED/replacement states.
     """
 
     def __init__(self, *, freshness_seconds: int = 180, hard_expiry_seconds: int | None = None):
         self.freshness_seconds = max(30, int(freshness_seconds))
+        # Retained for constructor compatibility; age does not expire candidates.
         self.hard_expiry_seconds = max(
             self.freshness_seconds,
             int(hard_expiry_seconds or self.freshness_seconds * 5),
@@ -125,32 +125,27 @@ class CandidateLifecycleManager:
             technical_score = sum(technical_parts) / len(technical_parts)
             drift_count = sum(x <= 0.0 for x in technical_parts)
 
-        # Age remains visible but has zero execution weight in RB-1.5.0.
-        freshness_health = 100.0
         health = self._clamp(rule_score * 0.75 + technical_score * 0.25)
         drift = "CONFIRMED" if drift_count >= 3 else "ELEVATED" if drift_count == 2 else "LOW"
 
         state = "VALID"
         reason = "CURRENT_CANDIDATE"
         action = "EVALUATE"
-        replacement_required = False
 
         if age <= min(60, self.freshness_seconds * 0.34):
             state = "NEW"
         elif age >= self.freshness_seconds * 0.67:
             state = "AGING"
 
-        # RB-1.5.0: signal age and intraday session phase are informational.
-        # A strong current opportunity is not rejected merely because the original
-        # Red Bar is old. Lifecycle retires a candidate only when current market
-        # evidence confirms that the opportunity itself has been lost.
+        # Current evidence, not age, decides eligibility. Lost VWAP + EMA +
+        # momentum finalizes this candidate immediately; a later Red Bar creates
+        # a new independent candidate instead of replacing/reactivating this one.
         if candidate is not None and drift == "CONFIRMED" and age >= 60:
-            state = "EXPIRED"
+            state = "NOT_ELIGIBLE"
             reason = "MARKET_DRIFT_CONFIRMED VWAP+EMA+MOMENTUM_LOST"
-            replacement_required = True
-            action = "USE_NEWER_RED_BAR" if replacement_signal_id else "AWAIT_NEW_RED_BAR"
+            action = "REJECT_CANDIDATE"
         elif duplicate:
-            state = "VALID"
+            state = "NOT_ELIGIBLE"
             reason = "DUPLICATE_EXISTING_POSITION_OR_QUEUE"
             action = "MANAGE_EXISTING_POSITION"
 
@@ -169,6 +164,6 @@ class CandidateLifecycleManager:
             duplicate=bool(duplicate),
             reason=reason,
             action=action,
-            replacement_required=replacement_required,
-            replacement_signal_id=replacement_signal_id,
+            replacement_required=False,
+            replacement_signal_id=None,
         )
