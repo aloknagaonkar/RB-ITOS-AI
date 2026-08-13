@@ -154,11 +154,20 @@ class CandidateDetailDatabaseProxy:
 
 
 class ExitSignalDatabaseProxy:
-    """Enrich the selected trade's signal with completed NIFTY 5m EMA10."""
+    """Restore full signal candle fields and add completed NIFTY 5m EMA10."""
 
-    def __init__(self, database, snapshot: EMA10TrendSnapshot) -> None:
+    def __init__(
+        self,
+        database,
+        snapshot: EMA10TrendSnapshot,
+        *,
+        instrument_key: str,
+        trading_date: str,
+    ) -> None:
         self._database = database
         self._snapshot = snapshot
+        self._instrument_key = str(instrument_key)
+        self._trading_date = str(trading_date)
 
     def __getattr__(self, name: str):
         return getattr(self._database, name)
@@ -167,7 +176,35 @@ class ExitSignalDatabaseProxy:
         row = self._database.read_signal_attempt_by_id(*args, **kwargs)
         if not row:
             return row
+
+        signal_id = str(
+            kwargs.get("signal_id")
+            or (args[0] if args else "")
+            or row.get("signal_id")
+            or ""
+        )
         enriched = dict(row)
+
+        # The compact by-id reader intentionally omits confirmation OHLC. The
+        # Exit Engine needs confirmation high/low for NIFTY thesis validation,
+        # so merge the matching full-session signal row for this UI evaluation.
+        try:
+            full_rows = self._database.read_signal_attempts(
+                self._instrument_key,
+                self._trading_date,
+            )
+            full_row = next(
+                (
+                    item for item in (full_rows or [])
+                    if str(item.get("signal_id") or "") == signal_id
+                ),
+                None,
+            )
+            if full_row:
+                enriched.update(full_row)
+        except Exception:
+            pass
+
         enriched.update(
             {
                 "_ema10_5m_ready": self._snapshot.ready,
@@ -243,7 +280,12 @@ def build_paper_exit_panel_wrapper(
         today_text,
     ):
         snapshot = snapshot_loader(paper_market)
-        evidence_database = ExitSignalDatabaseProxy(database, snapshot)
+        evidence_database = ExitSignalDatabaseProxy(
+            database,
+            snapshot,
+            instrument_key=instrument_key,
+            trading_date=today_text,
+        )
         return original(
             position=position,
             paper_engine=paper_engine,
