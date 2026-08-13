@@ -534,7 +534,14 @@ class HistoricalDecisionReplayService:
             raise ValueError(f"No cached 1-minute candles for {trading_date.isoformat()}")
         prior_dates = [d for d in self.historical.available_dates(instrument_key, interval_minutes=1) if d < trading_date][-10:]
         previous = [(d, self.historical.read_day(instrument_key, d, interval_minutes=1)) for d in prior_dates]
-        ema_frames = [frame for _, frame in previous if frame is not None and not frame.empty]
+        ema_start = trading_date - timedelta(days=7)
+        ema_frames = [
+            frame
+            for historical_date, frame in previous
+            if historical_date >= ema_start
+            and frame is not None
+            and not frame.empty
+        ]
         ema_source = pd.concat(ema_frames + [current], ignore_index=True)
         daily = build_daily_levels(trading_date, current, previous, previous_days=10)
         levels = list(daily.previous_day_levels)
@@ -752,10 +759,8 @@ class HistoricalDecisionReplayService:
                 blocker = f"FINAL_CONFIDENCE={final_conf:.2f}<MIN={self.minimum_confidence_pct:.2f}"
                 decision = "WAIT"
                 execution = "WOULD_WAIT"
-            elif expectancy <= 0:
-                blocker = f"EXPECTANCY={expectancy:.3f}<=0"
-                decision = "WAIT"
-                execution = "WOULD_WAIT"
+            # Expectancy remains recorded for research only. It has no
+            # execution veto or bonus in replay, matching the live committee.
 
             outcome = outcomes.get(signal_id)
             points = float(outcome.points) if outcome is not None and outcome.points is not None else None
