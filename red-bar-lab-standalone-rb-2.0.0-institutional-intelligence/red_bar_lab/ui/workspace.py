@@ -1,5 +1,6 @@
 import red_bar_lab.ui._shared as shared_ui
 from red_bar_lab.execution.exit_engine import PaperExitEngine
+from red_bar_lab.execution.trend_automation import TrendAwarePaperAutomationService
 from red_bar_lab.ui._shared import *
 from red_bar_lab.ui.pages import (
     committee_diagnostics,
@@ -20,6 +21,10 @@ from red_bar_lab.ui.pages import (
 )
 
 shared_ui.PaperExitEngine = PaperExitEngine
+# paper_trading imports shared symbols into its module namespace. Wire its
+# foreground committee evaluator to the same EMA10-aware service used by the
+# background paper monitor so UI decisions and execution decisions have parity.
+paper_trading.RedBarPaperAutomationService = TrendAwarePaperAutomationService
 
 _PAGE_MODULES = {
     "Operations Center": operations_center,
