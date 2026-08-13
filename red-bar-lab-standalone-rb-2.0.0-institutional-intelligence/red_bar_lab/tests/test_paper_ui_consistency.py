@@ -22,12 +22,22 @@ class _FakeDatabase:
         return True
 
     def read_signal_attempt_by_id(self, signal_id):
+        # Mirrors the compact production by-id reader, which omits candle OHLC.
         return {
             "signal_id": signal_id,
             "direction": "BULLISH",
-            "confirmation_high": 24500.0,
-            "confirmation_low": 24400.0,
         }
+
+    def read_signal_attempts(self, instrument_key, trading_date):
+        return [
+            {
+                "signal_id": "S1",
+                "direction": "BULLISH",
+                "confirmation_high": 24500.0,
+                "confirmation_low": 24400.0,
+                "confirmation_close": 24480.0,
+            }
+        ]
 
 
 def _contracts():
@@ -122,7 +132,7 @@ def test_candidate_detail_other_signal_pending_blocks_but_own_queue_does_not():
     ) is True
 
 
-def test_exit_panel_wrapper_enriches_signal_with_completed_ema10():
+def test_exit_panel_wrapper_enriches_thesis_and_completed_ema10():
     captured = {}
 
     def original(**kwargs):
@@ -152,6 +162,8 @@ def test_exit_panel_wrapper_enriches_signal_with_completed_ema10():
     )
 
     assert result == "rendered"
+    assert captured["signal"]["confirmation_high"] == 24500.0
+    assert captured["signal"]["confirmation_low"] == 24400.0
     assert captured["signal"]["_ema10_5m_ready"] is True
     assert captured["signal"]["_ema10_5m_close"] == 24525.0
     assert captured["signal"]["_ema10_5m_value"] == 24510.0
