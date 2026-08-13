@@ -125,6 +125,19 @@ def test_trailing_activates_after_twenty_percent_peak():
     assert result.effective_stop >= 112.5
 
 
+def test_breakeven_reason_wins_when_trailing_is_active_but_lower():
+    result = PaperExitEngine(trailing_distance_pct=25.0).evaluate(
+        position=_position(current=99.0, stop=85.0, mfe=21.0),
+        option_candle=_healthy_candle(),
+    )
+    assert result.trailing_active is True
+    assert result.trailing_stop == 90.75
+    assert result.breakeven_price == 100.0
+    assert result.effective_stop == 100.0
+    assert result.hard_exit_reason == "BREAKEVEN_STOP"
+    assert result.action == "EXIT"
+
+
 def test_bearish_nifty_thesis_invalidates_above_confirmation_high():
     result = PaperExitEngine().evaluate(
         position=_position(current=105.0),
