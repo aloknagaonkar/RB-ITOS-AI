@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
+import sqlite3
 from time import monotonic
 
 import pandas as pd
@@ -94,9 +95,36 @@ class TrendAwareDatabaseProxy:
     def __init__(self, database, trend_provider):
         self._database = database
         self._trend_provider = trend_provider
+        self._ensure_active_order_reentry_index()
 
     def __getattr__(self, name: str):
         return getattr(self._database, name)
+
+    def _ensure_active_order_reentry_index(self) -> None:
+        """Scope same signal/account/contract uniqueness to OPEN positions only.
+
+        Older databases used a permanent unique index, which meant a CLOSED order
+        still prevented a later order for the same signal and contract. The live
+        trend-aware execution path owns re-entry semantics, so migrate that index
+        when the proxy starts without changing any historical order rows.
+        """
+        path = getattr(self._database, "path", None)
+        if path is None:
+            return
+        self._database.initialize()
+        with sqlite3.connect(path) as conn:
+            conn.execute(
+                "DROP INDEX IF EXISTS uq_paper_execution_signal_account_instrument"
+            )
+            conn.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS
+                uq_paper_execution_signal_account_instrument
+                ON paper_execution_orders(signal_id, account_id, instrument_token)
+                WHERE signal_id IS NOT NULL AND status='OPEN'
+                """
+            )
+            conn.commit()
 
     def _enrich(self, row):
         if not row:
@@ -120,6 +148,78 @@ class TrendAwareDatabaseProxy:
         return self._enrich(
             self._database.read_signal_attempt_by_id(*args, **kwargs)
         )
+
+    def upsert_execution_queue_item(self, row: dict[str, object]) -> None:
+        """Recycle a CLOSED same-signal queue slot for a genuine re-entry.
+
+        Queue identity remains signal+contract for backward-compatible UI and
+        diagnostics. When that slot is CLOSED, a fresh qualification resets the
+        execution linkage instead of preserving CLOSED forever.
+        """
+        signal_id = str(row.get("signal_id") or "")
+        token = int(row.get("instrument_token") or 0)
+        existing = []
+        if signal_id and token > 0:
+            existing = self._database.read_execution_queue(
+                signal_id=signal_id,
+                limit=5000,
+            )
+        closed = next(
+            (
+                item for item in existing
+                if int(item.get("instrument_token") or 0) == token
+                and str(item.get("status") or "").upper() == "CLOSED"
+            ),
+            None,
+        )
+        if closed is None:
+            self._database.upsert_execution_queue_item(row)
+            return
+
+        path = getattr(self._database, "path", None)
+        if path is None:
+            self._database.upsert_execution_queue_item(row)
+            return
+        now = str(row.get("updated_at") or row.get("created_at") or "")
+        with sqlite3.connect(path) as conn:
+            conn.execute(
+                """
+                UPDATE execution_queue
+                SET trading_date=?, direction=?, candidate_rank=?, candidate_symbol=?,
+                    exchange=?, option_type=?, strike=?, expiry=?, lot_size=?, quantity=?,
+                    candidate_score=?, selection_score=?, execution_probability_pct=?,
+                    expected_value_pct=?, opportunity_score=?, entry_mode=?,
+                    signal_age_seconds=?, status=?, reason=?, order_id=NULL,
+                    created_at=?, updated_at=?, executed_at=NULL
+                WHERE signal_id=? AND instrument_token=?
+                """,
+                (
+                    row.get("trading_date"),
+                    row.get("direction"),
+                    row.get("candidate_rank"),
+                    row.get("candidate_symbol"),
+                    row.get("exchange") or "NFO",
+                    row.get("option_type"),
+                    row.get("strike"),
+                    row.get("expiry"),
+                    int(row.get("lot_size") or 1),
+                    int(row.get("quantity") or 0),
+                    row.get("candidate_score"),
+                    row.get("selection_score"),
+                    row.get("execution_probability_pct"),
+                    row.get("expected_value_pct"),
+                    row.get("opportunity_score"),
+                    row.get("entry_mode"),
+                    row.get("signal_age_seconds"),
+                    row.get("status"),
+                    row.get("reason"),
+                    row.get("created_at") or now,
+                    now,
+                    signal_id,
+                    token,
+                ),
+            )
+            conn.commit()
 
     def paper_execution_exists_for_candidate(
         self,
