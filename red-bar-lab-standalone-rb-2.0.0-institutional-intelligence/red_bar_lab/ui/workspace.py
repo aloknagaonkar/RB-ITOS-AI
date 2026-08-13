@@ -1,9 +1,15 @@
 import red_bar_lab.ui._shared as shared_ui
 from red_bar_lab.execution.exit_engine import PaperExitEngine
 from red_bar_lab.execution.trend_automation import TrendAwarePaperAutomationService
+from red_bar_lab.services.evidence_replay import EvidenceAwareHistoricalDecisionReplayService
+from red_bar_lab.ui.paper_consistency import (
+    build_candidate_workbench_wrapper,
+    build_paper_exit_panel_wrapper,
+)
 from red_bar_lab.ui._shared import *
 from red_bar_lab.ui.pages import (
     committee_diagnostics,
+    historical_intelligence,
     institutional_intelligence,
     intelligence,
     level_explorer,
@@ -25,12 +31,33 @@ shared_ui.PaperExitEngine = PaperExitEngine
 # foreground committee evaluator to the same EMA10-aware service used by the
 # background paper monitor so UI decisions and execution decisions have parity.
 paper_trading.RedBarPaperAutomationService = TrendAwarePaperAutomationService
+# Candidate Detail previously used signal-wide duplicate evidence. Scope that
+# read-only panel to the selected contract while leaving execution services on
+# their existing TrendAwareDatabaseProxy path.
+paper_trading._render_candidate_workbench_fragment = (
+    build_candidate_workbench_wrapper(
+        shared_ui._render_candidate_workbench_fragment
+    )
+)
+# Feed the Paper Exit preview the exact completed-5m EMA10 loader used by the
+# background trend-aware monitor. This changes display/evaluation evidence only;
+# the frozen operational hierarchy remains in PaperExitEngine.
+paper_trading._render_paper_exit_engine_panel = (
+    build_paper_exit_panel_wrapper(
+        shared_ui._render_paper_exit_engine_panel
+    )
+)
+# Historical Decision Replay remains the same frozen decision path; this wrapper
+# only persists the completed replay result into the additive Sprint-4 evidence
+# store after the decision/outcome has already been calculated.
+research_lab.HistoricalDecisionReplayService = EvidenceAwareHistoricalDecisionReplayService
 
 _PAGE_MODULES = {
     "Operations Center": operations_center,
     "Live Trading": live_trading,
     "Paper Trading": paper_trading,
     "Research Lab": research_lab,
+    "Historical Intelligence": historical_intelligence,
     "Signal Explorer": signal_explorer,
     "Level Explorer": level_explorer,
     "PD Startup Readiness": pd_readiness,
@@ -61,7 +88,7 @@ def render(settings: RedBarSettings) -> None:
     st.sidebar.markdown("---")
     st.sidebar.subheader("Workspace")
     workspace_pages = (
-        "Operations Center", "Live Trading", "Paper Trading", "Research Lab",
+        "Operations Center", "Live Trading", "Paper Trading", "Research Lab", "Historical Intelligence",
         "Signal Explorer", "Level Explorer", "PD Startup Readiness", "Previous Session Context", "Red Bar Diagnostics",
         "Committee Gate Trace", "Performance Hard Block Trace", "Opportunity Reward Trace",
         "Trade History", "Institutional Intelligence", "Intelligence",
