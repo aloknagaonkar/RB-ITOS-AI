@@ -227,7 +227,8 @@ class PaperExitEngine:
         elif technical_failures >= 2:
             hard_exit_reason = "OPTION_TECHNICAL_BREAKDOWN"
 
-        # Health score. Hard rules override score.
+        # Operational health score. Shadow OI/PCR/Greeks are intentionally
+        # excluded so advisory evidence can never trigger EXIT/TIGHTEN.
         health = 100.0
         if nifty_thesis == "INVALID":
             health -= 35
@@ -247,10 +248,6 @@ class PaperExitEngine:
             health -= 12
         if volume_health == "WEAK":
             health -= 5
-        if shadow_oi_pcr == "WARNING":
-            health -= 5
-        if shadow_greeks == "WARNING":
-            health -= 3
         health = max(0.0, min(100.0, health))
 
         if hard_exit_reason:
