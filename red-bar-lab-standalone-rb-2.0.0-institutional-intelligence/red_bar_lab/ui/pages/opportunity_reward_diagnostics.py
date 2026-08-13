@@ -5,9 +5,17 @@ from red_bar_lab.services.candidate_contract_price_trace import build_all_candid
 
 def render_page(settings, layout, database, token, underlying_name, instrument_key, interval) -> None:
     st.subheader("Opportunity Reward Trace")
+    st.markdown(
+        _decision_badge_html(
+            "LEGACY REWARD METRICS · INFORMATIONAL ONLY · EXECUTION IMPACT = NONE",
+            "shadow",
+        ),
+        unsafe_allow_html=True,
+    )
     st.caption(
-        "Read-only explanation of Opportunity Health reward consumption. "
-        "This page does not change reward thresholds, Committee decisions, or execution."
+        "Reward Remaining and Move Consumed are preserved for historical comparison only. "
+        "They no longer block Opportunity execution. The production paper monitor now uses "
+        "the completed NIFTY 5-minute candle relative to EMA10 for trend continuation."
     )
 
     selected_date = st.date_input("Trading date", value=date.today(), key="opportunity_reward_date")
@@ -23,7 +31,7 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     for index, row in enumerate(ordered):
         label = (
             f"{row.get('candidate_symbol')} · {row.get('direction')} · {row.get('decision')} · "
-            f"remaining {float(row.get('reward_remaining_pct') or 0.0):.1f}% · {row.get('evaluated_at')}"
+            f"legacy remaining {float(row.get('reward_remaining_pct') or 0.0):.1f}% · {row.get('evaluated_at')}"
         )
         options[f"{label} · {index + 1}"] = row
 
@@ -35,18 +43,18 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     trace = build_opportunity_reward_trace(opportunity, signal)
 
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Reward Gate", str(trace.get("reward_gate_status") or "—"))
+    c1.metric("Legacy Reward Gate", "INFO ONLY")
     c2.metric("Reward Remaining", f"{float(trace.get('persisted_reward_remaining_pct') or 0.0):.1f}%")
     c3.metric("Move Consumed", f"{float(trace.get('persisted_move_consumed_pct') or 0.0):.1f}%")
-    c4.metric("Minimum Remaining", f"{float(trace.get('minimum_reward_remaining_pct') or 0.0):.1f}%")
+    c4.metric("Old Reference", f"{float(trace.get('minimum_reward_remaining_pct') or 0.0):.1f}%")
     c5.metric("Opportunity Score", f"{float(trace.get('opportunity_score') or 0.0):.1f}")
 
-    if trace.get("reward_gate_status") == "BLOCK":
-        st.error("REWARD_CONSUMED: " + str(trace.get("reward_gate_reason") or ""))
-    else:
-        st.success(str(trace.get("reward_gate_reason") or "Reward gate passed."))
+    st.info(
+        "The old REWARD_CONSUMED result shown below is counterfactual research evidence only. "
+        "It cannot reject a trade after Change 1."
+    )
 
-    st.markdown("#### Reward Consumption Geometry")
+    st.markdown("#### Legacy Reward Consumption Geometry")
     geometry = [{
         "direction": trace.get("direction"),
         "confirmation_high": trace.get("confirmation_high"),
@@ -56,17 +64,18 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         "2x_range_full_consumption": trace.get("full_consumption_distance_2x_range"),
         "inferred_progress_points": trace.get("inferred_progress_points"),
         "inferred_evaluation_spot": trace.get("inferred_evaluation_spot"),
-        "reward_consumed_threshold_spot": trace.get("reward_consumed_threshold_spot"),
+        "old_reward_consumed_threshold_spot": trace.get("reward_consumed_threshold_spot"),
+        "old_gate_result": trace.get("reward_gate_status"),
     }]
     st.dataframe(_arrow_safe_rows(geometry), width="stretch", hide_index=True)
 
-    st.markdown("#### Current Reward Rule")
+    st.markdown("#### Current Opportunity Continuation Rule")
     st.code(
-        "candle_range = max(confirmation_high - confirmation_low, abs(confirmation_close) * 0.0005, 0.01)\n"
-        "progress = directional move from confirmation_close\n"
-        "move_consumed_pct = progress / (2 * candle_range) * 100\n"
-        "reward_remaining_pct = 100 - move_consumed_pct\n"
-        "REWARD_CONSUMED when reward_remaining_pct < 40%",
+        "BEARISH: completed NIFTY 5m Close <= EMA10 -> opportunity remains valid\n"
+        "BEARISH: completed NIFTY 5m Close >  EMA10 -> BEARISH_EMA10_LOST\n\n"
+        "BULLISH: completed NIFTY 5m Close >= EMA10 -> opportunity remains valid\n"
+        "BULLISH: completed NIFTY 5m Close <  EMA10 -> BULLISH_EMA10_LOST\n\n"
+        "Reward Remaining / Move Consumed -> INFORMATIONAL ONLY",
         language=None,
     )
 
@@ -76,7 +85,7 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         "candidate_symbol": trace.get("candidate_symbol"),
         "entry_mode": trace.get("entry_mode"),
         "signal_age_seconds": trace.get("signal_age_seconds"),
-        "reward_score": trace.get("reward_score"),
+        "legacy_reward_score": trace.get("reward_score"),
         "structure_valid": trace.get("structure_valid"),
         "opposite_red_bar": trace.get("opposite_red_bar"),
         "eligible": trace.get("eligible"),
@@ -89,8 +98,8 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
 
     st.markdown("#### All Selected Candidates — Contract Premium Lifecycle")
     st.caption(
-        "For every candidate evaluated in the same scan, this keeps the exact same option contract fixed and pulls its "
-        "1-minute premium at signal confirmation, first REWARD_CONSUMED evaluation, and the selected evaluation time."
+        "Historical same-contract premium tracing is retained for every candidate. Any first "
+        "REWARD_CONSUMED timestamp is now a legacy counterfactual marker, not an execution event."
     )
     scan_id = str(opportunity.get("scan_id") or "")
     scan_rows = [
@@ -138,38 +147,25 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
                 "Strike": item.get("strike"),
                 "Signal Time": item.get("signal_time"),
                 "Signal Premium ₹": item.get("signal_price"),
-                "First Consumed Time": item.get("first_consumed_time"),
-                "Consumed Premium ₹": item.get("first_consumed_price"),
-                "Premium Move to Consumed %": item.get("signal_to_consumed_change_pct"),
+                "Legacy Consumed Time": item.get("first_consumed_time"),
+                "Legacy Consumed Premium ₹": item.get("first_consumed_price"),
+                "Premium Move to Legacy Consumed %": item.get("signal_to_consumed_change_pct"),
                 "Evaluation Time": item.get("evaluation_time"),
                 "Evaluation Premium ₹": item.get("evaluation_price"),
                 "Premium Move to Evaluation %": item.get("signal_to_evaluation_change_pct"),
-                "Reward Remaining %": item.get("reward_remaining_pct"),
-                "Move Consumed %": item.get("move_consumed_pct"),
+                "Reward Remaining % (Info)": item.get("reward_remaining_pct"),
+                "Move Consumed % (Info)": item.get("move_consumed_pct"),
                 "Decision": item.get("decision"),
                 "Reason": item.get("reason"),
                 "Price Status": item.get("status"),
             } for item in premium_rows]
             st.dataframe(_arrow_safe_rows(display_rows), width="stretch", hide_index=True)
-            good = [item for item in premium_rows if item.get("signal_price") is not None]
-            if good:
-                best_move = max(
-                    good,
-                    key=lambda item: float(item.get("signal_to_evaluation_change_pct") or -9999.0),
-                )
-                st.caption(
-                    f"Same-contract comparison enabled for {len(good)}/{len(premium_rows)} candidates. "
-                    f"Largest signal→evaluation premium move in this scan: "
-                    f"{best_move.get('candidate_symbol')} "
-                    f"{float(best_move.get('signal_to_evaluation_change_pct') or 0.0):+.2f}%."
-                )
         except MissingAccessToken:
             st.info("Enter/resolve the Upstox access token to pull historical contract premiums for all candidates.")
         except Exception as exc:
             st.warning(f"Contract premium lifecycle is temporarily unavailable: {type(exc).__name__}: {exc}")
 
     st.caption(
-        "Current production model treats two confirmation-candle ranges beyond the confirmation close as "
-        "100% consumed and blocks when less than 40% reward remains. Contract premium tracing is diagnostic-only "
-        "and does not modify Opportunity, Committee, ranking, or execution decisions."
+        "Legacy reward geometry remains stored only to compare old and new behavior. "
+        "Production opportunity continuation is NIFTY completed 5m EMA10; fixed reward consumption has execution impact NONE."
     )

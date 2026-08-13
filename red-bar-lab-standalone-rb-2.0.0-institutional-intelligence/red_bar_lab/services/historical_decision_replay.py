@@ -9,7 +9,7 @@ import pandas as pd
 from red_bar_lab.execution.candidate_lifecycle import CandidateLifecycleManager, MarketSessionManager
 from red_bar_lab.execution.automation import CandidateScore
 from red_bar_lab.execution.paper_engine import PaperContract
-from red_bar_lab.execution.opportunity_engine import OpportunityIntelligenceEngine
+from red_bar_lab.execution.trend_automation import EMA10OpportunityIntelligenceEngine
 from red_bar_lab.execution.performance_selection import PerformanceTradeSelectionEngine
 from red_bar_lab.execution.institutional_execution import InstitutionalExecutionCommittee
 from red_bar_lab.execution.portfolio_manager import PortfolioCandidate, PortfolioRiskManager
@@ -138,7 +138,9 @@ class HistoricalDecisionReplayService:
         self.minimum_confidence_pct = float(minimum_confidence_pct)
         self.stop_loss_pct = float(stop_loss_pct)
         self.target_pct = float(target_pct)
-        self.opportunity_engine = OpportunityIntelligenceEngine(minimum_opportunity_score=float(minimum_opportunity_health))
+        self.opportunity_engine = EMA10OpportunityIntelligenceEngine(
+            minimum_opportunity_score=float(minimum_opportunity_health)
+        )
         self.selection_engine = PerformanceTradeSelectionEngine()
         self.execution_committee = InstitutionalExecutionCommittee(
             minimum_execution_probability_pct=float(minimum_confidence_pct),
@@ -160,6 +162,79 @@ class HistoricalDecisionReplayService:
         result = result.loc[ts.notna()].copy()
         result["timestamp"] = ts.loc[ts.notna()].dt.tz_convert(IST)
         return result.sort_values("timestamp").reset_index(drop=True)
+
+    @staticmethod
+    def _point_in_time_ema10(
+        frame: pd.DataFrame,
+        moment,
+    ) -> dict[str, object]:
+        """Completed-underlying 5m EMA10 using only candles known by moment."""
+        work = HistoricalDecisionReplayService._to_ist(frame)
+        ts = pd.Timestamp(moment)
+        if ts.tzinfo is None:
+            ts = ts.tz_localize(IST)
+        else:
+            ts = ts.tz_convert(IST)
+        work = work.loc[work["timestamp"] <= ts, ["timestamp", "close"]].copy()
+        work["close"] = pd.to_numeric(work["close"], errors="coerce")
+        work = work.dropna(subset=["timestamp", "close"])
+        if work.empty:
+            return {
+                "_ema10_5m_ready": False,
+                "_ema10_5m_close": None,
+                "_ema10_5m_value": None,
+                "_ema10_5m_timestamp": None,
+                "_ema10_5m_reason": "NO_UNDERLYING_CANDLES",
+            }
+
+        bars = (
+            work.set_index("timestamp")
+            .resample(
+                "5min",
+                origin="start_day",
+                offset="15min",
+                label="left",
+                closed="left",
+            )
+            .agg(
+                close=("close", "last"),
+                source_rows=("close", "count"),
+            )
+            .dropna(subset=["close"])
+        )
+        bars = bars[bars["source_rows"] >= 5].copy()
+        if bars.empty:
+            return {
+                "_ema10_5m_ready": False,
+                "_ema10_5m_close": None,
+                "_ema10_5m_value": None,
+                "_ema10_5m_timestamp": None,
+                "_ema10_5m_reason": "NO_COMPLETED_5M_CANDLES",
+            }
+
+        bars["ema10"] = bars["close"].ewm(
+            span=10,
+            adjust=False,
+        ).mean()
+        day_bars = bars[bars.index.date == ts.date()]
+        if day_bars.empty:
+            return {
+                "_ema10_5m_ready": False,
+                "_ema10_5m_close": None,
+                "_ema10_5m_value": None,
+                "_ema10_5m_timestamp": None,
+                "_ema10_5m_reason": "NO_COMPLETED_5M_CANDLE_TODAY",
+            }
+
+        latest = day_bars.iloc[-1]
+        latest_timestamp = day_bars.index[-1]
+        return {
+            "_ema10_5m_ready": True,
+            "_ema10_5m_close": round(float(latest["close"]), 4),
+            "_ema10_5m_value": round(float(latest["ema10"]), 4),
+            "_ema10_5m_timestamp": latest_timestamp.isoformat(),
+            "_ema10_5m_reason": "READY",
+        }
 
     @staticmethod
     def _point_in_time_metrics(frame: pd.DataFrame, moment, direction: str) -> dict[str, object]:
@@ -233,7 +308,6 @@ class HistoricalDecisionReplayService:
         ema = 5.0 if metrics["ema_ok"] is None else (10.0 if metrics["ema_ok"] else 0.0)
         momentum = 5.0 if metrics["momentum_ok"] is None else (10.0 if metrics["momentum_ok"] else 0.0)
         return round((spread + liquidity + volume + oi + vwap + ema + momentum) / 90.0 * 100.0, 2)
-
 
     @staticmethod
     def _historical_candidate(contract_row: dict[str, object], candles: pd.DataFrame) -> CandidateScore | None:
@@ -336,7 +410,7 @@ class HistoricalDecisionReplayService:
             return {"exit_time": None, "entry": candidate.ltp, "exit": None, "return_pct": None, "reason":"NO_FUTURE_OPTION_CANDLES"}
         entry = float(future.iloc[0]["close"])
         position={"entry_price":entry,"current_price":entry,"initial_stop_price":entry*(1-self.stop_loss_pct/100.0),
-                  "stop_price":entry*(1-self.stop_loss_pct/100.0),"target1_price":entry*(1+self.target_pct/100.0),
+                  "stop_price":entry*(1-self.stop_loss_pct/100.0),"target1_price":None,
                   "target2_price":None,"mfe_points":0.0}
         peak=entry
         u=HistoricalDecisionReplayService._to_ist(underlying)
@@ -347,7 +421,9 @@ class HistoricalDecisionReplayService:
             underlying_price=float(prior_u.iloc[-1]["close"]) if not prior_u.empty else None
             features=self._option_features(future, idx)
             eod_due=local_ts.time() >= pd.Timestamp("15:25").time()
-            health=self.exit_engine.evaluate(position=position, option_candle=features, signal=signal,
+            exit_signal=dict(signal)
+            exit_signal.update(self._point_in_time_ema10(underlying, local_ts))
+            health=self.exit_engine.evaluate(position=position, option_candle=features, signal=exit_signal,
                 current_underlying=underlying_price, opposite_red_bar_confirmed=False, eod_due=eod_due)
             if health.action=="EXIT":
                 return {"exit_time":local_ts,"entry":entry,"exit":current,
@@ -356,8 +432,6 @@ class HistoricalDecisionReplayService:
         last=float(future.iloc[-1]["close"])
         return {"exit_time":pd.Timestamp(future.iloc[-1]["timestamp"]).tz_convert(IST),"entry":entry,"exit":last,
                 "return_pct":round((last-entry)/entry*100.0,3) if entry else None,"reason":"EOD_DATA_END"}
-
-
 
     @staticmethod
     def _verdict(execution: str, outcome_result: str) -> str:
@@ -460,6 +534,15 @@ class HistoricalDecisionReplayService:
             raise ValueError(f"No cached 1-minute candles for {trading_date.isoformat()}")
         prior_dates = [d for d in self.historical.available_dates(instrument_key, interval_minutes=1) if d < trading_date][-10:]
         previous = [(d, self.historical.read_day(instrument_key, d, interval_minutes=1)) for d in prior_dates]
+        ema_start = trading_date - timedelta(days=7)
+        ema_frames = [
+            frame
+            for historical_date, frame in previous
+            if historical_date >= ema_start
+            and frame is not None
+            and not frame.empty
+        ]
+        ema_source = pd.concat(ema_frames + [current], ignore_index=True)
         daily = build_daily_levels(trading_date, current, previous, previous_days=10)
         levels = list(daily.previous_day_levels)
         levels.extend(x for x in (daily.first_candle, daily.next_red_candle, daily.mid_session_candle) if x is not None)
@@ -494,6 +577,7 @@ class HistoricalDecisionReplayService:
             signal={"signal_id":signal_id,"direction":direction,"confirmation_high":attempt.confirmation_high,
                     "confirmation_low":attempt.confirmation_low,"confirmation_close":attempt.confirmation_close,
                     "underlying_entry":attempt.underlying_entry}
+            signal.update(self._point_in_time_ema10(ema_source, moment_ts))
             contract_frames=self.option_chain_sync.point_in_time_contracts(instrument_key,trading_date,moment)
             scored=[]
             full_frame_by_symbol={}
@@ -565,7 +649,7 @@ class HistoricalDecisionReplayService:
                 # be consumed to label the factual/counterfactual outcome for research.
                 full=full_frame_by_symbol.get(cand.contract.tradingsymbol,pd.DataFrame())
                 if not full.empty:
-                    exit_info=self._simulate_exit(candidate=cand,all_candles=full,entry_moment=moment,signal=signal,underlying=current)
+                    exit_info=self._simulate_exit(candidate=cand,all_candles=full,entry_moment=moment,signal=signal,underlying=ema_source)
                 if execution=="WOULD_TAKE":
                     capital=float(exit_info.get("entry") or cand.ltp or 0.0)*cand.contract.lot_size
                     scheduled_positions.append({"exit_time":exit_info.get("exit_time"),"option_type":side,"capital":capital,"risk":capital*self.stop_loss_pct/100.0})
@@ -675,10 +759,8 @@ class HistoricalDecisionReplayService:
                 blocker = f"FINAL_CONFIDENCE={final_conf:.2f}<MIN={self.minimum_confidence_pct:.2f}"
                 decision = "WAIT"
                 execution = "WOULD_WAIT"
-            elif expectancy <= 0:
-                blocker = f"EXPECTANCY={expectancy:.3f}<=0"
-                decision = "WAIT"
-                execution = "WOULD_WAIT"
+            # Expectancy remains recorded for research only. It has no
+            # execution veto or bonus in replay, matching the live committee.
 
             outcome = outcomes.get(signal_id)
             points = float(outcome.points) if outcome is not None and outcome.points is not None else None

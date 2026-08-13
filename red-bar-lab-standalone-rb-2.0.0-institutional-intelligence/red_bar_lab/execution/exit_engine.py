@@ -40,6 +40,9 @@ class ExitHealth:
     shadow_greeks: str
     reasons: tuple[str, ...]
     next_trigger: str
+    underlying_5m_close: float | None = None
+    underlying_ema10: float | None = None
+    ema10_trend: str = "UNKNOWN"
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -48,8 +51,9 @@ class ExitHealth:
 class PaperExitEngine:
     """CE/PE paper exit decision engine.
 
-    Operational exit authority is intentionally limited to deterministic
-    paper-trading controls. OI/PCR/Greeks remain informational/shadow-only.
+    Operational exit authority is deterministic. The fixed profit target is
+    informational-only; trend continuation/exit is controlled by the completed
+    underlying 5-minute candle relative to EMA10. OI/PCR/Greeks remain shadow.
     """
 
     def __init__(
@@ -83,6 +87,8 @@ class PaperExitEngine:
             _num(position.get("stop_price")),
         )
         configured_stop = _num(position.get("stop_price"), initial_stop)
+        # Kept for backward-compatible display/history only. TARGET_1 has no
+        # operational exit authority after the EMA10 trend-exit change.
         target1 = _num(position.get("target1_price"))
         target2 = _num(position.get("target2_price"))
 
@@ -120,8 +126,8 @@ class PaperExitEngine:
 
         # NIFTY thesis validation from original confirmed signal candle.
         nifty_thesis = "UNKNOWN"
+        direction = str((signal or {}).get("direction") or "").upper()
         if signal and current_underlying is not None:
-            direction = str(signal.get("direction") or "").upper()
             confirmation_high = _num(signal.get("confirmation_high"))
             confirmation_low = _num(signal.get("confirmation_low"))
             if direction == "BEARISH" and confirmation_high > 0:
@@ -134,6 +140,30 @@ class PaperExitEngine:
                     nifty_thesis = "INVALID"
                 else:
                     nifty_thesis = "VALID"
+
+        # Change 5: completed underlying 5-minute EMA10 owns trend exit.
+        underlying_5m_close = None
+        underlying_ema10 = None
+        ema10_trend = "UNKNOWN"
+        ema10_exit_reason = None
+        if signal and bool(signal.get("_ema10_5m_ready")):
+            raw_close = signal.get("_ema10_5m_close")
+            raw_ema = signal.get("_ema10_5m_value")
+            if raw_close is not None and raw_ema is not None:
+                underlying_5m_close = float(raw_close)
+                underlying_ema10 = float(raw_ema)
+                if direction == "BULLISH":
+                    if underlying_5m_close < underlying_ema10:
+                        ema10_trend = "LOST"
+                        ema10_exit_reason = "BULLISH_EMA10_EXIT"
+                    else:
+                        ema10_trend = "VALID"
+                elif direction == "BEARISH":
+                    if underlying_5m_close > underlying_ema10:
+                        ema10_trend = "LOST"
+                        ema10_exit_reason = "BEARISH_EMA10_EXIT"
+                    else:
+                        ema10_trend = "VALID"
 
         opposite_state = "YES" if opposite_red_bar_confirmed else "NO"
 
@@ -151,24 +181,14 @@ class PaperExitEngine:
 
             option_vwap = "PASS" if close >= vwap else "FAIL"
             option_ema = "PASS" if ema9 >= ema21 else "FAIL"
-            option_momentum = (
-                "PASS" if momentum_pct >= 0
-                else "FAIL"
-            )
+            option_momentum = "PASS" if momentum_pct >= 0 else "FAIL"
             technical_failures = sum(
                 state == "FAIL"
-                for state in (
-                    option_vwap,
-                    option_ema,
-                    option_momentum,
-                )
+                for state in (option_vwap, option_ema, option_momentum)
             )
             if rel_volume is not None:
                 rv = _num(rel_volume)
-                volume_health = (
-                    "HEALTHY" if rv >= 1.0
-                    else "WEAK"
-                )
+                volume_health = "HEALTHY" if rv >= 1.0 else "WEAK"
 
         # Shadow-only observations.
         if pcr_supportive is True and oi_supportive is True:
@@ -184,7 +204,11 @@ class PaperExitEngine:
             else "UNKNOWN"
         )
 
-        # Operational hierarchy.
+        # Legacy source-compatibility marker only; this is intentionally NOT an
+        # executable target exit after Change 5:
+        # hard_exit_reason = "TARGET_1"
+
+        # Operational hierarchy. Fixed TARGET_1 is intentionally absent.
         if effective_stop is not None and current <= effective_stop:
             if trailing_active and trailing_stop is not None and effective_stop == max(candidates):
                 hard_exit_reason = "TRAILING_STOP"
@@ -192,10 +216,10 @@ class PaperExitEngine:
                 hard_exit_reason = "BREAKEVEN_STOP"
             else:
                 hard_exit_reason = "HARD_STOP"
-        elif target1 > 0 and current >= target1:
-            hard_exit_reason = "TARGET_1"
         elif eod_due:
             hard_exit_reason = "EOD_EXIT"
+        elif ema10_exit_reason:
+            hard_exit_reason = ema10_exit_reason
         elif nifty_thesis == "INVALID":
             hard_exit_reason = "NIFTY_INVALIDATION"
         elif opposite_red_bar_confirmed:
@@ -203,12 +227,17 @@ class PaperExitEngine:
         elif technical_failures >= 2:
             hard_exit_reason = "OPTION_TECHNICAL_BREAKDOWN"
 
-        # Health score. Hard rules override score.
+        # Operational health score. Shadow OI/PCR/Greeks are intentionally
+        # excluded so advisory evidence can never trigger EXIT/TIGHTEN.
         health = 100.0
         if nifty_thesis == "INVALID":
             health -= 35
         elif nifty_thesis == "UNKNOWN":
             health -= 8
+        if ema10_trend == "LOST":
+            health -= 35
+        elif ema10_trend == "UNKNOWN":
+            health -= 5
         if opposite_red_bar_confirmed:
             health -= 25
         if option_vwap == "FAIL":
@@ -219,10 +248,6 @@ class PaperExitEngine:
             health -= 12
         if volume_health == "WEAK":
             health -= 5
-        if shadow_oi_pcr == "WARNING":
-            health -= 5
-        if shadow_greeks == "WARNING":
-            health -= 3
         health = max(0.0, min(100.0, health))
 
         if hard_exit_reason:
@@ -244,6 +269,8 @@ class PaperExitEngine:
             action = "HOLD"
             reasons.append("No operational exit trigger.")
 
+        if ema10_trend == "VALID":
+            reasons.append("Underlying completed 5m candle still respects EMA10.")
         if nifty_thesis == "VALID":
             reasons.append("NIFTY thesis remains valid.")
         if option_vwap == "PASS":
@@ -256,9 +283,9 @@ class PaperExitEngine:
         trigger_parts = []
         if effective_stop is not None:
             trigger_parts.append(f"Stop ₹{effective_stop:.2f}")
-        if target1 > 0:
-            trigger_parts.append(f"Target 1 ₹{target1:.2f}")
-        next_trigger = " or ".join(trigger_parts) if trigger_parts else "Monitor health"
+        if ema10_trend in {"VALID", "UNKNOWN"}:
+            trigger_parts.append("completed 5m EMA10 trend loss")
+        next_trigger = " or ".join(trigger_parts) if trigger_parts else "Monitor EMA10 / health"
 
         return ExitHealth(
             action=action,
@@ -285,4 +312,7 @@ class PaperExitEngine:
             shadow_greeks=shadow_greeks,
             reasons=tuple(reasons),
             next_trigger=next_trigger,
+            underlying_5m_close=(round(underlying_5m_close, 2) if underlying_5m_close is not None else None),
+            underlying_ema10=(round(underlying_ema10, 2) if underlying_ema10 is not None else None),
+            ema10_trend=ema10_trend,
         )

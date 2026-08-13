@@ -45,15 +45,11 @@ class OpportunityEvaluation:
 
 
 class OpportunityIntelligenceEngine:
-    """Evaluate whether an older confirmed Red Bar still has entry edge.
+    """Evaluate whether a confirmed Red Bar still has current entry edge.
 
-    Fresh signals are still governed by the existing Current Decision Engine.
-    For signals older than the normal freshness window, this engine can grant a
-    guarded paper-entry extension when the opportunity remains exceptionally
-    strong.
-
-    The first model is intentionally deterministic and auditable. It can be
-    validated and reweighted later using the stored opportunity history.
+    Reward Remaining / Move Consumed remain calculated for research and historical
+    comparison, but they no longer have execution authority. The production paper
+    monitor adds completed-underlying 5-minute EMA10 continuation as the trend gate.
     """
 
     def __init__(
@@ -70,9 +66,8 @@ class OpportunityIntelligenceEngine:
         self.minimum_extended_candidate_score = float(
             minimum_extended_candidate_score
         )
-        self.minimum_reward_remaining_pct = float(
-            minimum_reward_remaining_pct
-        )
+        # Backward-compatible research threshold only.
+        self.minimum_reward_remaining_pct = float(minimum_reward_remaining_pct)
         self.minimum_liquidity_score = float(minimum_liquidity_score)
         self.minimum_spread_score = float(minimum_spread_score)
         self.minimum_momentum_score = float(minimum_momentum_score)
@@ -120,12 +115,10 @@ class OpportunityIntelligenceEngine:
         confirmation_low: float,
         confirmation_close: float,
     ) -> tuple[float, float]:
-        """Return remaining/consumed opportunity using Red Bar range extension.
+        """Legacy research geometry for remaining/consumed opportunity.
 
-        Two confirmation-candle ranges beyond the confirmation close is treated
-        as fully consumed for the first empirical model. This is a transparent
-        proxy until historical learning can replace it with a data-fitted
-        expected-move model.
+        This is retained only so old/new behavior can be compared historically.
+        It no longer blocks a trade.
         """
         candle_range = max(
             confirmation_high - confirmation_low,
@@ -188,9 +181,6 @@ class OpportunityIntelligenceEngine:
         ema_score = _num(candidate.ema_score)
         raw_momentum = _num(candidate.momentum_score)
 
-        # RB-1.5.0 Opportunity Health: current market strength, not signal age.
-        # Weights: structure 20, VWAP 15, EMA 15, momentum 15, volume 10,
-        # OI 10, liquidity 10, spread 5. Signal age is informational only.
         structure_score = 20.0 if structure_valid else 0.0
         vwap_health = 15.0 if vwap_score > 0 else 0.0
         ema_health = 15.0 if ema_score > 0 else 0.0
@@ -205,7 +195,8 @@ class OpportunityIntelligenceEngine:
         time_score = self._time_score(signal_age_seconds)
         opportunity_score = round(
             structure_score + vwap_health + ema_health + momentum_score
-            + volume_health + oi_health + liquidity_health + spread_health, 2
+            + volume_health + oi_health + liquidity_health + spread_health,
+            2,
         )
 
         entry_mode = (
@@ -214,15 +205,12 @@ class OpportunityIntelligenceEngine:
             else "OPPORTUNITY_EXTENSION"
         )
 
-        # Only true opportunity invalidation / execution-quality failures block.
-        # Weak individual indicators are absorbed into the 0-100 health score.
         blockers: list[str] = []
         if not structure_valid:
             blockers.append("STRUCTURE_INVALID")
         if opposite_red_bar_confirmed:
             blockers.append("OPPOSITE_RED_BAR")
-        if reward_remaining < self.minimum_reward_remaining_pct:
-            blockers.append("REWARD_CONSUMED")
+        # REWARD_CONSUMED intentionally removed from execution blockers.
         if spread_score <= 0:
             blockers.append("SPREAD")
         if liquidity_score <= 0:
@@ -234,7 +222,10 @@ class OpportunityIntelligenceEngine:
 
         eligible = not blockers
         decision = f"BUY {candidate.contract.option_type}" if eligible else "SKIP"
-        reason = "OPPORTUNITY_HEALTH_PASS" if eligible else " | ".join(blockers)
+        reason = (
+            "OPPORTUNITY_HEALTH_PASS | REWARD_METRICS_INFORMATIONAL_ONLY"
+            if eligible else " | ".join(blockers)
+        )
 
         return OpportunityEvaluation(
             signal_id=signal_id,

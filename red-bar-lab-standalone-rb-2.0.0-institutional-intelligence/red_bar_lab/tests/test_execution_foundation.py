@@ -234,7 +234,7 @@ def test_automatic_signal_to_virtual_order_is_idempotent(tmp_path):
     assert "OPEN" in states
 
 
-def test_automatic_target_exit_closes_virtual_order(tmp_path):
+def test_fixed_target_no_longer_closes_virtual_order(tmp_path):
     settings, db = _setup(tmp_path)
     _insert_confirmed_signal(db)
     fake = AutoFakeZerodha()
@@ -258,12 +258,12 @@ def test_automatic_target_exit_closes_virtual_order(tmp_path):
     fake.price = 130.0
     closed, errors = service.monitor_and_exit()
     assert errors == []
-    assert closed == 2
+    assert closed == 0
 
-    order = db.read_paper_execution_orders("PAPER-STD")[0]
-    assert order["status"] == "CLOSED"
-    assert order["exit_reason"] == "AUTO_TARGET"
-    assert order["realized_pnl"] > 0
+    orders = db.read_paper_execution_orders("PAPER-STD")
+    assert orders
+    assert all(order["status"] == "OPEN" for order in orders)
+    assert all(order.get("exit_reason") in {None, ""} for order in orders)
 
 
 
@@ -508,7 +508,6 @@ def test_rb090_old_signal_can_open_via_opportunity_extension(tmp_path):
     assert order["entry_mode"] == "OPPORTUNITY_EXTENSION"
     assert float(order["signal_age_at_entry"]) > 180
     assert float(order["opportunity_score"]) >= 85
-    assert float(order["reward_remaining_pct"]) >= 40
     assert "AUTO_OPPORTUNITY_EXTENSION" in str(order["entry_reason"])
 
     evaluations = db.read_opportunity_evaluations(
@@ -528,13 +527,14 @@ def test_rb090_old_signal_can_open_via_opportunity_extension(tmp_path):
     assert "OPEN" in states
 
 
-def test_rb090_old_signal_rejected_when_reward_is_consumed(tmp_path):
+def test_rb090_reward_consumption_is_informational_only(tmp_path):
     now = datetime.now(ZoneInfo("Asia/Kolkata"))
     trading_date = now.date().isoformat()
     old_ts = (now - timedelta(minutes=6)).isoformat()
 
     settings, db = _setup(tmp_path)
     # BULLISH signal whose move is already far beyond two confirmation ranges.
+    # Change 1 keeps this geometry for diagnostics but no longer lets it veto.
     _insert_opportunity_signal(
         db,
         signal_id="SIG-OPP-LATE",
@@ -560,19 +560,21 @@ def test_rb090_old_signal_rejected_when_reward_is_consumed(tmp_path):
         lots=1,
     )
     assert errors == []
-    assert opened == 0
-    assert skipped >= 1
+    assert opened >= 1
+    assert scored > 0
 
     evaluations = db.read_opportunity_evaluations(
         signal_id="SIG-OPP-LATE",
         limit=10,
     )
     assert evaluations
-    assert bool(evaluations[0]["eligible"]) is False
-    assert "REWARD_CONSUMED" in str(evaluations[0]["reason"])
+    assert bool(evaluations[0]["eligible"]) is True
+    assert float(evaluations[0]["reward_remaining_pct"]) < 40.0
+    assert "REWARD_CONSUMED" not in str(evaluations[0]["reason"])
 
     events = db.read_execution_state_events(
         signal_id="SIG-OPP-LATE"
     )
     states = {row["state"] for row in events}
-    assert "SKIPPED_OPPORTUNITY" in states
+    assert "OPPORTUNITY_EXTENSION_APPROVED" in states
+    assert "OPEN" in states

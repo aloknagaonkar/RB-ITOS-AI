@@ -59,7 +59,7 @@ def opportunity(score=90.0):
     return SimpleNamespace(opportunity_score=score)
 
 
-def test_strong_candidate_has_positive_ev_and_can_execute_without_history():
+def test_strong_candidate_keeps_expectancy_as_research_and_can_execute_without_history():
     committee = InstitutionalExecutionCommittee(minimum_execution_probability_pct=60)
     result = committee.evaluate(
         candidate=candidate(),
@@ -72,8 +72,10 @@ def test_strong_candidate_has_positive_ev_and_can_execute_without_history():
         target_pct=25,
     )
     assert result.execution_probability_pct >= 60
-    assert result.expected_value_pct > 0
+    assert result.expectancy_pct > 0
+    assert result.expected_value_pct == 0.0
     assert result.eligible is True
+    assert "PAYOFF_METRICS_INFORMATIONAL_ONLY" in result.reason
 
 
 def test_performance_hard_block_remains_authoritative_and_is_transparent():
@@ -152,13 +154,11 @@ def test_more_history_increases_payoff_authority_not_primary_confidence():
         historical_shadow=[], stop_loss_pct=15, target_pct=25,
     )
     assert high.adaptive_history_weight_pct > low.adaptive_history_weight_pct
-    # RB-1.2.0: history informs expectancy/payoff evidence; it does not replace
-    # the Primary Rule Engine as execution-confidence authority.
     assert high.execution_probability_pct == low.execution_probability_pct
     assert any(v.expert == "Primary Rule Engine" for v in high.expert_votes)
 
 
-def test_rb100_opportunity_reduces_probability_not_target_geometry():
+def test_payoff_geometry_is_research_only():
     committee = InstitutionalExecutionCommittee(minimum_execution_probability_pct=0)
     opp = SimpleNamespace(opportunity_score=75.0, reward_remaining_pct=40.0)
     result = committee.evaluate(
@@ -168,8 +168,32 @@ def test_rb100_opportunity_reduces_probability_not_target_geometry():
     )
     assert result.expected_win_pct == 25.0
     assert result.expected_loss_pct == 15.0
-    assert result.expectancy_pct == result.expected_value_pct
+    assert result.expectancy_pct > 0
+    assert result.expected_value_pct == 0.0
     assert result.expectancy_source == "CONFIGURED_PAYOFF_PRIOR"
+
+
+def test_negative_expectancy_does_not_veto_execution():
+    c = candidate()
+    c.total_score = 80.0
+    committee = InstitutionalExecutionCommittee(
+        minimum_execution_probability_pct=0,
+        minimum_expected_value_pct=9999.0,
+    )
+    result = committee.evaluate(
+        candidate=c,
+        selection=selection(),
+        opportunity=opportunity(),
+        historical_orders=[],
+        current_shadow=None,
+        historical_shadow=[],
+        stop_loss_pct=50,
+        target_pct=1,
+    )
+    assert result.expectancy_pct < 0
+    assert result.expected_value_pct == 0.0
+    assert result.eligible is True
+    assert "EXPECTANCY=" not in result.reason
 
 
 def test_rb100_expectancy_formula_uses_probability_and_payoff():
@@ -199,6 +223,7 @@ def test_rb141_shadow_agreement_is_informational_only():
     assert result.execution_probability_pct == 80.0
     assert result.expected_win_pct == 25.0
     assert result.expected_loss_pct == 15.0
+    assert result.expected_value_pct == 0.0
 
 
 def test_rb141_shadow_conflict_is_informational_only():
@@ -233,4 +258,3 @@ def test_rb141_shadow_wait_is_informational_only():
     assert result.agreement == "NEUTRAL"
     assert result.shadow_adjustment_pct == 0.0
     assert result.execution_probability_pct == 80.0
-

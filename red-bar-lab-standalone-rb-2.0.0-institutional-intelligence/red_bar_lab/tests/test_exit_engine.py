@@ -32,6 +32,17 @@ def _healthy_candle():
     }
 
 
+def _ema_signal(direction, close, ema10):
+    return {
+        "direction": direction,
+        "confirmation_high": 24600.0,
+        "confirmation_low": 24500.0,
+        "_ema10_5m_ready": True,
+        "_ema10_5m_close": close,
+        "_ema10_5m_value": ema10,
+    }
+
+
 def test_hard_stop_has_exit_authority():
     result = PaperExitEngine().evaluate(
         position=_position(current=84.0),
@@ -41,13 +52,57 @@ def test_hard_stop_has_exit_authority():
     assert result.hard_exit_reason == "HARD_STOP"
 
 
-def test_target_one_exits():
+def test_fixed_target_is_informational_only_and_does_not_exit():
     result = PaperExitEngine().evaluate(
         position=_position(current=126.0, mfe=26.0),
         option_candle=_healthy_candle(),
     )
+    assert result.target1 == 125.0
+    assert result.hard_exit_reason is None
+    assert result.action == "HOLD / TRAIL"
+
+
+def test_bullish_completed_5m_close_below_ema10_exits():
+    result = PaperExitEngine().evaluate(
+        position=_position(current=108.0),
+        option_candle=_healthy_candle(),
+        signal=_ema_signal("BULLISH", 24540.0, 24550.0),
+        current_underlying=24540.0,
+    )
+    assert result.ema10_trend == "LOST"
+    assert result.hard_exit_reason == "BULLISH_EMA10_EXIT"
     assert result.action == "EXIT"
-    assert result.hard_exit_reason == "TARGET_1"
+
+
+def test_bearish_completed_5m_close_above_ema10_exits():
+    result = PaperExitEngine().evaluate(
+        position=_position(current=108.0),
+        option_candle=_healthy_candle(),
+        signal=_ema_signal("BEARISH", 24560.0, 24550.0),
+        current_underlying=24560.0,
+    )
+    assert result.ema10_trend == "LOST"
+    assert result.hard_exit_reason == "BEARISH_EMA10_EXIT"
+    assert result.action == "EXIT"
+
+
+def test_ema10_touch_does_not_exit_completed_trend():
+    bullish = PaperExitEngine().evaluate(
+        position=_position(current=108.0),
+        option_candle=_healthy_candle(),
+        signal=_ema_signal("BULLISH", 24550.0, 24550.0),
+        current_underlying=24550.0,
+    )
+    bearish = PaperExitEngine().evaluate(
+        position=_position(current=108.0),
+        option_candle=_healthy_candle(),
+        signal=_ema_signal("BEARISH", 24550.0, 24550.0),
+        current_underlying=24550.0,
+    )
+    assert bullish.ema10_trend == "VALID"
+    assert bearish.ema10_trend == "VALID"
+    assert bullish.hard_exit_reason is None
+    assert bearish.hard_exit_reason is None
 
 
 def test_breakeven_arms_after_fifteen_percent_peak():

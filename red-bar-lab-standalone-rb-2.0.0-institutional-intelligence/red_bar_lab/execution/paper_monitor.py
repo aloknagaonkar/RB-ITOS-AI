@@ -6,7 +6,7 @@ import os
 import time
 
 from red_bar_lab.config import RedBarSettings, UNDERLYINGS
-from red_bar_lab.execution.automation import RedBarPaperAutomationService
+from red_bar_lab.execution.trend_automation import TrendAwarePaperAutomationService
 from red_bar_lab.market.upstox_intelligence import UnifiedUpstoxMarketIntelligenceService
 from red_bar_lab.market.paper_adapter import UpstoxPaperMarketAdapter
 from red_bar_lab.services.upstox_service import RedBarUpstoxService
@@ -86,7 +86,7 @@ def main() -> int:
         args.underlying,
         UNDERLYINGS[args.underlying],
     )
-    automation = RedBarPaperAutomationService(
+    automation = TrendAwarePaperAutomationService(
         zerodha=adapter,
         database=database,
         settings=settings,
@@ -103,7 +103,8 @@ def main() -> int:
         )
     logging.info(
         "Upstox market-data provider initialized. "
-        "Execution mode=PAPER; live broker orders=DISABLED."
+        "Execution mode=PAPER; live broker orders=DISABLED; "
+        "opportunity/exit trend=NIFTY_5M_EMA10."
     )
 
     from datetime import datetime
@@ -131,7 +132,7 @@ def main() -> int:
             "current_state": "STARTING",
             "last_signal_id": None,
             "last_decision": "STARTED",
-            "last_reason": "Paper monitor initialized.",
+            "last_reason": "Paper monitor initialized with NIFTY 5m EMA10 trend rules.",
             "last_error": None,
         }
     )

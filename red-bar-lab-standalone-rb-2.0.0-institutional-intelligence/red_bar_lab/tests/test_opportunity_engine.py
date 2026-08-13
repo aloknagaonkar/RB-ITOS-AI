@@ -73,7 +73,7 @@ def test_old_signal_is_rejected_when_opposite_red_bar_exists():
     assert "OPPOSITE_RED_BAR" in result.reason
 
 
-def test_old_signal_is_rejected_when_reward_is_consumed():
+def test_reward_consumed_is_retained_but_no_longer_blocks():
     result = OpportunityIntelligenceEngine().evaluate(
         signal=_bearish_signal(),
         candidate=_Candidate(),
@@ -81,9 +81,11 @@ def test_old_signal_is_rejected_when_reward_is_consumed():
         signal_age_seconds=480.0,
         opposite_red_bar_confirmed=False,
     )
-    assert result.eligible is False
     assert result.reward_remaining_pct < 40.0
-    assert "REWARD_CONSUMED" in result.reason
+    assert result.move_consumed_pct > 60.0
+    assert result.eligible is True
+    assert "REWARD_CONSUMED" not in result.reason
+    assert "REWARD_METRICS_INFORMATIONAL_ONLY" in result.reason
 
 
 def test_fresh_signal_is_classified_as_fresh_signal():

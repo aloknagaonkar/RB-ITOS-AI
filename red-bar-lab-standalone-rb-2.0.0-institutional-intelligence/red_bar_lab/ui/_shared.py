@@ -1567,9 +1567,11 @@ def _render_paper_exit_engine_panel(
 
     st.markdown("### Paper Exit Engine")
     st.caption(
-        "Operational exit authority: premium protection, Target 1, EOD, "
-        "NIFTY thesis, opposite Red Bar and option technical health. "
-        "PCR/OI/Greeks remain SHADOW EXIT evidence only."
+        "Operational exit authority: premium protection, completed NIFTY "
+        "5-minute EMA10 trend exit, EOD, NIFTY thesis, opposite Red Bar "
+        "and option technical health. Fixed profit targets are informational "
+        "only and have no exit authority. PCR/OI/Greeks remain SHADOW EXIT "
+        "evidence only."
     )
 
     entry = float(position.get("entry_price") or 0.0)
@@ -1740,52 +1742,30 @@ def _render_paper_exit_engine_panel(
             "pass",
         )
 
-        target1_near = bool(
-            exit_health.target1 is not None
-            and current < exit_health.target1
-            and exit_health.target1 > 0
-            and (exit_health.target1 - current)
-            / exit_health.target1
-            <= 0.05
-        )
-        target1_state = (
-            "HIT"
-            if (
-                exit_health.target1 is not None
-                and current >= exit_health.target1
+        ema10_value = (
+            (
+                f"5m Close {exit_health.underlying_5m_close:.2f} · "
+                f"EMA10 {exit_health.underlying_ema10:.2f}"
             )
-            else "NEAR"
-            if target1_near
-            else "ACTIVE"
+            if (
+                exit_health.underlying_5m_close is not None
+                and exit_health.underlying_ema10 is not None
+            )
+            else "Awaiting completed 5m EMA10 data"
         )
-        target1_tone = (
-            "pass"
-            if target1_state == "HIT"
-            else "warning"
-            if target1_state == "NEAR"
+        ema10_state = str(exit_health.ema10_trend or "UNKNOWN").upper()
+        ema10_tone = (
+            "fail"
+            if ema10_state == "LOST"
+            else "pass"
+            if ema10_state == "VALID"
             else "info"
         )
-
         _protection_row(
-            "Target 1",
-            (
-                f"₹{exit_health.target1:.2f}"
-                if exit_health.target1 is not None
-                else "—"
-            ),
-            target1_state,
-            target1_tone,
-        )
-
-        _protection_row(
-            "Target 2",
-            (
-                f"₹{exit_health.target2:.2f}"
-                if exit_health.target2 is not None
-                else "—"
-            ),
-            "INFO",
-            "info",
+            "NIFTY 5m EMA10",
+            ema10_value,
+            ema10_state,
+            ema10_tone,
         )
 
     with middle:
@@ -1843,6 +1823,11 @@ def _render_paper_exit_engine_panel(
         _health_row(
             "NIFTY Thesis",
             exit_health.nifty_thesis,
+            "OPERATIONAL",
+        )
+        _health_row(
+            "5m EMA10 Trend",
+            exit_health.ema10_trend,
             "OPERATIONAL",
         )
         _health_row(
@@ -2088,14 +2073,9 @@ def _render_paper_exit_engine_idle_panel() -> None:
                 "State": "READY",
             },
             {
-                "Protection": "Target 1",
-                "Trigger": "+25% premium",
+                "Protection": "5m EMA10 Trend Exit",
+                "Trigger": "Bullish: close < EMA10 · Bearish: close > EMA10",
                 "State": "READY",
-            },
-            {
-                "Protection": "Target 2",
-                "Trigger": "+40% premium",
-                "State": "INFO",
             },
         ]
         st.dataframe(
@@ -2113,7 +2093,7 @@ def _render_paper_exit_engine_idle_panel() -> None:
                 "State": "READY",
             },
             {
-                "Condition": "Target 1",
+                "Condition": "5m EMA10 Trend Exit",
                 "Authority": "OPERATIONAL",
                 "State": "READY",
             },
