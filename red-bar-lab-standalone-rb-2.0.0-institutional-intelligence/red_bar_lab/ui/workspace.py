@@ -3,6 +3,7 @@ from red_bar_lab.execution.exit_engine import PaperExitEngine
 from red_bar_lab.execution.trend_automation import TrendAwarePaperAutomationService
 from red_bar_lab.services.evidence_replay import EvidenceAwareHistoricalDecisionReplayService
 from red_bar_lab.ui.active_trade_views import build_paper_page_wrapper
+from red_bar_lab.ui.paper_time_display import install as install_paper_time_display
 from red_bar_lab.ui.paper_consistency import (
     build_candidate_workbench_wrapper,
     build_paper_exit_panel_wrapper,
@@ -26,6 +27,9 @@ from red_bar_lab.ui.pages import (
     signal_explorer,
     trade_history,
 )
+
+# Apply compact HH:MM entry/exit time formatting to the Paper Trading tables.
+install_paper_time_display()
 
 shared_ui.PaperExitEngine = PaperExitEngine
 # paper_trading imports shared symbols into its module namespace. Wire its
