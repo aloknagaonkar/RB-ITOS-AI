@@ -4,6 +4,7 @@ import pandas as pd
 
 from red_bar_lab.intelligence.buy_sell_strength import BuySellStrengthEngine
 from red_bar_lab.intelligence.institutional_confidence import InstitutionalConfidenceEngine
+from red_bar_lab.intelligence.institutional_sprint2 import InstitutionalSprint2Service
 from red_bar_lab.intelligence.oi_velocity import OIVelocityEngine
 from red_bar_lab.intelligence.premium_flow import PremiumFlowEngine
 from red_bar_lab.intelligence.strike_rotation import StrikeRotationEngine
@@ -97,3 +98,47 @@ def test_confidence_never_receives_execution_authority():
     assert confidence.direction == "BULLISH"
     assert confidence.score > 0
     assert confidence.execution_impact == "NONE"
+
+
+def test_sprint2_loads_only_required_point_in_time_artifacts():
+    class Database:
+        def read_option_chain_history(self, *args, **kwargs):
+            return [
+                {
+                    "collector_mode": "ONLINE",
+                    "snapshot_timestamp": pd.Timestamp("2026-08-12 10:00:00")
+                    + pd.Timedelta(minutes=minute),
+                    "chain_artifact_path": f"snap-{minute}.csv",
+                }
+                for minute in range(31)
+            ]
+
+    service = InstitutionalSprint2Service(Database())
+    reads = []
+
+    def fake_artifact(path_value):
+        reads.append(str(path_value))
+        return _chain(
+            [100, 200, 300],
+            [300, 200, 100],
+            [120, 80, 50],
+            [45, 75, 115],
+        )
+
+    service._artifact = fake_artifact
+    snapshots = service._snapshots("NIFTY", "2026-08-12")
+
+    timestamps = [timestamp for timestamp, _, _ in snapshots]
+    assert timestamps == [
+        pd.Timestamp("2026-08-12 10:15:00"),
+        pd.Timestamp("2026-08-12 10:25:00"),
+        pd.Timestamp("2026-08-12 10:29:00"),
+        pd.Timestamp("2026-08-12 10:30:00"),
+    ]
+    assert set(reads) == {
+        "snap-15.csv",
+        "snap-25.csv",
+        "snap-29.csv",
+        "snap-30.csv",
+    }
+    assert len(reads) == 4
