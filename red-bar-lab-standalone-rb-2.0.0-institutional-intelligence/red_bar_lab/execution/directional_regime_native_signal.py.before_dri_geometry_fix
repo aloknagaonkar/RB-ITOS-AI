@@ -1,0 +1,423 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Iterable, Mapping
+import json
+import os
+
+import pandas as pd
+
+
+VALID_DIRECTIONS = {"BULLISH", "BEARISH"}
+NON_EXECUTABLE_REGIMES = {
+    "SIDEWAYS",
+    "CONFLICT",
+    "TRANSITION_BULLISH",
+    "TRANSITION_BEARISH",
+}
+
+
+def _ts(value: object) -> pd.Timestamp | None:
+    if value in (None, ""):
+        return None
+    try:
+        result = pd.Timestamp(value)
+        if result.tzinfo is not None:
+            result = result.tz_convert("Asia/Kolkata").tz_localize(None)
+        return result
+    except Exception:
+        return None
+
+
+def _direction(row: Mapping[str, object]) -> str:
+    return str(row.get("direction") or "").upper().strip()
+
+
+def _signal_time(row: Mapping[str, object]) -> pd.Timestamp | None:
+    for field in (
+        "confirmation_timestamp",
+        "detected_at",
+        "setup_timestamp",
+        "timestamp",
+        "created_at",
+    ):
+        value = _ts(row.get(field))
+        if value is not None:
+            return value
+    return None
+
+
+@dataclass(frozen=True)
+class NativeSignalDecision:
+    action: str
+    reason: str
+    native_signal: dict[str, object] | None
+    related_signal_id: str | None = None
+
+
+def bundle_to_native_signal(
+    bundle: Mapping[str, object],
+    *,
+    now: object | None = None,
+) -> dict[str, object] | None:
+    """Convert one fresh v4.3 bundle into the legacy signal row shape.
+
+    The adapter changes execution authority only at the Paper Trading boundary.
+    Original v4.3 JSONL records remain immutable and execution_allowed=False.
+    """
+    direction = _direction(bundle)
+    if direction not in VALID_DIRECTIONS:
+        return None
+
+    current_regime = str(
+        bundle.get("current_regime")
+        or bundle.get("regime")
+        or direction
+    ).upper()
+    if current_regime in NON_EXECUTABLE_REGIMES:
+        return None
+    if current_regime in VALID_DIRECTIONS and current_regime != direction:
+        return None
+
+    detected_at = _ts(bundle.get("detected_at"))
+    fresh_until = _ts(bundle.get("fresh_until"))
+    current = _ts(now) or pd.Timestamp.now(tz="Asia/Kolkata").tz_localize(None)
+    if detected_at is None or fresh_until is None:
+        return None
+    if current < detected_at or current > fresh_until:
+        return None
+
+    bundle_id = str(bundle.get("bundle_id") or "").strip()
+    if not bundle_id:
+        return None
+
+    trigger = bundle.get("trigger_level")
+    invalidation = bundle.get("invalidation_level")
+    setup_type = str(bundle.get("primary_setup_type") or "DIRECTIONAL_REGIME")
+    signal_id = f"DRI-{bundle_id}"
+
+    return {
+        "signal_id": signal_id,
+        "direction": direction,
+        "status": "ACTIVE",
+        "state": "ACTIVE",
+        "signal_source": "DIRECTIONAL_REGIME_INTELLIGENCE",
+        "source": "DIRECTIONAL_REGIME_INTELLIGENCE",
+        "level_name": f"DRI:{setup_type}",
+        "level_value": trigger,
+        "trigger_level": trigger,
+        "invalidation_level": invalidation,
+        "setup_timestamp": detected_at.isoformat(),
+        "confirmation_timestamp": detected_at.isoformat(),
+        "detected_at": detected_at.isoformat(),
+        "fresh_until": fresh_until.isoformat(),
+        "bundle_id": bundle_id,
+        "primary_signal_id": bundle.get("primary_signal_id"),
+        "primary_setup_type": setup_type,
+        "supporting_signal_ids": list(
+            bundle.get("supporting_signal_ids") or []
+        ),
+        "supporting_setup_types": list(
+            bundle.get("supporting_setup_types") or []
+        ),
+        "red_bar_alignment": bundle.get("red_bar_alignment"),
+        "option_type": "CE" if direction == "BULLISH" else "PE",
+        "candle_a_high": trigger,
+        "candle_a_low": invalidation,
+        "reference_price": trigger,
+        "entry_stage": bundle.get("entry_stage"),
+        "five_minute_confirmation": bundle.get("five_minute_confirmation"),
+        "candidate_limit": int(
+            bundle.get("candidate_limit") or 0
+        ),
+        "native_execution_adapter": True,
+        "execution_allowed": True,
+    }
+
+
+def decide_native_signal(
+    native_signal: Mapping[str, object],
+    legacy_signals: Iterable[Mapping[str, object]],
+    *,
+    open_orders: Iterable[Mapping[str, object]] = (),
+    merge_window_minutes: int = 10,
+) -> NativeSignalDecision:
+    direction = _direction(native_signal)
+    native_time = _signal_time(native_signal)
+    native_id = str(native_signal.get("signal_id") or "")
+
+    # Existing same-direction open position: reinforcement only.
+    for order in open_orders:
+        status = str(order.get("status") or "").upper()
+        if status not in {"OPEN", "ACTIVE", "FILLED", "EXECUTED"}:
+            continue
+        order_direction = _direction(order)
+        if not order_direction:
+            option_type = str(order.get("option_type") or "").upper()
+            order_direction = (
+                "BULLISH" if option_type == "CE"
+                else "BEARISH" if option_type == "PE"
+                else ""
+            )
+        if order_direction == direction:
+            return NativeSignalDecision(
+                action="REINFORCEMENT_ONLY",
+                reason="SAME_DIRECTION_POSITION_ALREADY_OPEN",
+                native_signal=None,
+                related_signal_id=str(order.get("signal_id") or ""),
+            )
+        if order_direction in VALID_DIRECTIONS and order_direction != direction:
+            return NativeSignalDecision(
+                action="WAITING_FOR_POSITION_EXIT",
+                reason="OPPOSITE_POSITION_OPEN_EXIT_REVIEW_REQUIRED",
+                native_signal=None,
+                related_signal_id=str(order.get("signal_id") or ""),
+            )
+
+    nearest: tuple[float, Mapping[str, object]] | None = None
+    for legacy in legacy_signals:
+        legacy_id = str(legacy.get("signal_id") or "")
+        if legacy_id == native_id or legacy_id.startswith("DRI-"):
+            continue
+        legacy_time = _signal_time(legacy)
+        if native_time is None or legacy_time is None:
+            continue
+        delta = abs((native_time - legacy_time).total_seconds()) / 60.0
+        if delta > float(merge_window_minutes):
+            continue
+        if nearest is None or delta < nearest[0]:
+            nearest = (delta, legacy)
+
+    if nearest is None:
+        return NativeSignalDecision(
+            action="SINGLE_SOURCE",
+            reason="NO_NEARBY_REFERENCE_SIGNAL",
+            native_signal=dict(native_signal),
+        )
+
+    legacy = nearest[1]
+    legacy_direction = _direction(legacy)
+    legacy_id = str(legacy.get("signal_id") or "")
+
+    if legacy_direction == direction:
+        merged = dict(legacy)
+        existing_sources = list(merged.get("signal_sources") or [])
+        for source in (
+            str(merged.get("signal_source") or "REFERENCE_LEVEL"),
+            "DIRECTIONAL_REGIME_INTELLIGENCE",
+        ):
+            if source and source not in existing_sources:
+                existing_sources.append(source)
+        merged.update(
+            {
+                "signal_sources": existing_sources,
+                "source_count": len(existing_sources),
+                "merge_status": "DUAL_SOURCE_ALIGNED",
+                "directional_bundle_id": native_signal.get("bundle_id"),
+                "directional_signal_id": native_id,
+                "directional_setup_type": native_signal.get(
+                    "primary_setup_type"
+                ),
+                "directional_confirmation_timestamp": native_signal.get(
+                    "confirmation_timestamp"
+                ),
+            }
+        )
+        return NativeSignalDecision(
+            action="DUAL_SOURCE_ALIGNED",
+            reason="SAME_DIRECTION_WITHIN_MERGE_WINDOW",
+            native_signal=merged,
+            related_signal_id=legacy_id,
+        )
+
+    if legacy_direction in VALID_DIRECTIONS and legacy_direction != direction:
+        return NativeSignalDecision(
+            action="SOURCE_CONFLICT",
+            reason="OPPOSITE_DIRECTION_WITHIN_MERGE_WINDOW",
+            native_signal=None,
+            related_signal_id=legacy_id,
+        )
+
+    return NativeSignalDecision(
+        action="SINGLE_SOURCE",
+        reason="NEARBY_SIGNAL_HAS_NO_EXECUTABLE_DIRECTION",
+        native_signal=dict(native_signal),
+    )
+
+
+def _read_jsonl_rows(path: Path) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    if not path.exists():
+        return rows
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            rows.append(payload)
+    return rows
+
+
+def _primary_signal_index(
+    runs_root: str | Path,
+) -> dict[str, dict[str, object]]:
+    folder = Path(runs_root) / "fresh_setup_signals_v43"
+    index: dict[str, dict[str, object]] = {}
+    if not folder.exists():
+        return index
+    for path in sorted(folder.glob("*.jsonl")):
+        for row in _read_jsonl_rows(path):
+            signal_id = str(row.get("signal_id") or "").strip()
+            if signal_id:
+                index[signal_id] = row
+    return index
+
+
+def enrich_bundle_from_primary_signal(
+    bundle: Mapping[str, object],
+    primary_signal: Mapping[str, object] | None,
+) -> dict[str, object]:
+    enriched = dict(bundle)
+    if primary_signal is None:
+        return enriched
+
+    field_map = {
+        "fresh_until": "fresh_until",
+        "trigger_level": "trigger_level",
+        "invalidation_level": "invalidation_level",
+        "primary_setup_type": "setup_type",
+        "red_bar_alignment": "red_bar_alignment",
+        "detected_at": "detected_at",
+        "direction": "direction",
+    }
+    for bundle_field, signal_field in field_map.items():
+        if enriched.get(bundle_field) in (None, ""):
+            value = primary_signal.get(signal_field)
+            if value not in (None, ""):
+                enriched[bundle_field] = value
+
+    if not enriched.get("primary_signal_id"):
+        enriched["primary_signal_id"] = primary_signal.get("signal_id")
+    return enriched
+
+
+def read_fresh_bundles(
+    runs_root: str | Path,
+    *,
+    now: object | None = None,
+) -> list[dict[str, object]]:
+    folder = Path(runs_root) / "fresh_setup_bundles_v43"
+    if not folder.exists():
+        return []
+    primary_signals = _primary_signal_index(runs_root)
+    output: list[dict[str, object]] = []
+    for path in sorted(folder.glob("*.jsonl")):
+        for row in _read_jsonl_rows(path):
+            primary_signal_id = str(
+                row.get("primary_signal_id") or ""
+            ).strip()
+            enriched = enrich_bundle_from_primary_signal(
+                row,
+                primary_signals.get(primary_signal_id),
+            )
+            signal = bundle_to_native_signal(enriched, now=now)
+            if signal is not None:
+                signal["instrument_store_file"] = path.name
+                output.append(signal)
+    output.sort(
+        key=lambda row: str(row.get("confirmation_timestamp") or "")
+    )
+    return output
+
+
+class DirectionalNativeSignalDatabaseProxy:
+    """Inject executable DRI signals into the normal signal-read boundary."""
+
+    def __init__(
+        self,
+        database,
+        *,
+        runs_root: str | Path,
+        merge_window_minutes: int = 10,
+        now_provider=None,
+        enable_reference_signals: bool | None = None,
+    ):
+        self._database = database
+        self.runs_root = Path(runs_root)
+        self.merge_window_minutes = int(merge_window_minutes)
+        self.now_provider = now_provider
+        if enable_reference_signals is None:
+            raw = os.getenv(
+                "RB_ENABLE_REFERENCE_LEVEL_SIGNALS",
+                "true",
+            ).strip().lower()
+            enable_reference_signals = raw not in {
+                "0", "false", "no", "off",
+            }
+        self.enable_reference_signals = bool(enable_reference_signals)
+
+    def __getattr__(self, name):
+        return getattr(self._database, name)
+
+    def _now(self):
+        return self.now_provider() if self.now_provider else None
+
+    def _open_orders(self):
+        fn = getattr(self._database, "read_paper_execution_orders", None)
+        if fn is None:
+            return []
+        for args in (("PAPER-STD",), tuple()):
+            try:
+                return list(fn(*args) or [])
+            except TypeError:
+                continue
+            except Exception:
+                return []
+        return []
+
+    def read_signal_attempts(self, *args, **kwargs):
+        all_legacy = list(
+            self._database.read_signal_attempts(*args, **kwargs) or []
+        )
+        legacy = all_legacy if self.enable_reference_signals else []
+        native = read_fresh_bundles(
+            self.runs_root,
+            now=self._now(),
+        )
+        open_orders = self._open_orders()
+
+        result = list(legacy)
+        replaced_ids: set[str] = set()
+        for native_signal in native:
+            decision = decide_native_signal(
+                native_signal,
+                legacy,
+                open_orders=open_orders,
+                merge_window_minutes=self.merge_window_minutes,
+            )
+            if decision.action == "DUAL_SOURCE_ALIGNED":
+                related = decision.related_signal_id
+                result = [
+                    decision.native_signal
+                    if str(row.get("signal_id") or "") == related
+                    else row
+                    for row in result
+                ]
+                replaced_ids.add(str(related or ""))
+            elif decision.action == "SINGLE_SOURCE":
+                result.append(decision.native_signal)
+            # SOURCE_CONFLICT, REINFORCEMENT_ONLY and WAITING_FOR_POSITION_EXIT
+            # deliberately do not expose an additional executable signal.
+
+        # Deterministic signal-id deduplication.
+        deduped: dict[str, dict[str, object]] = {}
+        for row in result:
+            signal_id = str(row.get("signal_id") or "")
+            if signal_id:
+                deduped[signal_id] = dict(row)
+        return list(deduped.values())

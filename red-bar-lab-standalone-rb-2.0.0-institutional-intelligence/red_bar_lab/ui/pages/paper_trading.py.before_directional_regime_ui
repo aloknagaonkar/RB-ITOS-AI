@@ -3,37 +3,6 @@ from time import perf_counter
 from red_bar_lab.ui._shared import *
 
 
-
-def _parse_directional_reference_detail(
-    detail: object,
-) -> dict[str, str]:
-    values: dict[str, str] = {}
-    for token in str(detail or "").split(";"):
-        if "=" not in token:
-            continue
-        key, value = token.split("=", 1)
-        values[key.strip()] = value.strip()
-    return values
-
-
-def _latest_directional_reference(
-    database,
-    signal_id: str,
-) -> dict[str, str] | None:
-    rows = database.read_execution_state_events(
-        signal_id=signal_id,
-        limit=50,
-    )
-    for row in rows:
-        if row.get("state") != "DIRECTIONAL_REGIME_REFERENCE":
-            continue
-        parsed = _parse_directional_reference_detail(
-            row.get("detail")
-        )
-        parsed["timestamp"] = str(row.get("timestamp") or "")
-        return parsed
-    return None
-
 def render_page(settings, layout, database, token, underlying_name, instrument_key, interval) -> None:
     _perf_started = perf_counter()
     _perf_last = _perf_started
@@ -398,80 +367,6 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         st.info(
             "No confirmed Red Bar signal is available for automatic "
             "paper-execution validation."
-        )
-
-    st.markdown("### Directional Regime Intelligence")
-    directional_ui = (
-        _latest_directional_reference(
-            database,
-            str(latest_signal.get("signal_id") or ""),
-        )
-        if latest_signal
-        else None
-    )
-
-    if directional_ui:
-        status = directional_ui.get("status", "UNAVAILABLE")
-        status_cols = st.columns(7)
-        status_cols[0].metric("Status", status)
-        status_cols[1].metric(
-            "Regime",
-            directional_ui.get("regime", "UNKNOWN"),
-        )
-        status_cols[2].metric(
-            "Bundle Direction",
-            directional_ui.get("bundle_direction", "NA"),
-        )
-        status_cols[3].metric(
-            "Setup",
-            directional_ui.get("setup", "NA"),
-        )
-        status_cols[4].metric(
-            "Alignment",
-            directional_ui.get("alignment_score", "0"),
-        )
-        status_cols[5].metric(
-            "Policy",
-            directional_ui.get("policy_action", "CONTINUE"),
-        )
-        status_cols[6].metric(
-            "Candidate Bonus",
-            directional_ui.get("candidate_bonus", "0"),
-        )
-
-        reason = directional_ui.get("reason", "—")
-        mode = directional_ui.get(
-            "mode",
-            "ACTIVE_CONFIRMATION_FILTER",
-        )
-        if status == "CONFLICT":
-            st.error(
-                "Directional conflict: the current confirmed Paper Trading "
-                "signal is held before candidate and order creation."
-            )
-        elif status == "ALIGNED":
-            st.success(
-                "Directional alignment confirmed. The configured candidate "
-                "score bonus is applied, capped at 100."
-            )
-        elif status in {"PARTIAL_ALIGNMENT", "NEUTRAL"}:
-            st.info(
-                "Directional context is non-blocking. Paper Trading continues "
-                "without a score adjustment."
-            )
-        else:
-            st.warning(
-                "Directional reference is unavailable. Paper Trading uses "
-                "fail-open behavior and continues with the existing signal."
-            )
-        st.caption(
-            f"Reason: {reason} | Mode: {mode} | "
-            f"Bundle: {directional_ui.get('bundle_id', 'NA')}"
-        )
-    else:
-        st.info(
-            "No Directional Regime reference has been recorded for the latest "
-            "signal yet. Run or refresh the Paper Trading evaluation cycle."
         )
 
     # RB-0.9.3 foreground decision phase: evaluate the newest confirmed signal

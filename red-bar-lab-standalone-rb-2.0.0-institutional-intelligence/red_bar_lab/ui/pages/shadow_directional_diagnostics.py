@@ -56,6 +56,15 @@ from red_bar_lab.services.signal_trade_attribution_summary import (
     summarize_by_primary_setup,
     funnel_summary,
 )
+from red_bar_lab.services.historical_attribution_audit import (
+    HistoricalAuditRequest,
+    RangeHistoricalAttributionAudit,
+    resolve_range_preset,
+)
+from red_bar_lab.services.historical_bundle_backfill import (
+    HistoricalBundleBackfillRequest,
+    HistoricalV43BundleBackfill,
+)
 
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -106,7 +115,7 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         unsafe_allow_html=True,
     )
 
-    live_tab, replay_tab, validation_tab, calibration_tab, oos_tab, stability_tab, lifecycle_tab, stateful_tab = st.tabs([
+    live_tab, replay_tab, validation_tab, calibration_tab, oos_tab, stability_tab, lifecycle_tab, stateful_tab, attribution_replay_tab = st.tabs([
         "Current Observation",
         "Historical Replay & Outcomes",
         "Multi-Day Validation",
@@ -115,6 +124,7 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         "Regime & Period Stability",
         "Lifecycle Simulation",
         "Stateful Regime v4.3",
+        "Historical Attribution Replay",
     ])
 
     with live_tab:
@@ -1288,3 +1298,246 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         "Sprint 4.2 remains observation-only. Validation results cannot create, "
         "approve, enter, manage or exit any trade."
     )
+
+    with attribution_replay_tab:
+        st.markdown("### Range-Based Historical Attribution Audit")
+        st.caption(
+            "Read-only audit. It does not create candidates, Committee "
+            "decisions, queue items, paper orders or live orders."
+        )
+
+        preset_col, anchor_col = st.columns(2)
+        preset = preset_col.selectbox(
+            "Range preset",
+            (
+                "Single Day",
+                "Previous 5 Trading Days",
+                "Previous 10 Trading Days",
+                "Previous Month",
+                "Previous 3 Months",
+                "Custom Range",
+            ),
+            key="historical_attribution_range_preset",
+        )
+        anchor_date = anchor_col.date_input(
+            "Range anchor",
+            value=date.today(),
+            key="historical_attribution_anchor",
+        )
+
+        if preset == "Custom Range":
+            range_cols = st.columns(2)
+            audit_date_from = range_cols[0].date_input(
+                "Start date",
+                value=anchor_date - timedelta(days=6),
+                key="historical_attribution_custom_from",
+            )
+            audit_date_to = range_cols[1].date_input(
+                "End date",
+                value=anchor_date,
+                key="historical_attribution_custom_to",
+            )
+        else:
+            audit_date_from, audit_date_to = resolve_range_preset(
+                preset,
+                anchor_date,
+            )
+            st.info(
+                f"Selected range: {audit_date_from.isoformat()} "
+                f"to {audit_date_to.isoformat()}"
+            )
+
+        session_col, direction_col, setup_col = st.columns(3)
+        session = session_col.selectbox(
+            "Market session",
+            (
+                "Full Session",
+                "Opening",
+                "Mid-Session",
+                "Closing",
+                "Custom Time",
+            ),
+            key="historical_attribution_session",
+        )
+        audit_direction = direction_col.selectbox(
+            "Direction",
+            ("ALL", "BULLISH", "BEARISH"),
+            key="historical_attribution_direction",
+        )
+        audit_setup = setup_col.selectbox(
+            "Primary setup",
+            (
+                "ALL",
+                "BULLISH_STRUCTURE_BREAK",
+                "BEARISH_STRUCTURE_BREAK",
+                "BULLISH_RANGE_BREAKOUT",
+                "BEARISH_RANGE_BREAKDOWN",
+                "BULLISH_PULLBACK_CONTINUATION",
+                "BEARISH_PULLBACK_CONTINUATION",
+                "BULLISH_EMA_RECLAIM",
+                "BEARISH_EMA_LOSS",
+                "BULLISH_RED_BAR_CONFIRMATION",
+                "BEARISH_RED_BAR_CONFIRMATION",
+                "COUNTER_TREND_RED_BAR",
+            ),
+            key="historical_attribution_setup",
+        )
+
+        session_windows = {
+            "Full Session": (time(9, 15), time(15, 30)),
+            "Opening": (time(9, 15), time(10, 30)),
+            "Mid-Session": (time(10, 30), time(14, 0)),
+            "Closing": (time(14, 0), time(15, 30)),
+        }
+        if session == "Custom Time":
+            time_cols = st.columns(2)
+            audit_start_time = time_cols[0].time_input(
+                "Start time",
+                value=time(9, 15),
+                key="historical_attribution_start_time",
+            )
+            audit_end_time = time_cols[1].time_input(
+                "End time",
+                value=time(15, 30),
+                key="historical_attribution_end_time",
+            )
+        else:
+            audit_start_time, audit_end_time = session_windows[session]
+
+        persist_backfill = st.toggle(
+            "Persist generated v4.3 research artifacts",
+            value=True,
+            key="historical_attribution_persist_backfill",
+            help=(
+                "Writes only v4.3 regime, transition, signal and bundle JSONL "
+                "research artifacts. Candidate, Committee, queue and order "
+                "tables remain read-only."
+            ),
+        )
+        action_cols = st.columns(2)
+        run_backfill = action_cols[0].button(
+            "Backfill missing v4.3 bundles",
+            type="secondary",
+            key="run_historical_bundle_backfill",
+        )
+        run_audit = action_cols[1].button(
+            "Run read-only historical audit",
+            type="primary",
+            key="run_historical_attribution_audit",
+        )
+
+        if run_backfill:
+            try:
+                historical = _historical_service(token, layout)
+                backfill_result = HistoricalV43BundleBackfill(
+                    historical=historical,
+                    layout=layout,
+                ).run(
+                    HistoricalBundleBackfillRequest(
+                        instrument_key=instrument_key,
+                        date_from=audit_date_from,
+                        date_to=audit_date_to,
+                        start_time=audit_start_time,
+                        end_time=audit_end_time,
+                        persist_artifacts=persist_backfill,
+                    )
+                )
+                st.session_state[
+                    "historical_bundle_backfill_result"
+                ] = backfill_result
+                st.success("Historical v4.3 bundle backfill completed.")
+            except Exception as exc:
+                st.error(
+                    "Historical v4.3 bundle backfill failed: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+
+        backfill_result = st.session_state.get(
+            "historical_bundle_backfill_result"
+        )
+        if backfill_result:
+            st.markdown("#### Historical Bundle Backfill Summary")
+            st.dataframe(
+                _arrow_safe_rows([backfill_result["summary"]]),
+                width="stretch",
+                hide_index=True,
+            )
+            st.markdown("#### Backfill by Trading Day")
+            st.dataframe(
+                _arrow_safe_rows(backfill_result["days"]),
+                width="stretch",
+                hide_index=True,
+            )
+        if run_audit:
+            try:
+                audit_service = RangeHistoricalAttributionAudit(
+                    database=database,
+                    runs_root=layout.settings.runs_root,
+                )
+                audit_request = HistoricalAuditRequest(
+                    instrument_key=instrument_key,
+                    date_from=audit_date_from,
+                    date_to=audit_date_to,
+                    start_time=audit_start_time,
+                    end_time=audit_end_time,
+                    direction=audit_direction,
+                    setup_type=audit_setup,
+                )
+                st.session_state[
+                    "historical_attribution_audit_result"
+                ] = audit_service.audit(audit_request)
+                st.success("Historical source audit completed.")
+            except Exception as exc:
+                st.error(
+                    "Historical attribution audit failed: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+
+        audit_result = st.session_state.get(
+            "historical_attribution_audit_result"
+        )
+        if audit_result:
+            st.markdown("#### Audit Summary")
+            st.dataframe(
+                _arrow_safe_rows([audit_result["summary"]]),
+                width="stretch",
+                hide_index=True,
+            )
+
+            if audit_result["summary"].get("incomplete_sources"):
+                st.warning(
+                    "One or more source queries reached their configured "
+                    "limit. Those sources are marked result_complete=False."
+                )
+
+            st.markdown("#### Historical Source Availability")
+            st.dataframe(
+                _arrow_safe_rows(audit_result["sources"]),
+                width="stretch",
+                hide_index=True,
+            )
+
+            st.markdown("#### Targeted Bundle-to-Pipeline Chains")
+            if audit_result["matches"]:
+                st.dataframe(
+                    _arrow_safe_rows(audit_result["matches"]),
+                    width="stretch",
+                    hide_index=True,
+                )
+            else:
+                st.info(
+                    "No v4.3 setup bundles matched the selected date, "
+                    "time, direction and setup filters."
+                )
+
+            st.markdown("#### Matching Interpretation")
+            st.caption(
+                "The resolver first selects one historical pipeline signal "
+                "inside the bundle window, then queries selection, opportunity, "
+                "Committee and queue records by that exact signal_id. Paper "
+                "orders are filtered by the same signal_id. EXACT_CHAIN_MATCH "
+                "is direct-ID evidence; STRONG_CHAIN_MATCH and "
+                "PARTIAL_CHAIN_MATCH are progressively weaker. "
+                "AMBIGUOUS_MATCH means multiple equally near pipeline signals."
+            )
+

@@ -96,88 +96,6 @@ def _safe_ranking(
     return rows
 
 
-
-def _row_identity(row: dict[str, object]) -> tuple[str, str, str]:
-    return (
-        str(row.get("signal_id") or ""),
-        str(row.get("candidate_id") or ""),
-        str(
-            row.get("candidate_symbol")
-            or row.get("tradingsymbol")
-            or ""
-        ),
-    )
-
-
-def _active_ranking_from_queue(
-    ranking: list[dict[str, object]],
-    active_queue: list[dict[str, object]],
-) -> list[dict[str, object]]:
-    # Only ranking rows backed by a currently active queue item are active.
-    if not active_queue:
-        return []
-
-    queue_signal_ids = {
-        str(row.get("signal_id") or "")
-        for row in active_queue
-        if str(row.get("signal_id") or "")
-    }
-    queue_candidate_ids = {
-        str(row.get("candidate_id") or "")
-        for row in active_queue
-        if str(row.get("candidate_id") or "")
-    }
-    queue_symbols = {
-        str(
-            row.get("candidate_symbol")
-            or row.get("tradingsymbol")
-            or ""
-        )
-        for row in active_queue
-        if str(
-            row.get("candidate_symbol")
-            or row.get("tradingsymbol")
-            or ""
-        )
-    }
-
-    filtered: list[dict[str, object]] = []
-    for row in ranking:
-        signal_id, candidate_id, symbol = _row_identity(row)
-        matches = (
-            (candidate_id and candidate_id in queue_candidate_ids)
-            or (
-                signal_id
-                and signal_id in queue_signal_ids
-                and (not queue_symbols or symbol in queue_symbols)
-            )
-            or (symbol and symbol in queue_symbols)
-        )
-        if matches and bool(row.get("eligible")):
-            filtered.append(row)
-
-    deduped: dict[tuple[str, str], dict[str, object]] = {}
-    for row in filtered:
-        signal_id, _, symbol = _row_identity(row)
-        key = (signal_id, symbol)
-        current = deduped.get(key)
-        if current is None or (
-            float(row.get("selection_score") or 0.0)
-            > float(current.get("selection_score") or 0.0)
-        ):
-            deduped[key] = row
-
-    result = list(deduped.values())
-    result.sort(
-        key=lambda row: (
-            float(row.get("selection_score") or 0.0),
-            float(row.get("candidate_score") or 0.0),
-        ),
-        reverse=True,
-    )
-    return result
-
-
 def _compact_trade_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
     return [
         {
@@ -387,17 +305,13 @@ def render_current_trades(database) -> None:
 
 @_fragment("10s")
 def render_candidates_and_queue(database, trading_date: str) -> None:
-    ranking_history = _safe_ranking(database, trading_date)
+    ranking = _safe_ranking(database, trading_date)
     queue = _safe_queue(database)
     active_queue = [
         row
         for row in queue
         if str(row.get("status") or "").upper() in ACTIVE_QUEUE_STATUSES
     ]
-    ranking = _active_ranking_from_queue(
-        ranking_history,
-        active_queue,
-    )
 
     st.markdown("### Candidates & Execution Queue")
     rank_tab, queue_tab = st.tabs(["Active Top 5", "Execution Queue"])
@@ -409,11 +323,7 @@ def render_candidates_and_queue(database, trading_date: str) -> None:
                 hide_index=True,
             )
         else:
-            st.caption(
-                "No candidates are attached to an active execution "
-                "queue item. Historical rankings remain available "
-                "under Advanced Details & Diagnostics."
-            )
+            st.caption("No active ranked candidates.")
     with queue_tab:
         if active_queue:
             st.dataframe(

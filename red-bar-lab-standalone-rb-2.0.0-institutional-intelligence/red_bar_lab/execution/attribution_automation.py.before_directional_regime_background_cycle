@@ -6,9 +6,6 @@ from red_bar_lab.execution.trend_automation import (
 from red_bar_lab.services.attribution_pipeline_reconciler import (
     AttributionPipelineReconciler,
 )
-from red_bar_lab.execution.directional_regime_background import (
-    DirectionalRegimeBackgroundCycle,
-)
 from red_bar_lab.execution.directional_regime_native_signal import (
     DirectionalNativeSignalDatabaseProxy,
 )
@@ -22,28 +19,6 @@ class AttributionAwarePaperAutomationService(
     The superclass remains the only execution authority. Reconciliation is
     database/file observation after the existing process has completed.
     """
-
-    def _refresh_directional_regime_background(self):
-        runs_root = getattr(self.settings, "runs_root", None)
-        if runs_root is None:
-            return {
-                "status": "UNAVAILABLE",
-                "reason": "RUNS_ROOT_UNAVAILABLE",
-            }
-        try:
-            result = DirectionalRegimeBackgroundCycle(
-                adapter=self.zerodha,
-                runs_root=runs_root,
-            ).run()
-            return result.as_record()
-        except Exception as exc:
-            return {
-                "status": "UNAVAILABLE",
-                "reason": (
-                    f"BACKGROUND_REFRESH_FAILED:"
-                    f"{type(exc).__name__}:{exc}"
-                ),
-            }
 
     def _reconcile_attribution(self):
         settings = self.settings
@@ -64,9 +39,6 @@ class AttributionAwarePaperAutomationService(
         ).reconcile()
 
     def process_new_signals(self, *args, **kwargs):
-        self._last_directional_regime_background_refresh = (
-            self._refresh_directional_regime_background()
-        )
         original_database = self.database
         runs_root = getattr(self.settings, "runs_root", None)
         if runs_root is not None:
@@ -74,7 +46,6 @@ class AttributionAwarePaperAutomationService(
                 original_database,
                 runs_root=runs_root,
                 merge_window_minutes=10,
-                enable_reference_signals=None,
             )
         try:
             result = super().process_new_signals(*args, **kwargs)
