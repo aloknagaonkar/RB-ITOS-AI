@@ -1504,6 +1504,12 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
                 hide_index=True,
             )
 
+            if audit_result["summary"].get("incomplete_sources"):
+                st.warning(
+                    "One or more source queries reached their configured "
+                    "limit. Those sources are marked result_complete=False."
+                )
+
             st.markdown("#### Historical Source Availability")
             st.dataframe(
                 _arrow_safe_rows(audit_result["sources"]),
@@ -1527,7 +1533,9 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
             st.markdown("#### Matching Interpretation")
             st.caption(
                 "EXACT_SIGNAL_ID is direct identifier evidence. "
-                "DIRECTION_AND_WINDOW is inferred historical alignment, "
-                "not proof that v4.3 caused the pipeline event."
+                "DIRECTION_AND_WINDOW is inferred historical alignment. "
+                "AMBIGUOUS_MATCH means multiple equally near candidates "
+                "were available. SESSION_TIME_UNAVAILABLE rows pass date "
+                "filtering but cannot prove intraday session alignment."
             )
 

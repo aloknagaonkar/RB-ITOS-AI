@@ -19,7 +19,10 @@ from red_bar_lab.intelligence.fresh_setup_signal_engine import (
 )
 from red_bar_lab.services.attribution_context import build_attribution_context
 from red_bar_lab.services.fresh_setup_bundle import build_setup_bundles
-from red_bar_lab.services.fresh_setup_bundle_store import FreshSetupBundleStore
+from red_bar_lab.services.fresh_setup_bundle_store import (
+    FreshSetupBundleStore,
+    canonical_bundle_identity,
+)
 from red_bar_lab.services.fresh_setup_signal_store import FreshSetupSignalStore
 from red_bar_lab.services.stateful_regime_store import StatefulRegimeStore
 from red_bar_lab.services.transition_sequence_store import TransitionSequenceStore
@@ -116,9 +119,14 @@ class HistoricalV43BundleBackfill:
             / f"{safe}.jsonl"
         )
 
+        existing_rows = bundle_store.read_all()
         existing_bundle_ids = {
             str(row.get("bundle_id") or "")
-            for row in bundle_store.read_all()
+            for row in existing_rows
+        }
+        existing_canonical = {
+            canonical_bundle_identity(row)
+            for row in existing_rows
         }
 
         result_rows: list[dict[str, object]] = []
@@ -269,6 +277,7 @@ class HistoricalV43BundleBackfill:
                 bundle_records = [
                     {
                         **bundle.as_record(),
+                        "instrument_key": request.instrument_key,
                         "historical_backfill": True,
                         "source_read_only": True,
                     }
@@ -294,12 +303,15 @@ class HistoricalV43BundleBackfill:
                     totals["bundles_inserted"] += inserted
                     for bundle in bundle_records:
                         bundle_id = str(bundle.get("bundle_id") or "")
-                        if bundle_id in existing_bundle_ids:
-                            totals[
-                                "bundles_skipped_existing"
-                            ] += 1
+                        canonical = canonical_bundle_identity(bundle)
+                        if (
+                            bundle_id in existing_bundle_ids
+                            or canonical in existing_canonical
+                        ):
+                            totals["bundles_skipped_existing"] += 1
                         else:
                             existing_bundle_ids.add(bundle_id)
+                            existing_canonical.add(canonical)
 
                 previous_snapshot = snapshot
                 previous_transition = transition_record
