@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 from uuid import uuid4
@@ -11,12 +11,6 @@ import pandas as pd
 from red_bar_lab.execution.exit_engine import PaperExitEngine
 from red_bar_lab.execution.directional_regime_reference import (
     DirectionalRegimeReferenceService,
-)
-from red_bar_lab.execution.directional_regime_policy import (
-    evaluate_directional_regime_policy,
-)
-from red_bar_lab.execution.dri_opportunity_context import (
-    resolve_opposite_red_bar,
 )
 from red_bar_lab.execution.candidate_lifecycle import CandidateLifecycleManager, MarketSessionManager
 from red_bar_lab.execution.institutional_execution import InstitutionalExecutionCommittee
@@ -116,8 +110,6 @@ class RedBarPaperAutomationService:
         minimum_opportunity_health: float = 75.0,
         enable_directional_regime_reference: bool = True,
         directional_regime_maximum_age_minutes: int = 30,
-        directional_regime_aligned_bonus: float = 5.0,
-        hold_on_directional_regime_conflict: bool = True,
     ):
         self.zerodha = zerodha
         self.database = database
@@ -125,12 +117,6 @@ class RedBarPaperAutomationService:
         self.underlying_name = underlying_name
         self.enable_directional_regime_reference = bool(
             enable_directional_regime_reference
-        )
-        self.directional_regime_aligned_bonus = float(
-            directional_regime_aligned_bonus
-        )
-        self.hold_on_directional_regime_conflict = bool(
-            hold_on_directional_regime_conflict
         )
         self.directional_regime_reference = (
             DirectionalRegimeReferenceService(
@@ -558,10 +544,6 @@ class RedBarPaperAutomationService:
             )
 
             directional_reference = None
-            directional_policy = evaluate_directional_regime_policy(
-                "UNAVAILABLE",
-                aligned_bonus=self.directional_regime_aligned_bonus,
-            )
             if self.directional_regime_reference is not None:
                 try:
                     directional_reference = (
@@ -573,14 +555,6 @@ class RedBarPaperAutomationService:
                             at_time=(
                                 confirmation_timestamp
                                 or now.isoformat()
-                            ),
-                        )
-                    )
-                    directional_policy = (
-                        evaluate_directional_regime_policy(
-                            directional_reference.status,
-                            aligned_bonus=(
-                                self.directional_regime_aligned_bonus
                             ),
                         )
                     )
@@ -599,10 +573,7 @@ class RedBarPaperAutomationService:
                             f"alignment_score="
                             f"{directional_reference.alignment_score:.1f}; "
                             f"reason={directional_reference.reason}; "
-                            f"policy_action={directional_policy.action}; "
-                            f"candidate_bonus="
-                            f"{directional_policy.candidate_score_bonus:.1f}; "
-                            "mode=ACTIVE_CONFIRMATION_FILTER"
+                            "mode=REFERENCE_ONLY"
                         ),
                         score=(
                             directional_reference.alignment_score
@@ -614,39 +585,6 @@ class RedBarPaperAutomationService:
                         f"unavailable for {signal_id}: "
                         f"{type(exc).__name__}: {exc}"
                     )
-            if (
-                directional_policy.block_execution
-                and self.hold_on_directional_regime_conflict
-            ):
-                reason = directional_policy.reason
-                diagnostic["final_decision"] = "HOLD"
-                diagnostic["reason"] = reason
-                self.database.insert_paper_signal_diagnostic(
-                    diagnostic
-                )
-                self.database.expire_execution_queue_for_signal(
-                    signal_id=signal_id,
-                    reason=reason,
-                )
-                self._record_state(
-                    signal_id=signal_id,
-                    state="DIRECTIONAL_REGIME_HOLD",
-                    detail=(
-                        f"status={directional_policy.status}; "
-                        f"action={directional_policy.action}; "
-                        f"reason={reason}; "
-                        "new_candidate_creation=BLOCKED; "
-                        "paper_order_creation=BLOCKED"
-                    ),
-                    score=(
-                        directional_reference.alignment_score
-                        if directional_reference is not None
-                        else 0.0
-                    ),
-                )
-                skipped += 1
-                continue
-
             if not previous_events:
                 self._record_state(
                     signal_id=signal_id,
@@ -667,56 +605,6 @@ class RedBarPaperAutomationService:
                     direction=str(signal["direction"]),
                     spot_price=float(spot),
                 )
-                if directional_policy.candidate_score_bonus > 0:
-                    scores = [
-                        replace(
-                            candidate,
-                            total_score=(
-                                directional_policy.adjusted_score(
-                                    candidate.total_score
-                                )
-                            ),
-                            reason=(
-                                f"{candidate.reason}; "
-                                f"DIRECTIONAL_REGIME_BONUS="
-                                f"{directional_policy.candidate_score_bonus:.1f}"
-                            ),
-                        )
-                        for candidate in scores
-                    ]
-                    self._record_state(
-                        signal_id=signal_id,
-                        state="DIRECTIONAL_REGIME_BONUS_APPLIED",
-                        detail=(
-                            f"status={directional_policy.status}; "
-                            f"bonus={directional_policy.candidate_score_bonus:.1f}; "
-                            "score_cap=100"
-                        ),
-                        score=(scores[0].total_score if scores else None),
-                    )
-                if str(
-                    signal.get("entry_stage") or ""
-                ) == "EARLY_1M":
-                    candidate_limit = max(
-                        1,
-                        int(signal.get("candidate_limit") or 1),
-                    )
-                    scores = scores[:candidate_limit]
-                    self._record_state(
-                        signal_id=signal_id,
-                        state=(
-                            "EARLY_1M_CANDIDATE_LIMIT_APPLIED"
-                        ),
-                        detail=(
-                            f"candidate_limit={candidate_limit}; "
-                            "reason=EARLY_ENTRY_RISK_CONTROL"
-                        ),
-                        score=(
-                            scores[0].total_score
-                            if scores
-                            else None
-                        ),
-                    )
                 scored_count += len(scores)
                 if not scores:
                     diagnostic["reason"] = "NO_ELIGIBLE_CE_PE_CANDIDATE"
@@ -732,9 +620,18 @@ class RedBarPaperAutomationService:
                     "score_ok": best.total_score >= self.minimum_candidate_score,
                 })
 
-                opposite_red_bar = resolve_opposite_red_bar(
-                    signal=signal,
-                    signals=signals,
+                opposite_direction = (
+                    "BEARISH"
+                    if str(signal["direction"]).upper() == "BULLISH"
+                    else "BULLISH"
+                )
+                opposite_red_bar = any(
+                    str(item.get("direction") or "").upper() == opposite_direction
+                    and bool(item.get("confirmation_timestamp"))
+                    and str(item.get("confirmation_timestamp") or "")
+                    > str(confirmation_timestamp or "")
+                    for item in signals
+                    if str(item.get("signal_id") or "") != signal_id
                 )
                 entry_mode = (
                     "OPPORTUNITY_EXTENSION" if stale_for_extension else "FRESH_SIGNAL"

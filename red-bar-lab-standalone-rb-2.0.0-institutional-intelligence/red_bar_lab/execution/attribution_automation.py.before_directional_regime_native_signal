@@ -1,0 +1,43 @@
+from __future__ import annotations
+
+from red_bar_lab.execution.trend_automation import (
+    TrendAwarePaperAutomationService,
+)
+from red_bar_lab.services.attribution_pipeline_reconciler import (
+    AttributionPipelineReconciler,
+)
+
+
+class AttributionAwarePaperAutomationService(
+    TrendAwarePaperAutomationService
+):
+    """Run the existing paper workflow, then reconcile v4.3 attribution.
+
+    The superclass remains the only execution authority. Reconciliation is
+    database/file observation after the existing process has completed.
+    """
+
+    def _reconcile_attribution(self):
+        settings = self.settings
+        runs_root = getattr(settings, "runs_root", None)
+        if runs_root is None:
+            return {
+                "ledgers_seen": 0,
+                "candidate_links": 0,
+                "opportunity_links": 0,
+                "committee_links": 0,
+                "trade_entry_links": 0,
+                "trade_exit_links": 0,
+            }
+        raw_database = getattr(self, "_raw_database", self.database)
+        return AttributionPipelineReconciler(
+            database=raw_database,
+            runs_root=runs_root,
+        ).reconcile()
+
+    def process_new_signals(self, *args, **kwargs):
+        result = super().process_new_signals(*args, **kwargs)
+        self._last_attribution_reconciliation = (
+            self._reconcile_attribution()
+        )
+        return result

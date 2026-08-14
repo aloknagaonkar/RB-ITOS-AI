@@ -103,45 +103,6 @@ class DirectionalRegimeReferenceService:
             rows.extend(self._read_jsonl(path))
         return rows
 
-
-    def _signal_rows(self) -> list[dict[str, object]]:
-        folder = self.runs_root / "fresh_setup_signals_v43"
-        rows: list[dict[str, object]] = []
-        if not folder.exists():
-            return rows
-        for path in sorted(folder.glob("*.jsonl")):
-            rows.extend(self._read_jsonl(path))
-        return rows
-
-    def _enriched_bundle_rows(self) -> list[dict[str, object]]:
-        signal_index = {
-            str(row.get("signal_id") or ""): row
-            for row in self._signal_rows()
-            if str(row.get("signal_id") or "")
-        }
-        enriched_rows: list[dict[str, object]] = []
-        for original in self._bundle_rows():
-            row = dict(original)
-            primary_id = str(row.get("primary_signal_id") or "")
-            primary = signal_index.get(primary_id)
-            if primary is not None:
-                field_map = {
-                    "fresh_until": "fresh_until",
-                    "trigger_level": "trigger_level",
-                    "invalidation_level": "invalidation_level",
-                    "primary_setup_type": "setup_type",
-                    "red_bar_alignment": "red_bar_alignment",
-                    "detected_at": "detected_at",
-                    "direction": "direction",
-                }
-                for bundle_field, signal_field in field_map.items():
-                    if row.get(bundle_field) in (None, ""):
-                        value = primary.get(signal_field)
-                        if value not in (None, ""):
-                            row[bundle_field] = value
-            enriched_rows.append(row)
-        return enriched_rows
-
     def _regime_rows(self) -> list[dict[str, object]]:
         folder = self.runs_root / "stateful_regime_v43"
         rows: list[dict[str, object]] = []
@@ -226,7 +187,7 @@ class DirectionalRegimeReferenceService:
         )
 
         candidates = []
-        for row in self._enriched_bundle_rows():
+        for row in self._bundle_rows():
             row_instrument = str(row.get("instrument_key") or "")
             if row_instrument and row_instrument != instrument_key:
                 continue

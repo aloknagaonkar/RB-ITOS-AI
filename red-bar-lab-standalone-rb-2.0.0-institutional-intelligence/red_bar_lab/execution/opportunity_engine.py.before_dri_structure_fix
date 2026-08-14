@@ -151,30 +151,6 @@ class OpportunityIntelligenceEngine:
     ) -> OpportunityEvaluation:
         direction = str(signal.get("direction") or "").upper()
         signal_id = str(signal.get("signal_id") or "")
-        signal_source = str(
-            signal.get("signal_source")
-            or signal.get("source")
-            or ""
-        ).upper()
-        is_directional_regime = (
-            signal_source == "DIRECTIONAL_REGIME_INTELLIGENCE"
-            or signal_id.startswith("DRI-")
-        )
-        red_bar_alignment = str(
-            signal.get("red_bar_alignment") or ""
-        ).upper()
-        effective_opposite_red_bar = bool(
-            opposite_red_bar_confirmed
-        )
-        if is_directional_regime:
-            effective_opposite_red_bar = red_bar_alignment in {
-                "OPPOSITE",
-                "OPPOSITE_DIRECTION",
-                "CONFLICT",
-                "BEARISH_FOR_BULLISH",
-                "BULLISH_FOR_BEARISH",
-            }
-
         high = _num(signal.get("confirmation_high"))
         low = _num(signal.get("confirmation_low"))
         close = _num(
@@ -232,7 +208,7 @@ class OpportunityIntelligenceEngine:
         blockers: list[str] = []
         if not structure_valid:
             blockers.append("STRUCTURE_INVALID")
-        if effective_opposite_red_bar:
+        if opposite_red_bar_confirmed:
             blockers.append("OPPOSITE_RED_BAR")
         # REWARD_CONSUMED intentionally removed from execution blockers.
         if spread_score <= 0:
@@ -266,7 +242,7 @@ class OpportunityIntelligenceEngine:
             reward_remaining_pct=reward_remaining,
             move_consumed_pct=move_consumed,
             structure_valid=structure_valid,
-            opposite_red_bar=bool(effective_opposite_red_bar),
+            opposite_red_bar=bool(opposite_red_bar_confirmed),
             candidate_score=round(candidate_score, 2),
             spread_score=round(spread_score, 2),
             liquidity_score=round(liquidity_score, 2),

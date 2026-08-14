@@ -15,9 +15,6 @@ from red_bar_lab.execution.directional_regime_reference import (
 from red_bar_lab.execution.directional_regime_policy import (
     evaluate_directional_regime_policy,
 )
-from red_bar_lab.execution.dri_opportunity_context import (
-    resolve_opposite_red_bar,
-)
 from red_bar_lab.execution.candidate_lifecycle import CandidateLifecycleManager, MarketSessionManager
 from red_bar_lab.execution.institutional_execution import InstitutionalExecutionCommittee
 from red_bar_lab.execution.opportunity_engine import OpportunityIntelligenceEngine
@@ -732,9 +729,18 @@ class RedBarPaperAutomationService:
                     "score_ok": best.total_score >= self.minimum_candidate_score,
                 })
 
-                opposite_red_bar = resolve_opposite_red_bar(
-                    signal=signal,
-                    signals=signals,
+                opposite_direction = (
+                    "BEARISH"
+                    if str(signal["direction"]).upper() == "BULLISH"
+                    else "BULLISH"
+                )
+                opposite_red_bar = any(
+                    str(item.get("direction") or "").upper() == opposite_direction
+                    and bool(item.get("confirmation_timestamp"))
+                    and str(item.get("confirmation_timestamp") or "")
+                    > str(confirmation_timestamp or "")
+                    for item in signals
+                    if str(item.get("signal_id") or "") != signal_id
                 )
                 entry_mode = (
                     "OPPORTUNITY_EXTENSION" if stale_for_extension else "FRESH_SIGNAL"
