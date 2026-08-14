@@ -515,34 +515,10 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
                         target_pct=25.0,
                         option_chain_sync=cache_option_sync,
                     )
-                    dri_progress = st.progress(
-                        0.0,
-                        text="Preparing cached DRI replay-day data...",
-                    )
-                    dri_status = st.empty()
-
-                    def _update_dri_progress(done, total, stage, elapsed):
-                        ratio = min(1.0, done / total) if total else 0.0
-                        dri_progress.progress(
-                            ratio,
-                            text=f"DRI opportunity {done} of {total}: {stage}",
-                        )
-                        dri_status.caption(
-                            f"Current stage: {stage} · Elapsed: {elapsed:.1f}s"
-                        )
-
-                    dri_replay_service = HistoricalDRIDecisionReplayService(
-                        dri_policy
-                    )
                     st.session_state["historical_dri_decision_result"] = (
-                        dri_replay_service.run_day(
-                            instrument_key,
-                            replay_date,
-                            progress_callback=_update_dri_progress,
-                        )
-                    )
-                    st.session_state["historical_dri_replay_timing"] = (
-                        dri_replay_service.last_timing
+                        HistoricalDRIDecisionReplayService(
+                            dri_policy
+                        ).run_day(instrument_key, replay_date)
                     )
                 else:
                     st.session_state.pop(
@@ -623,17 +599,6 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
                         "then reuses the existing Opportunity, Committee, "
                         "Portfolio and Exit engines."
                     )
-                    replay_timing = st.session_state.get(
-                        "historical_dri_replay_timing"
-                    ) or {}
-                    if replay_timing:
-                        st.caption(
-                            "Replay performance — "
-                            f"total {replay_timing.get('total_seconds', 0):.1f}s · "
-                            f"preload {replay_timing.get('preload_seconds', 0):.1f}s · "
-                            f"cached contracts "
-                            f"{replay_timing.get('cached_contract_series', 0)}"
-                        )
                     x1, x2, x3, x4, x5, x6 = st.columns(6)
                     x1.metric("Bundles", dri_decisions.active_signals)
                     x2.metric("TAKE", dri_decisions.approved)

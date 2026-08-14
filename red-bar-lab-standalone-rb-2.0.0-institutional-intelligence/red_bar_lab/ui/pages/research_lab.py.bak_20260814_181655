@@ -1,5 +1,4 @@
 from red_bar_lab.services.historical_dri_replay import detect_historical_dri_events
-from red_bar_lab.services.historical_dri_decision_replay import HistoricalDRIDecisionReplayService
 from red_bar_lab.services.replay_opportunity_accounting import consolidate_replay_rows
 from red_bar_lab.ui._shared import *
 
@@ -504,50 +503,6 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
                     "sources": tuple(replay_sources),
                     "events": dri_events,
                 }
-
-                if "DRI_EARLY" in replay_sources:
-                    dri_policy = HistoricalDecisionReplayService(
-                        replay_reader,
-                        freshness_seconds=180,
-                        hard_expiry_seconds=900,
-                        minimum_confidence_pct=70.0,
-                        stop_loss_pct=15.0,
-                        target_pct=25.0,
-                        option_chain_sync=cache_option_sync,
-                    )
-                    dri_progress = st.progress(
-                        0.0,
-                        text="Preparing cached DRI replay-day data...",
-                    )
-                    dri_status = st.empty()
-
-                    def _update_dri_progress(done, total, stage, elapsed):
-                        ratio = min(1.0, done / total) if total else 0.0
-                        dri_progress.progress(
-                            ratio,
-                            text=f"DRI opportunity {done} of {total}: {stage}",
-                        )
-                        dri_status.caption(
-                            f"Current stage: {stage} · Elapsed: {elapsed:.1f}s"
-                        )
-
-                    dri_replay_service = HistoricalDRIDecisionReplayService(
-                        dri_policy
-                    )
-                    st.session_state["historical_dri_decision_result"] = (
-                        dri_replay_service.run_day(
-                            instrument_key,
-                            replay_date,
-                            progress_callback=_update_dri_progress,
-                        )
-                    )
-                    st.session_state["historical_dri_replay_timing"] = (
-                        dri_replay_service.last_timing
-                    )
-                else:
-                    st.session_state.pop(
-                        "historical_dri_decision_result", None
-                    )
             except ValueError as exc:
                 st.warning(str(exc))
             except Exception as exc:
@@ -604,89 +559,10 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
                     )
                 if "DRI_CONFIRMED" in selected_sources:
                     st.info(
-                        "DRI_CONFIRMED remains reserved for progressive 5-minute "
-                        "enrichment of the same EARLY bundle."
-                    )
-
-                dri_decisions = st.session_state.get(
-                    "historical_dri_decision_result"
-                )
-                if (
-                    dri_decisions is not None
-                    and dri_decisions.trading_date == replay_date
-                ):
-                    st.markdown(
-                        "##### DRI Rank-1 Committee & Exit Replay"
-                    )
-                    st.caption(
-                        "Each DRI bundle selects exactly one Rank-1 CE/PE, "
-                        "then reuses the existing Opportunity, Committee, "
-                        "Portfolio and Exit engines."
-                    )
-                    replay_timing = st.session_state.get(
-                        "historical_dri_replay_timing"
-                    ) or {}
-                    if replay_timing:
-                        st.caption(
-                            "Replay performance — "
-                            f"total {replay_timing.get('total_seconds', 0):.1f}s · "
-                            f"preload {replay_timing.get('preload_seconds', 0):.1f}s · "
-                            f"cached contracts "
-                            f"{replay_timing.get('cached_contract_series', 0)}"
-                        )
-                    x1, x2, x3, x4, x5, x6 = st.columns(6)
-                    x1.metric("Bundles", dri_decisions.active_signals)
-                    x2.metric("TAKE", dri_decisions.approved)
-                    x3.metric("WAIT", dri_decisions.waiting)
-                    x4.metric("BLOCK", dri_decisions.blocked)
-                    x5.metric("Wins", dri_decisions.winners)
-                    x6.metric("Losses", dri_decisions.losers)
-                    y1, y2, y3, y4 = st.columns(4)
-                    y1.metric(
-                        "False Positives",
-                        dri_decisions.false_positives,
-                    )
-                    y2.metric(
-                        "Correct Skips",
-                        dri_decisions.correct_skips,
-                    )
-                    y3.metric(
-                        "Accuracy",
-                        f"{dri_decisions.decision_accuracy_pct:.1f}%",
-                    )
-                    y4.metric(
-                        "Net Option Points",
-                        f"{dri_decisions.net_points:.2f}",
-                    )
-                    _st_dataframe_arrow_safe(
-                        [
-                            {
-                                "Time": row.timestamp,
-                                "Bundle": row.signal_id,
-                                "Setup": row.level_type,
-                                "Direction": row.direction,
-                                "Option": row.option_side,
-                                "Rank-1 Contract": row.candidate_symbol,
-                                "Rank": row.candidate_rank,
-                                "Candidate Score": row.candidate_score,
-                                "Opportunity Health": (
-                                    row.opportunity_health
-                                ),
-                                "Committee": row.execution,
-                                "Final %": row.final_confidence_pct,
-                                "Portfolio": row.portfolio_status,
-                                "Entry": row.option_entry_price,
-                                "Exit": row.option_exit_price,
-                                "Option Return %": row.option_return_pct,
-                                "Exit Reason": row.exit_reason,
-                                "Outcome": row.outcome_result,
-                                "Verdict": row.verdict,
-                                "Fidelity": row.data_fidelity,
-                            }
-                            for row in dri_decisions.rows
-                        ],
-                        width="stretch",
-                        hide_index=True,
+                        "DRI_CONFIRMED is visible as a replay source, but progressive "
+                        "5-minute enrichment is not yet used for Committee execution in "
+                        "this increment. It will reinforce the same EARLY opportunity "
+                        "rather than create a duplicate trade."
                     )
 
         replay_result = st.session_state.get("historical_decision_replay_result")

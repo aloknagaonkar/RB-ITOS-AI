@@ -1,0 +1,508 @@
+from __future__ import annotations
+
+from datetime import date
+from time import perf_counter
+from typing import Callable
+import pandas as pd
+
+from red_bar_lab.execution.candidate_lifecycle import MarketSessionManager
+from red_bar_lab.execution.portfolio_manager import PortfolioCandidate
+from red_bar_lab.services.historical_decision_replay import (
+    DecisionReplayRow,
+    HistoricalDecisionReplayResult,
+    HistoricalDecisionReplayService,
+)
+from red_bar_lab.services.historical_dri_replay import detect_historical_dri_events
+
+IST = "Asia/Kolkata"
+
+
+class HistoricalDRIDecisionReplayService:
+    """Additive DRI-to-existing-policy replay adapter.
+
+    One DRI event is one bundle and one Rank-1 candidate. Future option candles
+    are used only after the entry decision has been frozen.
+    """
+
+    def __init__(self, base: HistoricalDecisionReplayService) -> None:
+        if base.option_chain_sync is None:
+            raise ValueError("Point-in-time option-chain data is required.")
+        self.base = base
+        self.last_timing: dict[str, object] = {}
+
+    def run_day(
+        self,
+        instrument_key: str,
+        trading_date: date,
+        progress_callback: Callable[[int, int, str, float], None] | None = None,
+    ):
+        started = perf_counter()
+        coverage = self.base.option_chain_sync.validate_day(
+            instrument_key, trading_date
+        )
+        if not coverage.replay_ready:
+            raise ValueError(
+                f"Historical option replay is not ready for {trading_date}: "
+                f"{coverage.fidelity}"
+            )
+
+        candles = self.base.historical.read_day(
+            instrument_key, trading_date, interval_minutes=1
+        )
+        if candles is None or candles.empty:
+            raise ValueError(f"No cached 1-minute candles for {trading_date}")
+
+        events = detect_historical_dri_events(candles)
+        underlying = self.base._to_ist(candles)
+
+        # Preload replay-day option data once. The previous implementation
+        # reread/reconstructed every contract for every DRI event.
+        preload_started = perf_counter()
+        sync = self.base.option_chain_sync
+        live_mode = coverage.data_source == "LIVE_MARKET_CAPTURE"
+        live_snapshots = tuple(
+            sync._live_snapshots(instrument_key, trading_date)
+        ) if live_mode else ()
+        live_series_cache: dict[str, pd.DataFrame] = {}
+        stored_contracts: list[dict[str, object]] = []
+        stored_series: dict[str, pd.DataFrame] = {}
+        if not live_mode:
+            manifest = sync.store.read_manifest(instrument_key, trading_date)
+            stored_contracts = [
+                dict(raw)
+                for raw in (manifest.get("contracts") or [])
+                if isinstance(raw, dict)
+            ]
+            for raw in stored_contracts:
+                key = sync._contract_key(raw)
+                if not key:
+                    continue
+                frame = sync.store.read_candles(
+                    instrument_key, trading_date, key
+                )
+                if frame is not None and not frame.empty:
+                    stored_series[key] = frame.reset_index(drop=True)
+        preload_seconds = perf_counter() - preload_started
+
+        def _prior(frame: pd.DataFrame, moment: pd.Timestamp) -> pd.DataFrame:
+            if frame is None or frame.empty or "timestamp" not in frame.columns:
+                return pd.DataFrame()
+            ts = pd.to_datetime(frame["timestamp"], errors="coerce", utc=True)
+            result = frame.loc[ts <= moment.tz_convert("UTC")]
+            return result.reset_index(drop=True)
+
+        def point_in_time_contracts(moment: pd.Timestamp):
+            if not live_mode:
+                result = []
+                for raw in stored_contracts:
+                    key = sync._contract_key(raw)
+                    full = stored_series.get(key)
+                    if full is None:
+                        continue
+                    prior = _prior(full, moment)
+                    if not prior.empty:
+                        result.append((raw, prior, full))
+                return result
+
+            prior_snapshots = [s for s in live_snapshots if s[0] <= moment]
+            if not prior_snapshots:
+                return []
+            latest_ts, latest_meta, latest_chain = prior_snapshots[-1]
+            if (moment - latest_ts).total_seconds() > 180:
+                return []
+            result = []
+            for _, chain_row in latest_chain.iterrows():
+                for side in ("CE", "PE"):
+                    raw = sync._live_contract_row(
+                        chain_row,
+                        side,
+                        str(latest_meta.get("option_expiry") or "") or None,
+                    )
+                    key = sync._contract_key(raw)
+                    strike = sync._strike(raw)
+                    cache_key = f"{key}|{side}|{strike:.6f}"
+                    full = live_series_cache.get(cache_key)
+                    if full is None:
+                        full = sync._live_contract_series(
+                            live_snapshots,
+                            instrument_key=key,
+                            strike=strike,
+                            side=side,
+                        ).reset_index(drop=True)
+                        live_series_cache[cache_key] = full
+                    prior = _prior(full, moment)
+                    if not prior.empty:
+                        result.append((raw, prior, full))
+            return result
+
+        rows = []
+        admitted = 0
+        watchlisted = 0
+
+        total_events = len(events)
+        if progress_callback:
+            progress_callback(
+                0, total_events, "Replay-day option data loaded",
+                perf_counter() - started,
+            )
+
+        for event_index, event in enumerate(events, start=1):
+            if progress_callback:
+                progress_callback(
+                    event_index, total_events,
+                    f"Processing {event.setup_type}",
+                    perf_counter() - started,
+                )
+            moment = pd.Timestamp(event.timestamp)
+            if moment.tzinfo is None:
+                moment = moment.tz_localize(IST)
+            else:
+                moment = moment.tz_convert(IST)
+
+            direction = event.direction
+            option_side = "CE" if direction == "BULLISH" else "PE"
+            known = underlying.loc[underlying["timestamp"] <= moment]
+            spot = (
+                float(known.iloc[-1]["close"])
+                if not known.empty
+                else float(event.trigger_level)
+            )
+
+            signal = {
+                "signal_id": event.event_id,
+                "bundle_id": event.event_id,
+                "source": event.source,
+                "stage": event.stage,
+                "setup_type": event.setup_type,
+                "direction": direction,
+                "confirmation_high": (
+                    event.trigger_level
+                    if direction == "BULLISH"
+                    else event.invalidation_level
+                ),
+                "confirmation_low": (
+                    event.invalidation_level
+                    if direction == "BULLISH"
+                    else event.trigger_level
+                ),
+                "confirmation_close": event.trigger_level,
+                "underlying_entry": event.trigger_level,
+                "trigger_level": event.trigger_level,
+                "invalidation_level": event.invalidation_level,
+                "fresh_until": event.fresh_until,
+            }
+            signal.update(self.base._point_in_time_ema10(candles, moment))
+            metrics = self.base._point_in_time_metrics(
+                candles, moment, direction
+            )
+            lifecycle = self.base.lifecycle.evaluate(
+                signal_id=event.event_id,
+                confirmation_timestamp=event.timestamp,
+                now=moment.to_pydatetime(),
+            )
+            session = MarketSessionManager.classify(moment.to_pydatetime())
+
+            candidates = []
+            full_by_symbol = {}
+            for raw, prior, full in point_in_time_contracts(moment):
+                candidate = self.base._historical_candidate(raw, prior)
+                if candidate is None:
+                    continue
+                if candidate.contract.option_type != option_side:
+                    continue
+                candidates.append(candidate)
+                full_by_symbol[candidate.contract.tradingsymbol] = full
+
+            candidates.sort(
+                key=lambda c: (
+                    c.total_score,
+                    -abs(c.contract.strike - spot),
+                ),
+                reverse=True,
+            )
+            rank1 = candidates[0] if candidates else None
+
+            if rank1 is None:
+                rows.append(
+                    DecisionReplayRow(
+                        signal_id=event.event_id,
+                        timestamp=event.timestamp,
+                        level_type=event.setup_type,
+                        direction=direction,
+                        option_side=option_side,
+                        lifecycle_state=lifecycle.state,
+                        lifecycle_action=lifecycle.action,
+                        market_session=session.code,
+                        primary_confidence_pct=0.0,
+                        shadow_decision="WAIT",
+                        shadow_confidence_pct=50.0,
+                        agreement="INFORMATIONAL",
+                        shadow_adjustment_pct=0.0,
+                        final_confidence_pct=0.0,
+                        expectancy_pct=0.0,
+                        decision="WAIT",
+                        execution="WOULD_WAIT",
+                        blocker="NO_RANK1_OPTION_AT_TIMESTAMP",
+                        data_fidelity=coverage.fidelity,
+                        vwap_ok=metrics["vwap_ok"],
+                        ema_ok=metrics["ema_ok"],
+                        momentum_ok=metrics["momentum_ok"],
+                        volume_score=float(metrics["volume_score"]),
+                        oi_score=float(metrics["oi_score"]),
+                        outcome_points=None,
+                        outcome_result="UNKNOWN",
+                        verdict="UNRESOLVED",
+                        learning_attribution="OPTION_DATA_GAP",
+                        learning_recommendation=(
+                            "No point-in-time Rank-1 option was available."
+                        ),
+                    )
+                )
+                continue
+
+            opportunity = self.base.opportunity_engine.evaluate(
+                signal=signal,
+                candidate=rank1,
+                spot_price=spot,
+                signal_age_seconds=0.0,
+                opposite_red_bar_confirmed=False,
+                freshness_seconds=180.0,
+            )
+            selection = self.base.selection_engine.evaluate(
+                candidate=rank1,
+                candidate_rank=1,
+                opportunity=opportunity,
+                historical_orders=(),
+                entry_mode=opportunity.entry_mode,
+                minimum_candidate_score=65.0,
+                stop_loss_pct=self.base.stop_loss_pct,
+                target_pct=self.base.target_pct,
+                require_opportunity_gate=False,
+            )
+            committee = self.base.execution_committee.evaluate(
+                candidate=rank1,
+                selection=selection,
+                opportunity=opportunity,
+                historical_orders=(),
+                current_shadow=None,
+                historical_shadow=(),
+                stop_loss_pct=self.base.stop_loss_pct,
+                target_pct=self.base.target_pct,
+            )
+
+            portfolio = []
+            queue_id = (
+                f"HDRI-{event.event_id}-"
+                f"{rank1.contract.instrument_token}"
+            )
+            if committee.eligible:
+                portfolio = self.base.portfolio_manager.admit(
+                    [
+                        PortfolioCandidate(
+                            queue_id=queue_id,
+                            signal_id=event.event_id,
+                            symbol=rank1.contract.tradingsymbol,
+                            option_type=rank1.contract.option_type,
+                            rank=1,
+                            candidate_score=rank1.total_score,
+                            opportunity_health=opportunity.opportunity_score,
+                            expectancy_pct=committee.expected_value_pct,
+                            reference_price=float(rank1.ltp or 0.0),
+                            stop_loss_pct=self.base.stop_loss_pct,
+                            quantity=rank1.contract.lot_size,
+                        )
+                    ],
+                    initial_capital=self.base.initial_capital,
+                    current_open_trades=0,
+                    current_deployed_capital=0.0,
+                    current_risk=0.0,
+                    current_ce=0,
+                    current_pe=0,
+                )
+            admission = portfolio[0] if portfolio else None
+
+            execution = "WOULD_WAIT"
+            decision = "WAIT"
+            blocker = committee.reason
+            portfolio_status = "NOT_QUALIFIED"
+            portfolio_reason = committee.reason
+
+            if not session.entry_allowed:
+                execution = "WOULD_BLOCK"
+                decision = "BLOCKED"
+                blocker = f"MARKET_SESSION_{session.code}"
+                portfolio_status = "BLOCKED"
+                portfolio_reason = blocker
+            elif committee.eligible and admission and admission.admitted:
+                execution = "WOULD_TAKE"
+                decision = "APPROVED"
+                blocker = "NONE"
+                portfolio_status = "APPROVED"
+                portfolio_reason = admission.reason
+                admitted += 1
+            elif committee.eligible and admission:
+                portfolio_status = "WATCHLIST"
+                portfolio_reason = admission.reason
+                blocker = admission.reason
+                watchlisted += 1
+
+            exit_info = {
+                "entry": rank1.ltp,
+                "exit": None,
+                "return_pct": None,
+                "reason": "NO_FUTURE_OPTION_CANDLES",
+            }
+            full = full_by_symbol.get(
+                rank1.contract.tradingsymbol, pd.DataFrame()
+            )
+            if full is not None and not full.empty:
+                exit_info = self.base._simulate_exit(
+                    candidate=rank1,
+                    all_candles=full,
+                    entry_moment=moment.to_pydatetime(),
+                    signal=signal,
+                    underlying=candles,
+                )
+
+            ret = exit_info.get("return_pct")
+            if ret is None:
+                outcome = "UNKNOWN"
+                points = None
+            else:
+                points = float(exit_info.get("exit") or 0.0) - float(
+                    exit_info.get("entry") or 0.0
+                )
+                outcome = (
+                    "WIN" if ret > 0 else "LOSS" if ret < 0 else "BREAKEVEN"
+                )
+
+            verdict = self.base._verdict(execution, outcome)
+            attribution, recommendation = self.base._learning_attribution(
+                verdict=verdict,
+                blocker=blocker,
+                shadow_decision="WAIT",
+                shadow_adjustment=0.0,
+                vwap_ok=metrics["vwap_ok"],
+                ema_ok=metrics["ema_ok"],
+                momentum_ok=metrics["momentum_ok"],
+            )
+
+            rows.append(
+                DecisionReplayRow(
+                    signal_id=event.event_id,
+                    timestamp=event.timestamp,
+                    level_type=event.setup_type,
+                    direction=direction,
+                    option_side=option_side,
+                    lifecycle_state=lifecycle.state,
+                    lifecycle_action=lifecycle.action,
+                    market_session=session.code,
+                    primary_confidence_pct=committee.primary_confidence_pct,
+                    shadow_decision="WAIT",
+                    shadow_confidence_pct=50.0,
+                    agreement="INFORMATIONAL",
+                    shadow_adjustment_pct=0.0,
+                    final_confidence_pct=committee.execution_probability_pct,
+                    expectancy_pct=committee.expected_value_pct,
+                    decision=decision,
+                    execution=execution,
+                    blocker=blocker,
+                    data_fidelity=coverage.fidelity,
+                    vwap_ok=metrics["vwap_ok"],
+                    ema_ok=metrics["ema_ok"],
+                    momentum_ok=metrics["momentum_ok"],
+                    volume_score=rank1.volume_score,
+                    oi_score=rank1.oi_score,
+                    outcome_points=points,
+                    outcome_result=outcome,
+                    verdict=verdict,
+                    learning_attribution=attribution,
+                    learning_recommendation=recommendation,
+                    candidate_symbol=rank1.contract.tradingsymbol,
+                    candidate_rank=1,
+                    candidate_score=rank1.total_score,
+                    opportunity_health=opportunity.opportunity_score,
+                    portfolio_status=portfolio_status,
+                    portfolio_reason=portfolio_reason,
+                    exit_reason=exit_info.get("reason"),
+                    option_entry_price=exit_info.get("entry"),
+                    option_exit_price=exit_info.get("exit"),
+                    option_return_pct=ret,
+                    outcome_basis=(
+                        "EXECUTED_EXIT_ENGINE"
+                        if execution == "WOULD_TAKE"
+                        else "COUNTERFACTUAL_EXIT_ENGINE"
+                    ),
+                )
+            )
+
+        approved = sum(r.execution == "WOULD_TAKE" for r in rows)
+        waiting = sum(r.execution == "WOULD_WAIT" for r in rows)
+        blocked = sum(r.execution == "WOULD_BLOCK" for r in rows)
+        winners = sum(
+            r.execution == "WOULD_TAKE" and r.outcome_result == "WIN"
+            for r in rows
+        )
+        losers = sum(
+            r.execution == "WOULD_TAKE" and r.outcome_result == "LOSS"
+            for r in rows
+        )
+        net = sum(
+            (r.outcome_points or 0.0)
+            for r in rows
+            if r.execution == "WOULD_TAKE"
+        )
+        recommendations, accuracy = self.base._aggregate_learning(rows)
+
+        total_seconds = perf_counter() - started
+        self.last_timing = {
+            "events": len(events),
+            "preload_seconds": round(preload_seconds, 3),
+            "total_seconds": round(total_seconds, 3),
+            "cached_contract_series": (
+                len(live_series_cache) if live_mode else len(stored_series)
+            ),
+            "data_source": coverage.data_source,
+        }
+        if progress_callback:
+            progress_callback(
+                len(events), len(events), "Replay completed", total_seconds
+            )
+
+        return HistoricalDecisionReplayResult(
+            trading_date=trading_date,
+            rows=tuple(rows),
+            active_signals=len(events),
+            approved=approved,
+            blocked=blocked,
+            waiting=waiting,
+            expired=0,
+            winners=winners,
+            losers=losers,
+            net_points=round(net, 2),
+            data_fidelity=coverage.fidelity,
+            correct_takes=sum(r.verdict == "CORRECT_TAKE" for r in rows),
+            false_positives=sum(
+                r.verdict == "FALSE_POSITIVE" for r in rows
+            ),
+            missed_opportunities=sum(
+                r.verdict == "MISSED_OPPORTUNITY" for r in rows
+            ),
+            correct_skips=sum(r.verdict == "CORRECT_SKIP" for r in rows),
+            incorrect_blocks=sum(
+                r.verdict == "INCORRECT_BLOCK" for r in rows
+            ),
+            correct_blocks=sum(
+                r.verdict == "CORRECT_BLOCK" for r in rows
+            ),
+            decision_accuracy_pct=accuracy,
+            learning_recommendations=recommendations,
+            option_contract_coverage_pct=coverage.contract_coverage_pct,
+            option_candle_coverage_pct=coverage.candle_coverage_pct,
+            option_oi_coverage_pct=coverage.oi_coverage_pct,
+            replay_ready=coverage.replay_ready,
+            replay_fidelity_reason=coverage.reason,
+            portfolio_admitted=admitted,
+            portfolio_watchlisted=watchlisted,
+            data_source=coverage.data_source,
+        )
