@@ -1,5 +1,3 @@
-from red_bar_lab.services.historical_dri_replay import detect_historical_dri_events
-from red_bar_lab.services.replay_opportunity_accounting import consolidate_replay_rows
 from red_bar_lab.ui._shared import *
 
 
@@ -328,21 +326,6 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
             horizontal=True,
             key="historical_decision_replay_mode",
         )
-        replay_sources = st.multiselect(
-            "Replay Sources",
-            ["RED_BAR", "DRI_EARLY", "DRI_CONFIRMED"],
-            default=["RED_BAR", "DRI_EARLY"],
-            key="historical_decision_replay_sources",
-            help=(
-                "RED_BAR runs the existing reference-level replay. "
-                "DRI_EARLY detects completed 1-minute directional breaks immediately. "
-                "DRI_CONFIRMED is reserved for progressive 5-minute enrichment."
-            ),
-        )
-        st.caption(
-            "Rank-1 opportunity accounting is used for headline performance. "
-            "All candidate rows remain available in the detailed replay table."
-        )
         st.caption(
             "RB-1.6.0 validates historical option-chain coverage first, then uses the "
             "same Primary / Opportunity / Committee / Portfolio / Exit policy engines "
@@ -470,121 +453,28 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
                 "Replay is disabled for this date until option data is ready. "
                 "Use Sync / Repair Historical Option Chain, or select a date with stored ONLINE snapshots / expired-option history."
             )
-        if st.button(
-            "Run Historical Decision Replay",
-            type="primary",
-            disabled=(not coverage.replay_ready or not replay_sources),
-        ):
+        if st.button("Run Historical Decision Replay", type="primary", disabled=not coverage.replay_ready):
             try:
-                if "RED_BAR" in replay_sources:
-                    replay_service = HistoricalDecisionReplayService(
-                        replay_reader,
-                        freshness_seconds=180,
-                        hard_expiry_seconds=900,
-                        minimum_confidence_pct=70.0,
-                        stop_loss_pct=15.0,
-                        target_pct=25.0,
-                        option_chain_sync=cache_option_sync,
-                    )
-                    st.session_state["historical_decision_replay_result"] = (
-                        replay_service.run_day(instrument_key, replay_date)
-                    )
-                else:
-                    st.session_state.pop("historical_decision_replay_result", None)
-
-                dri_events = ()
-                if {"DRI_EARLY", "DRI_CONFIRMED"} & set(replay_sources):
-                    replay_candles = replay_reader.read_day(
-                        instrument_key, replay_date, interval_minutes=1
-                    )
-                    dri_events = detect_historical_dri_events(replay_candles)
-                st.session_state["historical_dri_replay_result"] = {
-                    "trading_date": replay_date,
-                    "sources": tuple(replay_sources),
-                    "events": dri_events,
-                }
+                replay_service = HistoricalDecisionReplayService(
+                    replay_reader,
+                    freshness_seconds=180,
+                    hard_expiry_seconds=900,
+                    minimum_confidence_pct=70.0,
+                    stop_loss_pct=15.0,
+                    target_pct=25.0,
+                    option_chain_sync=cache_option_sync,
+                )
+                st.session_state["historical_decision_replay_result"] = (
+                    replay_service.run_day(instrument_key, replay_date)
+                )
             except ValueError as exc:
                 st.warning(str(exc))
             except Exception as exc:
                 st.exception(exc)
 
-        dri_replay_result = st.session_state.get("historical_dri_replay_result")
-        if (
-            dri_replay_result is not None
-            and dri_replay_result.get("trading_date") == replay_date
-        ):
-            selected_sources = set(dri_replay_result.get("sources", ()))
-            dri_events = tuple(dri_replay_result.get("events", ()))
-            if {"DRI_EARLY", "DRI_CONFIRMED"} & selected_sources:
-                st.markdown("##### Historical DRI Signal Replay")
-                st.caption(
-                    "These events are generated candle-by-candle from completed historical "
-                    "1-minute candles. They use the historical candle timestamp and never "
-                    "read future candles. EARLY events are created immediately; later "
-                    "confirmation will enrich the same opportunity in the next wiring stage."
-                )
-                if dri_events:
-                    st.dataframe(
-                        [
-                            {
-                                "Time": event.timestamp,
-                                "Event": event.event_id,
-                                "Source": event.source,
-                                "Stage": event.stage,
-                                "Direction": event.direction,
-                                "Setup": event.setup_type,
-                                "Trigger": event.trigger_level,
-                                "Invalidation": event.invalidation_level,
-                                "Fresh Until": event.fresh_until,
-                            }
-                            for event in dri_events
-                        ],
-                        width="stretch",
-                        hide_index=True,
-                    )
-                    de1, de2, de3 = st.columns(3)
-                    de1.metric("DRI Opportunities", len(dri_events))
-                    de2.metric(
-                        "Bullish",
-                        sum(1 for event in dri_events if event.direction == "BULLISH"),
-                    )
-                    de3.metric(
-                        "Bearish",
-                        sum(1 for event in dri_events if event.direction == "BEARISH"),
-                    )
-                else:
-                    st.info(
-                        "No historical DRI early-break events met the completed-candle "
-                        "criteria for this date."
-                    )
-                if "DRI_CONFIRMED" in selected_sources:
-                    st.info(
-                        "DRI_CONFIRMED is visible as a replay source, but progressive "
-                        "5-minute enrichment is not yet used for Committee execution in "
-                        "this increment. It will reinforce the same EARLY opportunity "
-                        "rather than create a duplicate trade."
-                    )
-
         replay_result = st.session_state.get("historical_decision_replay_result")
         if replay_result is not None and replay_result.trading_date == replay_date:
             st.markdown("##### Live-Style Decision Summary")
-            opportunity_summary = consolidate_replay_rows(replay_result.rows)
-            st.markdown("##### Rank-1 Opportunity Summary")
-            os1, os2, os3, os4, os5, os6 = st.columns(6)
-            os1.metric("Opportunities", opportunity_summary.opportunities)
-            os2.metric("Candidates Evaluated", opportunity_summary.candidates_evaluated)
-            os3.metric("Trades Selected", opportunity_summary.trades_selected)
-            os4.metric("Wins", opportunity_summary.winners)
-            os5.metric("Losses", opportunity_summary.losers)
-            os6.metric(
-                "Opportunity Accuracy",
-                f"{opportunity_summary.decision_accuracy_pct:.1f}%",
-            )
-            st.caption(
-                "One Rank-1 row represents each signal opportunity. Lower-ranked "
-                "contracts remain in the detailed table for diagnostics and are not "
-                "counted as separate trades in this summary."
-            )
             r1, r2, r3, r4, r5, r6 = st.columns(6)
             r1.metric("Signals", replay_result.active_signals)
             r2.metric("Would Take", replay_result.approved)
