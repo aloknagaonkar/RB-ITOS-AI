@@ -9,9 +9,6 @@ from uuid import uuid4
 import pandas as pd
 
 from red_bar_lab.execution.exit_engine import PaperExitEngine
-from red_bar_lab.execution.directional_regime_reference import (
-    DirectionalRegimeReferenceService,
-)
 from red_bar_lab.execution.candidate_lifecycle import CandidateLifecycleManager, MarketSessionManager
 from red_bar_lab.execution.institutional_execution import InstitutionalExecutionCommittee
 from red_bar_lab.execution.opportunity_engine import OpportunityIntelligenceEngine
@@ -108,26 +105,11 @@ class RedBarPaperAutomationService:
         maximum_portfolio_capital_pct: float = 40.0,
         maximum_portfolio_risk_pct: float = 2.0,
         minimum_opportunity_health: float = 75.0,
-        enable_directional_regime_reference: bool = True,
-        directional_regime_maximum_age_minutes: int = 30,
     ):
         self.zerodha = zerodha
         self.database = database
         self.settings = settings
         self.underlying_name = underlying_name
-        self.enable_directional_regime_reference = bool(
-            enable_directional_regime_reference
-        )
-        self.directional_regime_reference = (
-            DirectionalRegimeReferenceService(
-                runs_root=settings.runs_root,
-                maximum_age_minutes=(
-                    directional_regime_maximum_age_minutes
-                ),
-            )
-            if self.enable_directional_regime_reference
-            else None
-        )
         self.minimum_candidate_score = float(minimum_candidate_score)
         self.initial_capital = float(initial_capital)
         self.stop_loss_pct = float(stop_loss_pct)
@@ -542,49 +524,6 @@ class RedBarPaperAutomationService:
             previous_events = self.database.read_execution_state_events(
                 signal_id=signal_id, limit=1
             )
-
-            directional_reference = None
-            if self.directional_regime_reference is not None:
-                try:
-                    directional_reference = (
-                        self.directional_regime_reference.evaluate(
-                            signal_direction=str(
-                                signal.get("direction") or ""
-                            ),
-                            instrument_key=instrument_key,
-                            at_time=(
-                                confirmation_timestamp
-                                or now.isoformat()
-                            ),
-                        )
-                    )
-                    self._record_state(
-                        signal_id=signal_id,
-                        state="DIRECTIONAL_REGIME_REFERENCE",
-                        detail=(
-                            f"status={directional_reference.status}; "
-                            f"regime={directional_reference.regime}; "
-                            f"bundle_direction="
-                            f"{directional_reference.bundle_direction or 'NA'}; "
-                            f"bundle_id="
-                            f"{directional_reference.bundle_id or 'NA'}; "
-                            f"setup="
-                            f"{directional_reference.primary_setup_type or 'NA'}; "
-                            f"alignment_score="
-                            f"{directional_reference.alignment_score:.1f}; "
-                            f"reason={directional_reference.reason}; "
-                            "mode=REFERENCE_ONLY"
-                        ),
-                        score=(
-                            directional_reference.alignment_score
-                        ),
-                    )
-                except Exception as exc:
-                    errors.append(
-                        "Directional Regime Intelligence reference "
-                        f"unavailable for {signal_id}: "
-                        f"{type(exc).__name__}: {exc}"
-                    )
             if not previous_events:
                 self._record_state(
                     signal_id=signal_id,
