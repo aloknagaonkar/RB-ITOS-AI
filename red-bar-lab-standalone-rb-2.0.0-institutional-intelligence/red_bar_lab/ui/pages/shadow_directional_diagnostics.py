@@ -61,6 +61,10 @@ from red_bar_lab.services.historical_attribution_audit import (
     RangeHistoricalAttributionAudit,
     resolve_range_preset,
 )
+from red_bar_lab.services.historical_bundle_backfill import (
+    HistoricalBundleBackfillRequest,
+    HistoricalV43BundleBackfill,
+)
 
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -1400,11 +1404,70 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         else:
             audit_start_time, audit_end_time = session_windows[session]
 
-        run_audit = st.button(
+        persist_backfill = st.toggle(
+            "Persist generated v4.3 research artifacts",
+            value=True,
+            key="historical_attribution_persist_backfill",
+            help=(
+                "Writes only v4.3 regime, transition, signal and bundle JSONL "
+                "research artifacts. Candidate, Committee, queue and order "
+                "tables remain read-only."
+            ),
+        )
+        action_cols = st.columns(2)
+        run_backfill = action_cols[0].button(
+            "Backfill missing v4.3 bundles",
+            type="secondary",
+            key="run_historical_bundle_backfill",
+        )
+        run_audit = action_cols[1].button(
             "Run read-only historical audit",
             type="primary",
             key="run_historical_attribution_audit",
         )
+
+        if run_backfill:
+            try:
+                historical = _historical_service(token, layout)
+                backfill_result = HistoricalV43BundleBackfill(
+                    historical=historical,
+                    layout=layout,
+                ).run(
+                    HistoricalBundleBackfillRequest(
+                        instrument_key=instrument_key,
+                        date_from=audit_date_from,
+                        date_to=audit_date_to,
+                        start_time=audit_start_time,
+                        end_time=audit_end_time,
+                        persist_artifacts=persist_backfill,
+                    )
+                )
+                st.session_state[
+                    "historical_bundle_backfill_result"
+                ] = backfill_result
+                st.success("Historical v4.3 bundle backfill completed.")
+            except Exception as exc:
+                st.error(
+                    "Historical v4.3 bundle backfill failed: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+
+        backfill_result = st.session_state.get(
+            "historical_bundle_backfill_result"
+        )
+        if backfill_result:
+            st.markdown("#### Historical Bundle Backfill Summary")
+            st.dataframe(
+                _arrow_safe_rows([backfill_result["summary"]]),
+                width="stretch",
+                hide_index=True,
+            )
+            st.markdown("#### Backfill by Trading Day")
+            st.dataframe(
+                _arrow_safe_rows(backfill_result["days"]),
+                width="stretch",
+                hide_index=True,
+            )
         if run_audit:
             try:
                 audit_service = RangeHistoricalAttributionAudit(
