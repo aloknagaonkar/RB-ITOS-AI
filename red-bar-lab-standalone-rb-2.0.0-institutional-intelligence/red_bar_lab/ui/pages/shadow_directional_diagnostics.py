@@ -56,6 +56,11 @@ from red_bar_lab.services.signal_trade_attribution_summary import (
     summarize_by_primary_setup,
     funnel_summary,
 )
+from red_bar_lab.services.historical_attribution_audit import (
+    HistoricalAuditRequest,
+    RangeHistoricalAttributionAudit,
+    resolve_range_preset,
+)
 
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -106,7 +111,7 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         unsafe_allow_html=True,
     )
 
-    live_tab, replay_tab, validation_tab, calibration_tab, oos_tab, stability_tab, lifecycle_tab, stateful_tab = st.tabs([
+    live_tab, replay_tab, validation_tab, calibration_tab, oos_tab, stability_tab, lifecycle_tab, stateful_tab, attribution_replay_tab = st.tabs([
         "Current Observation",
         "Historical Replay & Outcomes",
         "Multi-Day Validation",
@@ -115,6 +120,7 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         "Regime & Period Stability",
         "Lifecycle Simulation",
         "Stateful Regime v4.3",
+        "Historical Attribution Replay",
     ])
 
     with live_tab:
@@ -1288,3 +1294,177 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         "Sprint 4.2 remains observation-only. Validation results cannot create, "
         "approve, enter, manage or exit any trade."
     )
+
+    with attribution_replay_tab:
+        st.markdown("### Range-Based Historical Attribution Audit")
+        st.caption(
+            "Read-only audit. It does not create candidates, Committee "
+            "decisions, queue items, paper orders or live orders."
+        )
+
+        preset_col, anchor_col = st.columns(2)
+        preset = preset_col.selectbox(
+            "Range preset",
+            (
+                "Single Day",
+                "Previous 5 Trading Days",
+                "Previous 10 Trading Days",
+                "Previous Month",
+                "Previous 3 Months",
+                "Custom Range",
+            ),
+            key="historical_attribution_range_preset",
+        )
+        anchor_date = anchor_col.date_input(
+            "Range anchor",
+            value=date.today(),
+            key="historical_attribution_anchor",
+        )
+
+        if preset == "Custom Range":
+            range_cols = st.columns(2)
+            audit_date_from = range_cols[0].date_input(
+                "Start date",
+                value=anchor_date - timedelta(days=6),
+                key="historical_attribution_custom_from",
+            )
+            audit_date_to = range_cols[1].date_input(
+                "End date",
+                value=anchor_date,
+                key="historical_attribution_custom_to",
+            )
+        else:
+            audit_date_from, audit_date_to = resolve_range_preset(
+                preset,
+                anchor_date,
+            )
+            st.info(
+                f"Selected range: {audit_date_from.isoformat()} "
+                f"to {audit_date_to.isoformat()}"
+            )
+
+        session_col, direction_col, setup_col = st.columns(3)
+        session = session_col.selectbox(
+            "Market session",
+            (
+                "Full Session",
+                "Opening",
+                "Mid-Session",
+                "Closing",
+                "Custom Time",
+            ),
+            key="historical_attribution_session",
+        )
+        audit_direction = direction_col.selectbox(
+            "Direction",
+            ("ALL", "BULLISH", "BEARISH"),
+            key="historical_attribution_direction",
+        )
+        audit_setup = setup_col.selectbox(
+            "Primary setup",
+            (
+                "ALL",
+                "BULLISH_STRUCTURE_BREAK",
+                "BEARISH_STRUCTURE_BREAK",
+                "BULLISH_RANGE_BREAKOUT",
+                "BEARISH_RANGE_BREAKDOWN",
+                "BULLISH_PULLBACK_CONTINUATION",
+                "BEARISH_PULLBACK_CONTINUATION",
+                "BULLISH_EMA_RECLAIM",
+                "BEARISH_EMA_LOSS",
+                "BULLISH_RED_BAR_CONFIRMATION",
+                "BEARISH_RED_BAR_CONFIRMATION",
+                "COUNTER_TREND_RED_BAR",
+            ),
+            key="historical_attribution_setup",
+        )
+
+        session_windows = {
+            "Full Session": (time(9, 15), time(15, 30)),
+            "Opening": (time(9, 15), time(10, 30)),
+            "Mid-Session": (time(10, 30), time(14, 0)),
+            "Closing": (time(14, 0), time(15, 30)),
+        }
+        if session == "Custom Time":
+            time_cols = st.columns(2)
+            audit_start_time = time_cols[0].time_input(
+                "Start time",
+                value=time(9, 15),
+                key="historical_attribution_start_time",
+            )
+            audit_end_time = time_cols[1].time_input(
+                "End time",
+                value=time(15, 30),
+                key="historical_attribution_end_time",
+            )
+        else:
+            audit_start_time, audit_end_time = session_windows[session]
+
+        run_audit = st.button(
+            "Run read-only historical audit",
+            type="primary",
+            key="run_historical_attribution_audit",
+        )
+        if run_audit:
+            try:
+                audit_service = RangeHistoricalAttributionAudit(
+                    database=database,
+                    runs_root=layout.settings.runs_root,
+                )
+                audit_request = HistoricalAuditRequest(
+                    instrument_key=instrument_key,
+                    date_from=audit_date_from,
+                    date_to=audit_date_to,
+                    start_time=audit_start_time,
+                    end_time=audit_end_time,
+                    direction=audit_direction,
+                    setup_type=audit_setup,
+                )
+                st.session_state[
+                    "historical_attribution_audit_result"
+                ] = audit_service.audit(audit_request)
+                st.success("Historical source audit completed.")
+            except Exception as exc:
+                st.error(
+                    "Historical attribution audit failed: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+
+        audit_result = st.session_state.get(
+            "historical_attribution_audit_result"
+        )
+        if audit_result:
+            st.markdown("#### Audit Summary")
+            st.dataframe(
+                _arrow_safe_rows([audit_result["summary"]]),
+                width="stretch",
+                hide_index=True,
+            )
+
+            st.markdown("#### Historical Source Availability")
+            st.dataframe(
+                _arrow_safe_rows(audit_result["sources"]),
+                width="stretch",
+                hide_index=True,
+            )
+
+            st.markdown("#### Bundle-to-Pipeline Matches")
+            if audit_result["matches"]:
+                st.dataframe(
+                    _arrow_safe_rows(audit_result["matches"]),
+                    width="stretch",
+                    hide_index=True,
+                )
+            else:
+                st.info(
+                    "No v4.3 setup bundles matched the selected date, "
+                    "time, direction and setup filters."
+                )
+
+            st.markdown("#### Matching Interpretation")
+            st.caption(
+                "EXACT_SIGNAL_ID is direct identifier evidence. "
+                "DIRECTION_AND_WINDOW is inferred historical alignment, "
+                "not proof that v4.3 caused the pipeline event."
+            )
+
