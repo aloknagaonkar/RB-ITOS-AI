@@ -11,6 +11,9 @@ import pandas as pd
 from red_bar_lab.services.fresh_setup_bundle_store import (
     canonical_bundle_identity,
 )
+from red_bar_lab.services.targeted_historical_pipeline_resolver import (
+    TargetedHistoricalPipelineResolver,
+)
 
 
 MATCH_CONFIDENCE = {
@@ -37,6 +40,7 @@ TIMESTAMP_FIELDS = (
     "created_timestamp",
     "event_timestamp",
     "timestamp",
+    "cross_timestamp",
 )
 
 
@@ -435,7 +439,39 @@ class RangeHistoricalAttributionAudit:
                 }
             )
 
-        matches = self._match_bundles_one_to_one(bundles, pipeline)
+        resolver = TargetedHistoricalPipelineResolver(
+            database=self.database
+        )
+        used_signal_ids: set[str] = set()
+        targeted_matches = [
+            resolver.resolve(
+                bundle,
+                pipeline.get("signals", []),
+                instrument_key=request.instrument_key,
+                used_signal_ids=used_signal_ids,
+                selection_fallback_rows=pipeline.get(
+                    "selection", []
+                ),
+            )
+            for bundle in bundles
+        ]
+
+        legacy_method_by_resolution = {
+            "EXACT_CHAIN_MATCH": "EXACT_SIGNAL_ID",
+            "STRONG_CHAIN_MATCH": "DIRECTION_AND_WINDOW",
+            "PARTIAL_CHAIN_MATCH": "DIRECTION_AND_WINDOW",
+            "AMBIGUOUS_MATCH": "AMBIGUOUS_MATCH",
+            "NO_MATCH": "NO_MATCH",
+        }
+        for row in targeted_matches:
+            row.setdefault(
+                "match_method",
+                legacy_method_by_resolution.get(
+                    str(row.get("match_resolution") or ""),
+                    "NO_MATCH",
+                ),
+            )
+
         return {
             "summary": {
                 "date_from": request.date_from.isoformat(),
@@ -444,21 +480,37 @@ class RangeHistoricalAttributionAudit:
                     request.date_to - request.date_from
                 ).days + 1,
                 "bundles": len(bundles),
-                "exact_matches": sum(
-                    row["match_method"] == "EXACT_SIGNAL_ID"
-                    for row in matches
+                "exact_chain_matches": sum(
+                    row["match_resolution"] == "EXACT_CHAIN_MATCH"
+                    for row in targeted_matches
                 ),
-                "inferred_matches": sum(
-                    row["match_method"] == "DIRECTION_AND_WINDOW"
-                    for row in matches
+                "strong_chain_matches": sum(
+                    row["match_resolution"] == "STRONG_CHAIN_MATCH"
+                    for row in targeted_matches
+                ),
+                "partial_chain_matches": sum(
+                    row["match_resolution"] == "PARTIAL_CHAIN_MATCH"
+                    for row in targeted_matches
                 ),
                 "ambiguous_matches": sum(
-                    row["match_method"] == "AMBIGUOUS_MATCH"
-                    for row in matches
+                    row["match_resolution"] == "AMBIGUOUS_MATCH"
+                    for row in targeted_matches
                 ),
                 "no_matches": sum(
-                    row["match_method"] == "NO_MATCH"
-                    for row in matches
+                    row["match_resolution"] == "NO_MATCH"
+                    for row in targeted_matches
+                ),
+                # Backward-compatible Sprint 4.3.5.1/1.2 aliases.
+                "exact_matches": sum(
+                    row["match_resolution"] == "EXACT_CHAIN_MATCH"
+                    for row in targeted_matches
+                ),
+                "inferred_matches": sum(
+                    row["match_resolution"] in {
+                        "STRONG_CHAIN_MATCH",
+                        "PARTIAL_CHAIN_MATCH",
+                    }
+                    for row in targeted_matches
                 ),
                 "incomplete_sources": sum(
                     not bool(row.get("result_complete"))
@@ -468,7 +520,7 @@ class RangeHistoricalAttributionAudit:
                 "execution_allowed": False,
             },
             "sources": source_rows,
-            "matches": matches,
+            "matches": targeted_matches,
             "bundles": bundles,
         }
 

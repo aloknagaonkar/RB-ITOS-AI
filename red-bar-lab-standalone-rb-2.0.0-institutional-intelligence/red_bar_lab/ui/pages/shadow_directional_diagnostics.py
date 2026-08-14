@@ -1517,7 +1517,7 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
                 hide_index=True,
             )
 
-            st.markdown("#### Bundle-to-Pipeline Matches")
+            st.markdown("#### Targeted Bundle-to-Pipeline Chains")
             if audit_result["matches"]:
                 st.dataframe(
                     _arrow_safe_rows(audit_result["matches"]),
@@ -1532,10 +1532,12 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
 
             st.markdown("#### Matching Interpretation")
             st.caption(
-                "EXACT_SIGNAL_ID is direct identifier evidence. "
-                "DIRECTION_AND_WINDOW is inferred historical alignment. "
-                "AMBIGUOUS_MATCH means multiple equally near candidates "
-                "were available. SESSION_TIME_UNAVAILABLE rows pass date "
-                "filtering but cannot prove intraday session alignment."
+                "The resolver first selects one historical pipeline signal "
+                "inside the bundle window, then queries selection, opportunity, "
+                "Committee and queue records by that exact signal_id. Paper "
+                "orders are filtered by the same signal_id. EXACT_CHAIN_MATCH "
+                "is direct-ID evidence; STRONG_CHAIN_MATCH and "
+                "PARTIAL_CHAIN_MATCH are progressively weaker. "
+                "AMBIGUOUS_MATCH means multiple equally near pipeline signals."
             )
 
