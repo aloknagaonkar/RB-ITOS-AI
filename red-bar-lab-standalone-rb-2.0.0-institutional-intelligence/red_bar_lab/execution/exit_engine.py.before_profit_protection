@@ -23,8 +23,6 @@ class ExitHealth:
     initial_stop: float | None
     breakeven_price: float | None
     breakeven_armed: bool
-    profit_lock_active: bool
-    profit_lock_price: float | None
     trailing_active: bool
     trailing_stop: float | None
     target1: float | None
@@ -61,31 +59,13 @@ class PaperExitEngine:
     def __init__(
         self,
         *,
-        breakeven_trigger_pct: float = 5.0,
-        profit_lock_trigger_pct: float = 8.0,
-        profit_lock_pct: float = 2.0,
-        trailing_trigger_pct: float = 12.0,
-        trailing_distance_pct: float = 5.0,
+        breakeven_trigger_pct: float = 15.0,
+        trailing_trigger_pct: float = 20.0,
+        trailing_distance_pct: float = 10.0,
     ):
         self.breakeven_trigger_pct = float(breakeven_trigger_pct)
-        self.profit_lock_trigger_pct = float(profit_lock_trigger_pct)
-        self.profit_lock_pct = float(profit_lock_pct)
         self.trailing_trigger_pct = float(trailing_trigger_pct)
         self.trailing_distance_pct = float(trailing_distance_pct)
-
-        if not (
-            0.0 <= self.breakeven_trigger_pct
-            <= self.profit_lock_trigger_pct
-            <= self.trailing_trigger_pct
-        ):
-            raise ValueError(
-                "Protection triggers must satisfy breakeven <= "
-                "profit-lock <= trailing."
-            )
-        if self.profit_lock_pct < 0.0:
-            raise ValueError("profit_lock_pct cannot be negative.")
-        if self.trailing_distance_pct < 0.0:
-            raise ValueError("trailing_distance_pct cannot be negative.")
 
     def evaluate(
         self,
@@ -124,27 +104,12 @@ class PaperExitEngine:
         breakeven_armed = peak_pct >= self.breakeven_trigger_pct
         breakeven_price = entry if breakeven_armed else None
 
-        profit_lock_active = (
-            peak_pct >= self.profit_lock_trigger_pct
-        )
-        profit_lock_price = None
-        if profit_lock_active:
-            profit_lock_price = entry * (
-                1.0 + self.profit_lock_pct / 100.0
-            )
-
         trailing_active = peak_pct >= self.trailing_trigger_pct
         trailing_stop = None
         if trailing_active:
             trailing_stop = peak_price * (
                 1.0 - self.trailing_distance_pct / 100.0
             )
-
-        previous_protected_stop = max(
-            0.0,
-            _num(position.get("protected_stop_price")),
-            _num(position.get("effective_stop")),
-        )
 
         # Keep both the stop value and its source so the audit reason matches
         # the protection level that actually became binding. On an exact tie,
@@ -154,16 +119,8 @@ class PaperExitEngine:
             stop_candidates.append(("HARD_STOP", configured_stop, 0))
         if breakeven_price is not None and breakeven_price > 0:
             stop_candidates.append(("BREAKEVEN_STOP", breakeven_price, 1))
-        if profit_lock_price is not None and profit_lock_price > 0:
-            stop_candidates.append(
-                ("PROFIT_LOCK_STOP", profit_lock_price, 2)
-            )
         if trailing_stop is not None and trailing_stop > 0:
-            stop_candidates.append(("TRAILING_STOP", trailing_stop, 3))
-        if previous_protected_stop > 0:
-            stop_candidates.append(
-                ("PROTECTED_STOP", previous_protected_stop, 4)
-            )
+            stop_candidates.append(("TRAILING_STOP", trailing_stop, 2))
 
         effective_stop_reason = None
         effective_stop = None
@@ -302,12 +259,7 @@ class PaperExitEngine:
             reasons.append(hard_exit_reason)
         elif trailing_active:
             action = "HOLD / TRAIL"
-            reasons.append("Trailing profit protection active.")
-        elif profit_lock_active:
-            action = "HOLD / LOCK PROFIT"
-            reasons.append(
-                f"Minimum profit lock armed at " f"₹{profit_lock_price:.2f}."
-            )
+            reasons.append("Trailing protection active.")
         elif breakeven_armed:
             action = "HOLD / PROTECT"
             reasons.append("Breakeven protection armed.")
@@ -347,12 +299,6 @@ class PaperExitEngine:
             initial_stop=round(initial_stop, 2) if initial_stop > 0 else None,
             breakeven_price=round(breakeven_price, 2) if breakeven_price is not None else None,
             breakeven_armed=breakeven_armed,
-            profit_lock_active=profit_lock_active,
-            profit_lock_price=(
-                round(profit_lock_price, 2)
-                if profit_lock_price is not None
-                else None
-            ),
             trailing_active=trailing_active,
             trailing_stop=round(trailing_stop, 2) if trailing_stop is not None else None,
             target1=round(target1, 2) if target1 > 0 else None,
