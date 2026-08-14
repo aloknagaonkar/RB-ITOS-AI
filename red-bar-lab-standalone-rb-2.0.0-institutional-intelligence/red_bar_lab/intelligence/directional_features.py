@@ -172,7 +172,15 @@ def build_directional_feature_frame(
     output["bearish_structure"] = (prior_high < earlier_high) & (prior_low < earlier_low)
     output["price_above_fast"] = close > ema_fast
     output["price_above_slow"] = close > ema_slow
-    output["volume_ratio"] = source["volume"] / volume_mean.replace(0.0, np.nan)
+    # Index candles may legitimately report zero or unavailable volume.
+    # Volume is supporting evidence only, so an unusable baseline must not
+    # block the complete directional feature snapshot.
+    raw_volume_ratio = source["volume"] / volume_mean.replace(0.0, np.nan)
+    output["volume_ratio"] = (
+        raw_volume_ratio
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(1.0)
+    )
     return output
 
 
@@ -197,7 +205,6 @@ def latest_directional_features(
         "compression_ratio",
         "recent_swing_high",
         "recent_swing_low",
-        "volume_ratio",
     )
     missing = [name for name in required if pd.isna(row[name])]
     if missing:

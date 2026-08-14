@@ -1,6 +1,6 @@
 import red_bar_lab.ui._shared as shared_ui
 from red_bar_lab.execution.exit_engine import PaperExitEngine
-from red_bar_lab.execution.trend_automation import TrendAwarePaperAutomationService
+from red_bar_lab.execution.attribution_automation import AttributionAwarePaperAutomationService
 from red_bar_lab.services.evidence_replay import EvidenceAwareHistoricalDecisionReplayService
 from red_bar_lab.ui.active_trade_views import build_paper_page_wrapper
 from red_bar_lab.ui.paper_time_display import install as install_paper_time_display
@@ -32,7 +32,7 @@ from red_bar_lab.ui.pages import (
 install_paper_time_display()
 
 shared_ui.PaperExitEngine = PaperExitEngine
-paper_trading.RedBarPaperAutomationService = TrendAwarePaperAutomationService
+paper_trading.RedBarPaperAutomationService = AttributionAwarePaperAutomationService
 paper_trading._render_candidate_workbench_fragment = (
     build_candidate_workbench_wrapper(
         shared_ui._render_candidate_workbench_fragment
@@ -50,8 +50,8 @@ _PAGE_MODULES = {
     "Operations Center": operations_center,
     "Live Trading": live_trading,
     "Paper Trading": paper_trading,
-    "Shadow Directional": shadow_directional_diagnostics,
     "Research Lab": research_lab,
+    "Shadow Directional": shadow_directional_diagnostics,
     "Historical Intelligence": historical_intelligence,
     "Signal Explorer": signal_explorer,
     "Level Explorer": level_explorer,
@@ -83,9 +83,8 @@ def render(settings: RedBarSettings) -> None:
     st.sidebar.markdown("---")
     st.sidebar.subheader("Workspace")
     workspace_pages = (
-        "Operations Center", "Live Trading", "Paper Trading", "Shadow Directional",
-        "Research Lab", "Historical Intelligence", "Signal Explorer", "Level Explorer",
-        "PD Startup Readiness", "Previous Session Context", "Red Bar Diagnostics",
+        "Operations Center", "Live Trading", "Paper Trading", "Research Lab", "Shadow Directional", "Historical Intelligence",
+        "Signal Explorer", "Level Explorer", "PD Startup Readiness", "Previous Session Context", "Red Bar Diagnostics",
         "Committee Gate Trace", "Performance Hard Block Trace", "Opportunity Reward Trace",
         "Trade History", "Institutional Intelligence", "Intelligence",
     )
