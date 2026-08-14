@@ -12,7 +12,10 @@ from red_bar_lab.services.fresh_setup_bundle_store import (
     canonical_bundle_identity,
 )
 from red_bar_lab.services.targeted_historical_pipeline_resolver import (
+    PIPELINE_TIME_FIELDS,
+    SIGNAL_TIME_FIELDS,
     TargetedHistoricalPipelineResolver,
+    timestamp_candidates,
 )
 
 
@@ -96,30 +99,74 @@ def _previous_trading_days(anchor: date, count: int) -> tuple[date, date]:
 
 
 def _timestamp(value: object) -> pd.Timestamp | None:
+    """Normalize mixed aware/naive timestamps to UTC-naive."""
     if value in (None, ""):
         return None
     try:
-        return pd.Timestamp(value)
+        ts = pd.Timestamp(value)
     except Exception:
         return None
+
+    try:
+        if ts.tzinfo is not None:
+            ts = ts.tz_convert("UTC").tz_localize(None)
+    except Exception:
+        try:
+            ts = ts.tz_localize(None)
+        except Exception:
+            return None
+    return ts
 
 
 def _timestamp_info(
     row: Mapping[str, object],
+    source: str | None = None,
+    request: HistoricalAuditRequest | None = None,
 ) -> tuple[pd.Timestamp | None, bool, str | None]:
-    for field in TIMESTAMP_FIELDS:
-        value = row.get(field)
-        ts = _timestamp(value)
-        if ts is None:
-            continue
-        raw = str(value)
-        has_explicit_time = (
+    preferred = (
+        SIGNAL_TIME_FIELDS
+        if source == "signals"
+        else PIPELINE_TIME_FIELDS
+    )
+    candidates = timestamp_candidates(row, preferred)
+
+    if request is not None:
+        same_date = [
+            (field, ts)
+            for field, ts in candidates
+            if request.date_from <= ts.date() <= request.date_to
+        ]
+        in_session = [
+            (field, ts)
+            for field, ts in same_date
+            if request.start_time
+            <= ts.time().replace(tzinfo=None)
+            <= request.end_time
+        ]
+        if in_session:
+            field, ts = in_session[0]
+            return ts, True, field
+        if same_date:
+            field, ts = same_date[0]
+            raw = str(row.get(field))
+            has_time = (
+                "T" in raw
+                or " " in raw
+                or ":" in raw
+                or ts.time() != time(0, 0)
+            )
+            return ts, has_time, field
+
+    if candidates:
+        field, ts = candidates[0]
+        raw = str(row.get(field))
+        has_time = (
             "T" in raw
             or " " in raw
             or ":" in raw
             or ts.time() != time(0, 0)
         )
-        return ts, has_explicit_time, field
+        return ts, has_time, field
 
     trading_date = row.get("trading_date")
     ts = _timestamp(trading_date)
@@ -352,7 +399,11 @@ class RangeHistoricalAttributionAudit:
         session_unavailable_rows = []
 
         for row in raw:
-            ts, has_time, _ = _timestamp_info(row)
+            ts, has_time, _ = _timestamp_info(
+                row,
+                source=source,
+                request=request,
+            )
             if ts is None:
                 continue
             if not request.date_from <= ts.date() <= request.date_to:
@@ -387,6 +438,33 @@ class RangeHistoricalAttributionAudit:
         limit = self.QUERY_LIMITS.get(source)
         limit_hit = bool(limit and len(raw) >= limit)
 
+        discovered_timestamp_fields = sorted({
+            field
+            for row in raw[:200]
+            for field, _ in timestamp_candidates(
+                row,
+                SIGNAL_TIME_FIELDS
+                if source == "signals"
+                else PIPELINE_TIME_FIELDS,
+            )
+        })
+        discovered_signal_id_fields = sorted({
+            field
+            for row in raw[:200]
+            for field in (
+                "signal_id",
+                "pipeline_signal_id",
+                "source_signal_id",
+                "parent_signal_id",
+            )
+            if row.get(field) not in (None, "")
+        })
+        sample_fields = sorted({
+            str(field)
+            for row in raw[:10]
+            for field in row.keys()
+        })
+
         return direction_rows, {
             "raw_rows": len(raw),
             "date_filtered": len(date_rows),
@@ -398,6 +476,13 @@ class RangeHistoricalAttributionAudit:
             "query_limit": limit,
             "query_limit_hit": limit_hit,
             "result_complete": not limit_hit,
+            "timestamp_fields_detected": ",".join(
+                discovered_timestamp_fields
+            ),
+            "signal_id_fields_detected": ",".join(
+                discovered_signal_id_fields
+            ),
+            "sample_field_names": ",".join(sample_fields[:30]),
         }
 
     def audit(self, request: HistoricalAuditRequest) -> dict[str, object]:
@@ -418,6 +503,9 @@ class RangeHistoricalAttributionAudit:
                 "query_limit": None,
                 "query_limit_hit": False,
                 "result_complete": True,
+                "timestamp_fields_detected": "detected_at,fresh_until",
+                "signal_id_fields_detected": "primary_signal_id",
+                "sample_field_names": "",
                 "available": bool(bundles),
                 "read_only": True,
             }
@@ -446,10 +534,10 @@ class RangeHistoricalAttributionAudit:
         targeted_matches = [
             resolver.resolve(
                 bundle,
-                pipeline.get("signals", []),
+                raw.get("signals", []),
                 instrument_key=request.instrument_key,
                 used_signal_ids=used_signal_ids,
-                selection_fallback_rows=pipeline.get(
+                selection_fallback_rows=raw.get(
                     "selection", []
                 ),
             )
