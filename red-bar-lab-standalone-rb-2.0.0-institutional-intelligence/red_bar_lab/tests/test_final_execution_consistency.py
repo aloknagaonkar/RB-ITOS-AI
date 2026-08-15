@@ -3,10 +3,14 @@ from pathlib import Path
 
 import pandas as pd
 
-from red_bar_lab.execution.exit_engine import PaperExitEngine
+from red_bar_lab.execution.attribution_automation import (
+    AttributionAwarePaperAutomationService,
+)
 from red_bar_lab.execution.trend_automation import (
     EMA10OpportunityIntelligenceEngine,
+    TrendAwarePaperAutomationService,
 )
+from red_bar_lab.execution.exit_engine import PaperExitEngine
 from red_bar_lab.services.historical_decision_replay import (
     HistoricalDecisionReplayService,
 )
@@ -109,7 +113,7 @@ def test_replay_ema10_uses_completed_5m_bars_only():
     assert "09:15:00" in snapshot["_ema10_5m_timestamp"]
 
 
-def test_workspace_wires_foreground_to_trend_aware_service():
+def test_workspace_wires_foreground_to_attribution_aware_trend_service():
     workspace = (
         Path(__file__).parents[1]
         / "ui"
@@ -118,8 +122,12 @@ def test_workspace_wires_foreground_to_trend_aware_service():
 
     assert (
         "paper_trading.RedBarPaperAutomationService = "
-        "TrendAwarePaperAutomationService"
+        "AttributionAwarePaperAutomationService"
     ) in workspace
+    assert issubclass(
+        AttributionAwarePaperAutomationService,
+        TrendAwarePaperAutomationService,
+    )
 
 
 def test_low_fidelity_replay_does_not_use_expectancy_as_execution_gate():
