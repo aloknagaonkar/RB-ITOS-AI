@@ -5,7 +5,7 @@ from functools import wraps
 import pandas as pd
 import streamlit as st
 
-from red_bar_lab.services.historical_dri_relevant_coverage import (
+from red_bar_lab.services.historical_dri_relevant_coverage_compat import (
     analyze_historical_dri_relevant_coverage,
 )
 from red_bar_lab.ui._shared import (
