@@ -105,9 +105,9 @@ def test_ema10_touch_does_not_exit_completed_trend():
     assert bearish.hard_exit_reason is None
 
 
-def test_breakeven_arms_after_fifteen_percent_peak():
+def test_breakeven_arms_after_current_five_percent_policy():
     result = PaperExitEngine().evaluate(
-        position=_position(current=112.0, mfe=16.0),
+        position=_position(current=106.0, mfe=6.0),
         option_candle=_healthy_candle(),
     )
     assert result.breakeven_armed is True
@@ -115,17 +115,18 @@ def test_breakeven_arms_after_fifteen_percent_peak():
     assert result.effective_stop >= 100.0
 
 
-def test_trailing_activates_after_twenty_percent_peak():
+def test_trailing_uses_peak_and_current_five_percent_distance():
     result = PaperExitEngine().evaluate(
         position=_position(current=118.0, mfe=25.0),
         option_candle=_healthy_candle(),
     )
     assert result.trailing_active is True
-    assert result.trailing_stop == 112.5
-    assert result.effective_stop >= 112.5
+    assert result.peak_price == 125.0
+    assert result.trailing_stop == 118.75
+    assert result.effective_stop == 118.75
 
 
-def test_breakeven_reason_wins_when_trailing_is_active_but_lower():
+def test_profit_lock_wins_when_trailing_is_active_but_lower():
     result = PaperExitEngine(trailing_distance_pct=25.0).evaluate(
         position=_position(current=99.0, stop=85.0, mfe=21.0),
         option_candle=_healthy_candle(),
@@ -133,8 +134,9 @@ def test_breakeven_reason_wins_when_trailing_is_active_but_lower():
     assert result.trailing_active is True
     assert result.trailing_stop == 90.75
     assert result.breakeven_price == 100.0
-    assert result.effective_stop == 100.0
-    assert result.hard_exit_reason == "BREAKEVEN_STOP"
+    assert result.profit_lock_price == 102.0
+    assert result.effective_stop == 102.0
+    assert result.hard_exit_reason == "PROFIT_LOCK_STOP"
     assert result.action == "EXIT"
 
 
