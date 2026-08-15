@@ -8,6 +8,7 @@ from red_bar_lab.services.historical_dri_research_readiness import (
 )
 from red_bar_lab.ui.active_trade_views import build_paper_page_wrapper
 from red_bar_lab.ui.historical_dri_10day import build_10day_validation_wrapper
+from red_bar_lab.ui.historical_dri_20day import build_20day_validation_wrapper
 from red_bar_lab.ui.historical_dri_relevant_coverage import (
     build_relevant_coverage_wrapper,
 )
@@ -54,7 +55,7 @@ paper_trading._render_paper_exit_engine_panel = (
 research_lab.HistoricalDecisionReplayService = EvidenceAwareHistoricalDecisionReplayService
 
 # Limit the strategy-relevant readiness policy to the enhanced historical
-# 10-day Research Lab workflow. The normal option sync class remains unchanged
+# Research Lab workflows. The normal option sync class remains unchanged
 # everywhere else, including live and paper execution.
 def _research_option_sync_factory(provider, layout, historical, database=None):
     base_sync = shared_ui.HistoricalOptionChainSyncService(
@@ -70,6 +71,10 @@ historical_dri_10day_ui.HistoricalOptionChainSyncService = (
     _research_option_sync_factory
 )
 research_lab.render_page = build_10day_validation_wrapper(
+    research_lab.render_page,
+    research_lab,
+)
+research_lab.render_page = build_20day_validation_wrapper(
     research_lab.render_page,
     research_lab,
 )
