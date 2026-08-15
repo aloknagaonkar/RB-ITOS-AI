@@ -55,3 +55,11 @@ dist/
 
 # Jupyter
 .ipynb_checkpoints/
+apply_*.py
+fix_*.py
+payload/
+README_HISTORICAL_*.md
+*.bak-*
+export*.csv
+historical_dri_*.csv
+validate_historical_*.py
