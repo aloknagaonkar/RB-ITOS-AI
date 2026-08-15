@@ -16,7 +16,9 @@ from red_bar_lab.ui._shared import (
     _st_dataframe_arrow_safe,
 )
 
-_SESSION_KEY = "historical_dri_relevant_coverage_audit"
+# Version the key so old Streamlit sessions cannot keep rendering a stale audit
+# object created before compatibility fixes were installed.
+_SESSION_KEY = "historical_dri_relevant_coverage_audit_v2"
 
 
 def build_relevant_coverage_wrapper(original_render):
@@ -105,10 +107,6 @@ def _render_relevant_coverage_audit(*, layout, database, token, instrument_key) 
                     getattr(coverage, "data_source", "UNKNOWN") or "UNKNOWN"
                 )
 
-                # Live-capture readiness reports aggregate snapshot coverage but may
-                # not contain per-contract rows. For this diagnostic only, reuse the
-                # expired-option manifest/candle coverage as the contract-detail
-                # source while preserving the authoritative global readiness result.
                 if not tuple(getattr(coverage, "contracts", ()) or ()):
                     expired_detail = sync._validate_expired_day(
                         instrument_key,
@@ -159,12 +157,27 @@ def _render_relevant_coverage_audit(*, layout, database, token, instrument_key) 
         return
 
     audit = state["audit"]
+
+    # The authoritative replay gate always wins over this optional diagnostic.
+    # Derive the displayed value at render time so even a stale serialized audit
+    # can never show YES together with INSUFFICIENT.
+    effective_status = (
+        "FULL_REPLAY_READY" if audit.global_replay_ready else audit.status
+    )
+    effective_reason = (
+        "The authoritative global replay-readiness gate already passes. "
+        "Per-contract strike detail may be unavailable for this source, but the "
+        "date remains valid for replay."
+        if audit.global_replay_ready and audit.status != "FULL_REPLAY_READY"
+        else audit.reason
+    )
+
     a1, a2, a3, a4, a5, a6 = st.columns(6)
     a1.metric(
         "Global Replay Ready",
         "YES" if audit.global_replay_ready else "NO",
     )
-    a2.metric("Audit Status", audit.status)
+    a2.metric("Audit Status", effective_status)
     a3.metric("Relevant Contracts", audit.relevant_contracts)
     a4.metric(
         "Relevant Ready",
@@ -191,16 +204,16 @@ def _render_relevant_coverage_audit(*, layout, database, token, instrument_key) 
         + str(state.get("contract_source") or "UNKNOWN")
     )
 
-    if audit.status == "FULL_REPLAY_READY":
-        st.success(audit.reason)
-    elif audit.status == "STRATEGY_RELEVANT_COVERAGE_HIGH":
+    if effective_status == "FULL_REPLAY_READY":
+        st.success(effective_reason)
+    elif effective_status == "STRATEGY_RELEVANT_COVERAGE_HIGH":
         st.warning(
-            audit.reason
+            effective_reason
             + " The date remains excluded until a separately reviewed replay policy "
             "is approved; this audit does not automatically reclassify it."
         )
     else:
-        st.error(audit.reason)
+        st.error(effective_reason)
 
     st.caption(
         "Relevant strike window: "
@@ -242,6 +255,8 @@ def _render_relevant_coverage_audit(*, layout, database, token, instrument_key) 
         )
     with c2:
         summary_row = audit.summary()
+        summary_row["Audit Status"] = effective_status
+        summary_row["Reason"] = effective_reason
         summary_row["Contract Detail Source"] = state.get("contract_source")
         st.download_button(
             "Download Audit Summary CSV",
