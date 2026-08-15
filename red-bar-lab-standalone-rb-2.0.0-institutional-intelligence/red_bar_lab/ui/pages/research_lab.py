@@ -1,5 +1,6 @@
 from red_bar_lab.services.historical_dri_replay import detect_historical_dri_events
 from red_bar_lab.services.historical_dri_decision_replay import HistoricalDRIDecisionReplayService
+from red_bar_lab.services.historical_dri_multiday_validation import validate_historical_dri_dates
 from red_bar_lab.services.replay_opportunity_accounting import consolidate_replay_rows
 from red_bar_lab.ui._shared import *
 
@@ -679,6 +680,131 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
                                 "Exit": row.option_exit_price,
                                 "Option Return %": row.option_return_pct,
                                 "Exit Reason": row.exit_reason,
+                                "Trailing Activated": row.trailing_activated,
+                                "Trailing Exit": row.trailing_exit_price,
+                                "Trailing Return %": row.trailing_return_pct,
+                                "Trailing Exit Reason": row.trailing_exit_reason,
+                                "Trailing Protected Points": (
+                                    row.trailing_protected_points
+                                ),
+                                "Reversal State": row.reversal_state,
+                                "Reversal Reason": row.reversal_reason,
+                                "Reversal Provisional": (
+                                    row.reversal_provisional
+                                ),
+                                "Reversal Confirmed": (
+                                    row.reversal_confirmed
+                                ),
+                                "Reversal EMA10": (
+                                    row.reversal_ema10_value
+                                ),
+                                "Reversal EMA10 Slope": (
+                                    row.reversal_ema10_slope
+                                ),
+                                "Reversal EMA10 OK": (
+                                    row.reversal_ema10_ok
+                                ),
+                                "Reversal EMA30": (
+                                    row.reversal_ema30_value
+                                ),
+                                "Reversal EMA30 Slope": (
+                                    row.reversal_ema30_slope
+                                ),
+                                "Reversal EMA30 OK": (
+                                    row.reversal_ema30_ok
+                                ),
+                                "Two Directional Closes": (
+                                    row.reversal_two_directional_closes
+                                ),
+                                "Reversal Momentum OK": (
+                                    row.reversal_momentum_ok
+                                ),
+                                "Active Invalidation": (
+                                    row.reversal_active_invalidation
+                                ),
+                                "Invalidation Broken": (
+                                    row.reversal_invalidation_broken
+                                ),
+                                "Reset/Rebreak Reason": (
+                                    row.reset_rebreak_reason
+                                ),
+                                "Reset Seen": row.reset_seen,
+                                "Re-expansion Detected": (
+                                    row.reexpansion_detected
+                                ),
+                                "Reset Candle Time": (
+                                    row.reset_candle_time
+                                ),
+                                "EMA10 Touch Detected": (
+                                    row.ema10_touch_detected
+                                ),
+                                "Re-expansion Break Level": (
+                                    row.reexpansion_break_level
+                                ),
+                                "Strong Expansion Candle": (
+                                    row.strong_expansion_candle
+                                ),
+                                "Reset Classification": row.reset_classification,
+                                "Reset Window Bars": row.reset_window_bars,
+                                "Counter Candle Seen": (
+                                    row.reset_counter_candle_seen
+                                ),
+                                "EMA10 Near Touch": (
+                                    row.reset_near_touch_detected
+                                ),
+                                "Shallow Reset Detected": (
+                                    row.shallow_reset_detected
+                                ),
+                                "Reset Quality Passed": row.reset_quality_passed,
+                                "Reset Quality Count": (
+                                    row.reset_quality_criteria_count
+                                ),
+                                "Reset Quality Criteria": (
+                                    row.reset_quality_criteria
+                                ),
+                                "Market Action Count": (
+                                    row.reset_market_action_count
+                                ),
+                                "Market Action Passed": (
+                                    row.reset_market_action_passed
+                                ),
+                                "Market Action Criteria": (
+                                    row.reset_market_action_criteria
+                                ),
+                                "Moderate Market Action": (
+                                    row.reset_moderate_market_action_passed
+                                ),
+                                "Market Action Tier": row.reset_market_action_tier,
+                                "Reset Body Ratio %": (
+                                    row.reset_body_ratio_pct
+                                ),
+                                "Reset Break Distance %": (
+                                    row.reset_move_beyond_break_pct
+                                ),
+                                "Reset Relative Volume": (
+                                    row.reset_relative_volume
+                                ),
+                                "Quality Candidate Score Input": (
+                                    row.quality_candidate_score_input
+                                ),
+                                "Quality Opportunity Health Input": (
+                                    row.quality_opportunity_health_input
+                                ),
+                                "Adaptive Initial Stop %": (
+                                    row.adaptive_initial_stop_pct
+                                ),
+                                "Adaptive Trailing Exit": (
+                                    row.adaptive_trailing_exit_price
+                                ),
+                                "Adaptive Trailing Return %": (
+                                    row.adaptive_trailing_return_pct
+                                ),
+                                "Adaptive Trailing Exit Reason": (
+                                    row.adaptive_trailing_exit_reason
+                                ),
+                                "Adaptive Protected Points": (
+                                    row.adaptive_trailing_protected_points
+                                ),
                                 "Outcome": row.outcome_result,
                                 "Verdict": row.verdict,
                                 "Fidelity": row.data_fidelity,
@@ -688,6 +814,135 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
                         width="stretch",
                         hide_index=True,
                     )
+
+        with st.expander(
+            "Historical DRI Multi-Day Validation",
+            expanded=False,
+        ):
+            st.caption(
+                "Freeze the current DRI rules and validate the full "
+                "Opportunity, Committee, Portfolio and Exit path over "
+                "3–5 completed trading dates. Each date uses a fresh "
+                "service instance so state cannot leak between sessions."
+            )
+            batch_date_text = st.text_area(
+                "Trading dates (comma or newline separated)",
+                key="historical_dri_batch_dates",
+                placeholder="2026-08-12, 2026-08-13, 2026-08-14",
+                height=80,
+            )
+            if st.button(
+                "Run 3–5 Day DRI Validation",
+                key="historical_dri_batch_run",
+            ):
+                raw_tokens = [
+                    token.strip()
+                    for token in batch_date_text.replace("\n", ",").split(",")
+                    if token.strip()
+                ]
+                try:
+                    batch_dates = tuple(
+                        pd.Timestamp(token).date()
+                        for token in raw_tokens
+                    )
+                    batch_dates = tuple(dict.fromkeys(batch_dates))
+                    if not 3 <= len(batch_dates) <= 5:
+                        raise ValueError(
+                            "Enter between 3 and 5 unique trading dates."
+                        )
+
+                    batch_progress = st.progress(
+                        0.0,
+                        text="Preparing multi-day DRI validation...",
+                    )
+                    batch_status = st.empty()
+
+                    def _run_batch_day(batch_date):
+                        import time
+
+                        day_policy = HistoricalDecisionReplayService(
+                            replay_reader,
+                            freshness_seconds=180,
+                            hard_expiry_seconds=900,
+                            minimum_confidence_pct=70.0,
+                            stop_loss_pct=15.0,
+                            target_pct=25.0,
+                            option_chain_sync=cache_option_sync,
+                        )
+                        day_service = HistoricalDRIDecisionReplayService(
+                            day_policy
+                        )
+                        started = time.perf_counter()
+                        result = day_service.run_day(
+                            instrument_key,
+                            batch_date,
+                        )
+                        return result, time.perf_counter() - started
+
+                    def _batch_progress(done, total, day, status):
+                        ratio = min(1.0, done / total) if total else 0.0
+                        batch_progress.progress(
+                            ratio,
+                            text=(
+                                f"Multi-day validation {done}/{total}: "
+                                f"{day} · {status}"
+                            ),
+                        )
+                        batch_status.caption(
+                            f"Current date: {day} · Status: {status}"
+                        )
+
+                    st.session_state[
+                        "historical_dri_batch_validation"
+                    ] = validate_historical_dri_dates(
+                        batch_dates,
+                        run_day=_run_batch_day,
+                        progress_callback=_batch_progress,
+                    )
+                except Exception as exc:
+                    st.exception(exc)
+
+            batch_result = st.session_state.get(
+                "historical_dri_batch_validation"
+            )
+            if batch_result is not None:
+                b1, b2, b3, b4, b5, b6 = st.columns(6)
+                b1.metric("Successful Days", batch_result.successful_days)
+                b2.metric("Failed Days", batch_result.failed_days)
+                b3.metric("TAKE", batch_result.take)
+                b4.metric("Wins", batch_result.wins)
+                b5.metric("Losses", batch_result.losses)
+                b6.metric(
+                    "Net Option Points",
+                    f"{batch_result.net_points:.2f}",
+                )
+
+                c1, c2, c3, c4, c5 = st.columns(5)
+                c1.metric("Bundles", batch_result.bundles)
+                c2.metric("WAIT", batch_result.wait)
+                c3.metric("BLOCK", batch_result.block)
+                c4.metric(
+                    "False Positives",
+                    batch_result.false_positives,
+                )
+                c5.metric(
+                    "Mean Daily Accuracy",
+                    f"{batch_result.mean_daily_accuracy_pct:.1f}%",
+                )
+
+                batch_rows = batch_result.rows()
+                _st_dataframe_arrow_safe(
+                    batch_rows,
+                    width="stretch",
+                    hide_index=True,
+                )
+                st.download_button(
+                    "Download Multi-Day Summary as CSV",
+                    data=pd.DataFrame(batch_rows).to_csv(index=False),
+                    file_name="historical_dri_multiday_validation.csv",
+                    mime="text/csv",
+                    key="historical_dri_batch_download",
+                )
 
         replay_result = st.session_state.get("historical_decision_replay_result")
         if replay_result is not None and replay_result.trading_date == replay_date:

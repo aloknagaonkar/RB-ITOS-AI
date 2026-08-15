@@ -13,6 +13,38 @@ from red_bar_lab.services.historical_decision_replay import (
     HistoricalDecisionReplayService,
 )
 from red_bar_lab.services.historical_dri_replay import detect_historical_dri_events
+from red_bar_lab.services.historical_dri_quality import (
+    DRIQualityConfig,
+    SameDirectionReentryGate,
+    calibration_eligible,
+    filter_tradable_candidates,
+)
+from red_bar_lab.services.historical_dri_reentry_policy import (
+    ResetAndRebreakGate,
+)
+from red_bar_lab.services.historical_dri_reversal_state import (
+    HistoricalDRIReversalStateMachine,
+)
+from red_bar_lab.services.historical_dri_trailing_validation import (
+    TrailingStopConfig,
+    simulate_trailing_stop,
+)
+from red_bar_lab.services.historical_dri_trailing_reporting import (
+    attach_trailing_columns,
+    summarize_trailing_audit,
+)
+from red_bar_lab.services.historical_dri_diagnostics import (
+    build_reversal_diagnostics,
+)
+from red_bar_lab.services.historical_dri_refinements import (
+    override_reset_rebreak_if_reexpanded,
+    reset_reexpansion_diagnostics,
+)
+from red_bar_lab.services.historical_dri_quality_refinement import (
+    evaluate_reset_override_quality,
+    resolve_numeric_metric,
+    simulate_adaptive_trailing_stop,
+)
 
 IST = "Asia/Kolkata"
 
@@ -138,6 +170,29 @@ class HistoricalDRIDecisionReplayService:
         rows = []
         admitted = 0
         watchlisted = 0
+        quality_config = DRIQualityConfig()
+        reentry_gate = SameDirectionReentryGate(
+            quality_config.same_direction_cooldown_minutes
+        )
+        reset_rebreak_gate = ResetAndRebreakGate()
+        reset_rebreak_suppressed_count = 0
+        opposite_regime_reset_count = 0
+        reversal_state = HistoricalDRIReversalStateMachine()
+        pending_reversal_count = 0
+        confirmed_reversal_count = 0
+        provisional_reversal_count = 0
+        provisional_taken_directions = set()
+        trailing_audit = []
+        trailing_config = TrailingStopConfig(
+            initial_stop_pct=7.0,
+        )
+        detected_count = len(events)
+        qualified_count = 0
+        executed_count = 0
+        hypothetical_count = 0
+        unresolved_count = 0
+        quality_rejected_count = 0
+        cooldown_suppressed_count = 0
 
         total_events = len(events)
         if progress_callback:
@@ -213,6 +268,13 @@ class HistoricalDRIDecisionReplayService:
                 candidates.append(candidate)
                 full_by_symbol[candidate.contract.tradingsymbol] = full
 
+            quality_result = filter_tradable_candidates(
+                candidates,
+                spot=spot,
+                config=quality_config,
+            )
+            quality_rejected_count += quality_result.rejected_count
+            candidates = list(quality_result.accepted)
             candidates.sort(
                 key=lambda c: (
                     c.total_score,
@@ -221,6 +283,11 @@ class HistoricalDRIDecisionReplayService:
                 reverse=True,
             )
             rank1 = candidates[0] if candidates else None
+            rank1_blocker = (
+                "NO_TRADABLE_RANK1_OPTION"
+                if quality_result.rejected_count
+                else "NO_RANK1_OPTION_AT_TIMESTAMP"
+            )
 
             if rank1 is None:
                 rows.append(
@@ -242,7 +309,7 @@ class HistoricalDRIDecisionReplayService:
                         expectancy_pct=0.0,
                         decision="WAIT",
                         execution="WOULD_WAIT",
-                        blocker="NO_RANK1_OPTION_AT_TIMESTAMP",
+                        blocker=rank1_blocker,
                         data_fidelity=coverage.fidelity,
                         vwap_ok=metrics["vwap_ok"],
                         ema_ok=metrics["ema_ok"],
@@ -252,13 +319,91 @@ class HistoricalDRIDecisionReplayService:
                         outcome_points=None,
                         outcome_result="UNKNOWN",
                         verdict="UNRESOLVED",
-                        learning_attribution="OPTION_DATA_GAP",
+                        learning_attribution=(
+                            "OPTION_QUALITY_FILTER"
+                            if rank1_blocker == "NO_TRADABLE_RANK1_OPTION"
+                            else "OPTION_DATA_GAP"
+                        ),
                         learning_recommendation=(
-                            "No point-in-time Rank-1 option was available."
+                            "No tradable point-in-time Rank-1 option was available."
                         ),
                     )
                 )
+                unresolved_count += 1
                 continue
+
+            qualified_count += 1
+
+            reversal_decision = reversal_state.evaluate_opposite_event(
+                direction,
+                close_price=event.trigger_level,
+                metrics=metrics,
+                setup_type=event.setup_type,
+                candles=candles,
+                moment=moment,
+            )
+            pending_reversal = (
+                reversal_decision.state.value.startswith("PENDING_")
+                and not reversal_decision.confirmed
+            )
+            provisional_reversal = bool(
+                getattr(reversal_decision, "provisional", False)
+            )
+            provisional_already_used = bool(
+                provisional_reversal
+                and direction in provisional_taken_directions
+            )
+            if pending_reversal:
+                pending_reversal_count += 1
+            if provisional_reversal:
+                provisional_reversal_count += 1
+
+            if reversal_decision.confirmed:
+                before_cooldown = dict(reentry_gate._last_taken)
+                before_reset = dict(reset_rebreak_gate._last_taken)
+                reentry_gate.reset_opposite(direction)
+                reset_rebreak_gate.reset_opposite(direction)
+                if (
+                    before_cooldown != reentry_gate._last_taken
+                    or before_reset != reset_rebreak_gate._last_taken
+                ):
+                    opposite_regime_reset_count += 1
+                confirmed_reversal_count += 1
+
+            cooldown_reason = reentry_gate.reason(direction, moment)
+            reset_rebreak = reset_rebreak_gate.evaluate(
+                direction,
+                moment,
+                candles,
+                trigger_level=event.trigger_level,
+                invalidation_level=event.invalidation_level,
+            )
+            reset_rebreak = override_reset_rebreak_if_reexpanded(
+                reset_rebreak,
+                candles,
+                moment=moment,
+                direction=direction,
+                momentum_ok=bool(metrics.get("momentum_ok")),
+            )
+            reset_reexpansion_diag = reset_reexpansion_diagnostics(
+                candles,
+                moment=moment,
+                direction=direction,
+                momentum_ok=bool(metrics.get("momentum_ok")),
+            )
+
+            reversal_diag = build_reversal_diagnostics(
+                candles,
+                moment=moment,
+                direction=direction,
+                reversal_decision=reversal_decision,
+                active_invalidation=getattr(
+                    reversal_state, "last_invalidation", None
+                ),
+                reset_rebreak_reason=getattr(
+                    reset_rebreak, "reason", None
+                ),
+            )
 
             opportunity = self.base.opportunity_engine.evaluate(
                 signal=signal,
@@ -327,7 +472,75 @@ class HistoricalDRIDecisionReplayService:
             portfolio_status = "NOT_QUALIFIED"
             portfolio_reason = committee.reason
 
-            if not session.entry_allowed:
+            quality_candidate_score_input = resolve_numeric_metric(
+                rank1.total_score,
+            )
+            quality_opportunity_health_input = resolve_numeric_metric(
+                opportunity.opportunity_score,
+            )
+
+            reset_quality = evaluate_reset_override_quality(
+                candles,
+                moment=moment,
+                direction=direction,
+                reset_classification=str(
+                    reset_reexpansion_diag.get(
+                        "reset_classification"
+                    ) or "NONE"
+                ),
+                reset_rebreak_reason=getattr(
+                    reset_rebreak, "reason", None
+                ),
+                break_level=reset_reexpansion_diag.get(
+                    "reexpansion_break_level"
+                ),
+                candidate_score=quality_candidate_score_input,
+                opportunity_health=quality_opportunity_health_input,
+                ema10_ok=reversal_diag.get("reversal_ema10_ok"),
+                ema30_ok=reversal_diag.get("reversal_ema30_ok"),
+                reversal_confirmed=bool(
+                    reversal_diag.get("reversal_confirmed")
+                ),
+            )
+            reset_quality_blocker = bool(
+                reset_quality.get("applicable")
+                and not reset_quality.get("passed")
+            )
+            if reset_quality_blocker:
+                execution = "WOULD_WAIT"
+                decision = "WAIT"
+                blocker = "RESET_EXPANSION_QUALITY"
+                portfolio_status = "RESET_QUALITY_WAIT"
+                portfolio_reason = (
+                    "RESET_QUALITY_"
+                    f"{reset_quality.get('criteria_count', 0)}_OF_5_"
+                    f"MARKET_ACTION_{reset_quality.get('market_action_count', 0)}"
+                )
+            elif pending_reversal or provisional_already_used:
+                execution = "WOULD_WAIT"
+                decision = "WAIT"
+                blocker = reversal_decision.reason
+                portfolio_status = (
+                    "PROVISIONAL_REVERSAL_USED"
+                    if provisional_already_used
+                    else "PENDING_REVERSAL"
+                )
+                portfolio_reason = reversal_decision.reason
+            elif cooldown_reason:
+                execution = "WOULD_WAIT"
+                decision = "WAIT"
+                blocker = cooldown_reason
+                portfolio_status = "COOLDOWN"
+                portfolio_reason = cooldown_reason
+                cooldown_suppressed_count += 1
+            elif not reset_rebreak.allowed:
+                execution = "WOULD_WAIT"
+                decision = "WAIT"
+                blocker = reset_rebreak.reason
+                portfolio_status = "RESET_REQUIRED"
+                portfolio_reason = reset_rebreak.reason
+                reset_rebreak_suppressed_count += 1
+            elif not session.entry_allowed:
                 execution = "WOULD_BLOCK"
                 decision = "BLOCKED"
                 blocker = f"MARKET_SESSION_{session.code}"
@@ -340,6 +553,21 @@ class HistoricalDRIDecisionReplayService:
                 portfolio_status = "APPROVED"
                 portfolio_reason = admission.reason
                 admitted += 1
+                executed_count += 1
+                reentry_gate.record_taken(direction, moment)
+                reset_rebreak_gate.record_taken(
+                    direction,
+                    moment,
+                    trigger_level=event.trigger_level,
+                    invalidation_level=event.invalidation_level,
+                )
+                if provisional_reversal:
+                    provisional_taken_directions.add(direction)
+                else:
+                    reversal_state.record_taken(
+                        direction,
+                        invalidation_level=event.invalidation_level,
+                    )
             elif committee.eligible and admission:
                 portfolio_status = "WATCHLIST"
                 portfolio_reason = admission.reason
@@ -364,6 +592,35 @@ class HistoricalDRIDecisionReplayService:
                     underlying=candles,
                 )
 
+            trailing_result = None
+            adaptive_trailing_result = None
+            adaptive_initial_stop_pct = None
+            if execution == "WOULD_TAKE" and rank1.ltp:
+                trailing_result = simulate_trailing_stop(
+                    full,
+                    entry_moment=moment,
+                    entry_price=float(rank1.ltp),
+                    baseline_exit_price=exit_info.get("exit"),
+                    config=trailing_config,
+                )
+                (
+                    adaptive_initial_stop_pct,
+                    adaptive_trailing_result,
+                ) = simulate_adaptive_trailing_stop(
+                    full,
+                    entry_moment=moment,
+                    entry_price=float(rank1.ltp),
+                    baseline_exit_price=exit_info.get("exit"),
+                    base_config=trailing_config,
+                )
+                trailing_audit.append({
+                    "signal_id": event.event_id,
+                    "symbol": rank1.contract.tradingsymbol,
+                    "baseline_exit": exit_info.get("exit"),
+                    "baseline_return_pct": exit_info.get("return_pct"),
+                    **trailing_result.to_dict(),
+                })
+
             ret = exit_info.get("return_pct")
             if ret is None:
                 outcome = "UNKNOWN"
@@ -376,6 +633,8 @@ class HistoricalDRIDecisionReplayService:
                     "WIN" if ret > 0 else "LOSS" if ret < 0 else "BREAKEVEN"
                 )
 
+            if execution != "WOULD_TAKE" and outcome != "UNKNOWN":
+                hypothetical_count += 1
             verdict = self.base._verdict(execution, outcome)
             attribution, recommendation = self.base._learning_attribution(
                 verdict=verdict,
@@ -428,6 +687,153 @@ class HistoricalDRIDecisionReplayService:
                     option_entry_price=exit_info.get("entry"),
                     option_exit_price=exit_info.get("exit"),
                     option_return_pct=ret,
+                    trailing_activated=bool(
+                        trailing_result and trailing_result.activated
+                    ),
+                    trailing_exit_price=(
+                        trailing_result.exit_price
+                        if trailing_result else None
+                    ),
+                    trailing_return_pct=(
+                        trailing_result.return_pct
+                        if trailing_result else None
+                    ),
+                    trailing_exit_reason=(
+                        trailing_result.exit_reason
+                        if trailing_result else None
+                    ),
+                    trailing_protected_points=(
+                        trailing_result.protected_points
+                        if trailing_result else None
+                    ),
+                    reversal_state=reversal_diag["reversal_state"],
+                    reversal_reason=reversal_diag["reversal_reason"],
+                    reversal_provisional=reversal_diag[
+                        "reversal_provisional"
+                    ],
+                    reversal_confirmed=reversal_diag[
+                        "reversal_confirmed"
+                    ],
+                    reversal_ema10_value=reversal_diag[
+                        "reversal_ema10_value"
+                    ],
+                    reversal_ema10_slope=reversal_diag[
+                        "reversal_ema10_slope"
+                    ],
+                    reversal_ema10_ok=reversal_diag[
+                        "reversal_ema10_ok"
+                    ],
+                    reversal_ema30_value=reversal_diag[
+                        "reversal_ema30_value"
+                    ],
+                    reversal_ema30_slope=reversal_diag[
+                        "reversal_ema30_slope"
+                    ],
+                    reversal_ema30_ok=reversal_diag[
+                        "reversal_ema30_ok"
+                    ],
+                    reversal_two_directional_closes=reversal_diag[
+                        "reversal_two_directional_closes"
+                    ],
+                    reversal_momentum_ok=(
+                        bool(metrics.get("momentum_ok"))
+                        if metrics.get("momentum_ok") is not None
+                        else None
+                    ),
+                    reversal_active_invalidation=reversal_diag[
+                        "reversal_active_invalidation"
+                    ],
+                    reversal_invalidation_broken=reversal_diag[
+                        "reversal_invalidation_broken"
+                    ],
+                    reset_rebreak_reason=reversal_diag[
+                        "reset_rebreak_reason"
+                    ],
+                    reset_seen=reset_reexpansion_diag["reset_seen"],
+                    reexpansion_detected=(
+                        reset_reexpansion_diag["reexpansion_detected"]
+                    ),
+                    reset_candle_time=(
+                        reset_reexpansion_diag["reset_candle_time"]
+                    ),
+                    ema10_touch_detected=(
+                        reset_reexpansion_diag["ema10_touch_detected"]
+                    ),
+                    reexpansion_break_level=(
+                        reset_reexpansion_diag["reexpansion_break_level"]
+                    ),
+                    strong_expansion_candle=(
+                        reset_reexpansion_diag["strong_expansion_candle"]
+                    ),
+                    reset_classification=reset_reexpansion_diag[
+                        "reset_classification"
+                    ],
+                    reset_window_bars=reset_reexpansion_diag[
+                        "reset_window_bars"
+                    ],
+                    reset_counter_candle_seen=reset_reexpansion_diag[
+                        "reset_counter_candle_seen"
+                    ],
+                    reset_near_touch_detected=reset_reexpansion_diag[
+                        "reset_near_touch_detected"
+                    ],
+                    shallow_reset_detected=reset_reexpansion_diag[
+                        "shallow_reset_detected"
+                    ],
+                    reset_quality_passed=reset_quality.get("passed"),
+                    reset_quality_criteria_count=reset_quality.get(
+                        "criteria_count"
+                    ),
+                    reset_quality_criteria=reset_quality.get(
+                        "criteria"
+                    ),
+                    reset_market_action_count=reset_quality.get(
+                        "market_action_count"
+                    ),
+                    reset_market_action_passed=reset_quality.get(
+                        "market_action_passed"
+                    ),
+                    reset_market_action_criteria=reset_quality.get(
+                        "market_action_criteria"
+                    ),
+                    reset_moderate_market_action_passed=reset_quality.get(
+                        "moderate_market_action_passed"
+                    ),
+                    reset_market_action_tier=reset_quality.get(
+                        "market_action_tier"
+                    ),
+                    reset_body_ratio_pct=reset_quality.get(
+                        "body_ratio_pct"
+                    ),
+                    reset_move_beyond_break_pct=reset_quality.get(
+                        "move_beyond_break_pct"
+                    ),
+                    reset_relative_volume=reset_quality.get(
+                        "relative_volume"
+                    ),
+                    quality_candidate_score_input=(
+                        quality_candidate_score_input
+                    ),
+                    quality_opportunity_health_input=(
+                        quality_opportunity_health_input
+                    ),
+                    adaptive_initial_stop_pct=adaptive_initial_stop_pct,
+                    adaptive_trailing_exit_price=(
+                        adaptive_trailing_result.exit_price
+                        if adaptive_trailing_result else None
+                    ),
+                    adaptive_trailing_return_pct=(
+                        adaptive_trailing_result.return_pct
+                        if adaptive_trailing_result else None
+                    ),
+                    adaptive_trailing_exit_reason=(
+                        adaptive_trailing_result.exit_reason
+                        if adaptive_trailing_result else None
+                    ),
+                    adaptive_trailing_protected_points=(
+                        adaptive_trailing_result.protected_points
+                        if adaptive_trailing_result else None
+                    ),
                     outcome_basis=(
                         "EXECUTED_EXIT_ENGINE"
                         if execution == "WOULD_TAKE"
@@ -452,7 +858,10 @@ class HistoricalDRIDecisionReplayService:
             for r in rows
             if r.execution == "WOULD_TAKE"
         )
-        recommendations, accuracy = self.base._aggregate_learning(rows)
+        calibration_rows = [row for row in rows if calibration_eligible(row)]
+        recommendations, accuracy = self.base._aggregate_learning(
+            calibration_rows
+        )
 
         total_seconds = perf_counter() - started
         self.last_timing = {
@@ -463,7 +872,52 @@ class HistoricalDRIDecisionReplayService:
                 len(live_series_cache) if live_mode else len(stored_series)
             ),
             "data_source": coverage.data_source,
+            "detected": detected_count,
+            "qualified": qualified_count,
+            "executed": executed_count,
+            "hypothetical": hypothetical_count,
+            "unresolved": unresolved_count,
+            "quality_rejected_candidates": quality_rejected_count,
+            "cooldown_suppressed": cooldown_suppressed_count,
+            "reset_rebreak_suppressed": reset_rebreak_suppressed_count,
+            "opposite_regime_resets": opposite_regime_reset_count,
+            "pending_reversals": pending_reversal_count,
+            "confirmed_reversals": confirmed_reversal_count,
+            "provisional_reversals": provisional_reversal_count,
+            "provisional_directions_used": len(provisional_taken_directions),
+            "trailing_audited_trades": len(trailing_audit),
+            "trailing_net_points": round(sum(
+                float(item.get("exit_price") or 0.0)
+                - float(item.get("entry_price") or 0.0)
+                for item in trailing_audit
+            ), 3),
+            "baseline_net_points_for_trailing_set": round(sum(
+                float(item.get("baseline_exit") or 0.0)
+                - float(item.get("entry_price") or 0.0)
+                for item in trailing_audit
+            ), 3),
+            "trailing_protected_points": round(sum(
+                float(item.get("protected_points") or 0.0)
+                for item in trailing_audit
+            ), 3),
+            "calibration_eligible": len(calibration_rows),
         }
+        self.last_trailing_validation = tuple(trailing_audit)
+        self.last_trailing_summary = summarize_trailing_audit(
+            trailing_audit
+        )
+        if hasattr(self, "last_timing"):
+            self.last_timing.update(self.last_trailing_summary)
+        for _candidate_rows in (
+            locals().get("rows"),
+            locals().get("replay_rows"),
+            locals().get("results"),
+        ):
+            if isinstance(_candidate_rows, list):
+                attach_trailing_columns(
+                    _candidate_rows,
+                    trailing_audit,
+                )
         if progress_callback:
             progress_callback(
                 len(events), len(events), "Replay completed", total_seconds
