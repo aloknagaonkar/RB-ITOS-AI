@@ -5,7 +5,7 @@ from red_bar_lab.services.historical_dri_quality_refinement import (
 )
 
 
-def _candles():
+def _candles(*, latest_volume=100.0):
     return pd.DataFrame([
         {
             "timestamp": "2026-08-14T04:30:00Z",
@@ -21,7 +21,7 @@ def _candles():
             "high": 106,
             "low": 100,
             "close": 104,
-            "volume": 100,
+            "volume": latest_volume,
         },
     ])
 
@@ -67,7 +67,7 @@ def test_moderate_tier_allows_confirmed_reversal():
 
 def test_strong_tier_does_not_require_confirmed_reversal():
     result = evaluate_reset_override_quality(
-        _candles(),
+        _candles(latest_volume=300),
         moment="2026-08-14T10:01:00+05:30",
         direction="BULLISH",
         reset_classification="RESET_WINDOW_CONFIRMED",
@@ -79,6 +79,6 @@ def test_strong_tier_does_not_require_confirmed_reversal():
         ema30_ok=False,
         reversal_confirmed=False,
     )
-    assert result["market_action_count"] >= 1
+    assert result["market_action_count"] == 3
     assert result["market_action_tier"] == "STRONG"
     assert result["passed"] is True
