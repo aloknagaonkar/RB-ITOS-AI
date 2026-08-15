@@ -5,7 +5,7 @@ from red_bar_lab.services.historical_dri_quality_refinement import (
 )
 
 
-def _candles(*, latest_volume=100.0):
+def _candles(*, latest_volume=100.0, latest_close=104.0):
     return pd.DataFrame([
         {
             "timestamp": "2026-08-14T04:30:00Z",
@@ -20,7 +20,7 @@ def _candles(*, latest_volume=100.0):
             "open": 100,
             "high": 106,
             "low": 100,
-            "close": 104,
+            "close": latest_close,
             "volume": latest_volume,
         },
     ])
@@ -67,7 +67,7 @@ def test_moderate_tier_allows_confirmed_reversal():
 
 def test_strong_tier_does_not_require_confirmed_reversal():
     result = evaluate_reset_override_quality(
-        _candles(latest_volume=300),
+        _candles(latest_volume=300, latest_close=105.0),
         moment="2026-08-14T10:01:00+05:30",
         direction="BULLISH",
         reset_classification="RESET_WINDOW_CONFIRMED",
