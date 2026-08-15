@@ -5,7 +5,7 @@ from red_bar_lab.services.historical_dri_quality_refinement import (
 )
 
 
-def _candles(body_close=105.0):
+def _candles(body_close=105.0, latest_volume=100.0):
     return pd.DataFrame([
         {
             "timestamp": "2026-08-14T04:30:00Z",
@@ -21,7 +21,7 @@ def _candles(body_close=105.0):
             "high": 106,
             "low": 100,
             "close": body_close,
-            "volume": 100,
+            "volume": latest_volume,
         },
     ])
 
@@ -42,7 +42,7 @@ def test_score_and_health_alone_cannot_pass():
     assert result["passed"] is False
 
 
-def test_total_two_plus_market_action_passes():
+def test_two_strong_conditions_without_relative_volume_do_not_pass():
     result = evaluate_reset_override_quality(
         _candles(),
         moment="2026-08-14T10:01:00+05:30",
@@ -54,5 +54,22 @@ def test_total_two_plus_market_action_passes():
         opportunity_health=70,
     )
     assert result["criteria_count"] >= 2
-    assert result["market_action_count"] >= 1
+    assert result["market_action_count"] == 2
+    assert result["market_action_tier"] == "NONE"
+    assert result["passed"] is False
+
+
+def test_all_three_strong_market_action_conditions_pass():
+    result = evaluate_reset_override_quality(
+        _candles(latest_volume=300),
+        moment="2026-08-14T10:01:00+05:30",
+        direction="BULLISH",
+        reset_classification="RESET_WINDOW_CONFIRMED",
+        reset_rebreak_reason="RESET_MOMENTUM_REEXPANSION",
+        break_level=102,
+        candidate_score=90,
+        opportunity_health=70,
+    )
+    assert result["market_action_count"] == 3
+    assert result["market_action_tier"] == "STRONG"
     assert result["passed"] is True
