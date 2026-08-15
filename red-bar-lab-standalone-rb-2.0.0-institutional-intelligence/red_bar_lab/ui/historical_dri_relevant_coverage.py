@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import wraps
+from types import SimpleNamespace
 
 import pandas as pd
 import streamlit as st
@@ -99,19 +100,52 @@ def _render_relevant_coverage_audit(*, layout, database, token, instrument_key) 
                 "Auditing near-market CE/PE candle and OI coverage..."
             ):
                 coverage = sync.validate_day(instrument_key, selected_date)
+                audit_coverage = coverage
+                contract_source = str(
+                    getattr(coverage, "data_source", "UNKNOWN") or "UNKNOWN"
+                )
+
+                # Live-capture readiness reports aggregate snapshot coverage but may
+                # not contain per-contract rows. For this diagnostic only, reuse the
+                # expired-option manifest/candle coverage as the contract-detail
+                # source while preserving the authoritative global readiness result.
+                if not tuple(getattr(coverage, "contracts", ()) or ()):
+                    expired_detail = sync._validate_expired_day(
+                        instrument_key,
+                        selected_date,
+                    )
+                    expired_contracts = tuple(
+                        getattr(expired_detail, "contracts", ()) or ()
+                    )
+                    if expired_contracts:
+                        audit_coverage = SimpleNamespace(
+                            replay_ready=bool(
+                                getattr(coverage, "replay_ready", False)
+                            ),
+                            fidelity=str(
+                                getattr(coverage, "fidelity", "UNKNOWN")
+                            ),
+                            contracts=expired_contracts,
+                        )
+                        contract_source = (
+                            f"{contract_source} readiness + "
+                            "EXPIRED_OPTION_CANDLES contract detail"
+                        )
+
                 underlying = replay_reader.read_day(
                     instrument_key,
                     selected_date,
                     interval_minutes=1,
                 )
                 audit = analyze_historical_dri_relevant_coverage(
-                    coverage,
+                    audit_coverage,
                     underlying,
                 )
             st.session_state[_SESSION_KEY] = {
                 "instrument_key": instrument_key,
                 "trading_date": selected_date,
                 "audit": audit,
+                "contract_source": contract_source,
             }
         except Exception as exc:
             st.exception(exc)
@@ -151,6 +185,11 @@ def _render_relevant_coverage_audit(*, layout, database, token, instrument_key) 
     b3.metric("Strike Step", _format_number(audit.strike_step))
     b4.metric("Relevant CE", audit.relevant_ce_contracts)
     b5.metric("Relevant PE", audit.relevant_pe_contracts)
+
+    st.caption(
+        "Contract-detail source: "
+        + str(state.get("contract_source") or "UNKNOWN")
+    )
 
     if audit.status == "FULL_REPLAY_READY":
         st.success(audit.reason)
@@ -202,9 +241,11 @@ def _render_relevant_coverage_audit(*, layout, database, token, instrument_key) 
             key="historical_dri_relevant_coverage_download",
         )
     with c2:
+        summary_row = audit.summary()
+        summary_row["Contract Detail Source"] = state.get("contract_source")
         st.download_button(
             "Download Audit Summary CSV",
-            data=pd.DataFrame([audit.summary()]).to_csv(index=False),
+            data=pd.DataFrame([summary_row]).to_csv(index=False),
             file_name=(
                 f"historical_dri_relevant_coverage_summary_"
                 f"{selected_date.isoformat()}.csv"
