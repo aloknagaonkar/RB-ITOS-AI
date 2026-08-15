@@ -156,7 +156,7 @@ def evaluate_reset_override_quality(
     market_action_count = sum(
         1 for value in market_action_checks.values() if value
     )
-    strong_market_action_passed = market_action_count >= 1
+    strong_market_action_passed = all(market_action_checks.values())
     moderate_market_action_passed = bool(
         body_ratio_pct >= 60.0
         and move_pct > 0.0
