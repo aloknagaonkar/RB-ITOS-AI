@@ -3,6 +3,7 @@ from red_bar_lab.execution.exit_engine import PaperExitEngine
 from red_bar_lab.execution.attribution_automation import AttributionAwarePaperAutomationService
 from red_bar_lab.services.evidence_replay import EvidenceAwareHistoricalDecisionReplayService
 from red_bar_lab.ui.active_trade_views import build_paper_page_wrapper
+from red_bar_lab.ui.historical_dri_10day import build_10day_validation_wrapper
 from red_bar_lab.ui.paper_time_display import install as install_paper_time_display
 from red_bar_lab.ui.paper_consistency import (
     build_candidate_workbench_wrapper,
@@ -44,6 +45,10 @@ paper_trading._render_paper_exit_engine_panel = (
     )
 )
 research_lab.HistoricalDecisionReplayService = EvidenceAwareHistoricalDecisionReplayService
+research_lab.render_page = build_10day_validation_wrapper(
+    research_lab.render_page,
+    research_lab,
+)
 paper_trading.render_page = build_paper_page_wrapper(paper_trading.render_page)
 
 _PAGE_MODULES = {
