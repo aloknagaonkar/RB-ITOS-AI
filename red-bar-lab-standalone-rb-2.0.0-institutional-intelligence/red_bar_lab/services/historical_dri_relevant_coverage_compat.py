@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pandas as pd
 
 from red_bar_lab.services.historical_dri_relevant_coverage import (
@@ -12,12 +14,13 @@ def analyze_historical_dri_relevant_coverage(
     underlying: pd.DataFrame,
     **kwargs,
 ):
-    """Normalize historical price-column variants before running the audit.
+    """Normalize cached data variants before running the diagnostic audit.
 
     Older cached datasets may expose title-case/upper-case OHLC names or aliases
-    such as LTP/last_price. The core audit expects lower-case OHLC columns. This
-    adapter is diagnostic-only and does not change replay readiness or strategy
-    decisions.
+    such as LTP/last_price. Live-capture coverage can also be authoritative for
+    replay readiness without exposing per-contract strike rows. Neither condition
+    should change strategy decisions; this adapter only prevents a false
+    ``INSUFFICIENT_AUDIT_DATA`` diagnostic.
     """
 
     frame = underlying.copy() if underlying is not None else pd.DataFrame()
@@ -52,4 +55,24 @@ def analyze_historical_dri_relevant_coverage(
             if source is not None:
                 frame[target] = frame[source]
 
-    return _analyze(coverage, frame, **kwargs)
+    result = _analyze(coverage, frame, **kwargs)
+
+    # The normal replay-readiness service remains authoritative. A date that is
+    # already replay-ready through same-day live capture must not be labelled
+    # insufficient merely because that aggregate coverage object has no strike
+    # rows for this optional diagnostic table.
+    if (
+        bool(getattr(coverage, "replay_ready", False))
+        and result.status == "INSUFFICIENT_AUDIT_DATA"
+    ):
+        return replace(
+            result,
+            status="FULL_REPLAY_READY",
+            reason=(
+                "The authoritative global replay-readiness gate already passes. "
+                "Per-contract strike detail is unavailable for this coverage source, "
+                "so the contract table is informationally empty."
+            ),
+        )
+
+    return result
