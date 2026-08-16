@@ -19,6 +19,15 @@ NON_EXECUTABLE_REGIMES = {
 }
 
 
+def _env_enabled(name: str, default: bool = True) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return bool(default)
+    return raw.strip().lower() not in {
+        "0", "false", "no", "off",
+    }
+
+
 def _ts(value: object) -> pd.Timestamp | None:
     if value in (None, ""):
         return None
@@ -443,20 +452,52 @@ class DirectionalNativeSignalDatabaseProxy:
         merge_window_minutes: int = 10,
         now_provider=None,
         enable_reference_signals: bool | None = None,
+        enable_red_bar_strategy: bool | None = None,
+        enable_dri_strategy: bool | None = None,
+        enable_rsi_strategy: bool | None = None,
     ):
         self._database = database
         self.runs_root = Path(runs_root)
         self.merge_window_minutes = int(merge_window_minutes)
         self.now_provider = now_provider
-        if enable_reference_signals is None:
-            raw = os.getenv(
-                "RB_ENABLE_REFERENCE_LEVEL_SIGNALS",
-                "true",
-            ).strip().lower()
-            enable_reference_signals = raw not in {
-                "0", "false", "no", "off",
-            }
-        self.enable_reference_signals = bool(enable_reference_signals)
+
+        # The explicit Red Bar switch has priority. The older
+        # enable_reference_signals argument and environment variable remain
+        # supported for backward compatibility.
+        if enable_red_bar_strategy is None:
+            if enable_reference_signals is not None:
+                enable_red_bar_strategy = bool(
+                    enable_reference_signals
+                )
+            elif os.getenv("RB_ENABLE_RED_BAR_STRATEGY") is not None:
+                enable_red_bar_strategy = _env_enabled(
+                    "RB_ENABLE_RED_BAR_STRATEGY"
+                )
+            else:
+                enable_red_bar_strategy = _env_enabled(
+                    "RB_ENABLE_REFERENCE_LEVEL_SIGNALS"
+                )
+
+        if enable_dri_strategy is None:
+            enable_dri_strategy = _env_enabled(
+                "RB_ENABLE_DRI_STRATEGY"
+            )
+
+        if enable_rsi_strategy is None:
+            enable_rsi_strategy = _env_enabled(
+                "RB_ENABLE_RSI_STRATEGY"
+            )
+
+        self.enable_red_bar_strategy = bool(
+            enable_red_bar_strategy
+        )
+        self.enable_dri_strategy = bool(enable_dri_strategy)
+        self.enable_rsi_strategy = bool(enable_rsi_strategy)
+
+        # Compatibility alias for existing callers and tests.
+        self.enable_reference_signals = (
+            self.enable_red_bar_strategy
+        )
 
     def __getattr__(self, name):
         return getattr(self._database, name)
@@ -478,17 +519,30 @@ class DirectionalNativeSignalDatabaseProxy:
         return []
 
     def read_signal_attempts(self, *args, **kwargs):
-        all_legacy = list(
-            self._database.read_signal_attempts(*args, **kwargs) or []
+        legacy = (
+            list(
+                self._database.read_signal_attempts(
+                    *args, **kwargs
+                ) or []
+            )
+            if self.enable_red_bar_strategy
+            else []
         )
-        legacy = all_legacy if self.enable_reference_signals else []
-        native = read_fresh_bundles(
-            self.runs_root,
-            now=self._now(),
+        native = (
+            read_fresh_bundles(
+                self.runs_root,
+                now=self._now(),
+            )
+            if self.enable_dri_strategy
+            else []
         )
-        rsi_native = read_fresh_rsi_signals(
-            self.runs_root,
-            now=self._now(),
+        rsi_native = (
+            read_fresh_rsi_signals(
+                self.runs_root,
+                now=self._now(),
+            )
+            if self.enable_rsi_strategy
+            else []
         )
         open_orders = self._open_orders()
 

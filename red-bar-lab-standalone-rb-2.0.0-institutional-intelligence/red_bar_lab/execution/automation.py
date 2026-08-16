@@ -93,8 +93,8 @@ class RedBarPaperAutomationService:
         account_id: str = "PAPER-STD",
         initial_capital: float = 100000.0,
         minimum_candidate_score: float = 65.0,
-        stop_loss_pct: float = 15.0,
-        target_pct: float = 25.0,
+        stop_loss_pct: float = 7.0,
+        target_pct: float = 0.0,
         eod_exit_time: time = time(15, 25),
         max_signal_age_seconds: int = 180,
         allow_outside_market_hours: bool = False,
@@ -1096,7 +1096,11 @@ class RedBarPaperAutomationService:
                         blocked.append(f"{candidate.contract.tradingsymbol}:NO_PRICE")
                         continue
                     stop = reference * (1.0 - self.stop_loss_pct / 100.0)
-                    target = reference * (1.0 + self.target_pct / 100.0)
+                    target = (
+                        reference * (1.0 + self.target_pct / 100.0)
+                        if self.target_pct > 0.0
+                        else None
+                    )
                     quantity = int(lots) * candidate.contract.lot_size
                     h = selection.historical
                     entry_reason = (
@@ -1132,7 +1136,10 @@ class RedBarPaperAutomationService:
                             underlying_name=self.underlying_name,
                             underlying_price=float(spot),
                             stop_price=round(stop, 2),
-                            target1_price=round(target, 2),
+                            target1_price=(
+                                round(target, 2)
+                                if target is not None else None
+                            ),
                             target2_price=None,
                             reason=entry_reason,
                         )
@@ -1304,7 +1311,11 @@ class RedBarPaperAutomationService:
                 if quantity <= 0:
                     quantity = max(1, int(lots)) * contract.lot_size
                 stop = reference * (1.0 - self.stop_loss_pct / 100.0)
-                target = reference * (1.0 + self.target_pct / 100.0)
+                target = (
+                    reference * (1.0 + self.target_pct / 100.0)
+                    if self.target_pct > 0.0
+                    else None
+                )
                 self.database.update_execution_queue_status(
                     queue_id=queue_id, status="EXECUTING",
                     reason="PAPER_EXECUTION_STARTED",
@@ -1326,7 +1337,11 @@ class RedBarPaperAutomationService:
                     zerodha=self.zerodha, contract=contract, quantity=quantity,
                     signal_id=signal_id, underlying_name=self.underlying_name,
                     underlying_price=float(spot), stop_price=round(stop, 2),
-                    target1_price=round(target, 2), target2_price=None, reason=reason,
+                    target1_price=(
+                        round(target, 2)
+                        if target is not None else None
+                    ),
+                    target2_price=None, reason=reason,
                 )
                 order_id = str(opened_row["order_id"])
                 self.database.update_execution_queue_status(
@@ -1552,7 +1567,7 @@ class RedBarPaperAutomationService:
                         order_id=str(row["order_id"]),
                         state="BREAKEVEN_ARMED",
                         detail=(
-                            f"+15% peak reached; entry="
+                            f"+5% peak reached; entry="
                             f"{_num(row.get('entry_price')):.2f}; "
                             f"peak={exit_health.peak_price:.2f}; "
                             f"effective_stop={effective_stop}"
@@ -1565,7 +1580,7 @@ class RedBarPaperAutomationService:
                         order_id=str(row["order_id"]),
                         state="TRAILING_ACTIVATED",
                         detail=(
-                            f"+20% peak reached; peak="
+                            f"+12% peak reached; peak="
                             f"{exit_health.peak_price:.2f}; "
                             f"trail={exit_health.trailing_stop}"
                         ),
