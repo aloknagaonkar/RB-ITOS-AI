@@ -17,7 +17,10 @@ from red_bar_lab.execution.rsi_extreme_reversal import (
 
 
 def reversal_candles() -> pd.DataFrame:
-    closes = [100.0] * 8 + [98, 96, 94, 92, 90, 88, 86, 89]
+    # RSI arms on the first loss candle and crosses back above 20 within the
+    # frozen five-completed-candle window. The previous fixture crossed only
+    # after the arm had correctly expired.
+    closes = [100.0] * 8 + [98, 96, 94, 92, 95]
     timestamps = pd.date_range(
         "2026-08-14 09:15",
         periods=len(closes),
