@@ -21,6 +21,10 @@ from red_bar_lab.execution.early_directional_entry import (
     EarlyOneMinuteDirectionalEntryEngine,
     append_bundle_once,
 )
+from red_bar_lab.execution.rsi_extreme_reversal import (
+    RsiExtremeReversalEngine,
+    append_rsi_signals_once,
+)
 
 IST = "Asia/Kolkata"
 
@@ -35,6 +39,8 @@ class DirectionalBackgroundRefreshResult:
     signals_generated: int = 0
     bundles_generated: int = 0
     latest_bundle_id: str | None = None
+    rsi_signals_generated: int = 0
+    latest_rsi_signal_id: str | None = None
 
     def as_record(self) -> dict[str, object]:
         return dict(self.__dict__)
@@ -155,20 +161,64 @@ class DirectionalRegimeBackgroundCycle:
                 reason="UNDERLYING_CANDLE_PROVIDER_UNAVAILABLE",
                 instrument_key=instrument_key,
             )
-
         now = self._now()
         frames = self._load_frames(provider, str(instrument_key), now)
         one = _normalize_one_minute(frames, now)
-        five = _completed_five_minute(one, now)
+        safe = _safe_instrument(str(instrument_key))
+        normalized_key = str(instrument_key).upper().replace("_", " ")
+        is_nifty_50 = normalized_key in {
+            "NSE INDEX|NIFTY 50",
+            "NSE:NIFTY 50",
+            "NIFTY 50",
+        }
+        rsi_signals = (
+            [
+                signal.as_record()
+                for signal in RsiExtremeReversalEngine().detect(
+                    one,
+                    instrument_key=str(instrument_key),
+                )
+            ]
+            if is_nifty_50
+            else []
+        )
+        rsi_path = (
+            self.runs_root
+            / "rsi_extreme_reversal_v1"
+            / f"{safe}.jsonl"
+        )
+        rsi_signals_generated = (
+            append_rsi_signals_once(rsi_path, rsi_signals)
+            if is_nifty_50
+            else 0
+        )
+        fresh_rsi_signals = [
+            row
+            for row in rsi_signals
+            if pd.Timestamp(row["detected_at"]) <= now
+            <= pd.Timestamp(row["fresh_until"])
+        ]
+        latest_rsi = fresh_rsi_signals[-1] if fresh_rsi_signals else None
 
+        five = _completed_five_minute(one, now)
         if len(one) < 35 or len(five) < 35:
             return DirectionalBackgroundRefreshResult(
-                status="UNAVAILABLE",
-                reason=f"INSUFFICIENT_COMPLETED_CANDLES:1M={len(one)};5M={len(five)}",
+                status="READY" if latest_rsi is not None else "UNAVAILABLE",
+                reason=(
+                    "RSI_READY_DRI_UNAVAILABLE"
+                    if latest_rsi is not None
+                    else f"INSUFFICIENT_COMPLETED_CANDLES:1M={len(one)};5M={len(five)}"
+                ),
                 instrument_key=str(instrument_key),
+                signals_generated=(1 if latest_rsi is not None else 0),
+                rsi_signals_generated=rsi_signals_generated,
+                latest_rsi_signal_id=(
+                    str(latest_rsi.get("signal_id") or "")
+                    if latest_rsi is not None
+                    else None
+                ),
             )
 
-        safe = _safe_instrument(str(instrument_key))
         regime_store = StatefulRegimeStore(
             self.runs_root / "stateful_regime_v43" / f"{safe}.jsonl"
         )
@@ -217,12 +267,14 @@ class DirectionalRegimeBackgroundCycle:
             return DirectionalBackgroundRefreshResult(
                 status=(
                     "READY"
-                    if early_bundle is not None
+                    if early_bundle is not None or latest_rsi is not None
                     else "NO_SIGNAL"
                 ),
                 reason=(
                     "EARLY_1M_DIRECTIONAL_BUNDLE_READY"
                     if early_bundle is not None
+                    else "RSI_EXTREME_REVERSAL_SIGNAL_READY"
+                    if latest_rsi is not None
                     else "NO_ACTIVE_DIRECTIONAL_TRANSITION"
                 ),
                 instrument_key=str(instrument_key),
@@ -236,6 +288,12 @@ class DirectionalRegimeBackgroundCycle:
                 latest_bundle_id=(
                     str(early_bundle.get("bundle_id") or "")
                     if early_bundle is not None
+                    else None
+                ),
+                rsi_signals_generated=rsi_signals_generated,
+                latest_rsi_signal_id=(
+                    str(latest_rsi.get("signal_id") or "")
+                    if latest_rsi is not None
                     else None
                 ),
             )
@@ -274,10 +332,12 @@ class DirectionalRegimeBackgroundCycle:
 
         latest_bundle = bundles[-1] if bundles else None
         return DirectionalBackgroundRefreshResult(
-            status="READY" if bundles else "NO_SIGNAL",
+            status="READY" if bundles or latest_rsi is not None else "NO_SIGNAL",
             reason=(
                 "FRESH_SETUP_BUNDLE_READY"
                 if bundles
+                else "RSI_EXTREME_REVERSAL_SIGNAL_READY"
+                if latest_rsi is not None
                 else "NO_FRESH_SETUP_FROM_CURRENT_SNAPSHOT"
             ),
             instrument_key=str(instrument_key),
@@ -288,6 +348,12 @@ class DirectionalRegimeBackgroundCycle:
             latest_bundle_id=(
                 str(latest_bundle.get("bundle_id") or "")
                 if latest_bundle
+                else None
+            ),
+            rsi_signals_generated=rsi_signals_generated,
+            latest_rsi_signal_id=(
+                str(latest_rsi.get("signal_id") or "")
+                if latest_rsi is not None
                 else None
             ),
         )
