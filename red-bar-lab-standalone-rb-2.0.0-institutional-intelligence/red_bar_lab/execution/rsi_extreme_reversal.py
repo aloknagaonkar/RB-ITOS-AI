@@ -23,10 +23,8 @@ def _rsi(close: pd.Series, period: int = 7) -> pd.Series:
     if len(values) <= period:
         return result
 
-    seed_gain = gain.iloc[1 : period + 1].mean()
-    seed_loss = loss.iloc[1 : period + 1].mean()
-    average_gain = float(seed_gain)
-    average_loss = float(seed_loss)
+    average_gain = float(gain.iloc[1 : period + 1].mean())
+    average_loss = float(loss.iloc[1 : period + 1].mean())
 
     def value(avg_gain: float, avg_loss: float) -> float:
         if avg_loss == 0.0 and avg_gain > 0.0:
@@ -35,16 +33,16 @@ def _rsi(close: pd.Series, period: int = 7) -> pd.Series:
             return 0.0
         if avg_gain == 0.0 and avg_loss == 0.0:
             return 50.0
-        rs = avg_gain / avg_loss
-        return 100.0 - (100.0 / (1.0 + rs))
+        relative_strength = avg_gain / avg_loss
+        return 100.0 - (100.0 / (1.0 + relative_strength))
 
     result.iloc[period] = value(average_gain, average_loss)
     for index in range(period + 1, len(values)):
         average_gain = (
-            (average_gain * (period - 1)) + float(gain.iloc[index])
+            average_gain * (period - 1) + float(gain.iloc[index])
         ) / period
         average_loss = (
-            (average_loss * (period - 1)) + float(loss.iloc[index])
+            average_loss * (period - 1) + float(loss.iloc[index])
         ) / period
         result.iloc[index] = value(average_gain, average_loss)
     return result
@@ -176,6 +174,7 @@ class RsiExtremeReversalEngine:
             "signal_source": SIGNAL_SOURCE,
             "source": SIGNAL_SOURCE,
             "signal_sources": [SIGNAL_SOURCE],
+            "execution_strategy_source": SIGNAL_SOURCE,
             "source_count": 1,
             "merge_status": "SINGLE_SOURCE",
             "level_name": "RSI7_OVERSOLD_REVERSAL" if direction == "BULLISH" else "RSI7_OVERBOUGHT_REVERSAL",
