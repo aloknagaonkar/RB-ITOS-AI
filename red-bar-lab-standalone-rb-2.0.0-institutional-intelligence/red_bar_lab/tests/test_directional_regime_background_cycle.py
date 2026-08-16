@@ -112,7 +112,8 @@ def test_rsi_artifacts_are_not_generated_for_bank_nifty(tmp_path: Path):
 
 
 def test_rsi_can_be_ready_before_dri_five_minute_readiness(tmp_path: Path):
-    closes = [100.0] * 8 + [98, 96, 94, 92, 90, 88, 86, 89]
+    # Cross back above RSI 20 before the frozen five-candle arm expires.
+    closes = [100.0] * 8 + [98, 96, 94, 92, 95]
     timestamps = pd.date_range(
         "2026-08-14 09:15",
         periods=len(closes),
@@ -147,7 +148,7 @@ def test_rsi_can_be_ready_before_dri_five_minute_readiness(tmp_path: Path):
         adapter=EarlyRsiAdapter(),
         runs_root=tmp_path,
         now_provider=lambda: pd.Timestamp(
-            "2026-08-14 09:32:00",
+            "2026-08-14 09:29:00",
             tz="Asia/Kolkata",
         ),
     ).run()
