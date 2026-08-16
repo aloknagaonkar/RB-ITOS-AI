@@ -14,6 +14,7 @@ def _signal(
         "direction": direction,
         "signal_source": source,
         "source": source,
+        "execution_strategy_source": source,
         "confirmation_timestamp": timestamp,
         **extra,
     }
@@ -22,10 +23,9 @@ def _signal(
 def test_red_bar_remains_executable_without_rsi_confirmation():
     red_bar = _signal("REF-1", source="REFERENCE_LEVEL")
 
-    # RSI is absent. Existing Red Bar behaviour must remain unchanged; the
-    # supporting-evidence adapter does not reject or modify the Red Bar row.
     assert red_bar["direction"] == "BULLISH"
     assert red_bar["signal_source"] == "REFERENCE_LEVEL"
+    assert red_bar["execution_strategy_source"] == "REFERENCE_LEVEL"
     assert "RSI_EXTREME_REVERSAL_V1" not in red_bar.get("signal_sources", [])
 
 
@@ -36,9 +36,9 @@ def test_dri_remains_executable_without_rsi_confirmation():
         bundle_id="BND-1",
     )
 
-    # RSI is optional supporting evidence, not a DRI entry gate.
     assert dri["direction"] == "BULLISH"
     assert dri["signal_source"] == "DIRECTIONAL_REGIME_INTELLIGENCE"
+    assert dri["execution_strategy_source"] == "DIRECTIONAL_REGIME_INTELLIGENCE"
     assert "RSI_EXTREME_REVERSAL_V1" not in dri.get("signal_sources", [])
 
 
@@ -60,6 +60,7 @@ def test_same_direction_red_bar_and_rsi_merge_as_supporting_evidence():
     assert decision.native_signal["signal_id"] == "REF-1"
     assert decision.native_signal["source_count"] == 2
     assert decision.native_signal["merge_status"] == "DUAL_SOURCE_ALIGNED"
+    assert decision.native_signal["execution_strategy_source"] == "REFERENCE_LEVEL"
     assert set(decision.native_signal["signal_sources"]) == {
         "REFERENCE_LEVEL",
         "RSI_EXTREME_REVERSAL_V1",
@@ -88,6 +89,10 @@ def test_same_direction_dri_and_rsi_merge_as_supporting_evidence():
     assert decision.native_signal is not None
     assert decision.native_signal["signal_id"] == "DRI-BND-1"
     assert decision.native_signal["source_count"] == 2
+    assert (
+        decision.native_signal["execution_strategy_source"]
+        == "DIRECTIONAL_REGIME_INTELLIGENCE"
+    )
     assert set(decision.native_signal["signal_sources"]) == {
         "DIRECTIONAL_REGIME_INTELLIGENCE",
         "RSI_EXTREME_REVERSAL_V1",
