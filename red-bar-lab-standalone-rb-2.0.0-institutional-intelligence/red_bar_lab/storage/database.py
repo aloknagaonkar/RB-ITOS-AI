@@ -701,7 +701,28 @@ CREATE TABLE IF NOT EXISTS trade_outcomes (
 );
 """
 
+_EXECUTION_QUEUE_POLICY_COLUMNS = {
+    "execution_strategy_source": "TEXT",
+    "strategy_stop_loss_pct": "REAL",
+    "strategy_target_pct": "REAL",
+    "exit_mode": "TEXT",
+    "evaluation_horizon_minutes": "INTEGER",
+    "signal_sources_json": "TEXT NOT NULL DEFAULT '[]'",
+    "merge_status": "TEXT",
+    "rsi_signal_id": "TEXT",
+    "rsi_confirmation_timestamp": "TEXT",
+}
+
 _PAPER_EXECUTION_EXIT_COLUMNS = {
+    "execution_strategy_source": "TEXT",
+    "strategy_stop_loss_pct": "REAL",
+    "strategy_target_pct": "REAL",
+    "exit_mode": "TEXT",
+    "evaluation_horizon_minutes": "INTEGER",
+    "signal_sources_json": "TEXT NOT NULL DEFAULT '[]'",
+    "merge_status": "TEXT",
+    "rsi_signal_id": "TEXT",
+    "rsi_confirmation_timestamp": "TEXT",
     "initial_stop_price": "REAL",
     "breakeven_armed": "INTEGER NOT NULL DEFAULT 0",
     "trailing_active": "INTEGER NOT NULL DEFAULT 0",
@@ -817,6 +838,16 @@ class RedBarDatabase:
                     if name not in columns:
                         conn.execute(
                             f"ALTER TABLE signal_attempts ADD COLUMN {name} {definition}"
+                        )
+
+                queue_columns = {
+                    row[1]
+                    for row in conn.execute("PRAGMA table_info(execution_queue)")
+                }
+                for name, definition in _EXECUTION_QUEUE_POLICY_COLUMNS.items():
+                    if name not in queue_columns:
+                        conn.execute(
+                            f"ALTER TABLE execution_queue ADD COLUMN {name} {definition}"
                         )
 
                 paper_columns = {
@@ -2515,10 +2546,13 @@ class RedBarDatabase:
                     stop_price,target1_price,target2_price,status,
                     entry_reason,exit_timestamp,exit_price,exit_reason,
                     unrealized_pnl,realized_pnl,mfe_points,mae_points,
-                    updated_at
+                    execution_strategy_source,strategy_stop_loss_pct,
+                    strategy_target_pct,exit_mode,evaluation_horizon_minutes,
+                    signal_sources_json,merge_status,rsi_signal_id,
+                    rsi_confirmation_timestamp,updated_at
                 )
                 VALUES(
-                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                 )
                 """,
                 (
@@ -2554,6 +2588,15 @@ class RedBarDatabase:
                     row.get("realized_pnl"),
                     row.get("mfe_points"),
                     row.get("mae_points"),
+                    row.get("execution_strategy_source"),
+                    row.get("strategy_stop_loss_pct"),
+                    row.get("strategy_target_pct"),
+                    row.get("exit_mode"),
+                    row.get("evaluation_horizon_minutes"),
+                    json.dumps(row.get("signal_sources") or [], sort_keys=True, default=str),
+                    row.get("merge_status"),
+                    row.get("rsi_signal_id"),
+                    row.get("rsi_confirmation_timestamp"),
                     now,
                 ),
             )
@@ -3072,8 +3115,11 @@ class RedBarDatabase:
                     expiry,lot_size,quantity,candidate_score,selection_score,
                     execution_probability_pct,expected_value_pct,opportunity_score,
                     entry_mode,signal_age_seconds,status,reason,order_id,created_at,
-                    updated_at,executed_at
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    updated_at,executed_at,execution_strategy_source,
+                    strategy_stop_loss_pct,strategy_target_pct,exit_mode,
+                    evaluation_horizon_minutes,signal_sources_json,merge_status,
+                    rsi_signal_id,rsi_confirmation_timestamp
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(signal_id,instrument_token) DO UPDATE SET
                     trading_date=excluded.trading_date,
                     direction=excluded.direction,
@@ -3092,6 +3138,15 @@ class RedBarDatabase:
                     opportunity_score=excluded.opportunity_score,
                     entry_mode=excluded.entry_mode,
                     signal_age_seconds=excluded.signal_age_seconds,
+                    execution_strategy_source=excluded.execution_strategy_source,
+                    strategy_stop_loss_pct=excluded.strategy_stop_loss_pct,
+                    strategy_target_pct=excluded.strategy_target_pct,
+                    exit_mode=excluded.exit_mode,
+                    evaluation_horizon_minutes=excluded.evaluation_horizon_minutes,
+                    signal_sources_json=excluded.signal_sources_json,
+                    merge_status=excluded.merge_status,
+                    rsi_signal_id=excluded.rsi_signal_id,
+                    rsi_confirmation_timestamp=excluded.rsi_confirmation_timestamp,
                     status=CASE
                         WHEN execution_queue.status IN ('EXECUTED','ACTIVE','CLOSED')
                             THEN execution_queue.status
@@ -3117,6 +3172,15 @@ class RedBarDatabase:
                     row.get('status'), row.get('reason'), row.get('order_id'),
                     row.get('created_at') or now, row.get('updated_at') or now,
                     row.get('executed_at'),
+                    row.get('execution_strategy_source'),
+                    row.get('strategy_stop_loss_pct'),
+                    row.get('strategy_target_pct'),
+                    row.get('exit_mode'),
+                    row.get('evaluation_horizon_minutes'),
+                    json.dumps(row.get('signal_sources') or [], sort_keys=True, default=str),
+                    row.get('merge_status'),
+                    row.get('rsi_signal_id'),
+                    row.get('rsi_confirmation_timestamp'),
                 ),
             )
             conn.commit()

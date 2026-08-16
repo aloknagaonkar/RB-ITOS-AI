@@ -24,7 +24,11 @@ def execution_strategy_source(signal: Mapping[str, object] | None) -> str:
         or ""
     ).upper().strip()
     signal_id = str(row.get("signal_id") or "").upper().strip()
-    if source == RSI_STRATEGY_SOURCE or signal_id.startswith("RSI-"):
+    if (
+        source == RSI_STRATEGY_SOURCE
+        or signal_id.startswith("RSI7-")
+        or signal_id.startswith("RSI-")
+    ):
         return RSI_STRATEGY_SOURCE
     return source or "REFERENCE_LEVEL"
 
@@ -37,7 +41,22 @@ def resolve_execution_policy(
     default_stop_loss_pct: float = 15.0,
     default_target_pct: float | None = 25.0,
 ) -> ExecutionPolicy:
-    source = execution_strategy_source(signal)
+    row = signal or {}
+    source = execution_strategy_source(row)
+    persisted_stop = row.get("strategy_stop_loss_pct")
+    persisted_target = row.get("strategy_target_pct")
+    persisted_exit_mode = str(row.get("exit_mode") or "").strip()
+    if persisted_stop is not None and persisted_exit_mode:
+        return ExecutionPolicy(
+            source,
+            float(persisted_stop),
+            float(persisted_target) if persisted_target not in (None, "") else None,
+            persisted_exit_mode,
+            bool(
+                row.get("directional_conflicts_observational")
+                or source == RSI_STRATEGY_SOURCE
+            ),
+        )
     if source == RSI_STRATEGY_SOURCE:
         return ExecutionPolicy(source, 7.0, None, RSI_EXIT_MODE, True)
     return ExecutionPolicy(

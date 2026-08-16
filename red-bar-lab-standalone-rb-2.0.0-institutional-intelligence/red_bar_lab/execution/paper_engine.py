@@ -217,6 +217,7 @@ class RedBarPaperExecutionEngine:
         target1_price: float | None = None,
         target2_price: float | None = None,
         reason: str = "MANUAL_PAPER_ENTRY",
+        policy_metadata: dict[str, object] | None = None,
     ) -> dict[str, object]:
         if quantity <= 0:
             raise ValueError("Paper quantity must be positive.")
@@ -248,6 +249,7 @@ class RedBarPaperExecutionEngine:
 
         now = _now_ist()
         order_id = f"PAPER-{uuid4().hex[:12].upper()}"
+        policy_metadata = dict(policy_metadata or {})
         row = {
             "order_id": order_id,
             "account_id": self.account_id,
@@ -278,6 +280,15 @@ class RedBarPaperExecutionEngine:
             "mae_points": 0.0,
             "unrealized_pnl": 0.0,
             "realized_pnl": None,
+            "execution_strategy_source": policy_metadata.get("execution_strategy_source"),
+            "strategy_stop_loss_pct": policy_metadata.get("strategy_stop_loss_pct"),
+            "strategy_target_pct": policy_metadata.get("strategy_target_pct"),
+            "exit_mode": policy_metadata.get("exit_mode"),
+            "evaluation_horizon_minutes": policy_metadata.get("evaluation_horizon_minutes"),
+            "signal_sources": policy_metadata.get("signal_sources") or [],
+            "merge_status": policy_metadata.get("merge_status"),
+            "rsi_signal_id": policy_metadata.get("rsi_signal_id"),
+            "rsi_confirmation_timestamp": policy_metadata.get("rsi_confirmation_timestamp"),
         }
         self.database.insert_paper_execution_order(row)
         self.database.insert_paper_execution_mark(

@@ -6,7 +6,9 @@ import os
 import time
 
 from red_bar_lab.config import RedBarSettings, UNDERLYINGS
-from red_bar_lab.execution.trend_automation import TrendAwarePaperAutomationService
+from red_bar_lab.execution.attribution_automation import (
+    AttributionAwarePaperAutomationService,
+)
 from red_bar_lab.market.upstox_intelligence import UnifiedUpstoxMarketIntelligenceService
 from red_bar_lab.market.paper_adapter import UpstoxPaperMarketAdapter
 from red_bar_lab.services.upstox_service import RedBarUpstoxService
@@ -86,7 +88,7 @@ def main() -> int:
         args.underlying,
         UNDERLYINGS[args.underlying],
     )
-    automation = TrendAwarePaperAutomationService(
+    automation = AttributionAwarePaperAutomationService(
         zerodha=adapter,
         database=database,
         settings=settings,

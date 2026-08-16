@@ -959,6 +959,15 @@ class RedBarPaperAutomationService:
                         "opportunity_score": opportunity.opportunity_score,
                         "entry_mode": entry_mode,
                         "signal_age_seconds": age_seconds,
+                        "execution_strategy_source": execution_policy.strategy_source,
+                        "strategy_stop_loss_pct": execution_policy.stop_loss_pct,
+                        "strategy_target_pct": execution_policy.target_pct,
+                        "exit_mode": execution_policy.exit_mode,
+                        "evaluation_horizon_minutes": signal.get("evaluation_horizon_minutes"),
+                        "signal_sources": signal.get("signal_sources") or [signal.get("signal_source") or signal.get("source")],
+                        "merge_status": signal.get("merge_status"),
+                        "rsi_signal_id": signal.get("rsi_signal_id") or (signal_id if execution_policy.strategy_source == "RSI_EXTREME_REVERSAL_V1" else None),
+                        "rsi_confirmation_timestamp": signal.get("rsi_confirmation_timestamp") or (signal.get("confirmation_timestamp") if execution_policy.strategy_source == "RSI_EXTREME_REVERSAL_V1" else None),
                         "status": queue_status,
                         "reason": committee.reason,
                         "created_at": now.isoformat(),
@@ -1159,6 +1168,17 @@ class RedBarPaperAutomationService:
                             ),
                             target2_price=None,
                             reason=entry_reason,
+                            policy_metadata={
+                                "execution_strategy_source": execution_policy.strategy_source,
+                                "strategy_stop_loss_pct": execution_policy.stop_loss_pct,
+                                "strategy_target_pct": execution_policy.target_pct,
+                                "exit_mode": execution_policy.exit_mode,
+                                "evaluation_horizon_minutes": signal.get("evaluation_horizon_minutes"),
+                                "signal_sources": signal.get("signal_sources") or [signal.get("signal_source") or signal.get("source")],
+                                "merge_status": signal.get("merge_status"),
+                                "rsi_signal_id": signal.get("rsi_signal_id") or (signal_id if execution_policy.strategy_source == "RSI_EXTREME_REVERSAL_V1" else None),
+                                "rsi_confirmation_timestamp": signal.get("rsi_confirmation_timestamp") or signal.get("confirmation_timestamp"),
+                            },
                         )
                     except Exception as exc:
                         blocked.append(
@@ -1292,7 +1312,8 @@ class RedBarPaperAutomationService:
         for row in queue_rows:
             queue_id = str(row.get("queue_id") or "")
             signal_id = str(row.get("signal_id") or "")
-            queue_signal = signal_meta.get(signal_id) or {"signal_id": signal_id}
+            queue_signal = dict(row)
+            queue_signal.update(signal_meta.get(signal_id) or {})
             execution_policy = resolve_execution_policy(
                 queue_signal,
                 default_stop_loss_pct=self.stop_loss_pct,
@@ -1369,6 +1390,17 @@ class RedBarPaperAutomationService:
                         if target is not None else None
                     ),
                     target2_price=None, reason=reason,
+                    policy_metadata={
+                        "execution_strategy_source": execution_policy.strategy_source,
+                        "strategy_stop_loss_pct": execution_policy.stop_loss_pct,
+                        "strategy_target_pct": execution_policy.target_pct,
+                        "exit_mode": execution_policy.exit_mode,
+                        "evaluation_horizon_minutes": row.get("evaluation_horizon_minutes"),
+                        "signal_sources": __import__("json").loads(str(row.get("signal_sources_json") or "[]")),
+                        "merge_status": row.get("merge_status"),
+                        "rsi_signal_id": row.get("rsi_signal_id"),
+                        "rsi_confirmation_timestamp": row.get("rsi_confirmation_timestamp"),
+                    },
                 )
                 order_id = str(opened_row["order_id"])
                 self.database.update_execution_queue_status(
@@ -1562,8 +1594,20 @@ class RedBarPaperAutomationService:
                         f"{row.get('order_id')}: candle-health: {exc}"
                     )
 
+                policy_context = dict(signal or {})
+                policy_context.update({
+                    key: row.get(key)
+                    for key in (
+                        "signal_id", "execution_strategy_source",
+                        "strategy_stop_loss_pct", "strategy_target_pct",
+                        "exit_mode", "evaluation_horizon_minutes",
+                        "merge_status", "rsi_signal_id",
+                        "rsi_confirmation_timestamp",
+                    )
+                    if row.get(key) not in (None, "")
+                })
                 execution_policy = resolve_execution_policy(
-                    signal or {"signal_id": signal_id},
+                    policy_context,
                     default_stop_loss_pct=self.stop_loss_pct,
                     default_target_pct=self.target_pct,
                 )
