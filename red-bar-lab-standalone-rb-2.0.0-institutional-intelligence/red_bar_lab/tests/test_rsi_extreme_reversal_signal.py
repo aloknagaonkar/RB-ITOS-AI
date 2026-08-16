@@ -205,6 +205,7 @@ def test_rsi_can_form_triple_source_alignment(tmp_path: Path):
         FakeDatabase(),
         runs_root=tmp_path,
         now_provider=lambda: "2026-08-14T09:33:00+05:30",
+        enable_reference_signals=True,
     ).read_signal_attempts()
 
     assert len(rows) == 1
