@@ -9,6 +9,7 @@ from uuid import uuid4
 import pandas as pd
 
 from red_bar_lab.execution.exit_engine import PaperExitEngine
+from red_bar_lab.execution.execution_policy import resolve_execution_policy
 from red_bar_lab.execution.directional_regime_reference import (
     DirectionalRegimeReferenceService,
 )
@@ -93,8 +94,8 @@ class RedBarPaperAutomationService:
         account_id: str = "PAPER-STD",
         initial_capital: float = 100000.0,
         minimum_candidate_score: float = 65.0,
-        stop_loss_pct: float = 7.0,
-        target_pct: float = 0.0,
+        stop_loss_pct: float = 15.0,
+        target_pct: float = 25.0,
         eod_exit_time: time = time(15, 25),
         max_signal_age_seconds: int = 180,
         allow_outside_market_hours: bool = False,
@@ -479,6 +480,16 @@ class RedBarPaperAutomationService:
             signal_id = str(signal["signal_id"])
             signal_state = str(signal.get("state") or "")
             confirmation_timestamp = signal.get("confirmation_timestamp")
+            execution_policy = resolve_execution_policy(
+                signal,
+                default_stop_loss_pct=self.stop_loss_pct,
+                default_target_pct=self.target_pct,
+            )
+            policy_target_pct = (
+                execution_policy.target_pct
+                if execution_policy.target_pct is not None
+                else 0.0
+            )
             try:
                 signal_ts = pd.Timestamp(confirmation_timestamp)
                 if signal_ts.tzinfo is None:
@@ -617,6 +628,7 @@ class RedBarPaperAutomationService:
             if (
                 directional_policy.block_execution
                 and self.hold_on_directional_regime_conflict
+                and not execution_policy.directional_conflicts_observational
             ):
                 reason = directional_policy.reason
                 diagnostic["final_decision"] = "HOLD"
@@ -799,8 +811,8 @@ class RedBarPaperAutomationService:
                         historical_orders=historical_orders,
                         entry_mode=entry_mode,
                         minimum_candidate_score=self.minimum_candidate_score,
-                        stop_loss_pct=self.stop_loss_pct,
-                        target_pct=self.target_pct,
+                        stop_loss_pct=execution_policy.stop_loss_pct,
+                        target_pct=policy_target_pct,
                         require_opportunity_gate=stale_for_extension,
                     )
                     duplicate = self.database.paper_execution_exists_for_candidate(
@@ -878,8 +890,8 @@ class RedBarPaperAutomationService:
                         historical_orders=historical_orders,
                         current_shadow=current_shadow,
                         historical_shadow=historical_shadow,
-                        stop_loss_pct=self.stop_loss_pct,
-                        target_pct=self.target_pct,
+                        stop_loss_pct=execution_policy.stop_loss_pct,
+                        target_pct=policy_target_pct,
                     )
                     self.database.insert_institutional_execution_evaluation({
                         "scan_id": scan_id,
@@ -1007,7 +1019,8 @@ class RedBarPaperAutomationService:
                         option_type=cand.contract.option_type, rank=sel.candidate_rank,
                         candidate_score=cand.total_score, opportunity_health=opp.opportunity_score,
                         expectancy_pct=comm.expected_value_pct, reference_price=ref,
-                        stop_loss_pct=self.stop_loss_pct, quantity=int(lots) * cand.contract.lot_size,
+                        stop_loss_pct=execution_policy.stop_loss_pct,
+                        quantity=int(lots) * cand.contract.lot_size,
                     ))
                 admissions = self.portfolio_manager.admit(
                     portfolio_candidates, initial_capital=self.initial_capital,
@@ -1095,10 +1108,14 @@ class RedBarPaperAutomationService:
                     if reference <= 0:
                         blocked.append(f"{candidate.contract.tradingsymbol}:NO_PRICE")
                         continue
-                    stop = reference * (1.0 - self.stop_loss_pct / 100.0)
+                    stop = reference * (
+                        1.0 - execution_policy.stop_loss_pct / 100.0
+                    )
                     target = (
-                        reference * (1.0 + self.target_pct / 100.0)
-                        if self.target_pct > 0.0
+                        reference * (
+                            1.0 + execution_policy.target_pct / 100.0
+                        )
+                        if execution_policy.target_pct is not None
                         else None
                     )
                     quantity = int(lots) * candidate.contract.lot_size
@@ -1275,6 +1292,12 @@ class RedBarPaperAutomationService:
         for row in queue_rows:
             queue_id = str(row.get("queue_id") or "")
             signal_id = str(row.get("signal_id") or "")
+            queue_signal = signal_meta.get(signal_id) or {"signal_id": signal_id}
+            execution_policy = resolve_execution_policy(
+                queue_signal,
+                default_stop_loss_pct=self.stop_loss_pct,
+                default_target_pct=self.target_pct,
+            )
             symbol = str(row.get("candidate_symbol") or "")
             token = int(row.get("instrument_token") or 0)
             if not queue_id or not signal_id or not symbol or token <= 0:
@@ -1310,10 +1333,14 @@ class RedBarPaperAutomationService:
                 quantity = int(row.get("quantity") or 0)
                 if quantity <= 0:
                     quantity = max(1, int(lots)) * contract.lot_size
-                stop = reference * (1.0 - self.stop_loss_pct / 100.0)
+                stop = reference * (
+                    1.0 - execution_policy.stop_loss_pct / 100.0
+                )
                 target = (
-                    reference * (1.0 + self.target_pct / 100.0)
-                    if self.target_pct > 0.0
+                    reference * (
+                        1.0 + execution_policy.target_pct / 100.0
+                    )
+                    if execution_policy.target_pct is not None
                     else None
                 )
                 self.database.update_execution_queue_status(
@@ -1535,6 +1562,11 @@ class RedBarPaperAutomationService:
                         f"{row.get('order_id')}: candle-health: {exc}"
                     )
 
+                execution_policy = resolve_execution_policy(
+                    signal or {"signal_id": signal_id},
+                    default_stop_loss_pct=self.stop_loss_pct,
+                    default_target_pct=self.target_pct,
+                )
                 exit_health = exit_engine.evaluate(
                     position=row,
                     option_candle=option_candle,
@@ -1545,6 +1577,7 @@ class RedBarPaperAutomationService:
                     ),
                     opposite_red_bar_confirmed=opposite_confirmed,
                     eod_due=now.time() >= self.eod_exit_time,
+                    exit_mode=execution_policy.exit_mode,
                 )
 
                 # Never loosen protection.

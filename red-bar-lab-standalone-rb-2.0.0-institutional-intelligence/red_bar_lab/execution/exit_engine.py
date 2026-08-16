@@ -4,6 +4,8 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any
 
+from red_bar_lab.execution.execution_policy import RSI_EXIT_MODE
+
 # Retired RB-0.7.9 compatibility markers. These strings are intentionally
 # non-executable and exist only for legacy source-inspection tests:
 # breakeven_trigger_pct: float = 15.0
@@ -105,6 +107,7 @@ class PaperExitEngine:
         oi_supportive: bool | None = None,
         greeks_supportive: bool | None = None,
         eod_due: bool = False,
+        exit_mode: str = "STANDARD_MULTI_FACTOR",
     ) -> ExitHealth:
         entry = _num(position.get("entry_price"))
         current = _num(position.get("current_price"), entry)
@@ -176,6 +179,7 @@ class PaperExitEngine:
 
         reasons: list[str] = []
         hard_exit_reason = None
+        rsi_premium_only = str(exit_mode).upper() == RSI_EXIT_MODE
 
         nifty_thesis = "UNKNOWN"
         direction = str((signal or {}).get("direction") or "").upper()
@@ -263,14 +267,30 @@ class PaperExitEngine:
             hard_exit_reason = effective_stop_reason
         elif eod_due:
             hard_exit_reason = "EOD_EXIT"
-        elif ema10_exit_reason:
+        elif not rsi_premium_only and ema10_exit_reason:
             hard_exit_reason = ema10_exit_reason
-        elif nifty_thesis == "INVALID":
+        elif not rsi_premium_only and nifty_thesis == "INVALID":
             hard_exit_reason = "NIFTY_INVALIDATION"
-        elif opposite_red_bar_confirmed:
+        elif not rsi_premium_only and opposite_red_bar_confirmed:
             hard_exit_reason = "OPPOSITE_RED_BAR"
-        elif technical_failures >= 2:
+        elif not rsi_premium_only and technical_failures >= 2:
             hard_exit_reason = "OPTION_TECHNICAL_BREAKDOWN"
+
+        if rsi_premium_only:
+            shadow_warnings = []
+            if ema10_exit_reason:
+                shadow_warnings.append(ema10_exit_reason)
+            if nifty_thesis == "INVALID":
+                shadow_warnings.append("NIFTY_INVALIDATION")
+            if opposite_red_bar_confirmed:
+                shadow_warnings.append("OPPOSITE_RED_BAR")
+            if technical_failures >= 2:
+                shadow_warnings.append("OPTION_TECHNICAL_BREAKDOWN")
+            if shadow_warnings:
+                reasons.append(
+                    "SHADOW_EXIT_WARNINGS="
+                    + ",".join(dict.fromkeys(shadow_warnings))
+                )
 
         health = 100.0
         if nifty_thesis == "INVALID":
@@ -307,12 +327,15 @@ class PaperExitEngine:
         elif breakeven_armed:
             action = "HOLD / PROTECT"
             reasons.append("Breakeven protection armed.")
-        elif health < 50:
+        elif health < 50 and not rsi_premium_only:
             action = "EXIT"
             reasons.append("Trade health below 50.")
-        elif health < 70:
+        elif health < 70 and not rsi_premium_only:
             action = "TIGHTEN"
             reasons.append("Trade health weakening.")
+        elif rsi_premium_only:
+            action = "HOLD"
+            reasons.append("RSI premium-protection exit remains authoritative.")
         else:
             action = "HOLD"
             reasons.append("No operational exit trigger.")

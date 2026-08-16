@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from red_bar_lab.execution.execution_policy import is_rsi_primary
+
 
 def _num(value: Any, default: float = 0.0) -> float:
     try:
@@ -160,6 +162,7 @@ class OpportunityIntelligenceEngine:
             signal_source == "DIRECTIONAL_REGIME_INTELLIGENCE"
             or signal_id.startswith("DRI-")
         )
+        rsi_primary = is_rsi_primary(signal)
         red_bar_alignment = str(
             signal.get("red_bar_alignment") or ""
         ).upper()
@@ -182,12 +185,18 @@ class OpportunityIntelligenceEngine:
             _num(signal.get("underlying_entry"), spot_price),
         )
 
-        structure_valid = self._structure_valid(
-            direction=direction,
-            spot_price=float(spot_price),
-            confirmation_high=high,
-            confirmation_low=low,
+        structure_valid = (
+            True
+            if rsi_primary
+            else self._structure_valid(
+                direction=direction,
+                spot_price=float(spot_price),
+                confirmation_high=high,
+                confirmation_low=low,
+            )
         )
+        if rsi_primary:
+            effective_opposite_red_bar = False
         reward_remaining, move_consumed = self._reward_remaining(
             direction=direction,
             spot_price=float(spot_price),
@@ -218,8 +227,15 @@ class OpportunityIntelligenceEngine:
         market_context_score = round(volume_health + oi_health, 2)
         time_score = self._time_score(signal_age_seconds)
         opportunity_score = round(
-            structure_score + vwap_health + ema_health + momentum_score
-            + volume_health + oi_health + liquidity_health + spread_health,
+            (
+                100.0 if spread_score > 0 and liquidity_score > 0 else 0.0
+            )
+            if rsi_primary
+            else (
+                structure_score + vwap_health + ema_health + momentum_score
+                + volume_health + oi_health
+                + liquidity_health + spread_health
+            ),
             2,
         )
 
@@ -230,9 +246,9 @@ class OpportunityIntelligenceEngine:
         )
 
         blockers: list[str] = []
-        if not structure_valid:
+        if not rsi_primary and not structure_valid:
             blockers.append("STRUCTURE_INVALID")
-        if effective_opposite_red_bar:
+        if not rsi_primary and effective_opposite_red_bar:
             blockers.append("OPPOSITE_RED_BAR")
         # REWARD_CONSUMED intentionally removed from execution blockers.
         if spread_score <= 0:
@@ -247,8 +263,11 @@ class OpportunityIntelligenceEngine:
         eligible = not blockers
         decision = f"BUY {candidate.contract.option_type}" if eligible else "SKIP"
         reason = (
-            "OPPORTUNITY_HEALTH_PASS | REWARD_METRICS_INFORMATIONAL_ONLY"
-            if eligible else " | ".join(blockers)
+            "RSI_ENTRY_POLICY_PASS | EMA_RED_BAR_DRI_INFORMATIONAL_ONLY"
+            if eligible and rsi_primary
+            else "OPPORTUNITY_HEALTH_PASS | REWARD_METRICS_INFORMATIONAL_ONLY"
+            if eligible
+            else " | ".join(blockers)
         )
 
         return OpportunityEvaluation(

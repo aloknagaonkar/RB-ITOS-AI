@@ -8,6 +8,7 @@ from time import monotonic
 import pandas as pd
 
 from red_bar_lab.execution.automation import RedBarPaperAutomationService
+from red_bar_lab.execution.execution_policy import is_rsi_primary
 from red_bar_lab.execution.opportunity_engine import OpportunityIntelligenceEngine
 from red_bar_lab.execution.paper_engine import RedBarPaperExecutionEngine
 
@@ -31,6 +32,27 @@ class EMA10OpportunityIntelligenceEngine(OpportunityIntelligenceEngine):
         ready = bool(signal.get("_ema10_5m_ready"))
         close = signal.get("_ema10_5m_close")
         ema10 = signal.get("_ema10_5m_value")
+        rsi_primary = is_rsi_primary(signal)
+
+        # Frozen RSI policy: the base opportunity engine has already applied
+        # RSI-specific execution-quality gates. EMA10, Red Bar and DRI remain
+        # informational and must not change eligibility.
+        if rsi_primary:
+            return replace(
+                result,
+                eligible=result.eligible,
+                decision=(
+                    f"BUY {kwargs['candidate'].contract.option_type}"
+                    if result.eligible else "SKIP"
+                ),
+                reason=(
+                    "RSI_ENTRY_POLICY_PASS | "
+                    "EMA10_INFORMATIONAL_ONLY | "
+                    "RED_BAR_DRI_INFORMATIONAL_ONLY"
+                    if result.eligible
+                    else result.reason
+                ),
+            )
 
         informational_tokens = {
             "OPPORTUNITY_HEALTH_PASS",
@@ -43,7 +65,13 @@ class EMA10OpportunityIntelligenceEngine(OpportunityIntelligenceEngine):
             if item.strip() and item.strip() not in informational_tokens
         ]
 
-        if not ready or close is None or ema10 is None:
+        if rsi_primary:
+            blockers = [
+                item for item in blockers
+                if not item.startswith("EMA10_")
+                and not item.endswith("_EMA10_LOST")
+            ]
+        elif not ready or close is None or ema10 is None:
             blockers.append("EMA10_DATA_UNAVAILABLE")
         else:
             close_value = float(close)
@@ -65,9 +93,14 @@ class EMA10OpportunityIntelligenceEngine(OpportunityIntelligenceEngine):
                 if eligible else "SKIP"
             ),
             reason=(
-                "OPPORTUNITY_HEALTH_PASS | EMA10_TREND_VALID | "
-                "REWARD_METRICS_INFORMATIONAL_ONLY"
-                if eligible else " | ".join(blockers)
+                "RSI_ENTRY_POLICY_PASS | EMA10_INFORMATIONAL_ONLY"
+                if eligible and rsi_primary
+                else (
+                    "OPPORTUNITY_HEALTH_PASS | EMA10_TREND_VALID | "
+                    "REWARD_METRICS_INFORMATIONAL_ONLY"
+                )
+                if eligible
+                else " | ".join(blockers)
             ),
         )
 
@@ -291,7 +324,7 @@ class TrendAwarePaperAutomationService(RedBarPaperAutomationService):
         # metrics have zero execution authority.
 
         old_engine = self.engine
-        self.engine = NoTargetPaperExecutionEngine(
+        self.engine = RedBarPaperExecutionEngine(
             proxy,
             old_engine.settings,
             account_id=old_engine.account_id,
