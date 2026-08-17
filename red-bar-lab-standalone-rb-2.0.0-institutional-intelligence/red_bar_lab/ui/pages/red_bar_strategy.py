@@ -1,4 +1,5 @@
 from red_bar_lab.ui._shared import *
+from red_bar_lab.ui.strategy_option_context import build_option_behaviour_snapshot
 
 
 def _read_cached_candles(layout, instrument_key, trading_date):
@@ -25,6 +26,9 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     trading_date = selected_date.isoformat()
     candle_path, candles = _read_cached_candles(layout, instrument_key, trading_date)
     levels = database.read_reference_levels(instrument_key, trading_date)
+    option_context = build_option_behaviour_snapshot(
+        database, instrument_key, trading_date
+    )
     red_refs = [
         row for row in levels
         if str(row.get("level_type") or "") == "NEXT_RED_CANDLE"
@@ -42,10 +46,16 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
 
     st.markdown("### 1. Data & Feature Preparation")
     a1, a2, a3, a4 = st.columns(4)
-    a1.metric("Input readiness", readiness)
-    a2.metric("1-minute candles", candle_count)
-    a3.metric("OHLC normalized", "YES" if normalized_ready else "NO")
-    a4.metric("Red Bar reference", "READY" if reference_ready else "PENDING")
+    a1.metric("Detection readiness", readiness)
+    a2.metric("Market behaviour", option_context.get("directional_bias") or "UNAVAILABLE")
+    a3.metric("Option inputs", option_context.get("status") or "NOT READY")
+    a4.metric("Execution preparation", option_context.get("execution_status") or "NOT READY")
+
+    st.markdown("#### Core strategy inputs")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("1-minute candles", candle_count)
+    c2.metric("OHLC normalized", "YES" if normalized_ready else "NO")
+    c3.metric("Red Bar reference", "READY" if reference_ready else "PENDING")
 
     st.markdown("#### Post-collection preparation flow")
     st.code(
@@ -54,7 +64,8 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         "→ Opening and previous-session context loaded\n"
         "→ Red candle candidates evaluated\n"
         "→ NEXT_RED_CANDLE reference calculated\n"
-        "→ High, low and midpoint persisted",
+        "→ High, low and midpoint persisted\n"
+        "→ Stored option behaviour added as supporting evidence",
         language=None,
     )
 
@@ -92,6 +103,17 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     ]
     st.dataframe(_arrow_safe_rows(rows), width="stretch", hide_index=True)
 
+    st.markdown("#### Option Behaviour Inputs")
+    st.caption(
+        "Option-chain evidence confirms or contradicts the Red Bar price direction. "
+        "It does not replace the midpoint-cross authority."
+    )
+    option_rows = option_context.get("rows") or []
+    if option_rows:
+        st.dataframe(_arrow_safe_rows(option_rows), width="stretch", hide_index=True)
+    else:
+        st.warning(str(option_context.get("detail") or "Option context is unavailable."))
+
     if readiness == "READY":
         st.success("Red Bar strategy inputs are prepared for setup detection.")
     elif readiness == "PARTIAL":
@@ -102,5 +124,5 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         st.error("Red Bar input preparation cannot start until cached 1-minute OHLC data is available.")
 
     st.info(
-        "This page does not run detection, alter reference levels, or change execution behavior."
+        "This page does not run detection, alter reference levels, fetch new option data, or change execution behavior."
     )
