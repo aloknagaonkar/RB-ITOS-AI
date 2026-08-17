@@ -3,10 +3,101 @@ from red_bar_lab.services.historical_dri_decision_replay import HistoricalDRIDec
 from red_bar_lab.services.historical_dri_multiday_validation import validate_historical_dri_dates
 from red_bar_lab.services.replay_opportunity_accounting import consolidate_replay_rows
 from red_bar_lab.ui._shared import *
+from red_bar_lab.services.historical_strategy_validation import default_strategy_registry
+from red_bar_lab.services.historical_strategy_runner import (
+    run_historical_strategy_validation,
+)
+from red_bar_lab.ui.historical_strategy_validation import (
+    render_strategy_validation_results,
+    render_strategy_validation_selector,
+)
 
 
 def render_page(settings, layout, database, token, underlying_name, instrument_key, interval) -> None:
     st.subheader("Research Lab")
+
+    try:
+        generic_cached_reader = RedBarHistoricalService(
+            RedBarUpstoxService("cache-only"), layout
+        )
+        generic_available_dates = generic_cached_reader.available_dates(
+            instrument_key, interval_minutes=1
+        )
+    except Exception:
+        generic_available_dates = []
+
+    generic_registry = default_strategy_registry()
+    generic_selection = render_strategy_validation_selector(
+        generic_registry,
+        generic_available_dates,
+    )
+
+    generic_run_disabled = (
+        not generic_selection["dates"]
+        or not generic_selection["compare"]
+    )
+    if st.button(
+        "Run Generic Historical Validation",
+        type="primary",
+        disabled=generic_run_disabled,
+        key="run_generic_historical_validation",
+    ):
+        try:
+            generic_option_sync = HistoricalOptionChainSyncService(
+                RedBarUpstoxService(token or "cache-only"),
+                layout,
+                generic_cached_reader,
+                database=database,
+            )
+            with st.spinner(
+                "Running research-only historical strategy validation..."
+            ):
+                generic_reports = run_historical_strategy_validation(
+                    replay_reader=generic_cached_reader,
+                    option_chain_sync=generic_option_sync,
+                    instrument_key=instrument_key,
+                    trading_dates=generic_selection["dates"],
+                    strategies=generic_selection["compare"],
+                    registry=generic_registry,
+                )
+            st.session_state[
+                "generic_historical_validation_reports"
+            ] = generic_reports
+            st.session_state[
+                "generic_historical_validation_signature"
+            ] = (
+                instrument_key,
+                tuple(generic_selection["dates"]),
+                tuple(generic_selection["compare"]),
+            )
+            st.success(
+                f"Completed {len(generic_reports)} strategy validation "
+                f"report(s) across "
+                f"{len(generic_selection['dates'])} cached day(s)."
+            )
+        except Exception as exc:
+            st.exception(exc)
+
+    generic_reports = st.session_state.get(
+        "generic_historical_validation_reports"
+    )
+    generic_signature = st.session_state.get(
+        "generic_historical_validation_signature"
+    )
+    current_generic_signature = (
+        instrument_key,
+        tuple(generic_selection["dates"]),
+        tuple(generic_selection["compare"]),
+    )
+    if generic_reports and generic_signature == current_generic_signature:
+        render_strategy_validation_results(generic_reports)
+    elif generic_reports:
+        st.info(
+            "The strategy or validation window changed. "
+            "Run validation again to refresh the comparison."
+        )
+
+    st.markdown("---")
     st.markdown("#### Historical Data")
     today = date.today()
     start_date = st.date_input("From", today - timedelta(days=10))
