@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Mapping
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -12,7 +10,10 @@ from red_bar_lab.execution.directional_regime_policy import (
 from red_bar_lab.execution.directional_regime_reference import (
     DirectionalRegimeReferenceService,
 )
-from red_bar_lab.execution.dri_opportunity_context import resolve_opposite_red_bar
+from red_bar_lab.execution.dri_opportunity_context import (
+    is_dri_signal,
+    resolve_opposite_red_bar,
+)
 from red_bar_lab.execution.rsi_extreme_reversal import RsiExtremeReversalEngine
 
 
@@ -146,6 +147,7 @@ def build_rsi_signal_resolution(
     red_bar_rows = [
         row for row in attempts
         if str(row.get("signal_source") or row.get("source") or "").upper() != RSI_SOURCE
+        and not is_dri_signal(row)
     ]
     latest_red_bar = _latest(red_bar_rows, ("confirmation_timestamp", "cross_timestamp"))
     red_bar_relationship = _relationship(direction, latest_red_bar.get("direction"), bool(latest_red_bar))
