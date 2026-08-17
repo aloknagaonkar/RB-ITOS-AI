@@ -50,8 +50,12 @@ def _research_option_sync_factory(provider, layout, historical, database=None):
 
 def _configure_strategy_cache(module: ModuleType) -> None:
     from red_bar_lab.ui.strategy_candle_cache import read_cached_strategy_candles
+    from red_bar_lab.ui.strategy_query_cache import (
+        build_strategy_query_cache_wrapper,
+    )
 
     module._read_cached_candles = read_cached_strategy_candles
+    module.render_page = build_strategy_query_cache_wrapper(module.render_page)
 
 
 def _configure_paper_trading(paper_trading: ModuleType) -> None:
