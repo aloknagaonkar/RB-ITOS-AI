@@ -10,11 +10,15 @@ from red_bar_lab.ui.strategy_contract_ranking import (
     render_strategy_contract_ranking,
 )
 from red_bar_lab.ui.strategy_contract_readiness import build_contract_data_readiness
+from red_bar_lab.ui.strategy_contract_selection_audit import (
+    build_selection_audit,
+    render_selection_audit,
+)
 from red_bar_lab.ui.strategy_execution_source_gate import POLICIES, build_execution_source_gate
 
 
 def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
-    """Append read-only Section 5B after the already-installed Section 5A wrapper."""
+    """Append read-only Sections 5B and 5C after the installed Section 5A wrapper."""
     policy = POLICIES[page]
     ranking_policy = RANKING_POLICIES[policy.strategy_id]
     original_builder = getattr(module, policy.builder_name)
@@ -61,6 +65,8 @@ def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
             )
         ranking = rank_strategy_contracts(readiness, policy=ranking_policy)
         render_strategy_contract_ranking(ranking)
+        audit = build_selection_audit(ranking, policy=ranking_policy)
+        render_selection_audit(audit)
         return result
 
     setattr(module, policy.builder_name, capture_resolution)
