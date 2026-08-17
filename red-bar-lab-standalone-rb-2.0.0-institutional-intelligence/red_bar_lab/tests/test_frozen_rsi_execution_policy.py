@@ -2,7 +2,6 @@ from types import SimpleNamespace
 
 from red_bar_lab.execution.execution_policy import (
     RSI_EXIT_MODE,
-    STANDARD_EXIT_MODE,
     resolve_execution_policy,
 )
 from red_bar_lab.execution.exit_engine import PaperExitEngine
@@ -63,7 +62,7 @@ def _position(current, *, peak=None, stop=93.0):
     }
 
 
-def test_rsi_policy_is_scoped():
+def test_reversal_exit_policy_is_unified_across_strategy_sources():
     rsi = resolve_execution_policy(_rsi_signal())
     assert rsi.stop_loss_pct == 7.0
     assert rsi.target_pct is None
@@ -73,9 +72,10 @@ def test_rsi_policy_is_scoped():
         "signal_id": "REF-1",
         "execution_strategy_source": "REFERENCE_LEVEL",
     })
-    assert red_bar.stop_loss_pct == 15.0
-    assert red_bar.target_pct == 25.0
-    assert red_bar.exit_mode == STANDARD_EXIT_MODE
+    assert red_bar.stop_loss_pct == 7.0
+    assert red_bar.target_pct is None
+    assert red_bar.exit_mode == RSI_EXIT_MODE
+    assert red_bar.directional_conflicts_observational is True
 
 
 def test_rsi_entry_does_not_require_ema10_or_red_bar():
