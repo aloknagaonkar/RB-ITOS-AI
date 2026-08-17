@@ -15,6 +15,8 @@ from red_bar_lab.execution.execution_policy import resolve_execution_policy
 from red_bar_lab.execution.rsi_approval_policy import (
     apply_rsi_approval_policy,
     apply_rsi_entry_limit,
+    count_slot_consuming_rsi_orders,
+    RSI_ENTRY_ALLOCATION_MODE,
     RSI_STRATEGY_SOURCE,
 )
 from red_bar_lab.execution.directional_regime_reference import (
@@ -493,17 +495,26 @@ class RedBarPaperAutomationService:
                 default_target_pct=self.target_pct,
             )
             existing_rsi_entries = (
-                sum(
-                    1
-                    for order in historical_orders
-                    if str(order.get("signal_id") or "") == signal_id
-                    and str(order.get("execution_strategy_source") or "")
-                    == RSI_STRATEGY_SOURCE
+                count_slot_consuming_rsi_orders(
+                    historical_orders,
+                    signal_id=signal_id,
                 )
                 if execution_policy.strategy_source == RSI_STRATEGY_SOURCE
                 else 0
             )
             selected_rsi_entries = existing_rsi_entries
+            if execution_policy.strategy_source == RSI_STRATEGY_SOURCE:
+                self._record_state(
+                    signal_id=signal_id,
+                    state="RSI_ENTRY_CAPACITY",
+                    detail=(
+                        f"persisted_slots={existing_rsi_entries}; "
+                        "maximum_slots=2; "
+                        f"allocation_mode={RSI_ENTRY_ALLOCATION_MODE}; "
+                        "reservation_mode=CONSERVATIVE_ELIGIBILITY_RESERVATION"
+                    ),
+                    score=float(existing_rsi_entries),
+                )
             policy_target_pct = (
                 execution_policy.target_pct
                 if execution_policy.target_pct is not None

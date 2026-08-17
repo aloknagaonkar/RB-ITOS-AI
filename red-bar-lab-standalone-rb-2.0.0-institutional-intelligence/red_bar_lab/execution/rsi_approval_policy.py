@@ -5,6 +5,30 @@ from typing import Any
 
 RSI_STRATEGY_SOURCE = "RSI_EXTREME_REVERSAL_V1"
 RSI_MAX_ENTRIES_PER_SIGNAL = 2
+RSI_ENTRY_ALLOCATION_MODE = "FULL_QUANTITY_PER_ENTRY"
+
+RSI_ZERO_FILL_TERMINAL_STATUSES = frozenset({
+    "REJECTED",
+    "FAILED",
+    "CANCELLED",
+    "CANCELED",
+    "EXPIRED",
+})
+RSI_SLOT_CONSUMING_STATUSES = frozenset({
+    "PENDING",
+    "QUEUED",
+    "SUBMITTED",
+    "OPEN",
+    "TRIGGER PENDING",
+    "TRIGGER_PENDING",
+    "PARTIALLY FILLED",
+    "PARTIALLY_FILLED",
+    "FILLED",
+    "COMPLETE",
+    "COMPLETED",
+    "CLOSED",
+    "EXITED",
+})
 
 
 def _num(value: Any, default: float = 0.0) -> float:
@@ -14,6 +38,45 @@ def _num(value: Any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return float(default)
+
+
+def rsi_order_consumes_entry_slot(order: dict[str, Any]) -> bool:
+    """Return whether a persisted RSI order consumes one of two signal slots."""
+    status = str(
+        order.get("status")
+        or order.get("order_status")
+        or order.get("state")
+        or ""
+    ).strip().upper()
+
+    filled_quantity = _num(
+        order.get("filled_quantity")
+        if order.get("filled_quantity") is not None
+        else order.get("filled_qty"),
+        0.0,
+    )
+    if filled_quantity > 0:
+        return True
+    if status in RSI_ZERO_FILL_TERMINAL_STATUSES:
+        return False
+    if status in RSI_SLOT_CONSUMING_STATUSES:
+        return True
+    return True
+
+
+def count_slot_consuming_rsi_orders(
+    historical_orders,
+    *,
+    signal_id: str,
+) -> int:
+    return sum(
+        1
+        for order in historical_orders
+        if str(order.get("signal_id") or "") == str(signal_id or "")
+        and str(order.get("execution_strategy_source") or "")
+        == RSI_STRATEGY_SOURCE
+        and rsi_order_consumes_entry_slot(order)
+    )
 
 
 def apply_rsi_approval_policy(
