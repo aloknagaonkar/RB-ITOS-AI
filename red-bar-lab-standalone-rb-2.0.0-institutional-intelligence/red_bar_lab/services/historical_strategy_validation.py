@@ -46,6 +46,16 @@ class DayValidationResult:
     contract_coverage_pct: float = 0.0
     candle_coverage_pct: float = 0.0
     oi_coverage_pct: float = 0.0
+    global_replay_ready: bool = False
+    strategy_relevant_status: str = "NOT_EVALUATED"
+    strategy_relevant_reason: str = ""
+    relevant_contracts: int = 0
+    relevant_ce_contracts: int = 0
+    relevant_pe_contracts: int = 0
+    relevant_complete_contracts: int = 0
+    relevant_candle_coverage_pct: float = 0.0
+    relevant_oi_coverage_pct: float = 0.0
+    missing_relevant_contracts: int = 0
 
 
 @dataclass(frozen=True)

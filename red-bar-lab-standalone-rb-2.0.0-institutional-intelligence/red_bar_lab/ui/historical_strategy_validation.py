@@ -104,8 +104,20 @@ def render_strategy_validation_results(
                     'Contract Coverage %': day.contract_coverage_pct,
                     'Candle Coverage %': day.candle_coverage_pct,
                     'OI Coverage %': day.oi_coverage_pct,
+                    'Global Gate': (
+                        'PASS' if day.global_replay_ready else 'BLOCK'
+                    ),
+                    'Relevant Audit': day.strategy_relevant_status,
+                    'Relevant Contracts': day.relevant_contracts,
+                    'Relevant CE': day.relevant_ce_contracts,
+                    'Relevant PE': day.relevant_pe_contracts,
+                    'Relevant Complete': day.relevant_complete_contracts,
+                    'Relevant Candle %': day.relevant_candle_coverage_pct,
+                    'Relevant OI %': day.relevant_oi_coverage_pct,
+                    'Missing Relevant': day.missing_relevant_contracts,
                     'Replay Rows': len(day.rows),
                     'Readiness Reason': day.readiness_reason,
+                    'Relevant Audit Reason': day.strategy_relevant_reason,
                 }
                 for day in report.days
             ]

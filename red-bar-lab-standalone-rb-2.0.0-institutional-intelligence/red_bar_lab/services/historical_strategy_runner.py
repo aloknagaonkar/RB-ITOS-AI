@@ -13,6 +13,9 @@ from red_bar_lab.services.historical_strategy_adapters import (
     DRIHistoricalStrategyAdapter,
     RedBarHistoricalStrategyAdapter,
 )
+from red_bar_lab.services.historical_strategy_readiness import (
+    HistoricalStrategyReadinessService,
+)
 from red_bar_lab.services.historical_strategy_validation import (
     HistoricalStrategyValidationEngine,
     StrategyRegistry,
@@ -47,11 +50,21 @@ def build_historical_strategy_validation_engine(
         option_chain_sync=option_chain_sync,
     )
     dri_replay = HistoricalDRIDecisionReplayService(dri_policy_replay)
+    readiness = HistoricalStrategyReadinessService(
+        option_chain_sync,
+        replay_reader,
+    )
     return HistoricalStrategyValidationEngine(
         registry or default_strategy_registry(),
         (
-            DRIHistoricalStrategyAdapter(dri_replay),
-            RedBarHistoricalStrategyAdapter(red_bar_replay),
+            DRIHistoricalStrategyAdapter(
+                dri_replay,
+                readiness_service=readiness,
+            ),
+            RedBarHistoricalStrategyAdapter(
+                red_bar_replay,
+                readiness_service=readiness,
+            ),
         ),
     )
 
