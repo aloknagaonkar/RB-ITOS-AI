@@ -1,6 +1,41 @@
 from red_bar_lab.ui._shared import *
 
 
+def _format_data_availability_timestamp(value) -> str:
+    if value in (None, "", "—"):
+        return "Not available"
+    try:
+        timestamp = pd.Timestamp(value)
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.tz_localize("Asia/Kolkata")
+        else:
+            timestamp = timestamp.tz_convert("Asia/Kolkata")
+        return timestamp.strftime("%d %b %Y, %I:%M %p IST")
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _availability_card_html(title, status, status_class, rows) -> str:
+    row_html = "".join(
+        (
+            "<div class='rb-data-row'>"
+            f"<span>{label}</span>"
+            f"<strong class='rb-data-value rb-data-{row_class}'>{value}</strong>"
+            "</div>"
+        )
+        for label, value, row_class in rows
+    )
+    return (
+        f"<div class='rb-data-card rb-data-card-{status_class}'>"
+        "<div class='rb-data-card-header'>"
+        f"<strong>{title}</strong>"
+        f"<span class='rb-data-badge rb-data-badge-{status_class}'>{status}</span>"
+        "</div>"
+        f"{row_html}"
+        "</div>"
+    )
+
+
 def render_page(settings, layout, database, token, underlying_name, instrument_key, interval) -> None:
     st.subheader("Operations Center")
     st.caption(
@@ -76,6 +111,123 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         market.get("current_expiry") or "—",
     )
     st.caption(f"Current time: {market.get('current_time')}")
+
+    st.markdown("### Data Availability")
+    latest_data_timestamp = (
+        market.get("last_snapshot")
+        or market.get("current_time")
+    )
+    st.markdown(
+        "<div style='font-size:0.78rem;color:#6B7280;"
+        "margin-top:-0.35rem;margin-bottom:0.55rem;'>"
+        f"Last updated: {_format_data_availability_timestamp(latest_data_timestamp)}"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        """
+        <style>
+        .rb-data-card {
+            border: 1px solid #E5E7EB;
+            border-top-width: 3px;
+            border-radius: 10px;
+            padding: 0.8rem 0.85rem;
+            background: var(--secondary-background-color);
+            min-height: 190px;
+        }
+        .rb-data-card-available { border-top-color: #22C55E; }
+        .rb-data-card-partial { border-top-color: #F59E0B; }
+        .rb-data-card-unavailable { border-top-color: #DC2626; }
+        .rb-data-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.5rem;
+            margin-bottom: 0.65rem;
+        }
+        .rb-data-badge {
+            border-radius: 999px;
+            padding: 0.16rem 0.48rem;
+            font-size: 0.66rem;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+        .rb-data-badge-available { background:#DCFCE7;color:#166534; }
+        .rb-data-badge-partial { background:#FEF3C7;color:#92400E; }
+        .rb-data-badge-unavailable { background:#FEE2E2;color:#991B1B; }
+        .rb-data-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 0.65rem;
+            padding: 0.25rem 0;
+            border-bottom: 1px solid rgba(107,114,128,0.16);
+            font-size: 0.78rem;
+        }
+        .rb-data-row:last-child { border-bottom: 0; }
+        .rb-data-value { text-align: right; white-space: nowrap; }
+        .rb-data-available { color:#16A34A; }
+        .rb-data-partial { color:#D97706; }
+        .rb-data-unavailable { color:#DC2626; }
+        .rb-data-unknown { color:#6B7280; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    availability_columns = st.columns(4)
+    availability_cards = (
+        _availability_card_html(
+            "Underlying Data",
+            "PARTIAL",
+            "partial",
+            (
+                ("1-minute OHLC", "Available", "available"),
+                ("Volume", "Available", "available"),
+                ("RSI(7)", "Available", "available"),
+                ("Freshness checks", "Not available", "unavailable"),
+            ),
+        ),
+        _availability_card_html(
+            "Option-Chain Data",
+            "AVAILABLE",
+            "available",
+            (
+                ("Spot / ATM", "Available", "available"),
+                ("CE / PE price", "Available", "available"),
+                ("Volume / OI / PCR", "Available", "available"),
+                ("Walls / Max Pain", "Available", "available"),
+            ),
+        ),
+        _availability_card_html(
+            "Liquidity & Greeks",
+            "PARTIAL",
+            "partial",
+            (
+                ("Bid / Ask", "Available", "available"),
+                ("Spread", "Partial", "partial"),
+                ("IV and Greeks", "Available", "available"),
+                ("Relative volume", "Not validated", "unknown"),
+            ),
+        ),
+        _availability_card_html(
+            "Data Quality Controls",
+            "NOT AVAILABLE",
+            "unavailable",
+            (
+                ("Snapshot freshness", "Not available", "unavailable"),
+                ("Chain completeness", "Not available", "unavailable"),
+                ("Stale quote check", "Not available", "unavailable"),
+                ("Execution readiness", "Not available", "unavailable"),
+            ),
+        ),
+    )
+    for column, card in zip(availability_columns, availability_cards):
+        column.markdown(card, unsafe_allow_html=True)
+
+    st.caption(
+        "Availability is a high-level collection view. It does not grant "
+        "execution authority or change strategy decisions."
+    )
 
     st.markdown("### Intelligence Pipeline")
     pipeline = ops.pipeline
