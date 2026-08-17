@@ -412,7 +412,32 @@ CREATE TABLE IF NOT EXISTS paper_execution_marks (
 CREATE INDEX IF NOT EXISTS idx_paper_execution_marks_order
 ON paper_execution_marks(order_id, timestamp);
 
+CREATE TABLE IF NOT EXISTS paper_trade_checkpoints (
+    checkpoint_id TEXT PRIMARY KEY,
+    order_id TEXT NOT NULL,
+    signal_id TEXT,
+    execution_strategy_source TEXT,
+    horizon_minutes INTEGER NOT NULL,
+    due_timestamp TEXT NOT NULL,
+    observed_timestamp TEXT NOT NULL,
+    entry_price REAL NOT NULL,
+    checkpoint_price REAL NOT NULL,
+    return_pct REAL NOT NULL,
+    mfe_points REAL,
+    mae_points REAL,
+    peak_price REAL,
+    protected_stop_price REAL,
+    position_status_at_checkpoint TEXT NOT NULL,
+    captured_order_status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(order_id, horizon_minutes),
+    FOREIGN KEY(order_id) REFERENCES paper_execution_orders(order_id)
+);
 
+CREATE INDEX IF NOT EXISTS idx_paper_trade_checkpoints_order
+ON paper_trade_checkpoints(order_id, horizon_minutes);
+CREATE INDEX IF NOT EXISTS idx_paper_trade_checkpoints_signal
+ON paper_trade_checkpoints(signal_id, observed_timestamp);
 
 
 CREATE TABLE IF NOT EXISTS shadow_intelligence_evaluations (
@@ -2225,6 +2250,119 @@ class RedBarDatabase:
         return dict(row) if row else None
 
 
+
+    def read_paper_execution_marks(
+        self,
+        order_id: str,
+    ) -> list[dict[str, object]]:
+        self.initialize()
+        with sqlite3.connect(self.path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM paper_execution_marks
+                WHERE order_id=?
+                ORDER BY timestamp ASC, id ASC
+                """,
+                (order_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def upsert_paper_trade_checkpoint(
+        self,
+        row: dict[str, object],
+    ) -> None:
+        """Persist one immutable observational checkpoint per order/horizon."""
+        self.initialize()
+        now = datetime.now().astimezone().isoformat()
+        with sqlite3.connect(self.path) as conn:
+            conn.execute(
+                """
+                INSERT INTO paper_trade_checkpoints(
+                    checkpoint_id,order_id,signal_id,
+                    execution_strategy_source,horizon_minutes,
+                    due_timestamp,observed_timestamp,
+                    entry_price,checkpoint_price,return_pct,
+                    mfe_points,mae_points,peak_price,
+                    protected_stop_price,position_status_at_checkpoint,
+                    captured_order_status,created_at
+                )
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(order_id,horizon_minutes) DO NOTHING
+                """,
+                (
+                    row.get("checkpoint_id"),
+                    row.get("order_id"),
+                    row.get("signal_id"),
+                    row.get("execution_strategy_source"),
+                    int(row.get("horizon_minutes") or 0),
+                    row.get("due_timestamp"),
+                    row.get("observed_timestamp"),
+                    row.get("entry_price"),
+                    row.get("checkpoint_price"),
+                    row.get("return_pct"),
+                    row.get("mfe_points"),
+                    row.get("mae_points"),
+                    row.get("peak_price"),
+                    row.get("protected_stop_price"),
+                    row.get("position_status_at_checkpoint"),
+                    row.get("captured_order_status"),
+                    row.get("created_at") or now,
+                ),
+            )
+            conn.commit()
+
+    def read_paper_trade_checkpoint(
+        self,
+        *,
+        order_id: str,
+        horizon_minutes: int,
+    ) -> dict[str, object] | None:
+        self.initialize()
+        with sqlite3.connect(self.path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                """
+                SELECT *
+                FROM paper_trade_checkpoints
+                WHERE order_id=? AND horizon_minutes=?
+                """,
+                (order_id, int(horizon_minutes)),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def read_paper_trade_checkpoints(
+        self,
+        *,
+        signal_id: str | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, object]]:
+        self.initialize()
+        with sqlite3.connect(self.path) as conn:
+            conn.row_factory = sqlite3.Row
+            if signal_id:
+                rows = conn.execute(
+                    """
+                    SELECT *
+                    FROM paper_trade_checkpoints
+                    WHERE signal_id=?
+                    ORDER BY observed_timestamp DESC
+                    LIMIT ?
+                    """,
+                    (signal_id, int(limit)),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT *
+                    FROM paper_trade_checkpoints
+                    ORDER BY observed_timestamp DESC
+                    LIMIT ?
+                    """,
+                    (int(limit),),
+                ).fetchall()
+        return [dict(row) for row in rows]
 
     def upsert_signal_pipeline_status(
         self,

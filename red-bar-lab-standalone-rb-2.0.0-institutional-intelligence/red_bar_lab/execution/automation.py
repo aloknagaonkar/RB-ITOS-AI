@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import pandas as pd
 
+from red_bar_lab.execution.checkpoint import TradeCheckpointService
 from red_bar_lab.execution.exit_engine import PaperExitEngine
 from red_bar_lab.execution.execution_policy import resolve_execution_policy
 from red_bar_lab.execution.directional_regime_reference import (
@@ -1776,6 +1777,10 @@ class RedBarPaperAutomationService:
             trading_date=trading_date, lots=lots,
         )
         closed, exit_errors = self.monitor_and_exit()
+        checkpoint_result = TradeCheckpointService(
+            self.database,
+            account_id=self.engine.account_id,
+        ).capture_due(now=datetime.now(IST))
         signal_count = len(
             self.database.read_signal_attempts(
                 (
@@ -1792,5 +1797,10 @@ class RedBarPaperAutomationService:
             paper_orders_opened=opened,
             paper_orders_closed=closed,
             skipped=skipped,
-            errors=tuple(decision_errors + queue_errors + exit_errors),
+            errors=tuple(
+                decision_errors
+                + queue_errors
+                + exit_errors
+                + list(checkpoint_result.errors)
+            ),
         )
