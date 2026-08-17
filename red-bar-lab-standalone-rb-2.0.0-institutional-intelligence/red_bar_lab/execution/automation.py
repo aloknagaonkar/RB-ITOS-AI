@@ -12,6 +12,9 @@ from red_bar_lab.execution.checkpoint import TradeCheckpointService
 from red_bar_lab.execution.option_telemetry import OptionExecutionTelemetryService
 from red_bar_lab.execution.exit_engine import PaperExitEngine
 from red_bar_lab.execution.execution_policy import resolve_execution_policy
+from red_bar_lab.execution.rsi_approval_policy import (
+    apply_rsi_approval_policy,
+)
 from red_bar_lab.execution.directional_regime_reference import (
     DirectionalRegimeReferenceService,
 )
@@ -894,6 +897,12 @@ class RedBarPaperAutomationService:
                         historical_shadow=historical_shadow,
                         stop_loss_pct=execution_policy.stop_loss_pct,
                         target_pct=policy_target_pct,
+                    )
+                    committee = apply_rsi_approval_policy(
+                        committee,
+                        candidate=candidate,
+                        strategy_source=execution_policy.strategy_source,
+                        duplicate=duplicate,
                     )
                     self.database.insert_institutional_execution_evaluation({
                         "scan_id": scan_id,

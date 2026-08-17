@@ -429,6 +429,9 @@ CREATE TABLE IF NOT EXISTS paper_trade_checkpoints (
     protected_stop_price REAL,
     position_status_at_checkpoint TEXT NOT NULL,
     captured_order_status TEXT NOT NULL,
+    observation_quality TEXT NOT NULL DEFAULT 'UNKNOWN',
+    observation_lag_seconds REAL,
+    observation_note TEXT,
     created_at TEXT NOT NULL,
     UNIQUE(order_id, horizon_minutes),
     FOREIGN KEY(order_id) REFERENCES paper_execution_orders(order_id)
@@ -2324,6 +2327,25 @@ class RedBarDatabase:
         self.initialize()
         now = datetime.now().astimezone().isoformat()
         with sqlite3.connect(self.path) as conn:
+            existing_columns = {
+                str(item[1])
+                for item in conn.execute(
+                    'PRAGMA table_info(paper_trade_checkpoints)'
+                ).fetchall()
+            }
+            for column_name, column_type in {
+                'observation_quality': (
+                    "TEXT NOT NULL DEFAULT 'UNKNOWN'"
+                ),
+                'observation_lag_seconds': 'REAL',
+                'observation_note': 'TEXT',
+            }.items():
+                if column_name not in existing_columns:
+                    conn.execute(
+                        f'ALTER TABLE paper_trade_checkpoints '
+                        f'ADD COLUMN {column_name} {column_type}'
+                    )
+
             conn.execute(
                 """
                 INSERT INTO paper_trade_checkpoints(
@@ -2333,9 +2355,10 @@ class RedBarDatabase:
                     entry_price,checkpoint_price,return_pct,
                     mfe_points,mae_points,peak_price,
                     protected_stop_price,position_status_at_checkpoint,
-                    captured_order_status,created_at
+                    captured_order_status,observation_quality,
+                    observation_lag_seconds,observation_note,created_at
                 )
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(order_id,horizon_minutes) DO NOTHING
                 """,
                 (
@@ -2355,6 +2378,9 @@ class RedBarDatabase:
                     row.get("protected_stop_price"),
                     row.get("position_status_at_checkpoint"),
                     row.get("captured_order_status"),
+                    row.get("observation_quality") or "UNKNOWN",
+                    row.get("observation_lag_seconds"),
+                    row.get("observation_note"),
                     row.get("created_at") or now,
                 ),
             )

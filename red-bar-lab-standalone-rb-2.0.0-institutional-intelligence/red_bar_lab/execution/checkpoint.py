@@ -81,21 +81,71 @@ class TradeCheckpointService:
                     if mark_at <= current:
                         eligible_marks.append((mark_at, mark))
 
-                after_due = [item for item in eligible_marks if item[0] >= due_at]
+                exit_timestamp = order.get("exit_timestamp")
+                exited_at = (
+                    _timestamp(exit_timestamp)
+                    if exit_timestamp else None
+                )
+
+                after_due = [
+                    item for item in eligible_marks
+                    if item[0] >= due_at
+                ]
                 if after_due:
                     observed_at, observed_mark = after_due[0]
+                    lag_seconds = max(
+                        0.0,
+                        (observed_at - due_at).total_seconds(),
+                    )
+                    observation_quality = (
+                        "EXACT"
+                        if lag_seconds <= 5.0
+                        else "FIRST_MARK_AFTER_DUE"
+                    )
+                    observation_note = (
+                        "Market mark captured at due time."
+                        if observation_quality == "EXACT"
+                        else (
+                            "First available market mark after due time; "
+                            f"lag={lag_seconds:.1f}s."
+                        )
+                    )
+                elif exited_at is not None and exited_at < due_at:
+                    observed_at = exited_at
+                    observed_mark = {"price": order.get("exit_price")}
+                    lag_seconds = (
+                        observed_at - due_at
+                    ).total_seconds()
+                    observation_quality = "EXIT_BEFORE_HORIZON"
+                    observation_note = (
+                        "Position closed before checkpoint horizon; exit "
+                        "premium is recorded and is not a T+N market mark."
+                    )
                 else:
                     observed_at = current
                     observed_mark = {
-                        "price": order.get("current_price")
-                        or order.get("exit_price")
-                        or order.get("entry_price")
+                        "price": (
+                            order.get("current_price")
+                            or order.get("exit_price")
+                        )
                     }
+                    lag_seconds = max(
+                        0.0,
+                        (observed_at - due_at).total_seconds(),
+                    )
+                    observation_quality = "LATE_FALLBACK"
+                    observation_note = (
+                        "No stored market mark existed at or after due time; "
+                        "latest available position premium used as fallback."
+                    )
 
                 entry_price = _number(order.get("entry_price"))
                 checkpoint_price = _number(observed_mark.get("price"), entry_price)
                 if entry_price <= 0 or checkpoint_price <= 0:
-                    raise ValueError("CHECKPOINT_PRICE_UNAVAILABLE")
+                    raise ValueError(
+                        "PRICE_UNAVAILABLE:"
+                        f"quality={observation_quality}"
+                    )
 
                 marks_to_checkpoint = [
                     mark for mark_at, mark in eligible_marks if mark_at <= observed_at
@@ -114,9 +164,8 @@ class TradeCheckpointService:
                 mae_points = min(0.0, trough_price - entry_price)
                 return_pct = (checkpoint_price - entry_price) / entry_price * 100.0
 
-                exit_timestamp = order.get("exit_timestamp")
                 status_at_checkpoint = "OPEN"
-                if exit_timestamp and _timestamp(exit_timestamp) <= due_at:
+                if exited_at is not None and exited_at <= due_at:
                     status_at_checkpoint = "CLOSED"
 
                 checkpoint_id = f"{order_id}:{horizon}"
@@ -141,6 +190,12 @@ class TradeCheckpointService:
                     ),
                     "position_status_at_checkpoint": status_at_checkpoint,
                     "captured_order_status": str(order.get("status") or "UNKNOWN"),
+                    "observation_quality": observation_quality,
+                    "observation_lag_seconds": round(
+                        float(lag_seconds),
+                        3,
+                    ),
+                    "observation_note": observation_note,
                     "created_at": current.isoformat(),
                 })
                 captured += 1

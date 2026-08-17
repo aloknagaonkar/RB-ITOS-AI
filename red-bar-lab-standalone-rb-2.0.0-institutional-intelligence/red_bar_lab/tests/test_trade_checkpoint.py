@@ -124,3 +124,82 @@ def test_future_checkpoint_is_not_captured():
     )
     assert result.captured == 0
     assert not db.checkpoints
+
+
+def test_checkpoint_quality_exact():
+    entry = datetime(2026, 8, 17, 10, 0, tzinfo=IST)
+    db = FakeDatabase(
+        [_order(entry)],
+        {"PAPER-1": [{
+            "timestamp": (
+                entry + timedelta(minutes=15)
+            ).isoformat(),
+            "price": 109.0,
+        }]},
+    )
+    TradeCheckpointService(
+        db,
+        account_id="PAPER-STD",
+    ).capture_due(now=entry + timedelta(minutes=16))
+    checkpoint = db.checkpoints[("PAPER-1", 15)]
+    assert checkpoint["observation_quality"] == "EXACT"
+    assert checkpoint["observation_lag_seconds"] == 0.0
+
+
+def test_checkpoint_quality_first_mark_after_due():
+    entry = datetime(2026, 8, 17, 10, 0, tzinfo=IST)
+    db = FakeDatabase(
+        [_order(entry)],
+        {"PAPER-1": [{
+            "timestamp": (
+                entry + timedelta(minutes=17)
+            ).isoformat(),
+            "price": 110.0,
+        }]},
+    )
+    TradeCheckpointService(
+        db,
+        account_id="PAPER-STD",
+    ).capture_due(now=entry + timedelta(minutes=18))
+    checkpoint = db.checkpoints[("PAPER-1", 15)]
+    assert checkpoint["observation_quality"] == "FIRST_MARK_AFTER_DUE"
+    assert checkpoint["observation_lag_seconds"] == 120.0
+
+
+def test_checkpoint_quality_exit_before_horizon():
+    entry = datetime(2026, 8, 17, 10, 0, tzinfo=IST)
+    db = FakeDatabase(
+        [_order(
+            entry,
+            status="CLOSED",
+            exit_timestamp=(
+                entry + timedelta(minutes=10)
+            ).isoformat(),
+            exit_price=95.0,
+            current_price=95.0,
+        )],
+        {"PAPER-1": []},
+    )
+    TradeCheckpointService(
+        db,
+        account_id="PAPER-STD",
+    ).capture_due(now=entry + timedelta(minutes=15))
+    checkpoint = db.checkpoints[("PAPER-1", 15)]
+    assert checkpoint["observation_quality"] == "EXIT_BEFORE_HORIZON"
+    assert checkpoint["observation_lag_seconds"] == -300.0
+    assert checkpoint["position_status_at_checkpoint"] == "CLOSED"
+
+
+def test_checkpoint_quality_late_fallback():
+    entry = datetime(2026, 8, 17, 10, 0, tzinfo=IST)
+    db = FakeDatabase(
+        [_order(entry, current_price=108.0)],
+        {"PAPER-1": []},
+    )
+    TradeCheckpointService(
+        db,
+        account_id="PAPER-STD",
+    ).capture_due(now=entry + timedelta(minutes=20))
+    checkpoint = db.checkpoints[("PAPER-1", 15)]
+    assert checkpoint["observation_quality"] == "LATE_FALLBACK"
+    assert checkpoint["observation_lag_seconds"] == 300.0
