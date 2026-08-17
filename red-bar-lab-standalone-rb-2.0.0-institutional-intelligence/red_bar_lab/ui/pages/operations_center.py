@@ -36,6 +36,27 @@ def _availability_card_html(title, status, status_class, rows) -> str:
     )
 
 
+def _pipeline_stage_card_html(title, status, status_class, rows) -> str:
+    row_html = "".join(
+        (
+            "<div class='rb-pipeline-row'>"
+            f"<span>{label}</span>"
+            f"<strong>{value}</strong>"
+            "</div>"
+        )
+        for label, value in rows
+    )
+    return (
+        f"<div class='rb-pipeline-card rb-pipeline-card-{status_class}'>"
+        "<div class='rb-pipeline-card-header'>"
+        f"<strong>{title}</strong>"
+        f"<span class='rb-data-badge rb-data-badge-{status_class}'>{status}</span>"
+        "</div>"
+        f"{row_html}"
+        "</div>"
+    )
+
+
 def _availability_count(value):
     try:
         return int(value)
@@ -437,38 +458,237 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         "view. It does not block execution or change strategy decisions."
     )
 
-    st.markdown("### Intelligence Pipeline")
-    ip1, ip2, ip3, ip4 = st.columns(4)
-    ip1.metric("Signals Today", pipeline.get("signals_today"))
-    ip2.metric(
-        "Confirmed",
-        pipeline.get("confirmed_signals"),
-    )
-    ip3.metric("CORE Ready", pipeline.get("core_ready"))
-    ip4.metric("HYBRID Ready", pipeline.get("hybrid_ready"))
-
-    ip5, ip6, ip7, ip8 = st.columns(4)
-    ip5.metric(
-        "Market Context",
-        pipeline.get("market_context"),
-    )
-    ip6.metric(
-        "Volume / Structure",
-        pipeline.get("volume_structure"),
-    )
-    ip7.metric(
-        "Options Context",
-        pipeline.get("options_context"),
-    )
-    ip8.metric(
-        "Pipeline Status",
-        pipeline.get("pipeline_status"),
-    )
-
+    st.markdown("### Signal Enrichment Pipeline")
     st.caption(
-        f"Active signals: {pipeline.get('active_signals')} · "
-        f"Failed/timeout: {pipeline.get('failed_signals')} · "
-        f"EOD validation: {pipeline.get('eod_status')}"
+        "Confirmed signals are enriched independently with market, volume and "
+        "options context before CORE and HYBRID readiness is calculated."
+    )
+
+    signals_today = _availability_count(pipeline.get("signals_today")) or 0
+    confirmed_signals = _availability_count(
+        pipeline.get("confirmed_signals")
+    ) or 0
+    active_signals = _availability_count(pipeline.get("active_signals")) or 0
+    failed_signals = _availability_count(pipeline.get("failed_signals")) or 0
+    core_ready = _availability_count(pipeline.get("core_ready")) or 0
+    hybrid_ready = _availability_count(pipeline.get("hybrid_ready")) or 0
+
+    market_ready_count = max(
+        0,
+        confirmed_signals - (missing_market_count or 0),
+    )
+    volume_ready_count = max(
+        0,
+        confirmed_signals - (volume_missing_count or 0),
+    )
+    options_ready_count = max(
+        0,
+        confirmed_signals - (options_missing_count or 0),
+    )
+
+    def _stage_status(ready_count, total_count, missing_count=None):
+        if total_count == 0:
+            return "WAITING", "unknown"
+        if missing_count is None:
+            return "UNKNOWN", "unknown"
+        if ready_count >= total_count:
+            return "READY", "available"
+        if ready_count > 0:
+            return "PARTIAL", "partial"
+        return "MISSING", "unavailable"
+
+    signal_status = "READY" if confirmed_signals > 0 else "WAITING"
+    signal_class = "available" if confirmed_signals > 0 else "unknown"
+    market_status, market_class = _stage_status(
+        market_ready_count,
+        confirmed_signals,
+        missing_market_count,
+    )
+    volume_status, volume_stage_class = _stage_status(
+        volume_ready_count,
+        confirmed_signals,
+        volume_missing_count,
+    )
+    options_stage_status, options_stage_class = _stage_status(
+        options_ready_count,
+        confirmed_signals,
+        options_missing_count,
+    )
+
+    feature_ready = min(market_ready_count, volume_ready_count)
+    feature_status, feature_class = _stage_status(
+        feature_ready,
+        confirmed_signals,
+        max(missing_market_count or 0, volume_missing_count or 0),
+    )
+
+    eligibility_status = (
+        "READY"
+        if confirmed_signals > 0 and core_ready == confirmed_signals
+        else "PARTIAL"
+        if core_ready > 0 or hybrid_ready > 0
+        else "WAITING"
+    )
+    eligibility_class = (
+        "available"
+        if eligibility_status == "READY"
+        else "partial"
+        if eligibility_status == "PARTIAL"
+        else "unknown"
+    )
+
+    pipeline_status_value = str(
+        pipeline.get("pipeline_status") or "UNKNOWN"
+    ).upper()
+    pipeline_health_class = (
+        "available"
+        if pipeline_status_value in {"HEALTHY", "READY", "OK"}
+        else "unavailable"
+        if pipeline_status_value in {"ERROR", "FAILED", "CRITICAL"}
+        else "partial"
+    )
+
+    st.markdown(
+        """
+        <style>
+        .rb-pipeline-flow {
+            display: grid;
+            grid-template-columns: repeat(6, minmax(145px, 1fr));
+            gap: 0.55rem;
+            overflow-x: auto;
+            padding-bottom: 0.2rem;
+        }
+        .rb-pipeline-card {
+            border: 1px solid #E5E7EB;
+            border-top-width: 3px;
+            border-radius: 10px;
+            padding: 0.7rem 0.75rem;
+            background: var(--secondary-background-color);
+            min-height: 148px;
+        }
+        .rb-pipeline-card-available { border-top-color:#22C55E; }
+        .rb-pipeline-card-partial { border-top-color:#F59E0B; }
+        .rb-pipeline-card-unavailable { border-top-color:#DC2626; }
+        .rb-pipeline-card-unknown { border-top-color:#9CA3AF; }
+        .rb-pipeline-card-header {
+            display:flex;
+            justify-content:space-between;
+            align-items:center;
+            gap:0.4rem;
+            margin-bottom:0.55rem;
+            font-size:0.82rem;
+        }
+        .rb-pipeline-row {
+            display:flex;
+            justify-content:space-between;
+            gap:0.5rem;
+            padding:0.22rem 0;
+            border-bottom:1px solid rgba(107,114,128,0.14);
+            font-size:0.73rem;
+        }
+        .rb-pipeline-row:last-child { border-bottom:0; }
+        .rb-pipeline-row strong { text-align:right; }
+        .rb-pipeline-health {
+            margin-top:0.65rem;
+            padding:0.55rem 0.7rem;
+            border:1px solid #E5E7EB;
+            border-radius:8px;
+            font-size:0.77rem;
+            background:var(--secondary-background-color);
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    pipeline_cards = (
+        _pipeline_stage_card_html(
+            "1. Confirmed Signals",
+            signal_status,
+            signal_class,
+            (
+                ("Signals today", signals_today),
+                ("Confirmed", confirmed_signals),
+                ("Active", active_signals),
+                ("Failed / timeout", failed_signals),
+            ),
+        ),
+        _pipeline_stage_card_html(
+            "2. Market Context",
+            market_status,
+            market_class,
+            (
+                ("Ready", market_ready_count),
+                ("Missing", missing_market),
+                ("Source", "Market context service"),
+                ("Scope", "Per confirmed signal"),
+            ),
+        ),
+        _pipeline_stage_card_html(
+            "3. Volume & Structure",
+            volume_status,
+            volume_stage_class,
+            (
+                ("Ready", volume_ready_count),
+                ("Missing", missing_volume),
+                ("Source", "Volume structure service"),
+                ("Scope", "Per confirmed signal"),
+            ),
+        ),
+        _pipeline_stage_card_html(
+            "4. Option Context",
+            options_stage_status,
+            options_stage_class,
+            (
+                ("Linked", options_ready_count),
+                ("Missing", missing_options),
+                ("Link window", "120 seconds"),
+                ("Snapshot", freshness_text),
+            ),
+        ),
+        _pipeline_stage_card_html(
+            "5. Feature Store",
+            feature_status,
+            feature_class,
+            (
+                ("CORE inputs", feature_ready),
+                ("Market layer", market_ready_count),
+                ("Volume layer", volume_ready_count),
+                ("Options layer", options_ready_count),
+            ),
+        ),
+        _pipeline_stage_card_html(
+            "6. Eligibility",
+            eligibility_status,
+            eligibility_class,
+            (
+                ("CORE ready", core_ready),
+                ("HYBRID ready", hybrid_ready),
+                ("CORE rule", "Market + Volume"),
+                ("HYBRID rule", "CORE + Options"),
+            ),
+        ),
+    )
+    st.markdown(
+        "<div class='rb-pipeline-flow'>"
+        + "".join(pipeline_cards)
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        "<div class='rb-pipeline-health'>"
+        f"<strong>Pipeline health:</strong> "
+        f"<span class='rb-data-{pipeline_health_class}'>"
+        f"{pipeline_status_value}</span> · "
+        f"<strong>Errors:</strong> {pipeline_errors} · "
+        f"<strong>EOD validation:</strong> {pipeline.get('eod_status')}"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "Each enrichment stage is fault-isolated. Missing intelligence is "
+        "reported here but does not change the frozen strategy or execution "
+        "authority."
     )
 
     st.markdown("### AI Readiness")
