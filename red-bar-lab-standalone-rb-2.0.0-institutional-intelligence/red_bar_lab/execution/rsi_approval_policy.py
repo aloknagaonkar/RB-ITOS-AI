@@ -4,6 +4,7 @@ from dataclasses import replace
 from typing import Any
 
 RSI_STRATEGY_SOURCE = "RSI_EXTREME_REVERSAL_V1"
+RSI_MAX_ENTRIES_PER_SIGNAL = 2
 
 
 def _num(value: Any, default: float = 0.0) -> float:
@@ -73,5 +74,39 @@ def apply_rsi_approval_policy(
         decision=decision,
         reason=reason,
         primary_decision=decision,
+        primary_confidence_pct=100.0,
+    )
+
+
+def apply_rsi_entry_limit(
+    committee,
+    *,
+    strategy_source: str,
+    selected_entries: int,
+    maximum_entries: int = RSI_MAX_ENTRIES_PER_SIGNAL,
+):
+    """Keep only the best N hard-gate-qualified contracts per RSI cross.
+
+    Callers evaluate candidates in deterministic best-first order. Rejected
+    hard-gate candidates do not consume a slot, so the policy selects the best
+    two *eligible* contracts rather than merely candidate ranks one and two.
+    """
+    if (
+        str(strategy_source or "") != RSI_STRATEGY_SOURCE
+        or not committee.eligible
+        or int(selected_entries) < int(maximum_entries)
+    ):
+        return committee
+
+    reason = (
+        f"RSI_ENTRY_LIMIT_REACHED:{int(maximum_entries)} | "
+        "BETTER_ELIGIBLE_CONTRACTS_SELECTED"
+    )
+    return replace(
+        committee,
+        eligible=False,
+        decision="REJECT",
+        reason=reason,
+        primary_decision="REJECT",
         primary_confidence_pct=100.0,
     )

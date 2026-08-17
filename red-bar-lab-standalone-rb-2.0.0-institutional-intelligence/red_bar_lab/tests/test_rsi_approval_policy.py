@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from red_bar_lab.execution.rsi_approval_policy import (
     apply_rsi_approval_policy,
+    apply_rsi_entry_limit,
 )
 
 
@@ -91,5 +92,46 @@ def test_non_rsi_committee_result_is_unchanged():
         candidate=Candidate(),
         strategy_source="REFERENCE_LEVEL",
         duplicate=False,
+    )
+    assert result is original
+
+
+def test_rsi_entry_limit_accepts_first_two_eligible_contracts():
+    committee = Committee(eligible=True, decision="EXECUTE")
+    first = apply_rsi_entry_limit(
+        committee,
+        strategy_source="RSI_EXTREME_REVERSAL_V1",
+        selected_entries=0,
+    )
+    second = apply_rsi_entry_limit(
+        committee,
+        strategy_source="RSI_EXTREME_REVERSAL_V1",
+        selected_entries=1,
+    )
+    assert first.eligible is True
+    assert second.eligible is True
+
+
+def test_rsi_entry_limit_rejects_third_eligible_contract():
+    result = apply_rsi_entry_limit(
+        Committee(eligible=True, decision="EXECUTE"),
+        strategy_source="RSI_EXTREME_REVERSAL_V1",
+        selected_entries=2,
+    )
+    assert result.eligible is False
+    assert result.decision == "REJECT"
+    assert "RSI_ENTRY_LIMIT_REACHED:2" in result.reason
+
+
+def test_rsi_entry_limit_does_not_change_hard_gate_rejection():
+    original = Committee(
+        eligible=False,
+        decision="REJECT",
+        reason="RSI_HARD_GATE_FAIL",
+    )
+    result = apply_rsi_entry_limit(
+        original,
+        strategy_source="RSI_EXTREME_REVERSAL_V1",
+        selected_entries=2,
     )
     assert result is original

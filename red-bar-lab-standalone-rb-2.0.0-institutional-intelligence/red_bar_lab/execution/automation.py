@@ -14,6 +14,8 @@ from red_bar_lab.execution.exit_engine import PaperExitEngine
 from red_bar_lab.execution.execution_policy import resolve_execution_policy
 from red_bar_lab.execution.rsi_approval_policy import (
     apply_rsi_approval_policy,
+    apply_rsi_entry_limit,
+    RSI_STRATEGY_SOURCE,
 )
 from red_bar_lab.execution.directional_regime_reference import (
     DirectionalRegimeReferenceService,
@@ -490,6 +492,18 @@ class RedBarPaperAutomationService:
                 default_stop_loss_pct=self.stop_loss_pct,
                 default_target_pct=self.target_pct,
             )
+            existing_rsi_entries = (
+                sum(
+                    1
+                    for order in historical_orders
+                    if str(order.get("signal_id") or "") == signal_id
+                    and str(order.get("execution_strategy_source") or "")
+                    == RSI_STRATEGY_SOURCE
+                )
+                if execution_policy.strategy_source == RSI_STRATEGY_SOURCE
+                else 0
+            )
+            selected_rsi_entries = existing_rsi_entries
             policy_target_pct = (
                 execution_policy.target_pct
                 if execution_policy.target_pct is not None
@@ -904,6 +918,16 @@ class RedBarPaperAutomationService:
                         strategy_source=execution_policy.strategy_source,
                         duplicate=duplicate,
                     )
+                    committee = apply_rsi_entry_limit(
+                        committee,
+                        strategy_source=execution_policy.strategy_source,
+                        selected_entries=selected_rsi_entries,
+                    )
+                    if (
+                        execution_policy.strategy_source == RSI_STRATEGY_SOURCE
+                        and committee.eligible
+                    ):
+                        selected_rsi_entries += 1
                     self.database.insert_institutional_execution_evaluation({
                         "scan_id": scan_id,
                         "signal_id": signal_id,
