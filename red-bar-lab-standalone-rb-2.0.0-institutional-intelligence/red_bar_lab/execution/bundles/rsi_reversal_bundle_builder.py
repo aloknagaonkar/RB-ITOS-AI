@@ -9,6 +9,16 @@ from red_bar_lab.execution.bundles.bundle_identity import rsi_bundle_identity
 from red_bar_lab.execution.bundles.bundle_model import RSI_EXTREME_REVERSAL, StrategySignalBundle
 
 
+def _required_number(value: object, field: str) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"RSI bundle requires numeric {field}") from None
+    if pd.isna(number):
+        raise ValueError(f"RSI bundle requires numeric {field}")
+    return number
+
+
 def build_rsi_reversal_bundle(
     signal: Mapping[str, object],
     *,
@@ -20,12 +30,14 @@ def build_rsi_reversal_bundle(
         raise ValueError("RSI bundle requires a confirmed bullish or bearish signal")
     extreme_at = signal.get("rsi_armed_timestamp")
     confirmed_at = signal.get("confirmation_timestamp") or signal.get("detected_at")
-    if not extreme_at or not confirmed_at:
-        raise ValueError("RSI bundle requires extreme and confirmation timestamps")
+    cross_back_at = signal.get("rsi_crossback_timestamp") or confirmed_at
+    if not extreme_at or not cross_back_at or not confirmed_at:
+        raise ValueError("RSI bundle requires extreme, cross-back and confirmation timestamps")
     bundle_id, canonical = rsi_bundle_identity(
         instrument_key=instrument_key,
         direction=direction,
         extreme_timestamp=extreme_at,
+        cross_back_timestamp=cross_back_at,
         confirmation_timestamp=confirmed_at,
     )
     detected = pd.Timestamp(confirmed_at)
@@ -37,6 +49,11 @@ def build_rsi_reversal_bundle(
         else "PARTIALLY_CONSUMED" if entry_slots_consumed == 1
         else "FRESH"
     )
+    trigger = _required_number(
+        signal.get("trigger_level") or signal.get("confirmation_close"),
+        "trigger_level",
+    )
+    invalidation = _required_number(signal.get("invalidation_level"), "invalidation_level")
     return StrategySignalBundle(
         bundle_id=bundle_id,
         strategy_id=RSI_EXTREME_REVERSAL,
@@ -47,8 +64,8 @@ def build_rsi_reversal_bundle(
         fresh_until=str(fresh_until),
         primary_signal_id=str(signal.get("signal_id") or ""),
         primary_setup_type=str(signal.get("level_name") or "RSI_EXTREME_REVERSAL"),
-        trigger_level=float(signal.get("trigger_level") or signal.get("confirmation_close")),
-        invalidation_level=float(signal.get("invalidation_level")),
+        trigger_level=trigger,
+        invalidation_level=invalidation,
         bundle_state=state,
         execution_allowed=False,
         entry_slots_allowed=2,
