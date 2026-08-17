@@ -1,6 +1,7 @@
 from red_bar_lab.ui._shared import *
 from red_bar_lab.ui.strategy_option_context import build_option_behaviour_snapshot
 from red_bar_lab.ui.strategy_input_preparation import prepare_completed_one_minute
+from red_bar_lab.ui.strategy_red_bar_bundle import build_red_bar_bundle_resolution
 from red_bar_lab.ui.strategy_setup_detection import build_red_bar_setup_state
 from red_bar_lab.ui.strategy_section_summary import (
     elapsed_ms,
@@ -24,11 +25,18 @@ def _read_cached_candles(layout, instrument_key, trading_date):
     return path, frame
 
 
+def _render_rows(rows, empty_message):
+    if rows:
+        st.dataframe(_arrow_safe_rows(rows), width="stretch", hide_index=True)
+    else:
+        st.info(empty_message)
+
+
 def render_page(settings, layout, database, token, underlying_name, instrument_key, interval) -> None:
     st.subheader("Red Bar Strategy")
     st.caption(
-        "Section 1 - Data & Feature Preparation. Read-only visibility into the inputs "
-        "prepared after collection and before Red Bar setup detection."
+        "Independent Red Bar strategy observability. Sections 1-3 are read-only and do "
+        "not create signals, bundles, contracts, orders or positions."
     )
 
     selected_date = st.date_input(
@@ -95,28 +103,19 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
             ),
         },
     ]
-    option_rows = option_context.get("rows") or []
 
     with st.expander("View candle and feature preparation details"):
         st.dataframe(_arrow_safe_rows(rows), width="stretch", hide_index=True)
-
     with st.expander("View option behaviour details"):
-        if option_rows:
-            st.dataframe(_arrow_safe_rows(option_rows), width="stretch", hide_index=True)
-        else:
-            st.warning(str(option_context.get("detail") or "Option context is unavailable."))
-
+        _render_rows(option_context.get("rows") or [], str(option_context.get("detail") or "Option context is unavailable."))
     with st.expander("View refresh and performance details"):
         st.dataframe(
             _arrow_safe_rows(timing_rows(
                 section_name="Section 1 preparation",
                 refreshed_at=section1_refreshed,
                 prepared_ms=section1_ms,
-            )),
-            width="stretch",
-            hide_index=True,
+            )), width="stretch", hide_index=True,
         )
-
     with st.expander("View preparation flow"):
         st.code(
             "1-minute candles collected\n"
@@ -171,18 +170,72 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
 
     with st.expander("View condition-by-condition trace"):
         st.dataframe(_arrow_safe_rows(setup["rows"]), width="stretch", hide_index=True)
-
     with st.expander("View Section 2 refresh and performance details"):
         st.dataframe(
             _arrow_safe_rows(timing_rows(
                 section_name="Section 2 setup trace",
                 refreshed_at=section2_refreshed,
                 prepared_ms=section2_ms,
-            )),
-            width="stretch",
-            hide_index=True,
+            )), width="stretch", hide_index=True,
+        )
+
+    section3_started = section_timer()
+    bundle = build_red_bar_bundle_resolution(
+        database=database,
+        instrument_key=instrument_key,
+        trading_date=trading_date,
+        reference=red_ref,
+    )
+    section3_ms = elapsed_ms(section3_started)
+
+    st.markdown("### 3. Red Bar Signal Normalization & Bundle Lifecycle")
+    st.caption(
+        "The bundle contains only Red Bar reference, midpoint-cross and confirmation evidence. "
+        "RSI and DRI signals, cooldowns and consumption states do not affect it."
+    )
+    n1, n2, n3, n4 = st.columns(4)
+    n1.metric("Signal state", bundle["signal_state"])
+    n2.metric("Normalized intent", bundle["normalized_intent"])
+    n3.metric("Bundle state", bundle["bundle_state"])
+    n4.metric("Final result", bundle["final_outcome"])
+
+    b1, b2, b3, b4 = st.columns(4)
+    b1.metric("Strategy owner", bundle["strategy_owner"])
+    b2.metric("Bundle ID", bundle["bundle_id"])
+    b3.metric("Signal age", bundle["signal_age"])
+    b4.metric("Entry capacity", bundle["entry_capacity"])
+
+    st.write(f"**Decision reason:** {bundle['decision_reason']}")
+    st.write(f"**Applied lifecycle rule:** {bundle['applied_rule']}")
+    st.write(f"**Next architectural step:** {bundle['next_step']}")
+    render_timing_caption(st, refreshed_at=bundle.get("refreshed_at"), prepared_ms=section3_ms)
+
+    with st.expander("View confirmed Red Bar event"):
+        _render_rows(bundle["signal_rows"], "No confirmed Red Bar event is available for the selected date.")
+    with st.expander("View Red Bar bundle"):
+        _render_rows(bundle["bundle_rows"], "No Red Bar bundle can be built until reference, cross and confirmation are complete.")
+    with st.expander("View Red Bar consumption lifecycle"):
+        _render_rows(bundle["lifecycle_rows"], "No persisted Red Bar execution events were found; bundle capacity remains unconsumed.")
+    with st.expander("How was this Red Bar bundle created?"):
+        st.write(f"**Strategy owner:** {bundle['strategy_owner']}")
+        st.write(f"**Signal ID:** {bundle['signal_id']}")
+        st.write(f"**Bundle ID:** {bundle['bundle_id']}")
+        st.write(f"**Normalized intention:** {bundle['normalized_intent']}")
+        st.write(f"**Entry capacity:** {bundle['entry_capacity']}")
+        st.write(f"**Applied rule:** {bundle['applied_rule']}")
+        st.write(f"**Outcome:** {bundle['final_outcome']}")
+        st.write(f"**Reason:** {bundle['decision_reason']}")
+        st.write(f"**Next step:** {bundle['next_step']}")
+    with st.expander("View Section 3 refresh and performance details"):
+        st.dataframe(
+            _arrow_safe_rows(timing_rows(
+                section_name="Section 3 Red Bar bundle lifecycle",
+                refreshed_at=bundle.get("refreshed_at"),
+                prepared_ms=section3_ms,
+            )), width="stretch", hide_index=True,
         )
 
     st.info(
-        "This page does not run detection, alter reference levels, fetch new option data, or change execution behavior."
+        "Sections 1-3 are read-only. The displayed Red Bar bundle is constructed in memory "
+        "for observability; opening this page does not persist, forward, consume or execute it."
     )
