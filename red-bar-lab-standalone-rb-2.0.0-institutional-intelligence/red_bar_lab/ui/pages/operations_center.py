@@ -151,12 +151,12 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     )
     st.caption(f"Current time: {market.get('current_time')}")
 
-    st.markdown("### Data Availability")
+    st.markdown("### Data Readiness Gate v1")
     quality = ops.data_quality
     pipeline = ops.pipeline
     latest_data_timestamp = market.get("last_snapshot")
     page_refresh_timestamp = pd.Timestamp.now(tz="Asia/Kolkata")
-    freshness_text, freshness_class, _ = _snapshot_freshness(
+    freshness_text, freshness_class, freshness_age = _snapshot_freshness(
         latest_data_timestamp,
         market.get("phase"),
     )
@@ -174,19 +174,97 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         quality.get("pipeline_errors")
     )
 
+    missing_market_count = _availability_count(
+        quality.get("missing_market_context")
+    )
     volume_missing_count = _availability_count(
         quality.get("missing_volume_structure")
     )
+    options_missing_count = _availability_count(
+        quality.get("missing_options_context")
+    )
+    pipeline_error_count = _availability_count(
+        quality.get("pipeline_errors")
+    )
+
     volume_ready = volume_missing_count == 0
     volume_value = "Ready" if volume_ready else "Missing data"
     volume_class = "available" if volume_ready else "partial"
 
-    options_missing_count = _availability_count(
-        quality.get("missing_options_context")
-    )
     options_ready = options_missing_count == 0
     option_status = "AVAILABLE" if options_ready else "PARTIAL"
     option_status_class = "available" if options_ready else "partial"
+
+    blocking_reasons = []
+    warning_reasons = []
+    if latest_data_timestamp in (None, "", "—"):
+        blocking_reasons.append("No successful Upstox option-chain snapshot is available.")
+    if (
+        str(market.get("phase") or "").upper() == "OPEN"
+        and freshness_class == "unavailable"
+    ):
+        blocking_reasons.append(
+            f"Latest option-chain snapshot is stale ({freshness_age}s old)."
+        )
+    if str(market.get("collector_status") or "").upper() == "ERROR":
+        blocking_reasons.append("Collector status is ERROR.")
+    if pipeline_error_count and pipeline_error_count > 0:
+        blocking_reasons.append(
+            f"Pipeline has {pipeline_error_count} recorded error(s)."
+        )
+
+    for label, count in (
+        ("market context", missing_market_count),
+        ("volume / structure", volume_missing_count),
+        ("options context", options_missing_count),
+    ):
+        if count is None:
+            warning_reasons.append(f"{label.title()} count is unavailable.")
+        elif count > 0:
+            warning_reasons.append(f"{count} signal(s) are missing {label}.")
+
+    if freshness_class == "partial":
+        warning_reasons.append("Latest option-chain snapshot is delayed.")
+    warning_reasons.extend(
+        (
+            "Chain completeness validation is not implemented yet.",
+            "Zero/stale quote validation is not implemented yet.",
+            "Underlying candle freshness is not validated yet.",
+        )
+    )
+
+    if blocking_reasons:
+        readiness_state = "NOT READY"
+        readiness_class = "unavailable"
+    elif warning_reasons:
+        readiness_state = "PARTIAL"
+        readiness_class = "partial"
+    else:
+        readiness_state = "READY"
+        readiness_class = "available"
+
+    readiness_reason_html = "".join(
+        f"<li class='rb-data-unavailable'>{reason}</li>"
+        for reason in blocking_reasons
+    ) + "".join(
+        f"<li class='rb-data-partial'>{reason}</li>"
+        for reason in warning_reasons
+    )
+
+    st.markdown(
+        "<div class='rb-readiness-banner "
+        f"rb-readiness-banner-{readiness_class}'>"
+        "<div class='rb-readiness-banner-header'>"
+        "<strong>Overall data readiness</strong>"
+        f"<span class='rb-data-badge rb-data-badge-{readiness_class}'>"
+        f"{readiness_state}</span>"
+        "</div>"
+        "<ul class='rb-readiness-reasons'>"
+        f"{readiness_reason_html}"
+        "</ul>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
     st.markdown(
         "<div class='rb-data-meta'>"
@@ -212,11 +290,41 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     st.markdown(
         """
         <style>
+        .rb-readiness-banner {
+            border: 1px solid #E5E7EB;
+            border-left-width: 4px;
+            border-radius: 9px;
+            padding: 0.7rem 0.8rem;
+            margin-bottom: 0.65rem;
+        }
+        .rb-readiness-banner-available {
+            background:#F0FDF4;
+            border-left-color:#16A34A;
+        }
+        .rb-readiness-banner-partial {
+            background:#FFFBEB;
+            border-left-color:#F59E0B;
+        }
+        .rb-readiness-banner-unavailable {
+            background:#FEF2F2;
+            border-left-color:#DC2626;
+        }
+        .rb-readiness-banner-header {
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            gap:0.75rem;
+        }
+        .rb-readiness-reasons {
+            margin:0.45rem 0 0 1rem;
+            padding:0;
+            font-size:0.76rem;
+        }
         .rb-data-meta {
             font-size: 0.76rem;
             color: #6B7280;
             line-height: 1.45;
-            margin-top: -0.35rem;
+            margin-top: -0.1rem;
             margin-bottom: 0.45rem;
         }
         .rb-missing-strip {
@@ -277,18 +385,18 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     availability_columns = st.columns(4)
     availability_cards = (
         _availability_card_html(
-            "Underlying Data",
+            "Source Availability",
             "PARTIAL",
             "partial",
             (
                 ("1-minute OHLC", "Supported", "available"),
-                ("Current volume", volume_value, volume_class),
-                ("RSI(7)", "Supported", "available"),
+                ("Volume", volume_value, volume_class),
+                ("RSI(7) input", "Supported", "available"),
                 ("Candle freshness", "Not validated", "unknown"),
             ),
         ),
         _availability_card_html(
-            "Option-Chain Data",
+            "Option-Chain Collection",
             option_status,
             option_status_class,
             (
@@ -310,14 +418,14 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
             ),
         ),
         _availability_card_html(
-            "Data Quality Controls",
-            "NOT AVAILABLE",
-            "unavailable",
+            "Quality Controls",
+            "PARTIAL",
+            "partial",
             (
-                ("Broker data timestamp", "Not provided", "unknown"),
-                ("Chain completeness", "Not available", "unavailable"),
-                ("Stale quote check", "Not available", "unavailable"),
-                ("Execution readiness", "Not available", "unavailable"),
+                ("Snapshot freshness", freshness_text, freshness_class),
+                ("Chain completeness", "Not validated", "unknown"),
+                ("Zero / stale quotes", "Not validated", "unknown"),
+                ("Execution authority", "None", "unknown"),
             ),
         ),
     )
@@ -325,9 +433,8 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         column.markdown(card, unsafe_allow_html=True)
 
     st.caption(
-        "The Upstox collection time is the latest successfully stored option-chain "
-        "snapshot. It is not an authoritative broker-provided market-data timestamp. "
-        "Availability remains informational and cannot change execution decisions."
+        "Data Readiness Gate v1 is a read-only architecture and diagnostics "
+        "view. It does not block execution or change strategy decisions."
     )
 
     st.markdown("### Intelligence Pipeline")
