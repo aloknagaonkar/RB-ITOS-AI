@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-from typing import Mapping, Sequence
+from typing import Mapping
 
 import streamlit as st
 
@@ -166,17 +166,16 @@ def rank_strategy_contracts(
         distinct.append(row)
 
     selected = distinct[: policy.maximum_contracts]
+    selected_identity_to_position = {
+        str(row.get("instrument_key") or row.get("trading_symbol") or ""): position
+        for position, row in enumerate(selected, start=1)
+    }
     for index, row in enumerate(scored, start=1):
         row["rank"] = index
+        if row.get("ranking_decision") == "DUPLICATE_EXCLUDED":
+            continue
         identity = str(row.get("instrument_key") or row.get("trading_symbol") or "")
-        selected_index = next(
-            (
-                position
-                for position, selected_row in enumerate(selected, start=1)
-                if str(selected_row.get("instrument_key") or selected_row.get("trading_symbol") or "") == identity
-            ),
-            None,
-        )
+        selected_index = selected_identity_to_position.get(identity)
         if selected_index is not None:
             row["ranking_decision"] = "PRIMARY" if selected_index == 1 else "FALLBACK"
 
