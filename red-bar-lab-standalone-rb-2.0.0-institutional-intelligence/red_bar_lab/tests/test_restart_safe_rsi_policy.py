@@ -26,7 +26,7 @@ def test_persisted_queue_policy_survives_missing_artifact():
     assert policy.exit_mode == RSI_EXIT_MODE
 
 
-def test_standard_persisted_policy_remains_standard():
+def test_legacy_standard_persisted_policy_normalizes_to_unified_reversal():
     policy = resolve_execution_policy({
         "signal_id": "RB-1",
         "execution_strategy_source": "REFERENCE_LEVEL",
@@ -34,6 +34,8 @@ def test_standard_persisted_policy_remains_standard():
         "strategy_target_pct": 25.0,
         "exit_mode": "STANDARD_MULTI_FACTOR",
     })
-    assert policy.stop_loss_pct == 15.0
-    assert policy.target_pct == 25.0
-    assert policy.exit_mode == "STANDARD_MULTI_FACTOR"
+    assert policy.strategy_source == "REFERENCE_LEVEL"
+    assert policy.stop_loss_pct == 7.0
+    assert policy.target_pct is None
+    assert policy.exit_mode == RSI_EXIT_MODE
+    assert policy.directional_conflicts_observational is True
