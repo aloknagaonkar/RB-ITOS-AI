@@ -102,18 +102,32 @@ def _nearest_expiry(rows, trading_date: str):
     return min(ranked, key=lambda item: item[0])[1] if ranked else {}
 
 
-def build_option_behaviour_snapshot(database, instrument_key: str, trading_date: str):
-    """Build read-only context from aggregate option-chain snapshot records."""
-    try:
-        rows = list(
-            database.read_option_chain_history(
+def _read_option_rows(database, instrument_key: str, trading_date: str):
+    latest_reader = getattr(database, "read_latest_option_chain_snapshot", None)
+    if callable(latest_reader):
+        return list(
+            latest_reader(
                 instrument_key,
                 trading_date,
-                trading_date,
-                limit=500,
+                limit=100,
             )
             or []
         )
+    return list(
+        database.read_option_chain_history(
+            instrument_key,
+            trading_date,
+            trading_date,
+            limit=500,
+        )
+        or []
+    )
+
+
+def build_option_behaviour_snapshot(database, instrument_key: str, trading_date: str):
+    """Build read-only context from aggregate option-chain snapshot records."""
+    try:
+        rows = _read_option_rows(database, instrument_key, trading_date)
     except Exception as exc:
         return {
             "status": "NOT READY",
