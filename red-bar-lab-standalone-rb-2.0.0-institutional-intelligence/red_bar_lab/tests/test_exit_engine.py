@@ -1,3 +1,6 @@
+from datetime import datetime, timedelta, timezone
+
+from red_bar_lab.execution.execution_policy import RSI_EXIT_MODE
 from red_bar_lab.execution.exit_engine import PaperExitEngine
 
 
@@ -191,3 +194,57 @@ def test_oi_pcr_and_greeks_are_shadow_only():
     assert result.shadow_oi_pcr == "WARNING"
     assert result.shadow_greeks == "WARNING"
     assert result.hard_exit_reason is None
+
+
+def test_rsi_dynamic_protection_is_delayed_for_first_five_minutes():
+    position = _position(current=99.5, stop=93.0, mfe=6.0)
+    position["entry_timestamp"] = (
+        datetime.now(timezone.utc) - timedelta(minutes=2)
+    ).isoformat()
+
+    result = PaperExitEngine().evaluate(
+        position=position,
+        option_candle=_healthy_candle(),
+        exit_mode=RSI_EXIT_MODE,
+    )
+
+    assert result.breakeven_armed is False
+    assert result.profit_lock_active is False
+    assert result.trailing_active is False
+    assert result.effective_stop == 93.0
+    assert result.hard_exit_reason is None
+    assert "RSI_DYNAMIC_PROTECTION_DELAY_ACTIVE=300s" in result.reasons
+
+
+def test_rsi_hard_stop_remains_active_during_protection_delay():
+    position = _position(current=92.0, stop=93.0, mfe=6.0)
+    position["entry_timestamp"] = (
+        datetime.now(timezone.utc) - timedelta(minutes=2)
+    ).isoformat()
+
+    result = PaperExitEngine().evaluate(
+        position=position,
+        option_candle=_healthy_candle(),
+        exit_mode=RSI_EXIT_MODE,
+    )
+
+    assert result.breakeven_armed is False
+    assert result.hard_exit_reason == "HARD_STOP"
+    assert result.action == "EXIT"
+
+
+def test_rsi_breakeven_arms_after_five_minute_delay():
+    position = _position(current=99.5, stop=93.0, mfe=6.0)
+    position["entry_timestamp"] = (
+        datetime.now(timezone.utc) - timedelta(minutes=6)
+    ).isoformat()
+
+    result = PaperExitEngine().evaluate(
+        position=position,
+        option_candle=_healthy_candle(),
+        exit_mode=RSI_EXIT_MODE,
+    )
+
+    assert result.breakeven_armed is True
+    assert result.effective_stop == 100.0
+    assert result.hard_exit_reason == "BREAKEVEN_STOP"
