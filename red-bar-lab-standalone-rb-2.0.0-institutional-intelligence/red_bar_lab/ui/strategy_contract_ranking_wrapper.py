@@ -4,6 +4,9 @@ from functools import wraps
 from types import ModuleType
 from typing import Mapping
 
+from red_bar_lab.ui.strategy_contract_market_context import (
+    enrich_contract_market_context,
+)
 from red_bar_lab.ui.strategy_contract_ranking import (
     POLICIES as RANKING_POLICIES,
     rank_strategy_contracts,
@@ -67,6 +70,11 @@ def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
             readiness = build_contract_data_readiness(
                 gate=gate,
                 resolution=resolution,
+                database=database,
+                instrument_key=str(instrument_key),
+            )
+            readiness = enrich_contract_market_context(
+                readiness,
                 database=database,
                 instrument_key=str(instrument_key),
             )
