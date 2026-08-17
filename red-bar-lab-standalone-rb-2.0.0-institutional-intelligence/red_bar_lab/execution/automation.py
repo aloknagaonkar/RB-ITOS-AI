@@ -9,6 +9,7 @@ from uuid import uuid4
 import pandas as pd
 
 from red_bar_lab.execution.checkpoint import TradeCheckpointService
+from red_bar_lab.execution.option_telemetry import OptionExecutionTelemetryService
 from red_bar_lab.execution.exit_engine import PaperExitEngine
 from red_bar_lab.execution.execution_policy import resolve_execution_policy
 from red_bar_lab.execution.directional_regime_reference import (
@@ -1777,10 +1778,15 @@ class RedBarPaperAutomationService:
             trading_date=trading_date, lots=lots,
         )
         closed, exit_errors = self.monitor_and_exit()
+        cycle_now = datetime.now(IST)
         checkpoint_result = TradeCheckpointService(
             self.database,
             account_id=self.engine.account_id,
-        ).capture_due(now=datetime.now(IST))
+        ).capture_due(now=cycle_now)
+        telemetry_result = OptionExecutionTelemetryService(
+            self.database,
+            account_id=self.engine.account_id,
+        ).capture(market_data=self.zerodha, now=cycle_now)
         signal_count = len(
             self.database.read_signal_attempts(
                 (
@@ -1802,5 +1808,6 @@ class RedBarPaperAutomationService:
                 + queue_errors
                 + exit_errors
                 + list(checkpoint_result.errors)
+                + list(telemetry_result.errors)
             ),
         )

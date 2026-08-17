@@ -439,6 +439,53 @@ ON paper_trade_checkpoints(order_id, horizon_minutes);
 CREATE INDEX IF NOT EXISTS idx_paper_trade_checkpoints_signal
 ON paper_trade_checkpoints(signal_id, observed_timestamp);
 
+CREATE TABLE IF NOT EXISTS option_execution_telemetry (
+    telemetry_id TEXT PRIMARY KEY,
+    order_id TEXT NOT NULL,
+    signal_id TEXT,
+    execution_strategy_source TEXT,
+    observed_timestamp TEXT NOT NULL,
+    exchange TEXT,
+    tradingsymbol TEXT,
+    instrument_token INTEGER,
+    option_type TEXT,
+    strike REAL,
+    expiry TEXT,
+    entry_price REAL,
+    current_price REAL,
+    premium_return_pct REAL,
+    volume REAL,
+    volume_change REAL,
+    relative_volume REAL,
+    oi REAL,
+    oi_change REAL,
+    oi_change_pct REAL,
+    best_bid REAL,
+    best_ask REAL,
+    spread_points REAL,
+    spread_pct REAL,
+    buy_quantity REAL,
+    sell_quantity REAL,
+    iv REAL,
+    delta REAL,
+    gamma REAL,
+    theta REAL,
+    vega REAL,
+    pcr_oi REAL,
+    pcr_source TEXT,
+    support_classification TEXT NOT NULL,
+    support_reason TEXT,
+    authority TEXT NOT NULL DEFAULT 'OBSERVATIONAL_ONLY',
+    created_at TEXT NOT NULL,
+    UNIQUE(order_id, observed_timestamp),
+    FOREIGN KEY(order_id) REFERENCES paper_execution_orders(order_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_option_execution_telemetry_order
+ON option_execution_telemetry(order_id, observed_timestamp);
+CREATE INDEX IF NOT EXISTS idx_option_execution_telemetry_signal
+ON option_execution_telemetry(signal_id, observed_timestamp);
+
 
 CREATE TABLE IF NOT EXISTS shadow_intelligence_evaluations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2362,6 +2409,97 @@ class RedBarDatabase:
                     """,
                     (int(limit),),
                 ).fetchall()
+        return [dict(row) for row in rows]
+
+    def insert_option_execution_telemetry(
+        self,
+        row: dict[str, object],
+    ) -> None:
+        self.initialize()
+        now = datetime.now().astimezone().isoformat()
+        with sqlite3.connect(self.path) as conn:
+            conn.execute(
+                '''
+                INSERT OR IGNORE INTO option_execution_telemetry(
+                    telemetry_id,order_id,signal_id,
+                    execution_strategy_source,observed_timestamp,
+                    exchange,tradingsymbol,instrument_token,
+                    option_type,strike,expiry,entry_price,current_price,
+                    premium_return_pct,volume,volume_change,relative_volume,
+                    oi,oi_change,oi_change_pct,best_bid,best_ask,
+                    spread_points,spread_pct,buy_quantity,sell_quantity,
+                    iv,delta,gamma,theta,vega,pcr_oi,pcr_source,
+                    support_classification,support_reason,authority,created_at
+                )
+                VALUES(
+                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
+                    ?,?,?,?,?,?,?,?,?,?,?
+                )
+                ''',
+                (
+                    row.get('telemetry_id'), row.get('order_id'),
+                    row.get('signal_id'), row.get('execution_strategy_source'),
+                    row.get('observed_timestamp'), row.get('exchange'),
+                    row.get('tradingsymbol'), row.get('instrument_token'),
+                    row.get('option_type'), row.get('strike'), row.get('expiry'),
+                    row.get('entry_price'), row.get('current_price'),
+                    row.get('premium_return_pct'), row.get('volume'),
+                    row.get('volume_change'), row.get('relative_volume'),
+                    row.get('oi'), row.get('oi_change'), row.get('oi_change_pct'),
+                    row.get('best_bid'), row.get('best_ask'),
+                    row.get('spread_points'), row.get('spread_pct'),
+                    row.get('buy_quantity'), row.get('sell_quantity'),
+                    row.get('iv'), row.get('delta'), row.get('gamma'),
+                    row.get('theta'), row.get('vega'), row.get('pcr_oi'),
+                    row.get('pcr_source'), row.get('support_classification'),
+                    row.get('support_reason'),
+                    row.get('authority') or 'OBSERVATIONAL_ONLY',
+                    row.get('created_at') or now,
+                ),
+            )
+            conn.commit()
+
+    def read_latest_option_execution_telemetry(
+        self,
+        order_id: str,
+    ) -> dict[str, object] | None:
+        self.initialize()
+        with sqlite3.connect(self.path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                '''SELECT * FROM option_execution_telemetry
+                   WHERE order_id=?
+                   ORDER BY observed_timestamp DESC LIMIT 1''',
+                (order_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def read_option_execution_telemetry(
+        self,
+        *,
+        order_id: str | None = None,
+        signal_id: str | None = None,
+        limit: int = 500,
+    ) -> list[dict[str, object]]:
+        self.initialize()
+        clauses = []
+        values: list[object] = []
+        if order_id:
+            clauses.append('order_id=?')
+            values.append(order_id)
+        if signal_id:
+            clauses.append('signal_id=?')
+            values.append(signal_id)
+        where = ('WHERE ' + ' AND '.join(clauses)) if clauses else ''
+        values.append(int(limit))
+        with sqlite3.connect(self.path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                f'''SELECT * FROM option_execution_telemetry
+                    {where}
+                    ORDER BY observed_timestamp DESC LIMIT ?''',
+                tuple(values),
+            ).fetchall()
         return [dict(row) for row in rows]
 
     def upsert_signal_pipeline_status(
