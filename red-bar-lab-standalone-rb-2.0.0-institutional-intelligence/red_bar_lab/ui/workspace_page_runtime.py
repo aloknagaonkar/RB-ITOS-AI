@@ -49,6 +49,12 @@ def _research_option_sync_factory(provider, layout, historical, database=None):
 
 
 def _configure_strategy_cache(page: str, module: ModuleType) -> None:
+    from red_bar_lab.ui.strategy_identity_compatibility import (
+        install_strategy_identity_compatibility,
+    )
+
+    install_strategy_identity_compatibility()
+
     from red_bar_lab.ui.strategy_candle_cache import read_cached_strategy_candles
     from red_bar_lab.ui.strategy_contract_ranking_wrapper import (
         build_contract_ranking_page_wrapper,
