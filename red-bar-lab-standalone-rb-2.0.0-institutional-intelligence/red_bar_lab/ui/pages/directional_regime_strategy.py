@@ -1,4 +1,5 @@
 from red_bar_lab.ui._shared import *
+from red_bar_lab.ui.strategy_dri_bundle import build_dri_bundle_resolution
 from red_bar_lab.ui.strategy_option_context import build_option_behaviour_snapshot
 from red_bar_lab.ui.strategy_setup_detection import build_dri_setup_state
 from red_bar_lab.ui.strategy_input_preparation import (
@@ -178,6 +179,79 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
             hide_index=True,
         )
 
+    section3_started = section_timer()
+    resolution = build_dri_bundle_resolution(
+        database=database,
+        runs_root=settings.runs_root,
+        instrument_key=instrument_key,
+        trading_date=trading_date,
+    )
+    section3_ms = elapsed_ms(section3_started)
+
+    st.markdown("### 3. DRI Signal Normalization & Bundle Lifecycle")
+    st.caption(
+        "Read-only adaptation of the persisted DRI transition bundle into the common "
+        "strategy-owned contract. RSI and Red Bar records are not bundle members."
+    )
+    d1, d2, d3, d4 = st.columns(4)
+    d1.metric("Signal state", resolution["signal_state"])
+    d2.metric("Normalized intent", resolution["normalized_intent"])
+    d3.metric("Bundle state", resolution["bundle_state"])
+    d4.metric("Final outcome", resolution["final_outcome"])
+
+    e1, e2, e3, e4 = st.columns(4)
+    e1.metric("DRI bundle ID", resolution["bundle_id"])
+    e2.metric("Legacy bundle ID", resolution["legacy_bundle_id"])
+    e3.metric("Bundle age", resolution["signal_age"])
+    e4.metric("Entry capacity", resolution["entry_capacity"])
+    st.write(f"**Decision reason:** {resolution['decision_reason']}")
+    st.write(f"**Ownership rule:** {resolution['applied_rule']}")
+    st.write(f"**Next architectural step:** {resolution['next_step']}")
+    render_timing_caption(
+        st,
+        refreshed_at=resolution.get("refreshed_at"),
+        prepared_ms=section3_ms,
+    )
+
+    with st.expander("View DRI source bundle"):
+        if resolution["signal_rows"]:
+            st.dataframe(_arrow_safe_rows(resolution["signal_rows"]), width="stretch", hide_index=True)
+        else:
+            st.info("No persisted DRI bundle is available for the selected date.")
+
+    with st.expander("View normalized DRI bundle"):
+        if resolution["bundle_rows"]:
+            st.dataframe(_arrow_safe_rows(resolution["bundle_rows"]), width="stretch", hide_index=True)
+        else:
+            st.info("DRI normalization is waiting for a persisted bundle.")
+
+    with st.expander("View DRI bundle consumption lifecycle"):
+        if resolution["lifecycle_rows"]:
+            st.dataframe(_arrow_safe_rows(resolution["lifecycle_rows"]), width="stretch", hide_index=True)
+        else:
+            st.info("No strategy-and-bundle-scoped execution evidence is recorded.")
+
+    with st.expander("How was this DRI bundle created?"):
+        st.write(f"**Strategy owner:** {resolution['strategy_owner']}")
+        st.write(f"**Primary signal:** {resolution['signal_id']}")
+        st.write(f"**Canonical bundle ID:** {resolution['bundle_id']}")
+        st.write(f"**Lifecycle state:** {resolution['bundle_state']}")
+        st.write(f"**Outcome:** {resolution['final_outcome']}")
+        st.write(f"**Reason:** {resolution['decision_reason']}")
+        st.write(f"**Next step:** {resolution['next_step']}")
+
+    with st.expander("View Section 3 refresh and performance details"):
+        st.dataframe(
+            _arrow_safe_rows(timing_rows(
+                section_name="Section 3 DRI bundle lifecycle",
+                refreshed_at=resolution.get("refreshed_at"),
+                prepared_ms=section3_ms,
+            )),
+            width="stretch",
+            hide_index=True,
+        )
+
     st.info(
-        "This page does not classify a regime, fetch new option data, create native DRI signals, or change execution authority."
+        "Sections 1-3 are read-only. The legacy DRI writer remains unchanged; this page "
+        "does not persist a DRI-BND record, consume a bundle, select a contract, or submit an order."
     )
