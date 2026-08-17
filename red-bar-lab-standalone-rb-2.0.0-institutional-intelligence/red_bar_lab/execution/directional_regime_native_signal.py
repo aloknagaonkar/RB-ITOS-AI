@@ -499,6 +499,17 @@ class DirectionalNativeSignalDatabaseProxy:
             self.enable_red_bar_strategy
         )
 
+    def execution_source_enabled(self, strategy_source: object) -> bool:
+        """Return whether this source is allowed to enter execution processing."""
+        source = str(strategy_source or "").upper().strip()
+        if source == "RSI_EXTREME_REVERSAL_V1":
+            return self.enable_rsi_strategy
+        if source == "DIRECTIONAL_REGIME_INTELLIGENCE":
+            return self.enable_dri_strategy
+        # REFERENCE_LEVEL, RED_BAR and legacy/blank sources belong to the
+        # existing Red Bar execution path.
+        return self.enable_red_bar_strategy
+
     def __getattr__(self, name):
         return getattr(self._database, name)
 

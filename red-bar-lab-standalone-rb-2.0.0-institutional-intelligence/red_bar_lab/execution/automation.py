@@ -494,6 +494,54 @@ class RedBarPaperAutomationService:
                 default_stop_loss_pct=self.stop_loss_pct,
                 default_target_pct=self.target_pct,
             )
+            source_enabled = getattr(
+                self.database,
+                "execution_source_enabled",
+                None,
+            )
+            if (
+                callable(source_enabled)
+                and not source_enabled(
+                    execution_policy.strategy_source
+                )
+            ):
+                reason = (
+                    "STRATEGY_DISABLED:"
+                    f"{execution_policy.strategy_source}"
+                )
+                self.database.insert_paper_signal_diagnostic({
+                    "scan_id": scan_id,
+                    "signal_id": signal_id,
+                    "signal_state": signal_state,
+                    "direction": signal.get("direction"),
+                    "confirmation_timestamp": confirmation_timestamp,
+                    "signal_age_seconds": None,
+                    "market_hours_ok": market_open,
+                    "freshness_ok": False,
+                    "duplicate_free": True,
+                    "candidate_available": False,
+                    "best_candidate": None,
+                    "best_score": None,
+                    "minimum_score": self.minimum_candidate_score,
+                    "score_ok": False,
+                    "final_decision": "SKIP",
+                    "reason": reason,
+                    "timestamp": now.isoformat(),
+                })
+                self._record_state(
+                    signal_id=signal_id,
+                    state="STRATEGY_DISABLED",
+                    detail=(
+                        f"strategy_source="
+                        f"{execution_policy.strategy_source}; "
+                        "candidate_scoring=BLOCKED; "
+                        "committee=BLOCKED; "
+                        "queue=BLOCKED; "
+                        "paper_order=BLOCKED"
+                    ),
+                )
+                skipped += 1
+                continue
             existing_rsi_entries = (
                 count_slot_consuming_rsi_orders(
                     historical_orders,

@@ -204,3 +204,62 @@ def test_environment_switches(monkeypatch, tmp_path: Path):
     assert rows[0]["signal_source"] == (
         "RSI_EXTREME_REVERSAL_V1"
     )
+
+
+def test_rsi_only_backend_source_gate_blocks_red_bar(tmp_path: Path):
+    proxy = DirectionalNativeSignalDatabaseProxy(
+        StrategyDatabase(),
+        runs_root=tmp_path,
+        enable_red_bar_strategy=False,
+        enable_dri_strategy=False,
+        enable_rsi_strategy=True,
+    )
+
+    assert proxy.execution_source_enabled(
+        "RSI_EXTREME_REVERSAL_V1"
+    ) is True
+    assert proxy.execution_source_enabled(
+        "REFERENCE_LEVEL"
+    ) is False
+    assert proxy.execution_source_enabled("RED_BAR") is False
+    assert proxy.execution_source_enabled(
+        "DIRECTIONAL_REGIME_INTELLIGENCE"
+    ) is False
+
+
+def test_red_bar_only_backend_source_gate_blocks_rsi(tmp_path: Path):
+    proxy = DirectionalNativeSignalDatabaseProxy(
+        StrategyDatabase(),
+        runs_root=tmp_path,
+        enable_red_bar_strategy=True,
+        enable_dri_strategy=False,
+        enable_rsi_strategy=False,
+    )
+
+    assert proxy.execution_source_enabled(
+        "REFERENCE_LEVEL"
+    ) is True
+    assert proxy.execution_source_enabled(
+        "RSI_EXTREME_REVERSAL_V1"
+    ) is False
+
+
+def test_dri_only_backend_source_gate_isolated(tmp_path: Path):
+    proxy = DirectionalNativeSignalDatabaseProxy(
+        StrategyDatabase(),
+        runs_root=tmp_path,
+        enable_red_bar_strategy=False,
+        enable_dri_strategy=True,
+        enable_rsi_strategy=False,
+    )
+
+    assert proxy.execution_source_enabled(
+        "DIRECTIONAL_REGIME_INTELLIGENCE"
+    ) is True
+    assert proxy.execution_source_enabled(
+        "REFERENCE_LEVEL"
+    ) is False
+    assert proxy.execution_source_enabled(
+        "RSI_EXTREME_REVERSAL_V1"
+    ) is False
+
