@@ -5,6 +5,7 @@ from red_bar_lab.ui.strategy_input_preparation import (
     prepare_completed_one_minute,
 )
 from red_bar_lab.ui.strategy_setup_detection import build_rsi_setup_state
+from red_bar_lab.ui.strategy_signal_resolution import build_rsi_signal_resolution
 from red_bar_lab.ui.strategy_section_summary import (
     elapsed_ms,
     latest_frame_timestamp,
@@ -253,6 +254,96 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
             hide_index=True,
         )
 
+    section3_started = section_timer()
+    resolution = build_rsi_signal_resolution(
+        candles=prepared_candles,
+        database=database,
+        settings=settings,
+        instrument_key=instrument_key,
+        trading_date=trading_date,
+    )
+    section3_ms = elapsed_ms(section3_started)
+
+    st.markdown("### 3. Signal Normalization, Bundling & Conflict Resolution")
+    st.caption(
+        "Read-only explanation of how the confirmed RSI signal is normalized, checked for "
+        "freshness and prior consumption, and compared with Red Bar and Directional Regime evidence."
+    )
+    n1, n2, n3, n4 = st.columns(4)
+    n1.metric("Signal state", resolution["signal_state"])
+    n2.metric("Normalized intent", resolution["normalized_intent"])
+    n3.metric("Bundle state", resolution["bundle_state"])
+    n4.metric("Final outcome", resolution["final_outcome"])
+
+    r1, r2, r3, r4 = st.columns(4)
+    r1.metric("Signal ID", resolution["signal_id"])
+    r2.metric("Signal age", resolution["signal_age"])
+    r3.metric("Consumed", resolution["consumed"])
+    r4.metric(
+        "Support / oppose",
+        f"{resolution['supporting_count']} / {resolution['opposing_count']}",
+    )
+    st.write(f"**Decision reason:** {resolution['decision_reason']}")
+    st.write(f"**Applied conflict rule:** {resolution['applied_rule']}")
+    st.write(f"**Next architectural step:** {resolution['next_step']}")
+    render_timing_caption(
+        st,
+        refreshed_at=resolution.get("refreshed_at"),
+        prepared_ms=section3_ms,
+    )
+
+    with st.expander("View raw RSI signal"):
+        if resolution["raw_rows"]:
+            st.dataframe(_arrow_safe_rows(resolution["raw_rows"]), width="stretch", hide_index=True)
+        else:
+            st.info("No confirmed RSI signal is available for the selected date.")
+
+    with st.expander("View normalized trading intention"):
+        if resolution["normalization_rows"]:
+            st.dataframe(_arrow_safe_rows(resolution["normalization_rows"]), width="stretch", hide_index=True)
+        else:
+            st.info("Normalization is waiting for a confirmed RSI signal.")
+
+    with st.expander("View freshness and consumption checks"):
+        if resolution["freshness_rows"]:
+            st.dataframe(_arrow_safe_rows(resolution["freshness_rows"]), width="stretch", hide_index=True)
+        else:
+            st.info("Freshness and consumption cannot be evaluated without a signal.")
+
+    with st.expander("View bundle membership"):
+        if resolution["bundle_rows"]:
+            st.dataframe(_arrow_safe_rows(resolution["bundle_rows"]), width="stretch", hide_index=True)
+        else:
+            st.info("No comparison bundle is available.")
+
+    with st.expander("View engine-by-engine conflict analysis"):
+        if resolution["conflict_rows"]:
+            st.dataframe(_arrow_safe_rows(resolution["conflict_rows"]), width="stretch", hide_index=True)
+        else:
+            st.info("No cross-engine conflict evidence is available.")
+
+    with st.expander("How was the final bundle decision made?"):
+        st.write(f"**Signal lifecycle:** {resolution['signal_state']}")
+        st.write(f"**Normalized intention:** {resolution['normalized_intent']}")
+        st.write(f"**Supporting engines:** {resolution['supporting_count']}")
+        st.write(f"**Opposing engines:** {resolution['opposing_count']}")
+        st.write(f"**Applied rule:** {resolution['applied_rule']}")
+        st.write(f"**Outcome:** {resolution['final_outcome']}")
+        st.write(f"**Reason:** {resolution['decision_reason']}")
+        st.write(f"**Next step:** {resolution['next_step']}")
+
+    with st.expander("View Section 3 refresh and performance details"):
+        st.dataframe(
+            _arrow_safe_rows(timing_rows(
+                section_name="Section 3 signal resolution",
+                refreshed_at=resolution.get("refreshed_at"),
+                prepared_ms=section3_ms,
+            )),
+            width="stretch",
+            hide_index=True,
+        )
+
     st.info(
-        "This page does not create RSI signals, fetch new option data, submit orders, or change the reversal engine."
+        "Sections 1-3 are read-only. Opening this page does not create, consume, bundle, "
+        "forward or reject a signal and does not submit an order."
     )
