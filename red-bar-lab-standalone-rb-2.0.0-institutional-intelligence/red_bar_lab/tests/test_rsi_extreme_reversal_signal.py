@@ -17,9 +17,8 @@ from red_bar_lab.execution.rsi_extreme_reversal import (
 
 
 def reversal_candles() -> pd.DataFrame:
-    # RSI arms on the first loss candle and crosses back above 20 within the
-    # frozen five-completed-candle window. The previous fixture crossed only
-    # after the arm had correctly expired.
+    # RSI arms during the decline and confirms only when the completed bullish
+    # candle closes above the previous candle high without making a lower low.
     closes = [100.0] * 8 + [98, 96, 94, 92, 95]
     timestamps = pd.date_range(
         "2026-08-14 09:15",
@@ -73,6 +72,10 @@ def test_oversold_recovery_emits_one_ce_signal():
     assert row["signal_source"] == "RSI_EXTREME_REVERSAL_V1"
     assert row["rsi_armed_value"] <= 20.0
     assert row["rsi_confirmation_value"] > 20.0
+    assert row["confirmation_close"] > row["previous_candle_high"]
+    assert row["confirmation_low"] >= row["previous_candle_low"]
+    assert row["rsi_lifecycle_state"] == "REVERSAL_CONFIRMED"
+    assert row["structure_reclaim_confirmed"] is True
     assert row["entry_ready_timestamp"] == row["confirmation_timestamp"]
     assert row["strategy_stop_loss_pct"] == 7.0
     assert row["fixed_profit_target"] is False
@@ -88,6 +91,68 @@ def test_overbought_rejection_emits_one_pe_signal():
     assert row["option_type"] == "PE"
     assert row["rsi_armed_value"] >= 80.0
     assert row["rsi_confirmation_value"] < 80.0
+    assert row["confirmation_close"] < row["previous_candle_low"]
+    assert row["confirmation_high"] <= row["previous_candle_high"]
+
+
+def test_bullish_rsi_crossback_without_previous_high_reclaim_is_not_executable(monkeypatch):
+    frame = reversal_candles().iloc[-4:].reset_index(drop=True)
+    monkeypatch.setattr(
+        "red_bar_lab.execution.rsi_extreme_reversal._rsi",
+        lambda close, period: pd.Series([50.0, 19.0, 18.0, 21.0]),
+    )
+    frame.loc[3, "open"] = 92.0
+    frame.loc[3, "close"] = 93.0
+    frame.loc[3, "high"] = 94.0
+    frame.loc[3, "low"] = frame.loc[2, "low"]
+    assert RsiExtremeReversalEngine().detect(
+        frame, instrument_key="NSE_INDEX|Nifty 50"
+    ) == []
+
+
+def test_bullish_rsi_crossback_with_fresh_lower_low_is_not_executable(monkeypatch):
+    frame = reversal_candles().iloc[-4:].reset_index(drop=True)
+    monkeypatch.setattr(
+        "red_bar_lab.execution.rsi_extreme_reversal._rsi",
+        lambda close, period: pd.Series([50.0, 19.0, 18.0, 21.0]),
+    )
+    frame.loc[3, "open"] = 92.0
+    frame.loc[3, "close"] = frame.loc[2, "high"] + 1.0
+    frame.loc[3, "high"] = frame.loc[3, "close"] + 0.5
+    frame.loc[3, "low"] = frame.loc[2, "low"] - 0.1
+    assert RsiExtremeReversalEngine().detect(
+        frame, instrument_key="NSE_INDEX|Nifty 50"
+    ) == []
+
+
+def test_bearish_rsi_crossback_without_previous_low_reclaim_is_not_executable(monkeypatch):
+    frame = bearish_reversal_candles().iloc[-4:].reset_index(drop=True)
+    monkeypatch.setattr(
+        "red_bar_lab.execution.rsi_extreme_reversal._rsi",
+        lambda close, period: pd.Series([50.0, 81.0, 82.0, 79.0]),
+    )
+    frame.loc[3, "open"] = 108.0
+    frame.loc[3, "close"] = frame.loc[2, "low"] + 0.1
+    frame.loc[3, "low"] = frame.loc[2, "low"]
+    frame.loc[3, "high"] = frame.loc[2, "high"]
+    assert RsiExtremeReversalEngine().detect(
+        frame, instrument_key="NSE_INDEX|Nifty 50"
+    ) == []
+
+
+def test_bearish_rsi_crossback_with_fresh_higher_high_is_not_executable(monkeypatch):
+    frame = bearish_reversal_candles().iloc[-4:].reset_index(drop=True)
+    monkeypatch.setattr(
+        "red_bar_lab.execution.rsi_extreme_reversal._rsi",
+        lambda close, period: pd.Series([50.0, 81.0, 82.0, 79.0]),
+    )
+    frame.loc[3, "open"] = 108.0
+    frame.loc[3, "close"] = frame.loc[2, "low"] - 1.0
+    frame.loc[3, "low"] = frame.loc[3, "close"] - 0.5
+    frame.loc[3, "high"] = frame.loc[2, "high"] + 0.1
+    assert RsiExtremeReversalEngine().detect(
+        frame, instrument_key="NSE_INDEX|Nifty 50"
+    ) == []
 
 
 def test_exact_boundary_values_arm_but_do_not_confirm_until_crossed(monkeypatch):
@@ -98,6 +163,9 @@ def test_exact_boundary_values_arm_but_do_not_confirm_until_crossed(monkeypatch)
         lambda close, period: values,
     )
     frame.loc[3, "open"] = frame.loc[3, "close"] - 1.0
+    frame.loc[3, "close"] = frame.loc[2, "high"] + 1.0
+    frame.loc[3, "high"] = frame.loc[3, "close"] + 0.5
+    frame.loc[3, "low"] = frame.loc[2, "low"]
     signals = RsiExtremeReversalEngine().detect(
         frame, instrument_key="NSE_INDEX|Nifty 50"
     )
@@ -113,6 +181,9 @@ def test_exact_80_boundary_arms_pe(monkeypatch):
         lambda close, period: values,
     )
     frame.loc[2, "open"] = frame.loc[2, "close"] + 1.0
+    frame.loc[2, "close"] = frame.loc[1, "low"] - 1.0
+    frame.loc[2, "low"] = frame.loc[2, "close"] - 0.5
+    frame.loc[2, "high"] = frame.loc[1, "high"]
     signals = RsiExtremeReversalEngine().detect(
         frame, instrument_key="NSE_INDEX|Nifty 50"
     )
