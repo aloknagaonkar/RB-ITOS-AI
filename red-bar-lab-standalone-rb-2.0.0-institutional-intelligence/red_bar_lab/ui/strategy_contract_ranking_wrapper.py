@@ -4,6 +4,10 @@ from functools import wraps
 from types import ModuleType
 from typing import Mapping
 
+from red_bar_lab.ui.option_chain_directional_evidence import (
+    build_option_chain_directional_evidence,
+    render_option_chain_directional_evidence,
+)
 from red_bar_lab.ui.strategy_contract_market_context import (
     enrich_contract_market_context,
 )
@@ -26,7 +30,7 @@ from red_bar_lab.ui.strategy_execution_source_gate import POLICIES, build_execut
 
 
 def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
-    """Append read-only Sections 5B-5D after the installed Section 5A wrapper."""
+    """Append read-only Sections 5B-5D and Section 6A after installed Section 5A."""
     policy = POLICIES[page]
     ranking_policy = RANKING_POLICIES[policy.strategy_id]
     safeguard_policy = SAFEGUARD_POLICIES[policy.strategy_id]
@@ -88,6 +92,28 @@ def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
         render_strategy_contract_ranking(ranking)
         audit = build_selection_audit(ranking, policy=ranking_policy)
         render_selection_audit(audit)
+
+        if database is None or not instrument_key:
+            option_direction = {
+                "direction": "UNAVAILABLE",
+                "confidence": "NONE",
+                "bullish_score": 0.0,
+                "bearish_score": 0.0,
+                "previous_snapshot_timestamp": "Unavailable",
+                "current_snapshot_timestamp": str(readiness.get("snapshot_timestamp") or "Unavailable"),
+                "comparison_seconds": None,
+                "atm_strike": readiness.get("atm_strike"),
+                "strikes_evaluated": 0,
+                "dominant_reason": "Database or instrument context is unavailable.",
+                "rows": [],
+            }
+        else:
+            option_direction = build_option_chain_directional_evidence(
+                readiness,
+                database=database,
+                instrument_key=str(instrument_key),
+            )
+        render_option_chain_directional_evidence(option_direction)
         return result
 
     setattr(module, policy.builder_name, capture_resolution)
