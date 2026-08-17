@@ -24,6 +24,27 @@ def _weighted_contribution(row: Mapping[str, object], component: str, weight: fl
     return round(quality_pct * float(weight), 2)
 
 
+def _arrow_safe_rows(rows) -> list[dict[str, object]]:
+    """Keep each dataframe column type stable for Streamlit/PyArrow serialization."""
+    values = [dict(row) for row in (rows or [])]
+    if not values:
+        return []
+    columns = {key for row in values for key in row}
+    for column in columns:
+        present = [row.get(column) for row in values if row.get(column) is not None]
+        kinds = {
+            "bool" if isinstance(value, bool)
+            else "number" if isinstance(value, (int, float))
+            else "text"
+            for value in present
+        }
+        if len(kinds) > 1:
+            for row in values:
+                value = row.get(column)
+                row[column] = "" if value is None else str(value)
+    return values
+
+
 def build_selection_audit(
     ranking: Mapping[str, object],
     *,
@@ -34,9 +55,9 @@ def build_selection_audit(
     ranked = [dict(row) for row in (ranking.get("ranked_rows") or [])]
 
     policy_rows = [
-        {"policy field": "Strategy ID", "value": policy.strategy_id},
-        {"policy field": "Policy version", "value": policy.policy_version},
-        {"policy field": "Maximum proposed contracts", "value": policy.maximum_contracts},
+        {"policy field": "Strategy ID", "value": str(policy.strategy_id)},
+        {"policy field": "Policy version", "value": str(policy.policy_version)},
+        {"policy field": "Maximum proposed contracts", "value": str(policy.maximum_contracts)},
         {"policy field": "Preferred absolute delta", "value": f"{policy.preferred_abs_delta_min:.2f} to {policy.preferred_abs_delta_max:.2f}"},
     ]
     for _, label, weight_name in _COMPONENTS:
@@ -154,17 +175,17 @@ def render_selection_audit(result: Mapping[str, object]) -> None:
     st.write("**Persisted / reserved / bundle consumed / executed:** NO / NO / NO / NO")
 
     with st.expander("View active strategy-owned ranking policy"):
-        st.dataframe(list(result.get("policy_rows") or []), width="stretch", hide_index=True)
+        st.dataframe(_arrow_safe_rows(result.get("policy_rows") or []), width="stretch", hide_index=True)
 
     with st.expander("View score-component audit"):
-        rows = list(result.get("audit_rows") or [])
+        rows = _arrow_safe_rows(result.get("audit_rows") or [])
         if rows:
             st.dataframe(rows, width="stretch", hide_index=True)
         else:
             st.info("No contracts were available for score auditing.")
 
     with st.expander("View proposed read-only handoff records"):
-        rows = list(result.get("handoff_rows") or [])
+        rows = _arrow_safe_rows(result.get("handoff_rows") or [])
         if rows:
             st.dataframe(rows, width="stretch", hide_index=True)
         else:
