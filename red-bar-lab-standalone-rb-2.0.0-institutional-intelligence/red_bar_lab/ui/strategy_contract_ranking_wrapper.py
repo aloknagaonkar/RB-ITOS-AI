@@ -6,11 +6,15 @@ from typing import Mapping
 
 from red_bar_lab.ui.option_chain_directional_evidence import (
     build_option_chain_directional_evidence,
-    render_option_chain_directional_evidence,
 )
-from red_bar_lab.ui.strategy_contract_market_context import (
-    enrich_contract_market_context,
+from red_bar_lab.ui.option_chain_directional_evidence_view import (
+    render_option_chain_directional_evidence_5e,
 )
+from red_bar_lab.ui.strategy_candidate_readiness import (
+    build_candidate_readiness,
+    render_candidate_readiness,
+)
+from red_bar_lab.ui.strategy_contract_market_context import enrich_contract_market_context
 from red_bar_lab.ui.strategy_contract_ranking import (
     POLICIES as RANKING_POLICIES,
     rank_strategy_contracts,
@@ -30,7 +34,7 @@ from red_bar_lab.ui.strategy_execution_source_gate import POLICIES, build_execut
 
 
 def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
-    """Append read-only Sections 5B-5D and Section 6A after installed Section 5A."""
+    """Append read-only Sections 5B-5E and Sections 6A-6C after Section 5A."""
     policy = POLICIES[page]
     ranking_policy = RANKING_POLICIES[policy.strategy_id]
     safeguard_policy = SAFEGUARD_POLICIES[policy.strategy_id]
@@ -61,7 +65,7 @@ def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
         if database is None or not instrument_key:
             readiness = {
                 "outcome": "UNAVAILABLE",
-                "reason": "Database or instrument context is unavailable to Section 5B.",
+                "reason": "Database or instrument context is unavailable to Section 5.",
                 "strategy_id": policy.strategy_id,
                 "signal_id": str(gate.get("signal_id") or "Not created"),
                 "bundle_id": str(gate.get("bundle_id") or "Not created"),
@@ -83,10 +87,7 @@ def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
                 instrument_key=str(instrument_key),
             )
 
-        safeguarded = apply_contract_safeguards(
-            readiness,
-            policy=safeguard_policy,
-        )
+        safeguarded = apply_contract_safeguards(readiness, policy=safeguard_policy)
         render_contract_safeguards(safeguarded)
         ranking = rank_strategy_contracts(safeguarded, policy=ranking_policy)
         render_strategy_contract_ranking(ranking)
@@ -113,7 +114,20 @@ def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
                 database=database,
                 instrument_key=str(instrument_key),
             )
-        render_option_chain_directional_evidence(option_direction)
+        render_option_chain_directional_evidence_5e(option_direction)
+
+        evaluation_timestamp = None
+        if isinstance(resolution, Mapping):
+            evaluation_timestamp = resolution.get("refreshed_at")
+        candidate_result = build_candidate_readiness(
+            gate=gate,
+            resolution=resolution,
+            safeguarded=safeguarded,
+            ranking=ranking,
+            option_direction=option_direction,
+            evaluation_timestamp=evaluation_timestamp,
+        )
+        render_candidate_readiness(candidate_result)
         return result
 
     setattr(module, policy.builder_name, capture_resolution)
