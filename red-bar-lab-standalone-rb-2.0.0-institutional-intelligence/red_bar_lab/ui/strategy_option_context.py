@@ -21,6 +21,15 @@ def _number(value):
         return None
 
 
+def _display(value, *, digits: int = 3) -> str:
+    """Return one stable text type for the option-summary value column."""
+    if value in (None, ""):
+        return "Unavailable"
+    if isinstance(value, float):
+        return f"{value:.{digits}f}"
+    return str(value)
+
+
 def _first(row: Mapping[str, object], names: Iterable[str]):
     for name in names:
         value = row.get(name)
@@ -173,21 +182,21 @@ def build_option_behaviour_snapshot(database, instrument_key: str, trading_date:
         status = "STALE"
 
     display_rows = [
-        {"input": "Latest stored snapshot", "value": latest_ts.isoformat() if latest_ts is not None else "Timestamp unavailable"},
-        {"input": "Snapshot freshness", "value": freshness},
-        {"input": "Snapshot age seconds", "value": round(age_seconds, 1) if age_seconds is not None else None},
-        {"input": "Expiry", "value": expiry or "Unavailable"},
-        {"input": "Total CE open interest", "value": call_oi},
-        {"input": "Total PE open interest", "value": put_oi},
-        {"input": "Total CE change in OI", "value": call_change_oi},
-        {"input": "Total PE change in OI", "value": put_change_oi},
-        {"input": "PCR (OI)", "value": round(pcr, 3) if pcr is not None else None},
-        {"input": "Call wall", "value": snapshot.get("call_wall_strike")},
-        {"input": "Put wall", "value": snapshot.get("put_wall_strike")},
-        {"input": "Max pain", "value": snapshot.get("max_pain_strike")},
-        {"input": "ATM call IV", "value": snapshot.get("atm_call_iv")},
-        {"input": "ATM put IV", "value": snapshot.get("atm_put_iv")},
-        {"input": "OI positioning bias", "value": bias},
+        {"input": "Latest stored snapshot", "value": _display(latest_ts.isoformat() if latest_ts is not None else None)},
+        {"input": "Snapshot freshness", "value": _display(freshness)},
+        {"input": "Snapshot age seconds", "value": _display(age_seconds, digits=1)},
+        {"input": "Expiry", "value": _display(expiry)},
+        {"input": "Total CE open interest", "value": _display(call_oi)},
+        {"input": "Total PE open interest", "value": _display(put_oi)},
+        {"input": "Total CE change in OI", "value": _display(call_change_oi)},
+        {"input": "Total PE change in OI", "value": _display(put_change_oi)},
+        {"input": "PCR (OI)", "value": _display(pcr)},
+        {"input": "Call wall", "value": _display(snapshot.get("call_wall_strike"))},
+        {"input": "Put wall", "value": _display(snapshot.get("put_wall_strike"))},
+        {"input": "Max pain", "value": _display(snapshot.get("max_pain_strike"))},
+        {"input": "ATM call IV", "value": _display(snapshot.get("atm_call_iv"))},
+        {"input": "ATM put IV", "value": _display(snapshot.get("atm_put_iv"))},
+        {"input": "OI positioning bias", "value": _display(bias)},
         {"input": "Contract executability", "value": "Not evaluated in Section 1"},
     ]
 

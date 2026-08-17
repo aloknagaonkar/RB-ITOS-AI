@@ -83,7 +83,7 @@ def build_red_bar_setup_state(
         {
             "condition": "Midpoint available",
             "status": "PASS" if midpoint not in (None, "") else "WAIT",
-            "observed": midpoint if midpoint not in (None, "") else "Unavailable",
+            "observed": str(midpoint) if midpoint not in (None, "") else "Unavailable",
         },
         {
             "condition": "Midpoint cross",
