@@ -1,4 +1,4 @@
-from red_bar_lab.ui._shared import *
+from red_bar_lab.ui.shared_strategy import date, pd, st, _arrow_safe_rows
 from red_bar_lab.ui.strategy_option_context import build_option_behaviour_snapshot
 from red_bar_lab.ui.strategy_input_preparation import (
     latest_wilder_rsi,
