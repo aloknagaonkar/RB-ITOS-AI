@@ -120,7 +120,9 @@ def build_execution_source_gate(
         "normalized_intent": normalized_intent,
         "signal_state": signal_state,
         "bundle_state": bundle_state,
+        "section3_outcome": section3_outcome,
         "execution_enabled": execution_enabled,
+        "lifecycle_allowed": bundle_ready,
         "eligible": eligible,
         "forwarded": False,
         "final_outcome": final_outcome,
@@ -144,14 +146,19 @@ def render_execution_source_gate(gate: Mapping[str, object]) -> None:
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Strategy source", str(gate["strategy_owner"]))
-    c2.metric("Execution enabled", "YES" if gate["execution_enabled"] else "NO")
-    c3.metric("Source eligible", "YES" if gate["eligible"] else "NO")
-    c4.metric("Forwarded", "NO — READ ONLY")
+    c2.metric("Strategy control", "ENABLED" if gate["execution_enabled"] else "DISABLED")
+    c3.metric("Lifecycle gate", "PASS" if gate["lifecycle_allowed"] else "BLOCKED")
+    c4.metric("Source eligible", "YES" if gate["eligible"] else "NO")
 
     st.write(f"**Signal ID:** {gate['signal_id']}")
     st.write(f"**Bundle ID:** {gate['bundle_id']}")
     st.write(f"**Requested intent:** {gate['normalized_intent']}")
+    st.write(
+        f"**Lifecycle state:** bundle={gate['bundle_state']}; "
+        f"outcome={gate['section3_outcome']}"
+    )
     st.write(f"**Gate outcome:** {gate['final_outcome']}")
+    st.write(f"**Forwarded:** NO — READ ONLY")
     st.write(f"**Blocking reason:** {gate['blocking_reason']}")
     st.write(f"**Next architectural step:** {gate['next_step']}")
 
