@@ -9,6 +9,16 @@ from red_bar_lab.execution.bundles.bundle_identity import red_bar_bundle_identit
 from red_bar_lab.execution.bundles.bundle_model import RED_BAR, StrategySignalBundle
 
 
+def _required_number(value: object, field: str) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"Red Bar bundle requires numeric {field}") from None
+    if pd.isna(number):
+        raise ValueError(f"Red Bar bundle requires numeric {field}")
+    return number
+
+
 def build_red_bar_bundle(
     signal: Mapping[str, object],
     reference: Mapping[str, object],
@@ -35,6 +45,16 @@ def build_red_bar_bundle(
         fresh_until = (pd.Timestamp(confirmed_at) + timedelta(minutes=5)).isoformat()
     allowed = 1
     consumed = max(0, min(allowed, int(entry_slots_consumed)))
+    trigger = _required_number(
+        signal.get("trigger_level") or reference.get("level_value") or reference.get("midpoint"),
+        "trigger_level",
+    )
+    invalidation_source = (
+        signal.get("invalidation_level")
+        if signal.get("invalidation_level") not in (None, "")
+        else reference.get("source_low") if direction == "BULLISH" else reference.get("source_high")
+    )
+    invalidation = _required_number(invalidation_source, "invalidation_level")
     return StrategySignalBundle(
         bundle_id=bundle_id,
         strategy_id=RED_BAR,
@@ -45,12 +65,8 @@ def build_red_bar_bundle(
         fresh_until=str(fresh_until),
         primary_signal_id=str(signal.get("signal_id") or ""),
         primary_setup_type="RED_BAR_REFERENCE_CROSS",
-        trigger_level=float(signal.get("trigger_level") or reference.get("level_value") or reference.get("midpoint")),
-        invalidation_level=(
-            float(signal.get("invalidation_level"))
-            if signal.get("invalidation_level") not in (None, "")
-            else float(reference.get("source_low") if direction == "BULLISH" else reference.get("source_high"))
-        ),
+        trigger_level=trigger,
+        invalidation_level=invalidation,
         bundle_state="CONSUMED" if consumed else "FRESH",
         execution_allowed=False,
         entry_slots_allowed=allowed,
