@@ -37,15 +37,24 @@ def _readiness(rows, outcome="READY_FOR_RANKING"):
 def test_red_bar_and_dri_propose_at_most_one_contract():
     rows = [_row("OPT1", spread=1.0, volume=1000, oi=5000), _row("OPT2", spread=2.0, volume=500, oi=3000)]
     red_bar = rank_strategy_contracts(_readiness(rows), policy=POLICIES["RED_BAR"])
-    dri = rank_strategy_contracts(_readiness(rows), policy=POLICIES["DIRECTIONAL_REGIME_INTELLIGENCE"])
+    dri = rank_strategy_contracts(_readiness(rows), policy=POLICIES["DIRECTIONAL_REGIME"])
 
     assert red_bar["outcome"] == "SELECTED"
     assert red_bar["selected_count"] == 1
     assert dri["selected_count"] == 1
+    assert dri["strategy_id"] == "DIRECTIONAL_REGIME"
     assert red_bar["selected_rows"][0]["ranking_decision"] == "PRIMARY"
 
 
-def test_rsi_proposes_two_distinct_contracts_with_primary_and_fallback():
+def test_legacy_dri_policy_alias_emits_canonical_strategy_id():
+    result = rank_strategy_contracts(
+        _readiness([_row("OPT1", spread=1.0, volume=1000, oi=5000)]),
+        policy=POLICIES["DIRECTIONAL_REGIME_INTELLIGENCE"],
+    )
+    assert result["strategy_id"] == "DIRECTIONAL_REGIME"
+
+
+def test_rsi_proposes_two_distinct_independent_entries():
     rows = [
         _row("OPT1", spread=1.0, volume=1000, oi=5000, delta=-0.50),
         _row("OPT2", spread=1.5, volume=900, oi=4500, delta=-0.45),
@@ -56,8 +65,8 @@ def test_rsi_proposes_two_distinct_contracts_with_primary_and_fallback():
     assert result["outcome"] == "SELECTED"
     assert result["selected_count"] == 2
     assert len({row["instrument_key"] for row in result["selected_rows"]}) == 2
-    assert result["selected_rows"][0]["ranking_decision"] == "PRIMARY"
-    assert result["selected_rows"][1]["ranking_decision"] == "FALLBACK"
+    assert result["selected_rows"][0]["ranking_decision"] == "ENTRY_1"
+    assert result["selected_rows"][1]["ranking_decision"] == "ENTRY_2"
 
 
 def test_rsi_returns_partial_when_only_one_distinct_contract_is_eligible():
@@ -69,6 +78,7 @@ def test_rsi_returns_partial_when_only_one_distinct_contract_is_eligible():
 
     assert result["outcome"] == "PARTIAL"
     assert result["selected_count"] == 1
+    assert result["selected_rows"][0]["ranking_decision"] == "ENTRY_1"
     assert any(row["ranking_decision"] == "DUPLICATE_EXCLUDED" for row in result["ranked_rows"])
 
 
@@ -90,6 +100,15 @@ def test_non_liquidity_ready_rows_cannot_rank():
 
     assert result["outcome"] == "REJECTED"
     assert result["selected_count"] == 0
+
+
+def test_missing_greeks_are_explicitly_unavailable_not_fabricated():
+    result = rank_strategy_contracts(
+        _readiness([_row("OPT1", spread=1.0, volume=1000, oi=5000)]),
+        policy=POLICIES["RED_BAR"],
+    )
+    assert result["ranked_rows"][0]["delta_evidence_status"] == "UNAVAILABLE"
+    assert result["ranked_rows"][0]["iv_evidence_status"] == "AVAILABLE"
 
 
 def test_ranking_is_deterministic_for_equal_scores():
