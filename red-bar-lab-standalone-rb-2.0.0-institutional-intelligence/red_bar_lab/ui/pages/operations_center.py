@@ -10,7 +10,7 @@ def _format_data_availability_timestamp(value) -> str:
             timestamp = timestamp.tz_localize("Asia/Kolkata")
         else:
             timestamp = timestamp.tz_convert("Asia/Kolkata")
-        return timestamp.strftime("%d %b %Y, %I:%M %p IST")
+        return timestamp.strftime("%d %b %Y, %I:%M:%S %p IST")
     except (TypeError, ValueError):
         return str(value)
 
@@ -34,6 +34,45 @@ def _availability_card_html(title, status, status_class, rows) -> str:
         f"{row_html}"
         "</div>"
     )
+
+
+def _availability_count(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _count_status(value):
+    count = _availability_count(value)
+    if count is None:
+        return "Not available", "unknown"
+    if count == 0:
+        return "0", "available"
+    return str(count), "partial"
+
+
+def _snapshot_freshness(value, market_phase):
+    if value in (None, "", "—"):
+        return "Not available", "unavailable", None
+    try:
+        timestamp = pd.Timestamp(value)
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.tz_localize("Asia/Kolkata")
+        else:
+            timestamp = timestamp.tz_convert("Asia/Kolkata")
+        now = pd.Timestamp.now(tz="Asia/Kolkata")
+        age_seconds = max(0, int((now - timestamp).total_seconds()))
+    except (TypeError, ValueError):
+        return "Not available", "unknown", None
+
+    if str(market_phase or "").upper() != "OPEN":
+        return f"{age_seconds}s old", "unknown", age_seconds
+    if age_seconds <= 90:
+        return f"Fresh · {age_seconds}s", "available", age_seconds
+    if age_seconds <= 180:
+        return f"Delayed · {age_seconds}s", "partial", age_seconds
+    return f"Stale · {age_seconds}s", "unavailable", age_seconds
 
 
 def render_page(settings, layout, database, token, underlying_name, instrument_key, interval) -> None:
@@ -113,20 +152,81 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     st.caption(f"Current time: {market.get('current_time')}")
 
     st.markdown("### Data Availability")
-    latest_data_timestamp = (
-        market.get("last_snapshot")
-        or market.get("current_time")
+    quality = ops.data_quality
+    pipeline = ops.pipeline
+    latest_data_timestamp = market.get("last_snapshot")
+    page_refresh_timestamp = pd.Timestamp.now(tz="Asia/Kolkata")
+    freshness_text, freshness_class, _ = _snapshot_freshness(
+        latest_data_timestamp,
+        market.get("phase"),
+    )
+
+    missing_market, missing_market_class = _count_status(
+        quality.get("missing_market_context")
+    )
+    missing_volume, missing_volume_class = _count_status(
+        quality.get("missing_volume_structure")
+    )
+    missing_options, missing_options_class = _count_status(
+        quality.get("missing_options_context")
+    )
+    pipeline_errors, pipeline_errors_class = _count_status(
+        quality.get("pipeline_errors")
+    )
+
+    volume_missing_count = _availability_count(
+        quality.get("missing_volume_structure")
+    )
+    volume_ready = volume_missing_count == 0
+    volume_value = "Ready" if volume_ready else "Missing data"
+    volume_class = "available" if volume_ready else "partial"
+
+    options_missing_count = _availability_count(
+        quality.get("missing_options_context")
+    )
+    options_ready = options_missing_count == 0
+    option_status = "AVAILABLE" if options_ready else "PARTIAL"
+    option_status_class = "available" if options_ready else "partial"
+
+    st.markdown(
+        "<div class='rb-data-meta'>"
+        "<div><strong>Last successful Upstox option-chain collection:</strong> "
+        f"{_format_data_availability_timestamp(latest_data_timestamp)}</div>"
+        "<div><strong>Page refreshed:</strong> "
+        f"{_format_data_availability_timestamp(page_refresh_timestamp)}</div>"
+        "<div><strong>Collector cadence:</strong> 60 seconds by default · "
+        "<strong>Broker timestamp:</strong> Not provided</div>"
+        "</div>",
+        unsafe_allow_html=True,
     )
     st.markdown(
-        "<div style='font-size:0.78rem;color:#6B7280;"
-        "margin-top:-0.35rem;margin-bottom:0.55rem;'>"
-        f"Last updated: {_format_data_availability_timestamp(latest_data_timestamp)}"
+        "<div class='rb-missing-strip'>"
+        "<span>Missing today:</span> "
+        f"<strong class='rb-data-{missing_market_class}'>Market {missing_market}</strong> · "
+        f"<strong class='rb-data-{missing_volume_class}'>Volume {missing_volume}</strong> · "
+        f"<strong class='rb-data-{missing_options_class}'>Options {missing_options}</strong> · "
+        f"<strong class='rb-data-{pipeline_errors_class}'>Pipeline errors {pipeline_errors}</strong>"
         "</div>",
         unsafe_allow_html=True,
     )
     st.markdown(
         """
         <style>
+        .rb-data-meta {
+            font-size: 0.76rem;
+            color: #6B7280;
+            line-height: 1.45;
+            margin-top: -0.35rem;
+            margin-bottom: 0.45rem;
+        }
+        .rb-missing-strip {
+            font-size: 0.78rem;
+            padding: 0.45rem 0.65rem;
+            border: 1px solid #E5E7EB;
+            border-radius: 8px;
+            margin-bottom: 0.7rem;
+            background: var(--secondary-background-color);
+        }
         .rb-data-card {
             border: 1px solid #E5E7EB;
             border-top-width: 3px;
@@ -181,21 +281,21 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
             "PARTIAL",
             "partial",
             (
-                ("1-minute OHLC", "Available", "available"),
-                ("Volume", "Available", "available"),
-                ("RSI(7)", "Available", "available"),
-                ("Freshness checks", "Not available", "unavailable"),
+                ("1-minute OHLC", "Supported", "available"),
+                ("Current volume", volume_value, volume_class),
+                ("RSI(7)", "Supported", "available"),
+                ("Candle freshness", "Not validated", "unknown"),
             ),
         ),
         _availability_card_html(
             "Option-Chain Data",
-            "AVAILABLE",
-            "available",
+            option_status,
+            option_status_class,
             (
                 ("Spot / ATM", "Available", "available"),
                 ("CE / PE price", "Available", "available"),
                 ("Volume / OI / PCR", "Available", "available"),
-                ("Walls / Max Pain", "Available", "available"),
+                ("Collection freshness", freshness_text, freshness_class),
             ),
         ),
         _availability_card_html(
@@ -214,7 +314,7 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
             "NOT AVAILABLE",
             "unavailable",
             (
-                ("Snapshot freshness", "Not available", "unavailable"),
+                ("Broker data timestamp", "Not provided", "unknown"),
                 ("Chain completeness", "Not available", "unavailable"),
                 ("Stale quote check", "Not available", "unavailable"),
                 ("Execution readiness", "Not available", "unavailable"),
@@ -225,12 +325,12 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         column.markdown(card, unsafe_allow_html=True)
 
     st.caption(
-        "Availability is a high-level collection view. It does not grant "
-        "execution authority or change strategy decisions."
+        "The Upstox collection time is the latest successfully stored option-chain "
+        "snapshot. It is not an authoritative broker-provided market-data timestamp. "
+        "Availability remains informational and cannot change execution decisions."
     )
 
     st.markdown("### Intelligence Pipeline")
-    pipeline = ops.pipeline
     ip1, ip2, ip3, ip4 = st.columns(4)
     ip1.metric("Signals Today", pipeline.get("signals_today"))
     ip2.metric(
@@ -301,7 +401,6 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     )
 
     st.markdown("### Data Quality")
-    quality = ops.data_quality
     dq1, dq2, dq3, dq4 = st.columns(4)
     dq1.metric(
         "Missing Market",
