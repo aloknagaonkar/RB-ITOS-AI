@@ -31,7 +31,8 @@ from red_bar_lab.ui.strategy_contract_selection_audit import (
     render_selection_audit,
 )
 from red_bar_lab.ui.strategy_execution_source_gate import POLICIES, build_execution_source_gate
-from red_bar_lab.ui.strategy_opportunity_history_gate import (
+from red_bar_lab.ui.strategy_historical_performance_source import load_completed_trade_history
+from red_bar_lab.ui.strategy_opportunity_history_gate_v2 import (
     build_opportunity_history_gate,
     forward_candidates_for_risk,
     render_opportunity_history_gate,
@@ -165,13 +166,26 @@ def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
         opportunity_context = kwargs.get("opportunity_context")
         if not isinstance(opportunity_context, Mapping):
             opportunity_context = {}
-        historical_records = kwargs.get("historical_trade_records")
-        if not isinstance(historical_records, (list, tuple)):
-            historical_records = []
+
+        supplied_history = kwargs.get("historical_trade_records")
+        if isinstance(supplied_history, (list, tuple)):
+            historical_records = [dict(row) for row in supplied_history if isinstance(row, Mapping)]
+            history_source = {
+                "source_status": "EXPLICIT_OVERRIDE",
+                "source_reason": "CALLER_SUPPLIED_RECORDS",
+                "source_adapter_version": None,
+                "normalized_row_count": len(historical_records),
+                "source_read_only": True,
+            }
+        else:
+            history_source = load_completed_trade_history(database)
+            historical_records = list(history_source.get("records") or [])
+
         opportunity_result = build_opportunity_history_gate(
             downstream_candidates,
             opportunity_context=opportunity_context,
             historical_records=historical_records,
+            history_source=history_source,
         )
         render_opportunity_history_gate(opportunity_result)
 
