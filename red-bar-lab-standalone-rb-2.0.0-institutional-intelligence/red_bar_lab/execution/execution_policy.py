@@ -7,6 +7,12 @@ RSI_STRATEGY_SOURCE = "RSI_EXTREME_REVERSAL_V1"
 STANDARD_EXIT_MODE = "STANDARD_MULTI_FACTOR"
 RSI_EXIT_MODE = "RSI_PREMIUM_PROTECTION_ONLY"
 
+# All three active execution strategies now use the reversal-style premium
+# protection policy. Entry detection and strategy authority remain unchanged.
+REVERSAL_STYLE_STOP_LOSS_PCT = 7.0
+REVERSAL_STYLE_TARGET_PCT = None
+
+
 @dataclass(frozen=True)
 class ExecutionPolicy:
     strategy_source: str
@@ -14,6 +20,7 @@ class ExecutionPolicy:
     target_pct: float | None
     exit_mode: str
     directional_conflicts_observational: bool
+
 
 def execution_strategy_source(signal: Mapping[str, object] | None) -> str:
     row = signal or {}
@@ -32,8 +39,10 @@ def execution_strategy_source(signal: Mapping[str, object] | None) -> str:
         return RSI_STRATEGY_SOURCE
     return source or "REFERENCE_LEVEL"
 
+
 def is_rsi_primary(signal: Mapping[str, object] | None) -> bool:
     return execution_strategy_source(signal) == RSI_STRATEGY_SOURCE
+
 
 def resolve_execution_policy(
     signal: Mapping[str, object] | None,
@@ -41,28 +50,26 @@ def resolve_execution_policy(
     default_stop_loss_pct: float = 15.0,
     default_target_pct: float | None = 25.0,
 ) -> ExecutionPolicy:
-    row = signal or {}
-    source = execution_strategy_source(row)
-    persisted_stop = row.get("strategy_stop_loss_pct")
-    persisted_target = row.get("strategy_target_pct")
-    persisted_exit_mode = str(row.get("exit_mode") or "").strip()
-    if persisted_stop is not None and persisted_exit_mode:
-        return ExecutionPolicy(
-            source,
-            float(persisted_stop),
-            float(persisted_target) if persisted_target not in (None, "") else None,
-            persisted_exit_mode,
-            bool(
-                row.get("directional_conflicts_observational")
-                or source == RSI_STRATEGY_SOURCE
-            ),
-        )
-    if source == RSI_STRATEGY_SOURCE:
-        return ExecutionPolicy(source, 7.0, None, RSI_EXIT_MODE, True)
+    """Resolve the unified reversal-style exit policy for every strategy.
+
+    Red Bar, RSI Extreme Reversal, and Directional Regime Intelligence all use
+    the same premium-protection-only exit authority:
+
+    - 7% option-premium hard stop
+    - no fixed target exit
+    - five-minute dynamic-protection delay in ``PaperExitEngine``
+    - breakeven, profit lock, and trailing protection after the delay
+    - directional conflicts remain observational
+
+    Persisted legacy STANDARD_MULTI_FACTOR values are intentionally normalized
+    here so newly evaluated and previously persisted strategy rows behave
+    consistently under the unified policy.
+    """
+    source = execution_strategy_source(signal)
     return ExecutionPolicy(
         source,
-        float(default_stop_loss_pct),
-        float(default_target_pct) if default_target_pct is not None else None,
-        STANDARD_EXIT_MODE,
-        False,
+        REVERSAL_STYLE_STOP_LOSS_PCT,
+        REVERSAL_STYLE_TARGET_PCT,
+        RSI_EXIT_MODE,
+        True,
     )
