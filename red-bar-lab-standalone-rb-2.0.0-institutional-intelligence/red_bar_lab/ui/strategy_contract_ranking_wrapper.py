@@ -31,14 +31,17 @@ from red_bar_lab.ui.strategy_contract_selection_audit import (
     render_selection_audit,
 )
 from red_bar_lab.ui.strategy_execution_source_gate import POLICIES, build_execution_source_gate
-from red_bar_lab.ui.strategy_risk_readiness import (
-    build_risk_readiness,
-    render_risk_readiness,
+from red_bar_lab.ui.strategy_opportunity_history_gate import (
+    build_opportunity_history_gate,
+    forward_candidates_for_risk,
+    render_opportunity_history_gate,
 )
+from red_bar_lab.ui.strategy_risk_readiness import build_risk_readiness
+from red_bar_lab.ui.strategy_risk_readiness_view import render_risk_readiness_8a
 
 
-def _candidate_copy_with_contract_price(candidate_result, ranking):
-    """Enrich the Section 7 input copy without mutating Section 6 candidate records."""
+def _candidate_copy_with_contract_fields(candidate_result, ranking):
+    """Enrich a downstream read-only copy without mutating Section 6 records."""
     result = dict(candidate_result or {})
     selected = [dict(row) for row in (ranking.get("selected_rows") or [])]
     by_identity = {
@@ -56,14 +59,16 @@ def _candidate_copy_with_contract_price(candidate_result, ranking):
             str(candidate.get("role") or ""),
         )
         source = by_identity.get(key, {})
-        candidate["ltp"] = candidate.get("ltp") if candidate.get("ltp") is not None else source.get("ltp")
+        for field in ("ltp", "bid", "ask", "spread_pct", "volume", "oi", "iv", "delta"):
+            if candidate.get(field) is None:
+                candidate[field] = source.get(field)
         candidates.append(candidate)
     result["candidates"] = candidates
     return result
 
 
 def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
-    """Append read-only Sections 5B-5E, 6A-6C and Section 7 after Section 5A."""
+    """Append read-only Sections 5B-5E, 6A-6C, 7A-7C and 8A after Section 5A."""
     policy = POLICIES[page]
     ranking_policy = RANKING_POLICIES[policy.strategy_id]
     safeguard_policy = SAFEGUARD_POLICIES[policy.strategy_id]
@@ -145,9 +150,7 @@ def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
             )
         render_option_chain_directional_evidence_5e(option_direction)
 
-        evaluation_timestamp = None
-        if isinstance(resolution, Mapping):
-            evaluation_timestamp = resolution.get("refreshed_at")
+        evaluation_timestamp = resolution.get("refreshed_at") if isinstance(resolution, Mapping) else None
         candidate_result = build_candidate_readiness(
             gate=gate,
             resolution=resolution,
@@ -158,15 +161,26 @@ def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
         )
         render_candidate_readiness(candidate_result)
 
+        downstream_candidates = _candidate_copy_with_contract_fields(candidate_result, ranking)
+        opportunity_context = kwargs.get("opportunity_context")
+        if not isinstance(opportunity_context, Mapping):
+            opportunity_context = {}
+        historical_records = kwargs.get("historical_trade_records")
+        if not isinstance(historical_records, (list, tuple)):
+            historical_records = []
+        opportunity_result = build_opportunity_history_gate(
+            downstream_candidates,
+            opportunity_context=opportunity_context,
+            historical_records=historical_records,
+        )
+        render_opportunity_history_gate(opportunity_result)
+
         risk_context = kwargs.get("account_risk_context")
         if not isinstance(risk_context, Mapping):
             risk_context = {}
-        risk_input = _candidate_copy_with_contract_price(candidate_result, ranking)
-        risk_result = build_risk_readiness(
-            risk_input,
-            risk_context=risk_context,
-        )
-        render_risk_readiness(risk_result)
+        risk_input = forward_candidates_for_risk(opportunity_result)
+        risk_result = build_risk_readiness(risk_input, risk_context=risk_context)
+        render_risk_readiness_8a(risk_result)
         return result
 
     setattr(module, policy.builder_name, capture_resolution)
