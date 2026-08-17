@@ -21,11 +21,15 @@ class ContractRankingPolicy:
     preferred_abs_delta_max: float = 0.70
 
 
+_DRI_POLICY = ContractRankingPolicy(
+    "DIRECTIONAL_REGIME", "DRI-CONTRACT-RANK-V1", 1
+)
+
 POLICIES: Mapping[str, ContractRankingPolicy] = {
     "RED_BAR": ContractRankingPolicy("RED_BAR", "RB-CONTRACT-RANK-V1", 1),
-    "DIRECTIONAL_REGIME_INTELLIGENCE": ContractRankingPolicy(
-        "DIRECTIONAL_REGIME_INTELLIGENCE", "DRI-CONTRACT-RANK-V1", 1
-    ),
+    "DIRECTIONAL_REGIME": _DRI_POLICY,
+    # Read compatibility only. New results always emit the canonical strategy ID.
+    "DIRECTIONAL_REGIME_INTELLIGENCE": _DRI_POLICY,
     "RSI_EXTREME_REVERSAL": ContractRankingPolicy(
         "RSI_EXTREME_REVERSAL", "RSI-CONTRACT-RANK-V1", 2
     ),
@@ -66,6 +70,12 @@ def _delta_quality(value: float | None, policy: ContractRankingPolicy) -> float:
         return max(0.5, 1.0 - abs(absolute - midpoint) / (2.0 * half_width))
     distance = low - absolute if absolute < low else absolute - high
     return max(0.0, 0.5 - distance)
+
+
+def _selected_role(policy: ContractRankingPolicy, position: int) -> str:
+    if policy.strategy_id == "RSI_EXTREME_REVERSAL":
+        return f"ENTRY_{position}"
+    return "PRIMARY"
 
 
 def rank_strategy_contracts(
@@ -139,6 +149,8 @@ def rank_strategy_contracts(
             {
                 **row,
                 **{key: round(value * 100.0, 2) for key, value in components.items()},
+                "delta_evidence_status": "AVAILABLE" if delta is not None else "UNAVAILABLE",
+                "iv_evidence_status": "AVAILABLE" if iv is not None else "UNAVAILABLE",
                 "score": round(score, 2),
                 "ranking_decision": "ELIGIBLE",
             }
@@ -177,7 +189,7 @@ def rank_strategy_contracts(
         identity = str(row.get("instrument_key") or row.get("trading_symbol") or "")
         selected_index = selected_identity_to_position.get(identity)
         if selected_index is not None:
-            row["ranking_decision"] = "PRIMARY" if selected_index == 1 else "FALLBACK"
+            row["ranking_decision"] = _selected_role(policy, selected_index)
 
     if len(selected) >= policy.maximum_contracts:
         outcome = "SELECTED"
@@ -230,7 +242,9 @@ def render_strategy_contract_ranking(result: Mapping[str, object]) -> None:
         for index, row in enumerate(selected, start=1):
             summary_rows.append(
                 {
-                    "role": "PRIMARY" if index == 1 else "FALLBACK",
+                    "role": row.get("ranking_decision") or _selected_role(
+                        POLICIES[str(result.get("strategy_id"))], index
+                    ),
                     "rank": row.get("rank", index),
                     "instrument_key": row.get("instrument_key"),
                     "trading_symbol": row.get("trading_symbol"),
