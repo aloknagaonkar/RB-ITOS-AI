@@ -50,6 +50,9 @@ def _research_option_sync_factory(provider, layout, historical, database=None):
 
 def _configure_strategy_cache(page: str, module: ModuleType) -> None:
     from red_bar_lab.ui.strategy_candle_cache import read_cached_strategy_candles
+    from red_bar_lab.ui.strategy_contract_ranking_wrapper import (
+        build_contract_ranking_page_wrapper,
+    )
     from red_bar_lab.ui.strategy_contract_readiness_wrapper import (
         build_contract_readiness_page_wrapper,
     )
@@ -70,6 +73,7 @@ def _configure_strategy_cache(page: str, module: ModuleType) -> None:
     module.render_page = build_strategy_query_cache_wrapper(module.render_page)
     module.render_page = build_execution_source_gate_page_wrapper(module, page)
     module.render_page = build_contract_readiness_page_wrapper(module, page)
+    module.render_page = build_contract_ranking_page_wrapper(module, page)
 
 
 def _configure_paper_trading(paper_trading: ModuleType) -> None:
