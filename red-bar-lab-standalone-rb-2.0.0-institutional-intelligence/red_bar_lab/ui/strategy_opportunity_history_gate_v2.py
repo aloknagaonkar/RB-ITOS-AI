@@ -173,6 +173,8 @@ def build_opportunity_history_gate(
 ) -> dict[str, object]:
     rows = []
     records = list(historical_records or [])
+    source = dict(history_source or {})
+    coverage = dict(source.get("coverage") or {})
     for raw in candidate_result.get("candidates") or []:
         candidate = dict(raw)
         opportunity = _opportunity(candidate, dict(opportunity_context or {}), policy)
@@ -198,9 +200,13 @@ def build_opportunity_history_gate(
             "combined_outcome": final,
             "opportunity_policy_version": policy.opportunity_policy_version,
             "historical_filter_version": "HISTORICAL-GATE-V2-TIERED",
-            "history_source_status": (history_source or {}).get("source_status", "EXPLICIT_RECORDS"),
-            "history_source_reason": (history_source or {}).get("source_reason", "CALLER_SUPPLIED_RECORDS"),
-            "history_source_adapter_version": (history_source or {}).get("source_adapter_version"),
+            "history_source_status": source.get("source_status", "EXPLICIT_RECORDS"),
+            "history_source_reason": source.get("source_reason", "CALLER_SUPPLIED_RECORDS"),
+            "history_source_adapter_version": source.get("source_adapter_version"),
+            "history_coverage_status": coverage.get("coverage_status", "UNKNOWN"),
+            "history_matching_readiness": coverage.get("matching_readiness", "UNKNOWN"),
+            "history_excursion_readiness": coverage.get("excursion_readiness", "UNKNOWN"),
+            "history_missing_fields": list(coverage.get("missing_fields") or []),
             "policy_action": "OBSERVE_ONLY",
             "persisted": False,
             "reserved": False,
@@ -210,7 +216,8 @@ def build_opportunity_history_gate(
     return {
         "outcome": "FORWARD" if any(row["combined_outcome"] in {"FORWARD", "FORWARD_WITHOUT_HISTORICAL_SUPPORT"} for row in rows) else "WAIT" if any(row["combined_outcome"] == "WAIT" for row in rows) else "OBSERVE_ONLY" if any(row["combined_outcome"] == "OBSERVE_ONLY" for row in rows) else "REJECT" if rows else "UNAVAILABLE",
         "rows": rows,
-        "history_source": dict(history_source or {}),
+        "history_source": source,
+        "history_coverage": coverage,
         "policy_action": "OBSERVE_ONLY",
         "persisted": False,
         "reserved": False,
