@@ -40,11 +40,18 @@ def _trace_display(value, digits=2):
     return f"{number:,.{digits}f}"
 
 
+def _render_rows(rows, empty_message):
+    if rows:
+        st.dataframe(_arrow_safe_rows(rows), width="stretch", hide_index=True)
+    else:
+        st.info(empty_message)
+
+
 def render_page(settings, layout, database, token, underlying_name, instrument_key, interval) -> None:
     st.subheader("RSI Extreme Reversal")
     st.caption(
-        "Section 1 - Data & Feature Preparation. Read-only visibility into the candle, "
-        "RSI, structure and option-behaviour inputs prepared before reversal evaluation."
+        "Independent RSI strategy observability. Sections 1-3 are read-only and do not "
+        "create signals, bundles, contracts, orders or positions."
     )
 
     selected_date = st.date_input(
@@ -61,10 +68,7 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     columns_ready = required_columns.issubset(candles.columns)
     raw_candle_count = int(len(candles)) if columns_ready else 0
     candle_count = int(len(prepared_candles))
-    rsi_period = 7
-    oversold = 20
-    overbought = 80
-    latest_rsi = latest_wilder_rsi(prepared_candles, rsi_period)
+    latest_rsi = latest_wilder_rsi(prepared_candles, 7)
     rsi_ready = latest_rsi is not None
     structure_ready = candle_count >= 2
     readiness = "READY" if rsi_ready and structure_ready else (
@@ -92,40 +96,27 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     render_option_positioning_summary(st, option_context.get("directional_bias"))
     render_timing_caption(st, refreshed_at=section1_refreshed, prepared_ms=section1_ms)
 
-    rows = [
+    preparation_rows = [
         {"stage": "Collected candle file", "status": "AVAILABLE" if candle_path.exists() else "MISSING", "detail": str(candle_path)},
         {"stage": "Required OHLC columns", "status": "READY" if columns_ready else "MISSING", "detail": ", ".join(sorted(required_columns))},
-        {
-            "stage": "RSI calculation",
-            "status": "READY" if rsi_ready else "NOT READY",
-            "detail": f"Wilder period={rsi_period}; latest={latest_rsi if latest_rsi is not None else 'unavailable'}; completed_rows={candle_count}; raw_rows={raw_candle_count}",
-        },
-        {"stage": "Extreme thresholds", "status": "CONFIGURED", "detail": f"Oversold <= {oversold}; Overbought >= {overbought}"},
+        {"stage": "RSI calculation", "status": "READY" if rsi_ready else "NOT READY", "detail": f"Wilder period=7; latest={latest_rsi if latest_rsi is not None else 'unavailable'}; completed_rows={candle_count}; raw_rows={raw_candle_count}"},
+        {"stage": "Extreme thresholds", "status": "CONFIGURED", "detail": "Oversold <= 20; Overbought >= 80"},
         {"stage": "Price-structure inputs", "status": "READY" if structure_ready else "NOT READY", "detail": "Current OHLC plus previous completed candle high/low"},
-        {"stage": "Confirmation policy", "status": "CONFIGURED", "detail": "Cross-back + candle direction + structure reclaim + no fresh adverse extreme"},
+        {"stage": "Confirmation policy", "status": "CONFIGURED", "detail": "Cross-back + candle direction + structure reclaim/break + no fresh adverse extreme"},
     ]
-    option_rows = option_context.get("rows") or []
 
     with st.expander("View candle and feature preparation details"):
-        st.dataframe(_arrow_safe_rows(rows), width="stretch", hide_index=True)
-
+        st.dataframe(_arrow_safe_rows(preparation_rows), width="stretch", hide_index=True)
     with st.expander("View option behaviour details"):
-        if option_rows:
-            st.dataframe(_arrow_safe_rows(option_rows), width="stretch", hide_index=True)
-        else:
-            st.warning(str(option_context.get("detail") or "Option context is unavailable."))
-
+        _render_rows(option_context.get("rows") or [], str(option_context.get("detail") or "Option context is unavailable."))
     with st.expander("View refresh and performance details"):
         st.dataframe(
             _arrow_safe_rows(timing_rows(
                 section_name="Section 1 preparation",
                 refreshed_at=section1_refreshed,
                 prepared_ms=section1_ms,
-            )),
-            width="stretch",
-            hide_index=True,
+            )), width="stretch", hide_index=True,
         )
-
     with st.expander("View preparation flow"):
         st.code(
             "1-minute candles collected\n"
@@ -157,7 +148,7 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     st.markdown("### 2. Strategy State & Setup Detection")
     st.caption(
         "Read-only trace using the production RSI detector: extreme arm, cross-back, "
-        "candle direction, structure reclaim and adverse-extreme protection."
+        "candle direction, structure reclaim/break and adverse-extreme protection."
     )
     s1, s2, s3, s4 = st.columns(4)
     s1.metric("Engine state", setup["status"])
@@ -174,72 +165,37 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     trace = setup.get("decision_trace") or {}
     with st.expander("How was the current RSI decision made?", expanded=False):
         if not trace or not trace.get("checks"):
-            st.info(
-                str(
-                    trace.get("first_unmet_condition")
-                    or "Sufficient completed candle and RSI data is unavailable."
-                )
-            )
-            st.write(
-                f"**Next step:** {trace.get('next_step') or 'Wait for enough completed 1-minute candles.'}"
-            )
+            st.info(str(trace.get("first_unmet_condition") or "Sufficient completed candle and RSI data is unavailable."))
+            st.write(f"**Next step:** {trace.get('next_step') or 'Wait for enough completed 1-minute candles.'}")
         else:
             previous_candle = trace.get("previous_candle") or {}
             current_candle = trace.get("current_candle") or {}
             recent_extreme = trace.get("recent_extreme") or {}
-
-            st.caption(
-                f"Evaluation timestamp: {trace.get('evaluation_timestamp') or 'Unavailable'}"
-            )
+            st.caption(f"Evaluation timestamp: {trace.get('evaluation_timestamp') or 'Unavailable'}")
             e1, e2, e3, e4 = st.columns(4)
             e1.metric("Evaluated path", trace.get("path") or "UNDECIDED")
             e2.metric("Previous RSI", _trace_display(previous_candle.get("rsi")))
             e3.metric("Current RSI", _trace_display(current_candle.get("rsi")))
             e4.metric("Final outcome", trace.get("final_outcome") or "Unavailable")
-
-            st.markdown("#### Evaluated completed candles")
-            candle_rows = [
-                {
-                    "candle": "Previous",
-                    "timestamp": str(previous_candle.get("timestamp") or "Unavailable"),
-                    "open": _trace_display(previous_candle.get("open")),
-                    "high": _trace_display(previous_candle.get("high")),
-                    "low": _trace_display(previous_candle.get("low")),
-                    "close": _trace_display(previous_candle.get("close")),
-                    "rsi": _trace_display(previous_candle.get("rsi")),
-                },
-                {
-                    "candle": "Current",
-                    "timestamp": str(current_candle.get("timestamp") or "Unavailable"),
-                    "open": _trace_display(current_candle.get("open")),
-                    "high": _trace_display(current_candle.get("high")),
-                    "low": _trace_display(current_candle.get("low")),
-                    "close": _trace_display(current_candle.get("close")),
-                    "rsi": _trace_display(current_candle.get("rsi")),
-                },
-            ]
-            st.dataframe(
-                _arrow_safe_rows(candle_rows),
-                width="stretch",
-                hide_index=True,
-            )
-
+            candle_rows = []
+            for label, candle in (("Previous", previous_candle), ("Current", current_candle)):
+                candle_rows.append({
+                    "candle": label,
+                    "timestamp": str(candle.get("timestamp") or "Unavailable"),
+                    "open": _trace_display(candle.get("open")),
+                    "high": _trace_display(candle.get("high")),
+                    "low": _trace_display(candle.get("low")),
+                    "close": _trace_display(candle.get("close")),
+                    "rsi": _trace_display(candle.get("rsi")),
+                })
+            st.dataframe(_arrow_safe_rows(candle_rows), width="stretch", hide_index=True)
             st.caption(
-                "Recent RSI window: "
-                f"{int(recent_extreme.get('window_candles') or 0)} candles · "
+                f"Recent RSI window: {int(recent_extreme.get('window_candles') or 0)} candles · "
                 f"lowest={_trace_display(recent_extreme.get('lowest_rsi'))} · "
                 f"highest={_trace_display(recent_extreme.get('highest_rsi'))}"
             )
-
-            st.markdown("#### Ordered live checks")
-            st.dataframe(
-                _arrow_safe_rows(trace.get("checks") or []),
-                width="stretch",
-                hide_index=True,
-            )
-            st.write(
-                f"**First unmet condition:** {trace.get('first_unmet_condition') or 'Unavailable'}"
-            )
+            st.dataframe(_arrow_safe_rows(trace.get("checks") or []), width="stretch", hide_index=True)
+            st.write(f"**First unmet condition:** {trace.get('first_unmet_condition') or 'Unavailable'}")
             st.write(f"**Final outcome:** {trace.get('final_outcome') or 'Unavailable'}")
             st.write(f"**Next step:** {trace.get('next_step') or 'Unavailable'}")
 
@@ -249,9 +205,7 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
                 section_name="Section 2 setup trace",
                 refreshed_at=section2_refreshed,
                 prepared_ms=section2_ms,
-            )),
-            width="stretch",
-            hide_index=True,
+            )), width="stretch", hide_index=True,
         )
 
     section3_started = section_timer()
@@ -264,86 +218,58 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     )
     section3_ms = elapsed_ms(section3_started)
 
-    st.markdown("### 3. Signal Normalization, Bundling & Conflict Resolution")
+    st.markdown("### 3. RSI Signal Normalization & Bundle Lifecycle")
     st.caption(
-        "Read-only explanation of how the confirmed RSI signal is normalized, checked for "
-        "freshness and prior consumption, and compared with Red Bar and Directional Regime evidence."
+        "The bundle contains only RSI Extreme Reversal evidence. Red Bar and DRI signals, "
+        "bundles, cooldowns and consumption states do not affect this RSI-owned lifecycle."
     )
     n1, n2, n3, n4 = st.columns(4)
     n1.metric("Signal state", resolution["signal_state"])
     n2.metric("Normalized intent", resolution["normalized_intent"])
     n3.metric("Bundle state", resolution["bundle_state"])
-    n4.metric("Final outcome", resolution["final_outcome"])
+    n4.metric("Final result", resolution["final_outcome"])
 
-    r1, r2, r3, r4 = st.columns(4)
-    r1.metric("Signal ID", resolution["signal_id"])
-    r2.metric("Signal age", resolution["signal_age"])
-    r3.metric("Consumed", resolution["consumed"])
-    r4.metric(
-        "Support / oppose",
-        f"{resolution['supporting_count']} / {resolution['opposing_count']}",
-    )
+    b1, b2, b3, b4 = st.columns(4)
+    b1.metric("Strategy owner", resolution["strategy_owner"])
+    b2.metric("Bundle ID", resolution["bundle_id"])
+    b3.metric("Signal age", resolution["signal_age"])
+    b4.metric("Entry capacity", resolution["entry_capacity"])
+
     st.write(f"**Decision reason:** {resolution['decision_reason']}")
-    st.write(f"**Applied conflict rule:** {resolution['applied_rule']}")
+    st.write(f"**Applied lifecycle rule:** {resolution['applied_rule']}")
     st.write(f"**Next architectural step:** {resolution['next_step']}")
-    render_timing_caption(
-        st,
-        refreshed_at=resolution.get("refreshed_at"),
-        prepared_ms=section3_ms,
-    )
+    render_timing_caption(st, refreshed_at=resolution.get("refreshed_at"), prepared_ms=section3_ms)
 
     with st.expander("View raw RSI signal"):
-        if resolution["raw_rows"]:
-            st.dataframe(_arrow_safe_rows(resolution["raw_rows"]), width="stretch", hide_index=True)
-        else:
-            st.info("No confirmed RSI signal is available for the selected date.")
-
-    with st.expander("View normalized trading intention"):
-        if resolution["normalization_rows"]:
-            st.dataframe(_arrow_safe_rows(resolution["normalization_rows"]), width="stretch", hide_index=True)
-        else:
-            st.info("Normalization is waiting for a confirmed RSI signal.")
-
-    with st.expander("View freshness and consumption checks"):
-        if resolution["freshness_rows"]:
-            st.dataframe(_arrow_safe_rows(resolution["freshness_rows"]), width="stretch", hide_index=True)
-        else:
-            st.info("Freshness and consumption cannot be evaluated without a signal.")
-
-    with st.expander("View bundle membership"):
-        if resolution["bundle_rows"]:
-            st.dataframe(_arrow_safe_rows(resolution["bundle_rows"]), width="stretch", hide_index=True)
-        else:
-            st.info("No comparison bundle is available.")
-
-    with st.expander("View engine-by-engine conflict analysis"):
-        if resolution["conflict_rows"]:
-            st.dataframe(_arrow_safe_rows(resolution["conflict_rows"]), width="stretch", hide_index=True)
-        else:
-            st.info("No cross-engine conflict evidence is available.")
-
-    with st.expander("How was the final bundle decision made?"):
-        st.write(f"**Signal lifecycle:** {resolution['signal_state']}")
+        _render_rows(resolution["raw_rows"], "No confirmed RSI signal is available for the selected date.")
+    with st.expander("View normalized RSI trading intention"):
+        _render_rows(resolution["normalization_rows"], "Normalization is waiting for a confirmed RSI signal.")
+    with st.expander("View RSI freshness and duplicate checks"):
+        _render_rows(resolution["freshness_rows"], "Freshness cannot be evaluated without an RSI signal.")
+    with st.expander("View RSI bundle"):
+        _render_rows(resolution["bundle_rows"], "No RSI bundle can be built until the complete confirmation chain passes.")
+    with st.expander("View RSI entry-slot lifecycle"):
+        _render_rows(resolution["lifecycle_rows"], "No persisted RSI execution events were found; entry capacity remains unconsumed.")
+    with st.expander("How was this RSI bundle created?"):
+        st.write(f"**Strategy owner:** {resolution['strategy_owner']}")
+        st.write(f"**Signal ID:** {resolution['signal_id']}")
+        st.write(f"**Bundle ID:** {resolution['bundle_id']}")
         st.write(f"**Normalized intention:** {resolution['normalized_intent']}")
-        st.write(f"**Supporting engines:** {resolution['supporting_count']}")
-        st.write(f"**Opposing engines:** {resolution['opposing_count']}")
+        st.write(f"**Entry capacity:** {resolution['entry_capacity']}")
         st.write(f"**Applied rule:** {resolution['applied_rule']}")
         st.write(f"**Outcome:** {resolution['final_outcome']}")
         st.write(f"**Reason:** {resolution['decision_reason']}")
         st.write(f"**Next step:** {resolution['next_step']}")
-
     with st.expander("View Section 3 refresh and performance details"):
         st.dataframe(
             _arrow_safe_rows(timing_rows(
-                section_name="Section 3 signal resolution",
+                section_name="Section 3 RSI bundle lifecycle",
                 refreshed_at=resolution.get("refreshed_at"),
                 prepared_ms=section3_ms,
-            )),
-            width="stretch",
-            hide_index=True,
+            )), width="stretch", hide_index=True,
         )
 
     st.info(
-        "Sections 1-3 are read-only. Opening this page does not create, consume, bundle, "
-        "forward or reject a signal and does not submit an order."
+        "Sections 1-3 are read-only. The displayed bundle is constructed in memory for "
+        "observability; opening this page does not persist, forward, consume or execute it."
     )
