@@ -70,7 +70,7 @@ class RsiExtremeReversalSignal:
 
 
 class RsiExtremeReversalEngine:
-    """Frozen 1-minute RSI(7) 80/20 reversal signal specification."""
+    """1-minute RSI(7) 80/20 reversal with completed-candle structure confirmation."""
 
     def __init__(
         self,
@@ -128,16 +128,39 @@ class RsiExtremeReversalEngine:
             if pe_armed_at is not None and index - pe_armed_at > self.arm_candles:
                 pe_armed_at = None
 
-            bullish_candle = float(frame.at[index, "close"]) > float(frame.at[index, "open"])
-            bearish_candle = float(frame.at[index, "close"]) < float(frame.at[index, "open"])
+            current_open = float(frame.at[index, "open"])
+            current_high = float(frame.at[index, "high"])
+            current_low = float(frame.at[index, "low"])
+            current_close = float(frame.at[index, "close"])
+            previous_high = float(frame.at[index - 1, "high"])
+            previous_low = float(frame.at[index - 1, "low"])
+
+            bullish_candle = current_close > current_open
+            bearish_candle = current_close < current_open
+            bullish_structure_reclaim = current_close > previous_high
+            bearish_structure_reclaim = current_close < previous_low
+            fresh_lower_low = current_low < previous_low
+            fresh_higher_high = current_high > previous_high
 
             if (
                 ce_armed_at is not None
                 and float(previous_rsi) <= self.oversold
                 and float(current_rsi) > self.oversold
                 and bullish_candle
+                and bullish_structure_reclaim
+                and not fresh_lower_low
             ):
-                signals.append(self._build(frame, index, ce_armed_at, "BULLISH", instrument_key))
+                signals.append(
+                    self._build(
+                        frame,
+                        index,
+                        ce_armed_at,
+                        "BULLISH",
+                        instrument_key,
+                        previous_high=previous_high,
+                        previous_low=previous_low,
+                    )
+                )
                 ce_armed_at = None
 
             if (
@@ -145,8 +168,20 @@ class RsiExtremeReversalEngine:
                 and float(previous_rsi) >= self.overbought
                 and float(current_rsi) < self.overbought
                 and bearish_candle
+                and bearish_structure_reclaim
+                and not fresh_higher_high
             ):
-                signals.append(self._build(frame, index, pe_armed_at, "BEARISH", instrument_key))
+                signals.append(
+                    self._build(
+                        frame,
+                        index,
+                        pe_armed_at,
+                        "BEARISH",
+                        instrument_key,
+                        previous_high=previous_high,
+                        previous_low=previous_low,
+                    )
+                )
                 pe_armed_at = None
 
         return signals
@@ -158,6 +193,9 @@ class RsiExtremeReversalEngine:
         armed_index: int,
         direction: str,
         instrument_key: str,
+        *,
+        previous_high: float,
+        previous_low: float,
     ) -> RsiExtremeReversalSignal:
         candle_open_at = _timestamp(frame.at[index, "timestamp"])
         confirmed_at = candle_open_at + pd.Timedelta(minutes=1)
@@ -165,10 +203,11 @@ class RsiExtremeReversalEngine:
         close = float(frame.at[index, "close"])
         low = float(frame.at[index, "low"])
         high = float(frame.at[index, "high"])
+        bullish = direction == "BULLISH"
         record = {
             "signal_id": _signal_id(instrument_key, direction, confirmed_at),
             "direction": direction,
-            "option_type": "CE" if direction == "BULLISH" else "PE",
+            "option_type": "CE" if bullish else "PE",
             "status": "ACTIVE",
             "state": "ACTIVE",
             "signal_source": SIGNAL_SOURCE,
@@ -177,13 +216,15 @@ class RsiExtremeReversalEngine:
             "execution_strategy_source": SIGNAL_SOURCE,
             "source_count": 1,
             "merge_status": "SINGLE_SOURCE",
-            "level_name": "RSI7_OVERSOLD_REVERSAL" if direction == "BULLISH" else "RSI7_OVERBOUGHT_REVERSAL",
+            "level_name": "RSI7_OVERSOLD_REVERSAL" if bullish else "RSI7_OVERBOUGHT_REVERSAL",
             "level_value": close,
             "trigger_level": close,
-            "invalidation_level": low if direction == "BULLISH" else high,
+            "invalidation_level": low if bullish else high,
             "confirmation_high": high,
             "confirmation_low": low,
             "confirmation_close": close,
+            "previous_candle_high": previous_high,
+            "previous_candle_low": previous_low,
             "underlying_entry": close,
             "candle_a_high": high,
             "candle_a_low": low,
@@ -198,6 +239,17 @@ class RsiExtremeReversalEngine:
             "rsi_confirmation_value": float(frame.at[index, "rsi"]),
             "rsi_armed_timestamp": armed_at.isoformat(),
             "rsi_arm_candles": self.arm_candles,
+            "rsi_lifecycle_state": "REVERSAL_CONFIRMED",
+            "rsi_extreme_detected": True,
+            "rsi_crossback_confirmed": True,
+            "candle_direction_confirmed": True,
+            "structure_reclaim_confirmed": True,
+            "fresh_extreme_rejected": False,
+            "structure_confirmation_rule": (
+                "CLOSE_ABOVE_PREVIOUS_HIGH_NO_FRESH_LOWER_LOW"
+                if bullish
+                else "CLOSE_BELOW_PREVIOUS_LOW_NO_FRESH_HIGHER_HIGH"
+            ),
             "strategy_stop_loss_pct": 7.0,
             "fixed_profit_target": False,
             "evaluation_horizon_minutes": 15,
