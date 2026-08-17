@@ -2,7 +2,7 @@ from red_bar_lab.ui._shared import *
 from red_bar_lab.ui.strategy_option_context import build_option_behaviour_snapshot
 from red_bar_lab.ui.strategy_input_preparation import prepare_completed_one_minute
 from red_bar_lab.ui.strategy_red_bar_bundle import build_red_bar_bundle_resolution
-from red_bar_lab.ui.strategy_setup_detection import build_red_bar_setup_state
+from red_bar_lab.ui.strategy_red_bar_setup import build_red_bar_owned_setup_state
 from red_bar_lab.ui.strategy_section_summary import (
     elapsed_ms,
     latest_frame_timestamp,
@@ -136,7 +136,7 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         st.error("Red Bar input preparation cannot start until cached 1-minute OHLC data is available.")
 
     section2_started = section_timer()
-    setup = build_red_bar_setup_state(
+    setup = build_red_bar_owned_setup_state(
         database,
         instrument_key,
         trading_date,
@@ -156,8 +156,8 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
 
     st.markdown("### 2. Strategy State & Setup Detection")
     st.caption(
-        "Read-only trace of reference creation, midpoint crossing and confirmation. "
-        "The first unmet condition explains why the strategy has not advanced."
+        "Read-only trace of Red Bar-owned reference creation, midpoint crossing and confirmation. "
+        "RSI and DRI signal attempts are excluded."
     )
     s1, s2, s3, s4 = st.columns(4)
     s1.metric("Engine state", setup["status"])
@@ -215,7 +215,7 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     with st.expander("View Red Bar bundle"):
         _render_rows(bundle["bundle_rows"], "No Red Bar bundle can be built until reference, cross and confirmation are complete.")
     with st.expander("View Red Bar consumption lifecycle"):
-        _render_rows(bundle["lifecycle_rows"], "No persisted Red Bar execution events were found; bundle capacity remains unconsumed.")
+        _render_rows(bundle["lifecycle_rows"], "No strategy-and-bundle-scoped Red Bar execution events were found.")
     with st.expander("How was this Red Bar bundle created?"):
         st.write(f"**Strategy owner:** {bundle['strategy_owner']}")
         st.write(f"**Signal ID:** {bundle['signal_id']}")
