@@ -1,5 +1,7 @@
 from red_bar_lab.ui._shared import *
 from red_bar_lab.ui.strategy_option_context import build_option_behaviour_snapshot
+from red_bar_lab.ui.strategy_input_preparation import prepare_completed_one_minute
+from red_bar_lab.ui.strategy_setup_detection import build_red_bar_setup_state
 
 
 def _read_cached_candles(layout, instrument_key, trading_date):
@@ -16,7 +18,7 @@ def _read_cached_candles(layout, instrument_key, trading_date):
 def render_page(settings, layout, database, token, underlying_name, instrument_key, interval) -> None:
     st.subheader("Red Bar Strategy")
     st.caption(
-        "Section 1 · Data & Feature Preparation. Read-only visibility into the inputs "
+        "Section 1 - Data & Feature Preparation. Read-only visibility into the inputs "
         "prepared after collection and before Red Bar setup detection."
     )
 
@@ -25,6 +27,7 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     )
     trading_date = selected_date.isoformat()
     candle_path, candles = _read_cached_candles(layout, instrument_key, trading_date)
+    prepared_candles = prepare_completed_one_minute(candles, trading_date)
     levels = database.read_reference_levels(instrument_key, trading_date)
     option_context = build_option_behaviour_snapshot(
         database, instrument_key, trading_date
@@ -37,8 +40,9 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
 
     required_columns = {"timestamp", "open", "high", "low", "close"}
     candle_columns_ready = required_columns.issubset(candles.columns)
-    candle_count = int(len(candles)) if candle_columns_ready else 0
-    normalized_ready = bool(candle_count and candle_columns_ready)
+    raw_candle_count = int(len(candles)) if candle_columns_ready else 0
+    candle_count = int(len(prepared_candles))
+    normalized_ready = bool(candle_count)
     reference_ready = bool(red_ref)
     readiness = "READY" if normalized_ready and reference_ready else (
         "PARTIAL" if normalized_ready else "NOT READY"
@@ -49,7 +53,7 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     a1.metric("Detection readiness", readiness)
     a2.metric("Market behaviour", option_context.get("directional_bias") or "UNAVAILABLE")
     a3.metric("Option inputs", option_context.get("status") or "NOT READY")
-    a4.metric("Execution preparation", option_context.get("execution_status") or "NOT READY")
+    a4.metric("Contract safeguards", option_context.get("execution_status") or "NOT EVALUATED")
 
     st.markdown("#### Core strategy inputs")
     c1, c2, c3 = st.columns(3)
@@ -60,12 +64,12 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     st.markdown("#### Post-collection preparation flow")
     st.code(
         "1-minute candles collected\n"
-        "→ Session candles normalized\n"
-        "→ Opening and previous-session context loaded\n"
-        "→ Red candle candidates evaluated\n"
-        "→ NEXT_RED_CANDLE reference calculated\n"
-        "→ High, low and midpoint persisted\n"
-        "→ Stored option behaviour added as supporting evidence",
+        "-> Session candles normalized\n"
+        "-> Opening and previous-session context loaded\n"
+        "-> Red candle candidates evaluated\n"
+        "-> NEXT_RED_CANDLE reference calculated\n"
+        "-> High, low and midpoint persisted\n"
+        "-> Stored option behaviour added as supporting evidence",
         language=None,
     )
 
@@ -83,7 +87,7 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         {
             "stage": "Session candle normalization",
             "status": "READY" if normalized_ready else "NOT READY",
-            "detail": f"{candle_count} usable rows",
+            "detail": f"raw={raw_candle_count}; completed_valid={candle_count}",
         },
         {
             "stage": "NEXT_RED_CANDLE reference",
@@ -122,6 +126,27 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         )
     else:
         st.error("Red Bar input preparation cannot start until cached 1-minute OHLC data is available.")
+
+    setup = build_red_bar_setup_state(
+        database,
+        instrument_key,
+        trading_date,
+        reference=red_ref,
+        option_bias=option_context.get("directional_bias"),
+    )
+    st.markdown("### 2. Strategy State & Setup Detection")
+    st.caption(
+        "Read-only trace of reference creation, midpoint crossing and confirmation. "
+        "The first unmet condition explains why the strategy has not advanced."
+    )
+    s1, s2, s3, s4 = st.columns(4)
+    s1.metric("Engine state", setup["status"])
+    s2.metric("Direction", setup["direction"])
+    s3.metric("Setup ID", setup["setup_id"])
+    s4.metric("Option alignment", setup["option_alignment"])
+    st.write(f"**Waiting for:** {setup['waiting_for']}")
+    st.write(f"**Current blocker:** {setup['blocker']}")
+    st.dataframe(_arrow_safe_rows(setup["rows"]), width="stretch", hide_index=True)
 
     st.info(
         "This page does not run detection, alter reference levels, fetch new option data, or change execution behavior."

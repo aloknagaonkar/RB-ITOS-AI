@@ -1,5 +1,10 @@
 from red_bar_lab.ui._shared import *
 from red_bar_lab.ui.strategy_option_context import build_option_behaviour_snapshot
+from red_bar_lab.ui.strategy_setup_detection import build_dri_setup_state
+from red_bar_lab.ui.strategy_input_preparation import (
+    prepare_completed_five_minute,
+    prepare_completed_one_minute,
+)
 
 
 def _read_cached_candles(layout, instrument_key, trading_date):
@@ -13,39 +18,10 @@ def _read_cached_candles(layout, instrument_key, trading_date):
     return path, frame
 
 
-def _resample_five_minute(candles):
-    required = {"timestamp", "open", "high", "low", "close"}
-    if candles.empty or not required.issubset(candles.columns):
-        return pd.DataFrame()
-    frame = candles.copy()
-    frame["timestamp"] = pd.to_datetime(frame["timestamp"], errors="coerce", utc=True)
-    for column in ("open", "high", "low", "close", "volume"):
-        if column in frame.columns:
-            frame[column] = pd.to_numeric(frame[column], errors="coerce")
-    frame = frame.dropna(subset=["timestamp", "open", "high", "low", "close"])
-    if frame.empty:
-        return pd.DataFrame()
-    aggregations = {
-        "open": "first",
-        "high": "max",
-        "low": "min",
-        "close": "last",
-    }
-    if "volume" in frame.columns:
-        aggregations["volume"] = "sum"
-    return (
-        frame.set_index("timestamp")
-        .resample("5min")
-        .agg(aggregations)
-        .dropna(subset=["open", "high", "low", "close"])
-        .reset_index()
-    )
-
-
 def render_page(settings, layout, database, token, underlying_name, instrument_key, interval) -> None:
     st.subheader("Directional Regime Intelligence")
     st.caption(
-        "Section 1 · Data & Feature Preparation. Read-only visibility into the "
+        "Section 1 - Data & Feature Preparation. Read-only visibility into the "
         "multi-timeframe, directional and option-behaviour inputs prepared before regime classification."
     )
 
@@ -54,21 +30,23 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     )
     trading_date = selected_date.isoformat()
     candle_path, candles = _read_cached_candles(layout, instrument_key, trading_date)
+    one_minute = prepare_completed_one_minute(candles, trading_date)
+    five_minute = prepare_completed_five_minute(one_minute, trading_date)
     option_context = build_option_behaviour_snapshot(
         database, instrument_key, trading_date
     )
 
     required_columns = {"timestamp", "open", "high", "low", "close"}
     columns_ready = required_columns.issubset(candles.columns)
-    one_minute_count = int(len(candles)) if columns_ready else 0
-    five_minute = _resample_five_minute(candles) if columns_ready else pd.DataFrame()
+    raw_one_minute_count = int(len(candles)) if columns_ready else 0
+    one_minute_count = int(len(one_minute))
     five_minute_count = int(len(five_minute))
     volume_ready = bool("volume" in candles.columns and pd.to_numeric(
         candles.get("volume"), errors="coerce"
     ).notna().any()) if not candles.empty else False
-    structure_ready = five_minute_count >= 3
-    indicator_window_ready = five_minute_count >= 14
-    readiness = "READY" if structure_ready and indicator_window_ready else (
+    structure_ready = five_minute_count >= 35
+    indicator_window_ready = one_minute_count >= 35 and five_minute_count >= 35
+    readiness = "READY" if indicator_window_ready else (
         "PARTIAL" if columns_ready else "NOT READY"
     )
 
@@ -77,7 +55,7 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     a1.metric("Detection readiness", readiness)
     a2.metric("Market behaviour", option_context.get("directional_bias") or "UNAVAILABLE")
     a3.metric("Option inputs", option_context.get("status") or "NOT READY")
-    a4.metric("Execution preparation", option_context.get("execution_status") or "NOT READY")
+    a4.metric("Contract safeguards", option_context.get("execution_status") or "NOT EVALUATED")
 
     st.markdown("#### Core strategy inputs")
     c1, c2, c3, c4 = st.columns(4)
@@ -89,13 +67,13 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     st.markdown("#### Post-collection preparation flow")
     st.code(
         "Price and volume collected\n"
-        "→ 1-minute candles normalized\n"
-        "→ 5-minute candles aligned\n"
-        "→ Market structure inputs prepared\n"
-        "→ EMA slope / acceleration windows prepared\n"
-        "→ DMI / ADX and ATR windows prepared\n"
-        "→ Stored option behaviour added as supporting evidence\n"
-        "→ Directional regime feature set made available",
+        "-> 1-minute candles normalized\n"
+        "-> 5-minute candles aligned\n"
+        "-> Market structure inputs prepared\n"
+        "-> EMA slope / acceleration windows prepared\n"
+        "-> DMI / ADX and ATR windows prepared\n"
+        "-> Stored option behaviour added as supporting evidence\n"
+        "-> Directional regime feature set made available",
         language=None,
     )
 
@@ -113,7 +91,7 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         {
             "stage": "1-minute normalization",
             "status": "READY" if one_minute_count else "NOT READY",
-            "detail": f"{one_minute_count} rows",
+            "detail": f"raw={raw_one_minute_count}; completed_valid={one_minute_count}",
         },
         {
             "stage": "5-minute alignment",
@@ -123,12 +101,12 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         {
             "stage": "Price-structure window",
             "status": "READY" if structure_ready else "PARTIAL",
-            "detail": "Requires multiple completed 5-minute candles",
+            "detail": f"Production requirement: 35 completed 5-minute candles; available={five_minute_count}",
         },
         {
             "stage": "Indicator lookback window",
             "status": "READY" if indicator_window_ready else "PARTIAL",
-            "detail": "EMA, DMI/ADX and ATR preparation requires sufficient history",
+            "detail": f"Production requirement: 1m>=35 and 5m>=35; available={one_minute_count}/{five_minute_count}",
         },
         {
             "stage": "Volume context",
@@ -140,7 +118,7 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
 
     st.markdown("#### Option Behaviour Inputs")
     st.caption(
-        "Option positioning enriches the price regime with OI, change-in-OI, volume and PCR evidence. "
+        "Option positioning enriches the price regime with aggregate OI, change-in-OI and PCR evidence. "
         "DRI price/volume structure remains the primary directional authority."
     )
     option_rows = option_context.get("rows") or []
@@ -157,6 +135,26 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         )
     else:
         st.error("Directional input preparation cannot start until cached 1-minute OHLC data is available.")
+
+    setup = build_dri_setup_state(
+        settings.runs_root,
+        instrument_key,
+        trading_date,
+        option_bias=option_context.get("directional_bias"),
+    )
+    st.markdown("### 2. Strategy State & Setup Detection")
+    st.caption(
+        "Read-only trace of the persisted DRI lifecycle: regime snapshot, transition, "
+        "fresh setup signal and setup bundle."
+    )
+    s1, s2, s3, s4 = st.columns(4)
+    s1.metric("Engine state", setup["status"])
+    s2.metric("Direction", setup["direction"])
+    s3.metric("Setup ID", setup["setup_id"])
+    s4.metric("Option alignment", setup["option_alignment"])
+    st.write(f"**Waiting for:** {setup['waiting_for']}")
+    st.write(f"**Current blocker:** {setup['blocker']}")
+    st.dataframe(_arrow_safe_rows(setup["rows"]), width="stretch", hide_index=True)
 
     st.info(
         "This page does not classify a regime, fetch new option data, create native DRI signals, or change execution authority."
