@@ -1,4 +1,5 @@
 from red_bar_lab.ui._shared import *
+from red_bar_lab.ui.strategy_option_context import build_option_behaviour_snapshot
 
 
 def _read_cached_candles(layout, instrument_key, trading_date):
@@ -45,7 +46,7 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     st.subheader("Directional Regime Intelligence")
     st.caption(
         "Section 1 · Data & Feature Preparation. Read-only visibility into the "
-        "multi-timeframe and directional inputs prepared before regime classification."
+        "multi-timeframe, directional and option-behaviour inputs prepared before regime classification."
     )
 
     selected_date = st.date_input(
@@ -53,6 +54,9 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     )
     trading_date = selected_date.isoformat()
     candle_path, candles = _read_cached_candles(layout, instrument_key, trading_date)
+    option_context = build_option_behaviour_snapshot(
+        database, instrument_key, trading_date
+    )
 
     required_columns = {"timestamp", "open", "high", "low", "close"}
     columns_ready = required_columns.issubset(candles.columns)
@@ -70,10 +74,17 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
 
     st.markdown("### 1. Data & Feature Preparation")
     a1, a2, a3, a4 = st.columns(4)
-    a1.metric("Input readiness", readiness)
-    a2.metric("1-minute candles", one_minute_count)
-    a3.metric("5-minute candles", five_minute_count)
-    a4.metric("Volume input", "READY" if volume_ready else "UNAVAILABLE")
+    a1.metric("Detection readiness", readiness)
+    a2.metric("Market behaviour", option_context.get("directional_bias") or "UNAVAILABLE")
+    a3.metric("Option inputs", option_context.get("status") or "NOT READY")
+    a4.metric("Execution preparation", option_context.get("execution_status") or "NOT READY")
+
+    st.markdown("#### Core strategy inputs")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("1-minute candles", one_minute_count)
+    c2.metric("5-minute candles", five_minute_count)
+    c3.metric("Volume input", "READY" if volume_ready else "UNAVAILABLE")
+    c4.metric("Indicator window", "READY" if indicator_window_ready else "PARTIAL")
 
     st.markdown("#### Post-collection preparation flow")
     st.code(
@@ -83,6 +94,7 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         "→ Market structure inputs prepared\n"
         "→ EMA slope / acceleration windows prepared\n"
         "→ DMI / ADX and ATR windows prepared\n"
+        "→ Stored option behaviour added as supporting evidence\n"
         "→ Directional regime feature set made available",
         language=None,
     )
@@ -126,6 +138,17 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     ]
     st.dataframe(_arrow_safe_rows(rows), width="stretch", hide_index=True)
 
+    st.markdown("#### Option Behaviour Inputs")
+    st.caption(
+        "Option positioning enriches the price regime with OI, change-in-OI, volume and PCR evidence. "
+        "DRI price/volume structure remains the primary directional authority."
+    )
+    option_rows = option_context.get("rows") or []
+    if option_rows:
+        st.dataframe(_arrow_safe_rows(option_rows), width="stretch", hide_index=True)
+    else:
+        st.warning(str(option_context.get("detail") or "Option context is unavailable."))
+
     if readiness == "READY":
         st.success("Directional feature inputs are prepared for regime classification.")
     elif readiness == "PARTIAL":
@@ -136,5 +159,5 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         st.error("Directional input preparation cannot start until cached 1-minute OHLC data is available.")
 
     st.info(
-        "This page does not classify a regime, create native DRI signals, or change execution authority."
+        "This page does not classify a regime, fetch new option data, create native DRI signals, or change execution authority."
     )
