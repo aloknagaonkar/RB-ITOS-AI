@@ -87,6 +87,18 @@ def _strike_interval(rows: list[dict[str, object]]) -> float | None:
     return min(differences) if differences else None
 
 
+def _moneyness(side: str, strike: float | None, spot: float | None, atm: float | None) -> str:
+    if strike is None or spot is None or atm is None:
+        return "UNAVAILABLE"
+    if strike == atm:
+        return "ATM"
+    if str(side).upper() == "CE":
+        return "ITM" if strike < spot else "OTM"
+    if str(side).upper() == "PE":
+        return "ITM" if strike > spot else "OTM"
+    return "UNAVAILABLE"
+
+
 def apply_contract_safeguards(
     readiness: Mapping[str, object],
     *,
@@ -108,6 +120,7 @@ def apply_contract_safeguards(
         "hard_safeguard_pass_count": 0,
         "execution_metadata_ready_count": 0,
         "strike_safeguard_status": "NOT_EVALUATED",
+        "strike_interval": None,
         "safeguard_rows": [],
     }
 
@@ -184,10 +197,13 @@ def apply_contract_safeguards(
         elif spread_pct > policy.maximum_spread_pct:
             reasons.append("SPREAD_TOO_WIDE")
 
+        strike_distance_points = None
         strike_distance_steps = None
         strike_status = "NOT_EVALUATED_MISSING_SPOT_OR_ATM"
+        moneyness = _moneyness(str(row.get("option_side") or ""), strike, spot, atm)
         if strike_evaluable and strike is not None:
-            strike_distance_steps = abs(strike - float(atm)) / float(interval)
+            strike_distance_points = abs(strike - float(atm))
+            strike_distance_steps = strike_distance_points / float(interval)
             strike_status = "PASS"
             if strike_distance_steps > policy.maximum_strike_distance_steps:
                 reasons.append("STRIKE_OUT_OF_RANGE")
@@ -212,10 +228,19 @@ def apply_contract_safeguards(
         execution_metadata_ready = hard_pass and not execution_metadata_reasons
         row.update(
             {
+                "spot_price": spot,
+                "atm_strike": atm,
+                "strike_interval": interval,
+                "moneyness": moneyness,
                 "hard_safeguard_pass": hard_pass,
                 "safeguard_reasons": ", ".join(reasons) if reasons else "NONE",
                 "snapshot_age_seconds": round(age_seconds, 3),
                 "snapshot_freshness": "FRESH",
+                "strike_distance_points": (
+                    round(strike_distance_points, 3)
+                    if strike_distance_points is not None
+                    else None
+                ),
                 "strike_distance_steps": (
                     round(strike_distance_steps, 3)
                     if strike_distance_steps is not None
@@ -237,7 +262,12 @@ def apply_contract_safeguards(
             {
                 "instrument_key": row.get("instrument_key"),
                 "expiry": row.get("expiry"),
+                "spot": spot,
+                "atm": atm,
                 "strike": strike,
+                "moneyness": moneyness,
+                "strike_distance_points": row["strike_distance_points"],
+                "strike_distance_steps": row["strike_distance_steps"],
                 "spread_pct": spread_pct,
                 "volume": volume,
                 "oi": oi,
@@ -255,9 +285,9 @@ def apply_contract_safeguards(
     metadata_count = sum(bool(row.get("execution_metadata_ready")) for row in hardened)
     outcome = "READY_FOR_RANKING" if pass_count else "REJECTED"
     reason = (
-        f"{pass_count} contract(s) passed absolute snapshot, expiry and liquidity safeguards."
+        f"{pass_count} contract(s) passed absolute snapshot, expiry, strike-distance and liquidity safeguards."
         if pass_count
-        else "No contract passed the absolute snapshot, expiry and liquidity safeguards."
+        else "No contract passed the absolute snapshot, expiry, strike-distance and liquidity safeguards."
     )
     return {
         **base,
@@ -270,6 +300,7 @@ def apply_contract_safeguards(
         "strike_safeguard_status": (
             "EVALUATED" if strike_evaluable else "NOT_EVALUATED_MISSING_SPOT_OR_ATM"
         ),
+        "strike_interval": interval,
         "contract_rows": hardened,
         "safeguard_rows": safeguard_rows,
         "ready_for_ranking": pass_count,
@@ -297,7 +328,11 @@ def render_contract_safeguards(result: Mapping[str, object]) -> None:
     )
     st.write(f"**Safeguard policy:** {result.get('safeguard_policy_version', 'Unavailable')}")
     st.write(f"**Snapshot age:** {result.get('snapshot_age_seconds', 'Unavailable')} seconds")
+    st.write(f"**Point-in-time spot:** {result.get('spot_price', 'Unavailable')} ({result.get('spot_source', 'UNAVAILABLE')})")
+    st.write(f"**ATM strike:** {result.get('atm_strike', 'Unavailable')} ({result.get('atm_source', 'UNAVAILABLE')})")
+    st.write(f"**Strike interval:** {result.get('strike_interval', 'Unavailable')}")
     st.write(f"**Strike safeguard:** {result.get('strike_safeguard_status', 'NOT_EVALUATED')}")
+    st.write(f"**Market context:** {result.get('market_context_status', 'UNAVAILABLE')} — {result.get('market_context_reason', 'Unavailable')}")
     st.write(f"**Decision reason:** {result.get('reason', 'Unavailable')}")
     st.write(
         "**Execution note:** Missing token/lot/exchange/tick metadata is displayed explicitly; "
