@@ -10,6 +10,11 @@ from red_bar_lab.ui.strategy_contract_ranking import (
     render_strategy_contract_ranking,
 )
 from red_bar_lab.ui.strategy_contract_readiness import build_contract_data_readiness
+from red_bar_lab.ui.strategy_contract_safeguards import (
+    POLICIES as SAFEGUARD_POLICIES,
+    apply_contract_safeguards,
+    render_contract_safeguards,
+)
 from red_bar_lab.ui.strategy_contract_selection_audit import (
     build_selection_audit,
     render_selection_audit,
@@ -18,9 +23,10 @@ from red_bar_lab.ui.strategy_execution_source_gate import POLICIES, build_execut
 
 
 def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
-    """Append read-only Sections 5B and 5C after the installed Section 5A wrapper."""
+    """Append read-only Sections 5B-5D after the installed Section 5A wrapper."""
     policy = POLICIES[page]
     ranking_policy = RANKING_POLICIES[policy.strategy_id]
+    safeguard_policy = SAFEGUARD_POLICIES[policy.strategy_id]
     original_builder = getattr(module, policy.builder_name)
     original_render = module.render_page
     captured: dict[str, object] = {}
@@ -53,6 +59,7 @@ def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
                 "signal_id": str(gate.get("signal_id") or "Not created"),
                 "bundle_id": str(gate.get("bundle_id") or "Not created"),
                 "requested_side": "Unavailable",
+                "bundle_timestamp": "Unavailable",
                 "snapshot_timestamp": "Unavailable",
                 "contract_rows": [],
             }
@@ -63,7 +70,13 @@ def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
                 database=database,
                 instrument_key=str(instrument_key),
             )
-        ranking = rank_strategy_contracts(readiness, policy=ranking_policy)
+
+        safeguarded = apply_contract_safeguards(
+            readiness,
+            policy=safeguard_policy,
+        )
+        render_contract_safeguards(safeguarded)
+        ranking = rank_strategy_contracts(safeguarded, policy=ranking_policy)
         render_strategy_contract_ranking(ranking)
         audit = build_selection_audit(ranking, policy=ranking_policy)
         render_selection_audit(audit)
