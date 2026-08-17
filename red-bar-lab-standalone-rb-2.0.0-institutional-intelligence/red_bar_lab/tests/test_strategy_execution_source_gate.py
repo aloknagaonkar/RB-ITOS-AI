@@ -4,6 +4,7 @@ from types import ModuleType
 
 from red_bar_lab.ui.strategy_execution_source_gate import (
     POLICIES,
+    build_cross_section_readiness,
     build_execution_source_gate,
     build_execution_source_gate_page_wrapper,
 )
@@ -17,6 +18,14 @@ def _resolution(**overrides):
         "final_outcome": "FORWARD",
         "signal_id": "SIG-1",
         "bundle_id": "BUNDLE-1",
+        "refreshed_at": "2026-08-17T13:02:00+05:30",
+        "bundle_rows": [
+            {"field": "Created at", "value": "2026-08-17T13:02:00+05:30"},
+            {"field": "Fresh until", "value": "2026-08-17T13:05:00+05:30"},
+        ],
+        "signal_rows": [
+            {"field": "Confirmation timestamp", "value": "2026-08-17T13:02:00+05:30"}
+        ],
     }
     value.update(overrides)
     return value
@@ -103,24 +112,82 @@ def test_gate_requires_explicit_ce_or_pe_intent():
     assert "OBSERVE / WAIT" in gate["blocking_reason"]
 
 
-def test_page_wrapper_captures_only_its_strategy_resolution(monkeypatch):
+def test_stale_bundle_summary_is_detected_but_not_contract_eligible():
+    resolution = _resolution(bundle_state="STALE", final_outcome="HOLD")
+    gate = build_execution_source_gate(
+        resolution,
+        POLICIES["RSI Extreme Reversal"],
+        environment={"RB_ENABLE_RSI_STRATEGY": "enabled"},
+    )
+    summary = build_cross_section_readiness(
+        gate,
+        resolution,
+        setup={"status": "CONFIRMED", "rows": []},
+        option_context={
+            "latest_timestamp": "2026-08-17T18:02:29+05:30",
+            "freshness": "STALE",
+        },
+    )
+
+    assert summary["overall_status"] == "STALE"
+    assert summary["detection_status"] == "CONFIRMED"
+    assert summary["contract_selection_outcome"] == "NOT_ELIGIBLE"
+    assert "new confirmed, fresh" in summary["waiting_for"]
+    assert summary["evidence_rows"][0]["status"] == "STALE"
+    assert summary["evidence_rows"][-1]["status"] == "EXPIRED"
+
+
+def test_fresh_enabled_bundle_summary_is_ready_for_read_only_selection():
+    resolution = _resolution()
+    gate = build_execution_source_gate(
+        resolution,
+        POLICIES["Red Bar Strategy"],
+        environment={"RB_ENABLE_RED_BAR_STRATEGY": "true"},
+    )
+    summary = build_cross_section_readiness(
+        gate,
+        resolution,
+        setup={"status": "CONFIRMED", "rows": []},
+        option_context={"status": "READY", "latest_timestamp": "2026-08-17T13:02:00+05:30"},
+    )
+
+    assert summary["overall_status"] == "READY_FOR_CONTRACT_SELECTION"
+    assert summary["contract_selection_outcome"] == "ELIGIBLE_READ_ONLY"
+    assert "contract selection may be evaluated" in summary["downstream_status"]
+
+
+def test_page_wrapper_captures_strategy_resolution_setup_and_option_context(monkeypatch):
     module = ModuleType("red_bar_test_page")
-    rendered = []
 
     def build_red_bar_bundle_resolution(*args, **kwargs):
         return _resolution(bundle_id="RB-BUNDLE")
 
+    def build_red_bar_owned_setup_state(*args, **kwargs):
+        return {"status": "CONFIRMED", "rows": []}
+
+    def build_option_behaviour_snapshot(*args, **kwargs):
+        return {"status": "READY", "latest_timestamp": "2026-08-17T13:02:00+05:30"}
+
     def render_page(*args, **kwargs):
+        module.build_option_behaviour_snapshot()
+        module.build_red_bar_owned_setup_state()
         module.build_red_bar_bundle_resolution()
         return "rendered"
 
     module.build_red_bar_bundle_resolution = build_red_bar_bundle_resolution
+    module.build_red_bar_owned_setup_state = build_red_bar_owned_setup_state
+    module.build_option_behaviour_snapshot = build_option_behaviour_snapshot
     module.render_page = render_page
 
     captured_gates = []
+    captured_summaries = []
     monkeypatch.setattr(
         "red_bar_lab.ui.strategy_execution_source_gate.render_execution_source_gate",
         lambda gate: captured_gates.append(gate),
+    )
+    monkeypatch.setattr(
+        "red_bar_lab.ui.strategy_execution_source_gate.render_cross_section_readiness",
+        lambda summary: captured_summaries.append(summary),
     )
 
     wrapped = build_execution_source_gate_page_wrapper(module, "Red Bar Strategy")
@@ -128,6 +195,8 @@ def test_page_wrapper_captures_only_its_strategy_resolution(monkeypatch):
     assert captured_gates[0]["strategy_id"] == "RED_BAR"
     assert captured_gates[0]["bundle_id"] == "RB-BUNDLE"
     assert captured_gates[0]["forwarded"] is False
+    assert captured_summaries[0]["detection_status"] == "CONFIRMED"
+    assert captured_summaries[0]["evidence_rows"][0]["status"] == "READY"
 
 
 def test_gate_module_contains_no_write_or_execution_action():
