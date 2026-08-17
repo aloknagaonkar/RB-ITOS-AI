@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import streamlit as st
+
 _INSTALLED = False
 
 
@@ -61,6 +63,21 @@ def _enrich_gate(gate):
     return result
 
 
+def _render_separation(gate):
+    st.markdown("#### Analysis vs Execution Eligibility")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Contract analysis", "ELIGIBLE" if gate.get("analysis_eligible") else "BLOCKED")
+    c2.metric("Execution control", "ENABLED" if gate.get("execution_enabled") else "DISABLED")
+    c3.metric("Execution eligibility", "ELIGIBLE" if gate.get("execution_eligible") else "BLOCKED")
+    st.write(f"**Policy action:** {gate.get('policy_action')}")
+    st.write(f"**Analysis blocker:** {gate.get('analysis_blocking_reason')}")
+    st.write(f"**Execution blocker:** {gate.get('execution_blocking_reason')}")
+    if gate.get("analysis_eligible") and not gate.get("execution_eligible"):
+        st.info(
+            "Sections 5A–5D remain available in OBSERVE_ONLY mode. Candidate creation, bundle consumption, reservation, and orders remain blocked."
+        )
+
+
 def install_analysis_eligibility_separation():
     global _INSTALLED
     if _INSTALLED:
@@ -72,6 +89,8 @@ def install_analysis_eligibility_separation():
     original_gate = gate_module.build_execution_source_gate
     original_summary = gate_module.build_cross_section_readiness
     original_readiness = readiness_module.build_contract_data_readiness
+    original_gate_render = gate_module.render_execution_source_gate
+    original_readiness_render = readiness_module.render_contract_data_readiness
 
     def build_gate(*args, **kwargs):
         return _enrich_gate(original_gate(*args, **kwargs))
@@ -102,7 +121,19 @@ def install_analysis_eligibility_separation():
         result["policy_action"] = str(gate.get("policy_action") or "BLOCKED")
         return result
 
+    def render_gate(gate):
+        original_gate_render(gate)
+        _render_separation(gate)
+
+    def render_readiness(result):
+        original_readiness_render(result)
+        st.write(f"**Analysis mode:** {result.get('analysis_mode', 'BLOCKED')}")
+        st.write(f"**Execution enabled:** {'YES' if result.get('execution_enabled') else 'NO'}")
+        st.write(f"**Policy action:** {result.get('policy_action', 'BLOCKED')}")
+
     gate_module.build_execution_source_gate = build_gate
     gate_module.build_cross_section_readiness = build_summary
+    gate_module.render_execution_source_gate = render_gate
     readiness_module.build_contract_data_readiness = build_readiness
+    readiness_module.render_contract_data_readiness = render_readiness
     _INSTALLED = True
