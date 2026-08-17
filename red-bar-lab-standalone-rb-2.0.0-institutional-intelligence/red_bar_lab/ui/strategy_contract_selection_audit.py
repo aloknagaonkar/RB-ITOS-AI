@@ -45,6 +45,15 @@ def _arrow_safe_rows(rows) -> list[dict[str, object]]:
     return values
 
 
+def _handoff_role(policy: ContractRankingPolicy, row: Mapping[str, object], index: int) -> str:
+    ranked_role = str(row.get("ranking_decision") or "")
+    if ranked_role in {"PRIMARY", "ENTRY_1", "ENTRY_2"}:
+        return ranked_role
+    if policy.strategy_id == "RSI_EXTREME_REVERSAL":
+        return f"ENTRY_{index}"
+    return "PRIMARY"
+
+
 def build_selection_audit(
     ranking: Mapping[str, object],
     *,
@@ -91,6 +100,8 @@ def build_selection_audit(
                 "oi": row.get("oi"),
                 "delta": row.get("delta"),
                 "iv": row.get("iv"),
+                "delta_evidence_status": row.get("delta_evidence_status"),
+                "iv_evidence_status": row.get("iv_evidence_status"),
                 "spread_quality": row.get("spread_quality"),
                 "volume_quality": row.get("volume_quality"),
                 "oi_quality": row.get("oi_quality"),
@@ -111,7 +122,7 @@ def build_selection_audit(
                 "bundle_id": str(ranking.get("bundle_id") or "Not created"),
                 "snapshot_timestamp": str(ranking.get("snapshot_timestamp") or "Unavailable"),
                 "requested_side": str(ranking.get("requested_side") or "Unavailable"),
-                "role": "PRIMARY" if index == 1 else "FALLBACK",
+                "role": _handoff_role(policy, row, index),
                 "rank": row.get("rank", index),
                 "instrument_key": row.get("instrument_key"),
                 "trading_symbol": row.get("trading_symbol"),
