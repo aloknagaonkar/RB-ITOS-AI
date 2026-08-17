@@ -32,6 +32,10 @@ from red_bar_lab.ui.strategy_contract_selection_audit import (
 )
 from red_bar_lab.ui.strategy_execution_source_gate import POLICIES, build_execution_source_gate
 from red_bar_lab.ui.strategy_historical_performance_source import load_completed_trade_history
+from red_bar_lab.ui.strategy_history_coverage import (
+    build_history_coverage,
+    render_history_coverage,
+)
 from red_bar_lab.ui.strategy_opportunity_history_gate_v2 import (
     build_opportunity_history_gate,
     forward_candidates_for_risk,
@@ -175,6 +179,7 @@ def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
                 "source_reason": "CALLER_SUPPLIED_RECORDS",
                 "source_adapter_version": None,
                 "normalized_row_count": len(historical_records),
+                "coverage": build_history_coverage(historical_records),
                 "source_read_only": True,
             }
         else:
@@ -188,6 +193,7 @@ def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
             history_source=history_source,
         )
         render_opportunity_history_gate(opportunity_result)
+        render_history_coverage(history_source.get("coverage") or build_history_coverage([]))
 
         risk_context = kwargs.get("account_risk_context")
         if not isinstance(risk_context, Mapping):
