@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from functools import wraps
 from pathlib import Path
+import sqlite3
 
 import streamlit as st
 
@@ -18,6 +19,48 @@ def _open_database(database_path: str) -> RedBarDatabase:
 
 
 @st.cache_data(ttl=OBSERVATIONAL_QUERY_TTL_SECONDS, show_spinner=False)
+def read_latest_option_chain_snapshot_cached(
+    database_path: str,
+    instrument_key: str,
+    trading_date: str,
+    limit: int = 100,
+):
+    """Return only rows belonging to the latest stored snapshot timestamp.
+
+    This query is intentionally confined to the read-only strategy-page cache
+    adapter. It does not alter the core database facade or any collection,
+    contract-selection, execution, position, or risk-control workflow.
+    """
+    database = _open_database(database_path)
+    with sqlite3.connect(database.path) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM option_chain_snapshot_history
+            WHERE instrument_key=?
+              AND trading_date=?
+              AND snapshot_timestamp=(
+                  SELECT MAX(snapshot_timestamp)
+                  FROM option_chain_snapshot_history
+                  WHERE instrument_key=?
+                    AND trading_date=?
+              )
+            ORDER BY option_expiry, id
+            LIMIT ?
+            """,
+            (
+                instrument_key,
+                trading_date,
+                instrument_key,
+                trading_date,
+                int(limit),
+            ),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+@st.cache_data(ttl=OBSERVATIONAL_QUERY_TTL_SECONDS, show_spinner=False)
 def read_option_chain_history_cached(
     database_path: str,
     instrument_key: str,
@@ -25,7 +68,7 @@ def read_option_chain_history_cached(
     end_date: str,
     limit: int = 500,
 ):
-    """Cache stored option-chain history used as supporting evidence."""
+    """Cache the legacy option-history reader used as a compatibility fallback."""
     database = _open_database(database_path)
     return database.read_option_chain_history(
         instrument_key,
@@ -55,6 +98,19 @@ class StrategyObservationalDatabaseProxy:
 
     def __getattr__(self, name: str):
         return getattr(self._database, name)
+
+    def read_latest_option_chain_snapshot(
+        self,
+        instrument_key: str,
+        trading_date: str,
+        limit: int = 100,
+    ):
+        return read_latest_option_chain_snapshot_cached(
+            self._database_path,
+            instrument_key,
+            trading_date,
+            limit,
+        )
 
     def read_option_chain_history(
         self,
@@ -111,5 +167,6 @@ def build_strategy_query_cache_wrapper(render_page):
 
 def clear_strategy_observational_query_cache() -> None:
     """Explicit invalidation hook for future write-capable workflows."""
+    read_latest_option_chain_snapshot_cached.clear()
     read_option_chain_history_cached.clear()
     read_reference_levels_cached.clear()
