@@ -7,7 +7,7 @@ from red_bar_lab.ui.strategy_contract_selection_audit import build_selection_aud
 def _selected_row(key: str, rank: int, score: float):
     return {
         "rank": rank,
-        "ranking_decision": "PRIMARY" if rank == 1 else "FALLBACK",
+        "ranking_decision": f"ENTRY_{rank}",
         "instrument_key": key,
         "trading_symbol": key,
         "option_side": "PE",
@@ -19,6 +19,8 @@ def _selected_row(key: str, rank: int, score: float):
         "oi": 5000.0,
         "delta": -0.5,
         "iv": 15.0,
+        "delta_evidence_status": "AVAILABLE",
+        "iv_evidence_status": "AVAILABLE",
         "spread_quality": 90.0,
         "volume_quality": 100.0,
         "oi_quality": 100.0,
@@ -43,7 +45,7 @@ def _ranking(selected_rows):
     }
 
 
-def test_rsi_audit_builds_primary_and_fallback_handoff_records():
+def test_rsi_audit_builds_two_independent_entry_handoff_records():
     policy = POLICIES["RSI_EXTREME_REVERSAL"]
     result = build_selection_audit(
         _ranking([_selected_row("OPT-1", 1, 95.0), _selected_row("OPT-2", 2, 90.0)]),
@@ -52,7 +54,7 @@ def test_rsi_audit_builds_primary_and_fallback_handoff_records():
 
     assert result["outcome"] == "HANDOFF_READY_READ_ONLY"
     assert result["selected_count"] == 2
-    assert [row["role"] for row in result["handoff_rows"]] == ["PRIMARY", "FALLBACK"]
+    assert [row["role"] for row in result["handoff_rows"]] == ["ENTRY_1", "ENTRY_2"]
     assert {row["instrument_key"] for row in result["handoff_rows"]} == {"OPT-1", "OPT-2"}
     assert all(row["handoff_state"] == "PROPOSED_READ_ONLY" for row in result["handoff_rows"])
     assert all(row["persisted"] is False for row in result["handoff_rows"])
@@ -69,6 +71,7 @@ def test_audit_exposes_weighted_score_contributions():
     assert row["oi_quality_contribution"] == 25.0
     assert row["delta_quality_contribution"] == 10.0
     assert row["iv_evidence_contribution"] == 5.0
+    assert row["delta_evidence_status"] == "AVAILABLE"
 
 
 def test_no_selected_contract_produces_no_handoff():
