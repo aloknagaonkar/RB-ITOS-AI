@@ -4,21 +4,15 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from red_bar_lab.execution.directional_regime_policy import (
-    evaluate_directional_regime_policy,
-)
-from red_bar_lab.execution.directional_regime_reference import (
-    DirectionalRegimeReferenceService,
-)
-from red_bar_lab.execution.dri_opportunity_context import (
-    is_dri_signal,
-    resolve_opposite_red_bar,
-)
+from red_bar_lab.execution.bundles import build_rsi_reversal_bundle
 from red_bar_lab.execution.rsi_extreme_reversal import RsiExtremeReversalEngine
-
 
 IST = ZoneInfo("Asia/Kolkata")
 RSI_SOURCE = "RSI_EXTREME_REVERSAL_V1"
+CONSUMING_STATES = {
+    "QUEUED", "APPROVED", "ORDER_OPENED", "POSITION_OPENED", "EXECUTED",
+    "FILLED", "OPEN", "CLOSED", "EXITED", "COMPLETE", "COMPLETED",
+}
 
 
 def _text(value: object) -> str:
@@ -50,38 +44,38 @@ def _as_ist(value: object) -> pd.Timestamp | None:
         return None
 
 
-def _safe_execution_events(database, signal_id: str) -> list[dict[str, object]]:
+def _execution_events(database, signal_id: str) -> list[dict[str, object]]:
     if not signal_id or not hasattr(database, "read_execution_state_events"):
         return []
     try:
-        return list(database.read_execution_state_events(signal_id=signal_id, limit=100) or [])
+        return list(database.read_execution_state_events(signal_id=signal_id, limit=200) or [])
     except Exception:
         return []
 
 
-def _consumption_state(database, signal_id: str) -> tuple[bool, str]:
-    events = _safe_execution_events(database, signal_id)
-    if not events:
-        return False, "No persisted execution-state event was found for this signal."
-    consumed_states = {
-        "QUEUED", "APPROVED", "ORDER_OPENED", "POSITION_OPENED", "EXECUTED",
-        "FILLED", "OPEN", "CLOSED", "EXITED",
-    }
-    states = [str(row.get("state") or row.get("status") or "").upper() for row in events]
-    consumed = any(state in consumed_states for state in states)
-    return consumed, (
-        "A persisted downstream execution event exists."
-        if consumed else "Execution events exist, but none prove that an entry was created."
-    )
-
-
-def _relationship(primary_direction: str, other_direction: object, available: bool) -> str:
-    if not available:
-        return "UNAVAILABLE"
-    other = str(other_direction or "").upper()
-    if other not in {"BULLISH", "BEARISH"}:
-        return "NEUTRAL"
-    return "SUPPORTS" if other == primary_direction else "OPPOSES"
+def _consumed_slots(database, signal_id: str) -> tuple[int, list[dict[str, str]]]:
+    events = _execution_events(database, signal_id)
+    consumed_keys: set[str] = set()
+    rows: list[dict[str, str]] = []
+    for index, event in enumerate(events, start=1):
+        state = str(event.get("state") or event.get("status") or "").upper()
+        contract_key = str(
+            event.get("instrument_key")
+            or event.get("instrument_token")
+            or event.get("tradingsymbol")
+            or event.get("order_id")
+            or f"event-{index}"
+        )
+        consumes = state in CONSUMING_STATES
+        if consumes:
+            consumed_keys.add(contract_key)
+        rows.append({
+            "state": state or "Unavailable",
+            "contract_or_order": contract_key,
+            "consumes_slot": "YES" if consumes else "NO",
+            "timestamp": _text(event.get("timestamp")),
+        })
+    return min(2, len(consumed_keys)), rows
 
 
 def build_rsi_signal_resolution(
@@ -94,10 +88,7 @@ def build_rsi_signal_resolution(
 ) -> dict[str, object]:
     signals = [
         item.as_record()
-        for item in RsiExtremeReversalEngine().detect(
-            candles,
-            instrument_key=instrument_key,
-        )
+        for item in RsiExtremeReversalEngine().detect(candles, instrument_key=instrument_key)
     ]
     signal = _latest(signals, ("confirmation_timestamp", "detected_at"))
     if not signal:
@@ -107,155 +98,128 @@ def build_rsi_signal_resolution(
             "bundle_state": "NOT CREATED",
             "final_outcome": "OBSERVE",
             "signal_id": "Not created",
+            "bundle_id": "Not created",
+            "strategy_owner": "RSI Extreme Reversal",
             "signal_age": "Unavailable",
-            "consumed": "No",
-            "supporting_count": "0",
-            "opposing_count": "0",
+            "entry_capacity": "0 of 2 consumed",
             "next_step": "Wait for a confirmed RSI reversal signal.",
             "raw_rows": [],
             "normalization_rows": [],
             "freshness_rows": [],
             "bundle_rows": [],
-            "conflict_rows": [],
-            "decision_reason": "No confirmed RSI reversal signal is available for normalization.",
-            "applied_rule": "No signal; observe only.",
+            "lifecycle_rows": [],
+            "decision_reason": "No confirmed RSI reversal signal is available.",
+            "applied_rule": "Armed or incomplete RSI states do not create a bundle.",
             "refreshed_at": None,
         }
 
     signal_id = str(signal.get("signal_id") or "")
-    direction = str(signal.get("direction") or "").upper()
-    option_side = "CE" if direction == "BULLISH" else "PE" if direction == "BEARISH" else "NONE"
-    detected_at = _as_ist(signal.get("detected_at") or signal.get("confirmation_timestamp"))
-    fresh_until = _as_ist(signal.get("fresh_until"))
+    consumed_slots, lifecycle_rows = _consumed_slots(database, signal_id)
+    bundle = build_rsi_reversal_bundle(
+        signal,
+        instrument_key=instrument_key,
+        entry_slots_consumed=consumed_slots,
+    )
+    detected_at = _as_ist(bundle.detected_at)
+    fresh_until = _as_ist(bundle.fresh_until)
     now = pd.Timestamp.now(tz=IST)
     age_seconds = max(0.0, (now - detected_at).total_seconds()) if detected_at is not None else None
     fresh = bool(fresh_until is not None and now <= fresh_until)
-    consumed, consumed_detail = _consumption_state(database, signal_id)
 
     attempts = list(database.read_signal_attempts(instrument_key, trading_date) or [])
-    same_id_count = sum(1 for row in attempts if str(row.get("signal_id") or "") == signal_id)
-    duplicate = same_id_count > 1
-    if duplicate:
-        signal_state = "DUPLICATE"
-    elif consumed:
-        signal_state = "CONSUMED"
-    elif fresh:
-        signal_state = "FRESH"
-    else:
-        signal_state = "STALE"
-
-    red_bar_rows = [
+    matching_rsi = [
         row for row in attempts
-        if str(row.get("signal_source") or row.get("source") or "").upper() != RSI_SOURCE
-        and not is_dri_signal(row)
+        if str(row.get("signal_id") or "") == signal_id
+        and str(row.get("signal_source") or row.get("source") or RSI_SOURCE).upper() == RSI_SOURCE
     ]
-    latest_red_bar = _latest(red_bar_rows, ("confirmation_timestamp", "cross_timestamp"))
-    red_bar_relationship = _relationship(direction, latest_red_bar.get("direction"), bool(latest_red_bar))
-    opposite_red_bar = resolve_opposite_red_bar(signal=signal, signals=attempts)
-    if opposite_red_bar:
-        red_bar_relationship = "OPPOSES"
-
-    try:
-        dri = DirectionalRegimeReferenceService(
-            runs_root=settings.runs_root,
-            maximum_age_minutes=30,
-        ).evaluate(
-            signal_direction=direction,
-            instrument_key=instrument_key,
-            at_time=signal.get("confirmation_timestamp") or signal.get("detected_at"),
-        )
-        dri_status = str(dri.status or "UNAVAILABLE").upper()
-        dri_relationship = {
-            "ALIGNED": "SUPPORTS",
-            "PARTIAL_ALIGNMENT": "SUPPORTS",
-            "CONFLICT": "OPPOSES",
-            "NEUTRAL": "NEUTRAL",
-        }.get(dri_status, "UNAVAILABLE")
-        dri_policy = evaluate_directional_regime_policy(dri_status)
-    except Exception as exc:
-        dri = None
-        dri_relationship = "UNAVAILABLE"
-        dri_policy = evaluate_directional_regime_policy("UNAVAILABLE")
-        dri_status = f"UNAVAILABLE: {type(exc).__name__}"
-
-    relationships = [red_bar_relationship, dri_relationship]
-    supporting = sum(value == "SUPPORTS" for value in relationships)
-    opposing = sum(value == "OPPOSES" for value in relationships)
+    duplicate = len(matching_rsi) > 1
 
     if duplicate:
+        lifecycle_state = "DUPLICATE"
         final_outcome = "HOLD"
-        reason = "The stable RSI signal identity appears more than once in persisted signal attempts."
-        rule = "Duplicate signals are not forwarded as new trading intentions."
-    elif consumed:
+        reason = "The same RSI stable signal identity appears more than once in RSI-owned records."
+        rule = "Deduplication is scoped to RSI_EXTREME_REVERSAL plus canonical event identity."
+    elif consumed_slots >= bundle.entry_slots_allowed:
+        lifecycle_state = "CONSUMED"
         final_outcome = "HOLD"
-        reason = "This RSI signal already has downstream execution-state evidence."
-        rule = "Consumed signals are managed through their existing queue or position."
-    elif dri_policy.block_execution:
+        reason = "Both RSI contract-entry slots have been consumed."
+        rule = "One RSI bundle allows two independently executable contracts."
+    elif not fresh:
+        lifecycle_state = "STALE"
         final_outcome = "HOLD"
-        reason = "A fresh Directional Regime bundle conflicts with the RSI direction."
-        rule = dri_policy.reason
-    else:
+        reason = "The RSI bundle is outside its recorded freshness window."
+        rule = "Stale bundle state is reported without changing production execution behavior."
+    elif consumed_slots == 1:
+        lifecycle_state = "PARTIALLY_CONSUMED"
         final_outcome = "FORWARD"
-        reason = "The confirmed RSI signal is normalized and no production DRI conflict policy blocks it."
-        rule = dri_policy.reason
-
-    event_identity = " | ".join([
-        RSI_SOURCE,
-        instrument_key,
-        direction or "UNAVAILABLE",
-        _text(signal.get("rsi_armed_timestamp")),
-        _text(signal.get("confirmation_timestamp")),
-    ])
+        reason = "One RSI entry slot remains available for contract selection."
+        rule = "RSI bundle capacity progresses 0/2 → 1/2 → 2/2."
+    else:
+        lifecycle_state = "FRESH"
+        final_outcome = "FORWARD"
+        reason = "A fresh RSI-owned bundle has two available contract-entry slots."
+        rule = "Only confirmed RSI reversal evidence is included in this bundle."
 
     raw_rows = [
-        {"field": "Signal ID", "value": _text(signal_id)},
+        {"field": "Signal ID", "value": signal_id or "Unavailable"},
         {"field": "Source engine", "value": RSI_SOURCE},
         {"field": "Detection timestamp", "value": _text(signal.get("detected_at"))},
-        {"field": "Direction", "value": direction or "Unavailable"},
+        {"field": "Direction", "value": bundle.direction},
         {"field": "RSI armed value", "value": _text(signal.get("rsi_armed_value"))},
         {"field": "RSI confirmation value", "value": _text(signal.get("rsi_confirmation_value"))},
         {"field": "Signal age", "value": f"{age_seconds:.1f} seconds" if age_seconds is not None else "Unavailable"},
     ]
     normalization_rows = [
-        {"field": "Normalized direction", "value": direction or "WAIT"},
-        {"field": "Normalized intent", "value": f"BUY {option_side}" if option_side in {"CE", "PE"} else "OBSERVE / WAIT"},
-        {"field": "Option side", "value": option_side},
-        {"field": "Confidence", "value": "Production signal confirmed"},
-        {"field": "Source", "value": RSI_SOURCE},
-        {"field": "Stable event identity", "value": event_identity},
+        {"field": "Strategy owner", "value": "RSI Extreme Reversal"},
+        {"field": "Strategy ID", "value": bundle.strategy_id},
+        {"field": "Normalized direction", "value": bundle.direction},
+        {"field": "Normalized intent", "value": f"BUY {bundle.option_side}"},
+        {"field": "Option side", "value": bundle.option_side},
+        {"field": "Canonical event identity", "value": bundle.canonical_event_identity},
     ]
     freshness_rows = [
-        {"check": "Within signal fresh-until", "status": "PASS" if fresh else "WAIT", "detail": _text(signal.get("fresh_until"))},
-        {"check": "Already consumed", "status": "YES" if consumed else "NO", "detail": consumed_detail},
-        {"check": "Duplicate stable signal ID", "status": "YES" if duplicate else "NO", "detail": f"Persisted matches={same_id_count}"},
-        {"check": "Final lifecycle state", "status": signal_state, "detail": "Read-only classification; opening this page does not consume the signal."},
+        {"check": "Bundle created from confirmed RSI signal", "status": "PASS", "detail": bundle.detected_at},
+        {"check": "Within recorded fresh-until", "status": "PASS" if fresh else "WAIT", "detail": bundle.fresh_until},
+        {"check": "Duplicate within RSI strategy", "status": "YES" if duplicate else "NO", "detail": f"RSI-owned matches={len(matching_rsi)}"},
+        {"check": "Entry slots remaining", "status": str(bundle.entry_slots_allowed - consumed_slots), "detail": f"{consumed_slots} of {bundle.entry_slots_allowed} consumed"},
     ]
     bundle_rows = [
-        {"member": "RSI reversal", "signal_id": signal_id, "direction": direction, "relationship": "PRIMARY", "timestamp": _text(signal.get("detected_at"))},
-        {"member": "Directional regime", "signal_id": _text(getattr(dri, "bundle_id", None)), "direction": _text(getattr(dri, "bundle_direction", None)), "relationship": dri_relationship, "timestamp": _text(getattr(dri, "detected_at", None))},
-        {"member": "Red Bar", "signal_id": _text(latest_red_bar.get("signal_id")), "direction": _text(latest_red_bar.get("direction")), "relationship": red_bar_relationship, "timestamp": _text(latest_red_bar.get("confirmation_timestamp"))},
-    ]
-    conflict_rows = [
-        {"engine": "Directional Regime", "relationship": dri_relationship, "state": dri_status, "reason": _text(getattr(dri, "reason", None))},
-        {"engine": "Red Bar", "relationship": red_bar_relationship, "state": "LATEST PERSISTED SIGNAL" if latest_red_bar else "UNAVAILABLE", "reason": "Opposite newer Red Bar is observational for the RSI path; DRI production policy remains the blocking conflict authority."},
+        {"field": "Strategy owner", "value": "RSI Extreme Reversal"},
+        {"field": "Bundle ID", "value": bundle.bundle_id},
+        {"field": "Primary signal", "value": bundle.primary_signal_id},
+        {"field": "Primary setup", "value": bundle.primary_setup_type},
+        {"field": "Direction", "value": bundle.direction},
+        {"field": "Option side", "value": bundle.option_side},
+        {"field": "Trigger level", "value": f"{bundle.trigger_level:,.2f}"},
+        {"field": "Invalidation level", "value": f"{bundle.invalidation_level:,.2f}"},
+        {"field": "Created at", "value": bundle.detected_at},
+        {"field": "Fresh until", "value": bundle.fresh_until},
+        {"field": "Entry capacity", "value": f"{consumed_slots} of {bundle.entry_slots_allowed} consumed"},
+        {"field": "Execution allowed", "value": "NO — SHADOW/READ-ONLY"},
     ]
 
     return {
-        "signal_state": signal_state,
-        "normalized_intent": f"BUY {option_side}" if option_side in {"CE", "PE"} else "OBSERVE / WAIT",
-        "bundle_state": "DRI BUNDLE AVAILABLE" if getattr(dri, "bundle_id", None) else "COMPARISON ONLY",
+        "signal_state": "CONFIRMED",
+        "normalized_intent": f"BUY {bundle.option_side}",
+        "bundle_state": lifecycle_state,
         "final_outcome": final_outcome,
         "signal_id": signal_id or "Not created",
+        "bundle_id": bundle.bundle_id,
+        "strategy_owner": "RSI Extreme Reversal",
         "signal_age": f"{age_seconds:.1f} sec" if age_seconds is not None else "Unavailable",
-        "consumed": "Yes" if consumed else "No",
-        "supporting_count": str(supporting),
-        "opposing_count": str(opposing),
-        "next_step": "Select the best two eligible option contracts." if final_outcome == "FORWARD" else "Wait for the blocking state to clear or manage the existing signal lifecycle.",
+        "entry_capacity": f"{consumed_slots} of {bundle.entry_slots_allowed} consumed",
+        "next_step": (
+            f"Select the best two eligible {bundle.option_side} contracts."
+            if final_outcome == "FORWARD" and consumed_slots == 0
+            else f"Select one remaining eligible {bundle.option_side} contract."
+            if final_outcome == "FORWARD"
+            else "Wait for a new independent RSI bundle."
+        ),
         "raw_rows": raw_rows,
         "normalization_rows": normalization_rows,
         "freshness_rows": freshness_rows,
         "bundle_rows": bundle_rows,
-        "conflict_rows": conflict_rows,
+        "lifecycle_rows": lifecycle_rows,
         "decision_reason": reason,
         "applied_rule": rule,
         "refreshed_at": detected_at,
