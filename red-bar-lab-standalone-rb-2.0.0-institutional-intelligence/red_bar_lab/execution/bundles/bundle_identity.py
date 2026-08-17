@@ -41,13 +41,30 @@ def red_bar_bundle_identity(
 
 
 def rsi_bundle_identity(
-    *, instrument_key: str, direction: str, extreme_timestamp: object, confirmation_timestamp: object
+    *,
+    instrument_key: str,
+    direction: str,
+    extreme_timestamp: object,
+    cross_back_timestamp: object,
+    confirmation_timestamp: object,
 ) -> tuple[str, str]:
-    canonical = "|".join(
-        ["RSI_EXTREME_REVERSAL", instrument_key, direction, str(extreme_timestamp), str(confirmation_timestamp)]
-    )
+    # The frozen RSI detector currently confirms cross-back and price structure
+    # on the same completed candle. Keep both fields explicit in the canonical
+    # identity, while avoiding a duplicated token in the readable ID.
+    canonical = "|".join([
+        "RSI_EXTREME_REVERSAL",
+        instrument_key,
+        direction,
+        str(extreme_timestamp),
+        str(cross_back_timestamp),
+        str(confirmation_timestamp),
+    ])
+    times = [_time_token(extreme_timestamp), _time_token(cross_back_timestamp)]
+    confirmation_token = _time_token(confirmation_timestamp)
+    if confirmation_token != times[-1]:
+        times.append(confirmation_token)
     readable = "-".join(
-        ["RSI-BND", _token(instrument_key), _token(direction), _time_token(extreme_timestamp), _time_token(confirmation_timestamp)]
+        ["RSI-BND", _token(instrument_key), _token(direction), *times]
     )
     return _bounded("RSI-BND", canonical, readable), canonical
 
