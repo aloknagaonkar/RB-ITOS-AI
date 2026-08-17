@@ -27,6 +27,18 @@ def _read_cached_candles(layout, instrument_key, trading_date):
     return path, frame
 
 
+def _trace_display(value, digits=2):
+    if value in (None, ""):
+        return "Unavailable"
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if pd.isna(number):
+        return "Unavailable"
+    return f"{number:,.{digits}f}"
+
+
 def render_page(settings, layout, database, token, underlying_name, instrument_key, interval) -> None:
     st.subheader("RSI Extreme Reversal")
     st.caption(
@@ -157,6 +169,78 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
 
     with st.expander("View condition-by-condition trace"):
         st.dataframe(_arrow_safe_rows(setup["rows"]), width="stretch", hide_index=True)
+
+    trace = setup.get("decision_trace") or {}
+    with st.expander("How was the current RSI decision made?", expanded=False):
+        if not trace or not trace.get("checks"):
+            st.info(
+                str(
+                    trace.get("first_unmet_condition")
+                    or "Sufficient completed candle and RSI data is unavailable."
+                )
+            )
+            st.write(
+                f"**Next step:** {trace.get('next_step') or 'Wait for enough completed 1-minute candles.'}"
+            )
+        else:
+            previous_candle = trace.get("previous_candle") or {}
+            current_candle = trace.get("current_candle") or {}
+            recent_extreme = trace.get("recent_extreme") or {}
+
+            st.caption(
+                f"Evaluation timestamp: {trace.get('evaluation_timestamp') or 'Unavailable'}"
+            )
+            e1, e2, e3, e4 = st.columns(4)
+            e1.metric("Evaluated path", trace.get("path") or "UNDECIDED")
+            e2.metric("Previous RSI", _trace_display(previous_candle.get("rsi")))
+            e3.metric("Current RSI", _trace_display(current_candle.get("rsi")))
+            e4.metric("Final outcome", trace.get("final_outcome") or "Unavailable")
+
+            st.markdown("#### Evaluated completed candles")
+            candle_rows = [
+                {
+                    "candle": "Previous",
+                    "timestamp": str(previous_candle.get("timestamp") or "Unavailable"),
+                    "open": _trace_display(previous_candle.get("open")),
+                    "high": _trace_display(previous_candle.get("high")),
+                    "low": _trace_display(previous_candle.get("low")),
+                    "close": _trace_display(previous_candle.get("close")),
+                    "rsi": _trace_display(previous_candle.get("rsi")),
+                },
+                {
+                    "candle": "Current",
+                    "timestamp": str(current_candle.get("timestamp") or "Unavailable"),
+                    "open": _trace_display(current_candle.get("open")),
+                    "high": _trace_display(current_candle.get("high")),
+                    "low": _trace_display(current_candle.get("low")),
+                    "close": _trace_display(current_candle.get("close")),
+                    "rsi": _trace_display(current_candle.get("rsi")),
+                },
+            ]
+            st.dataframe(
+                _arrow_safe_rows(candle_rows),
+                width="stretch",
+                hide_index=True,
+            )
+
+            st.caption(
+                "Recent RSI window: "
+                f"{int(recent_extreme.get('window_candles') or 0)} candles · "
+                f"lowest={_trace_display(recent_extreme.get('lowest_rsi'))} · "
+                f"highest={_trace_display(recent_extreme.get('highest_rsi'))}"
+            )
+
+            st.markdown("#### Ordered live checks")
+            st.dataframe(
+                _arrow_safe_rows(trace.get("checks") or []),
+                width="stretch",
+                hide_index=True,
+            )
+            st.write(
+                f"**First unmet condition:** {trace.get('first_unmet_condition') or 'Unavailable'}"
+            )
+            st.write(f"**Final outcome:** {trace.get('final_outcome') or 'Unavailable'}")
+            st.write(f"**Next step:** {trace.get('next_step') or 'Unavailable'}")
 
     with st.expander("View Section 2 refresh and performance details"):
         st.dataframe(
