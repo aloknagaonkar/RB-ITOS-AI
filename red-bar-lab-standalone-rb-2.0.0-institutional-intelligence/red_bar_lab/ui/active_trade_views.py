@@ -7,6 +7,11 @@ from zoneinfo import ZoneInfo
 
 import streamlit as st
 
+from red_bar_lab.ui.strategy_attribution import (
+    RSI_STRATEGY_SOURCE,
+    build_strategy_attribution,
+)
+
 
 ARCHIVED_STATUSES = {"ARCHIVED", "DUPLICATE", "DUPLICATE_TRADE"}
 ACTIVE_QUEUE_STATUSES = {
@@ -193,6 +198,43 @@ def _compact_trade_rows(rows: list[dict[str, object]]) -> list[dict[str, object]
         }
         for row in rows
     ]
+
+
+def _safe_checkpoint(database, order: dict[str, object]):
+    horizon = int(order.get("evaluation_horizon_minutes") or 0)
+    order_id = str(order.get("order_id") or "")
+    if not order_id or horizon <= 0:
+        return None
+    try:
+        return database.read_paper_trade_checkpoint(
+            order_id=order_id,
+            horizon_minutes=horizon,
+        )
+    except Exception:
+        return None
+
+
+def _safe_latest_telemetry(database, order_id: str):
+    try:
+        return database.read_latest_option_execution_telemetry(order_id)
+    except Exception:
+        return None
+
+
+def _attribution_rows(database, orders: list[dict[str, object]]):
+    rows = []
+    for order in orders:
+        rows.append(
+            build_strategy_attribution(
+                order,
+                _safe_checkpoint(database, order),
+                _safe_latest_telemetry(
+                    database,
+                    str(order.get("order_id") or ""),
+                ),
+            )
+        )
+    return rows
 
 
 def _compact_exit_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -385,6 +427,61 @@ def render_current_trades(database) -> None:
         st.info("No open paper trades.")
 
 
+@_fragment("5s")
+def render_strategy_attribution(database) -> None:
+    orders = list(database.read_paper_execution_orders("PAPER-STD") or [])
+    rsi_orders = [
+        row
+        for row in orders
+        if str(row.get("execution_strategy_source") or "")
+        == RSI_STRATEGY_SOURCE
+    ]
+    rsi_orders.sort(
+        key=lambda row: str(row.get("entry_timestamp") or ""),
+        reverse=True,
+    )
+
+    st.markdown("### Strategy Attribution")
+    st.caption(
+        "Execution identity, frozen policy, T+15 observation and option/OI "
+        "telemetry. Telemetry remains observational and cannot veto entries "
+        "or trigger exits."
+    )
+    if not rsi_orders:
+        st.info("No RSI Extreme Reversal paper trades recorded yet.")
+        return
+
+    for item in _attribution_rows(database, rsi_orders[:10]):
+        with st.container(border=True):
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Strategy", item["strategy"])
+            c2.metric("Contract", item["contract"] or "Not available")
+            c3.metric("Checkpoint", item["checkpoint_status"])
+            c4.metric("Option Telemetry", item["telemetry_status"])
+
+            st.markdown(
+                f"**Execution policy:** {item['exit_policy']}  \n"
+                f"**Exit mode:** {item['exit_mode']}  \n"
+                f"**Telemetry authority:** {item['telemetry_authority']}  \n"
+                f"**Checkpoint detail:** {item['checkpoint_detail']}  \n"
+                f"**Option/OI detail:** {item['telemetry_detail']}"
+            )
+            with st.expander("Signal trace", expanded=False):
+                st.write(
+                    {
+                        "Order": item["order_id"],
+                        "Strategy source": item["strategy_source"],
+                        "RSI signal": item["rsi_signal_id"]
+                        or "Not recorded",
+                        "RSI confirmation": (
+                            item["rsi_confirmation_timestamp"]
+                            or "Not recorded"
+                        ),
+                        "Merge status": item["merge_status"],
+                    }
+                )
+
+
 @_fragment("10s")
 def render_candidates_and_queue(database, trading_date: str) -> None:
     ranking_history = _safe_ranking(database, trading_date)
@@ -468,6 +565,7 @@ def build_paper_page_wrapper(original):
 
         render_trading_overview(proxy, instrument_key, trading_date)
         render_current_trades(proxy)
+        render_strategy_attribution(proxy)
         render_candidates_and_queue(proxy, trading_date)
         render_recent_exits(proxy)
 
