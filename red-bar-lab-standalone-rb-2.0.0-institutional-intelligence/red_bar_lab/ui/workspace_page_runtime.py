@@ -58,6 +58,12 @@ def _configure_strategy_cache(page: str, module: ModuleType) -> None:
     )
 
     module._read_cached_candles = read_cached_strategy_candles
+    if page == "RSI Extreme Reversal":
+        from red_bar_lab.ui.rsi_decision_trace_alignment import (
+            install_rsi_decision_trace_alignment,
+        )
+
+        install_rsi_decision_trace_alignment(module)
     module.render_page = build_strategy_query_cache_wrapper(module.render_page)
     module.render_page = build_execution_source_gate_page_wrapper(module, page)
 
