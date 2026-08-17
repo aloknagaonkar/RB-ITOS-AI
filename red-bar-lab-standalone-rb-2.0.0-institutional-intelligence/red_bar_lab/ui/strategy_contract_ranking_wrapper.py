@@ -31,10 +31,39 @@ from red_bar_lab.ui.strategy_contract_selection_audit import (
     render_selection_audit,
 )
 from red_bar_lab.ui.strategy_execution_source_gate import POLICIES, build_execution_source_gate
+from red_bar_lab.ui.strategy_risk_readiness import (
+    build_risk_readiness,
+    render_risk_readiness,
+)
+
+
+def _candidate_copy_with_contract_price(candidate_result, ranking):
+    """Enrich the Section 7 input copy without mutating Section 6 candidate records."""
+    result = dict(candidate_result or {})
+    selected = [dict(row) for row in (ranking.get("selected_rows") or [])]
+    by_identity = {
+        (
+            str(row.get("instrument_key") or row.get("instrument_token") or ""),
+            str(row.get("ranking_decision") or ""),
+        ): row
+        for row in selected
+    }
+    candidates = []
+    for raw in result.get("candidates") or []:
+        candidate = dict(raw)
+        key = (
+            str(candidate.get("instrument_key") or candidate.get("instrument_token") or ""),
+            str(candidate.get("role") or ""),
+        )
+        source = by_identity.get(key, {})
+        candidate["ltp"] = candidate.get("ltp") if candidate.get("ltp") is not None else source.get("ltp")
+        candidates.append(candidate)
+    result["candidates"] = candidates
+    return result
 
 
 def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
-    """Append read-only Sections 5B-5E and Sections 6A-6C after Section 5A."""
+    """Append read-only Sections 5B-5E, 6A-6C and Section 7 after Section 5A."""
     policy = POLICIES[page]
     ranking_policy = RANKING_POLICIES[policy.strategy_id]
     safeguard_policy = SAFEGUARD_POLICIES[policy.strategy_id]
@@ -128,6 +157,16 @@ def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
             evaluation_timestamp=evaluation_timestamp,
         )
         render_candidate_readiness(candidate_result)
+
+        risk_context = kwargs.get("account_risk_context")
+        if not isinstance(risk_context, Mapping):
+            risk_context = {}
+        risk_input = _candidate_copy_with_contract_price(candidate_result, ranking)
+        risk_result = build_risk_readiness(
+            risk_input,
+            risk_context=risk_context,
+        )
+        render_risk_readiness(risk_result)
         return result
 
     setattr(module, policy.builder_name, capture_resolution)
