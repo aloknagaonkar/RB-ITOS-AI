@@ -36,6 +36,13 @@ _PAGE_MODULE_PATHS = {
     "Intelligence": "red_bar_lab.ui.pages.intelligence",
 }
 
+_CACHED_CANDLE_PAGES = frozenset(
+    {
+        "Red Bar Strategy",
+        "RSI Extreme Reversal",
+        "Directional Regime Intelligence",
+    }
+)
 _PAGE_MODULE_CACHE: dict[str, ModuleType] = {}
 _CONFIGURED_PAGE_MODULES: set[str] = set()
 
@@ -53,6 +60,15 @@ def _research_option_sync_factory(provider, layout, historical, database=None):
         database=database,
     )
     return HistoricalDRIResearchReadinessService(base_sync, historical)
+
+
+def _configure_strategy_candle_cache(module: ModuleType) -> None:
+    """Install the metadata-keyed candle reader on strategy pages only."""
+    from red_bar_lab.ui.strategy_candle_cache import (
+        read_cached_strategy_candles,
+    )
+
+    module._read_cached_candles = read_cached_strategy_candles
 
 
 def _configure_paper_trading(module: ModuleType) -> None:
@@ -107,6 +123,8 @@ def _configure_page(page: str, module: ModuleType) -> None:
     """Apply each page's existing integration hooks once, after lazy import."""
     if page in _CONFIGURED_PAGE_MODULES:
         return
+    if page in _CACHED_CANDLE_PAGES:
+        _configure_strategy_candle_cache(module)
     if page == "Paper Trading":
         _configure_paper_trading(module)
     elif page == "Research Lab":
