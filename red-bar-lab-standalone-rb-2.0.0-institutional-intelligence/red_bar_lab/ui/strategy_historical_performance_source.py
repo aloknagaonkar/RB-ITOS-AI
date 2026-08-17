@@ -3,6 +3,8 @@ from __future__ import annotations
 import math
 from typing import Mapping, Sequence
 
+from red_bar_lab.ui.strategy_history_coverage import build_history_coverage
+
 
 _SOURCE_VERSION = "PAPER-EXECUTION-HISTORY-ADAPTER-V1"
 
@@ -87,38 +89,32 @@ def normalize_completed_trades(rows: Sequence[Mapping[str, object]] | None) -> l
     return normalized
 
 
+def _unavailable(reason: str) -> dict[str, object]:
+    records: list[dict[str, object]] = []
+    return {
+        "source_status": "UNAVAILABLE",
+        "source_reason": reason,
+        "source_adapter_version": _SOURCE_VERSION,
+        "records": records,
+        "coverage": build_history_coverage(records),
+        "source_read_only": True,
+    }
+
+
 def load_completed_trade_history(database, *, account_id: str = "PAPER-STD") -> dict[str, object]:
     """Read completed paper trades through the database's established read API."""
     reader = getattr(database, "read_paper_execution_orders", None) if database is not None else None
     if reader is None:
-        return {
-            "source_status": "UNAVAILABLE",
-            "source_reason": "READ_PAPER_EXECUTION_ORDERS_UNAVAILABLE",
-            "source_adapter_version": _SOURCE_VERSION,
-            "records": [],
-            "source_read_only": True,
-        }
+        return _unavailable("READ_PAPER_EXECUTION_ORDERS_UNAVAILABLE")
     try:
         raw = reader(account_id)
     except TypeError:
         try:
             raw = reader()
         except Exception as exc:
-            return {
-                "source_status": "UNAVAILABLE",
-                "source_reason": f"HISTORY_READ_FAILED:{type(exc).__name__}",
-                "source_adapter_version": _SOURCE_VERSION,
-                "records": [],
-                "source_read_only": True,
-            }
+            return _unavailable(f"HISTORY_READ_FAILED:{type(exc).__name__}")
     except Exception as exc:
-        return {
-            "source_status": "UNAVAILABLE",
-            "source_reason": f"HISTORY_READ_FAILED:{type(exc).__name__}",
-            "source_adapter_version": _SOURCE_VERSION,
-            "records": [],
-            "source_read_only": True,
-        }
+        return _unavailable(f"HISTORY_READ_FAILED:{type(exc).__name__}")
     raw_rows = [dict(row) for row in (raw or []) if isinstance(row, Mapping)]
     records = normalize_completed_trades(raw_rows)
     return {
@@ -128,5 +124,6 @@ def load_completed_trade_history(database, *, account_id: str = "PAPER-STD") -> 
         "raw_row_count": len(raw_rows),
         "normalized_row_count": len(records),
         "records": records,
+        "coverage": build_history_coverage(records),
         "source_read_only": True,
     }
