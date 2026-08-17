@@ -17,6 +17,10 @@ class FakeDatabase:
 
 def test_reference_signals_enabled_by_default(tmp_path, monkeypatch):
     monkeypatch.delenv(
+        "RB_ENABLE_RED_BAR_STRATEGY",
+        raising=False,
+    )
+    monkeypatch.delenv(
         "RB_ENABLE_REFERENCE_LEVEL_SIGNALS",
         raising=False,
     )
@@ -32,6 +36,10 @@ def test_reference_signals_disabled_in_dri_only_mode(
     tmp_path,
     monkeypatch,
 ):
+    monkeypatch.delenv(
+        "RB_ENABLE_RED_BAR_STRATEGY",
+        raising=False,
+    )
     monkeypatch.setenv(
         "RB_ENABLE_REFERENCE_LEVEL_SIGNALS",
         "false",
