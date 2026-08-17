@@ -2,6 +2,15 @@ from red_bar_lab.ui._shared import *
 from red_bar_lab.ui.strategy_option_context import build_option_behaviour_snapshot
 from red_bar_lab.ui.strategy_input_preparation import prepare_completed_one_minute
 from red_bar_lab.ui.strategy_setup_detection import build_red_bar_setup_state
+from red_bar_lab.ui.strategy_section_summary import (
+    elapsed_ms,
+    latest_frame_timestamp,
+    latest_timestamp,
+    render_option_positioning_summary,
+    render_timing_caption,
+    section_timer,
+    timing_rows,
+)
 
 
 def _read_cached_candles(layout, instrument_key, trading_date):
@@ -26,12 +35,12 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         "Trading date", value=date.today(), key="red_bar_strategy_date"
     )
     trading_date = selected_date.isoformat()
+
+    section1_started = section_timer()
     candle_path, candles = _read_cached_candles(layout, instrument_key, trading_date)
     prepared_candles = prepare_completed_one_minute(candles, trading_date)
     levels = database.read_reference_levels(instrument_key, trading_date)
-    option_context = build_option_behaviour_snapshot(
-        database, instrument_key, trading_date
-    )
+    option_context = build_option_behaviour_snapshot(database, instrument_key, trading_date)
     red_refs = [
         row for row in levels
         if str(row.get("level_type") or "") == "NEXT_RED_CANDLE"
@@ -47,6 +56,13 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     readiness = "READY" if normalized_ready and reference_ready else (
         "PARTIAL" if normalized_ready else "NOT READY"
     )
+    section1_refreshed = latest_timestamp(
+        latest_frame_timestamp(prepared_candles),
+        option_context.get("latest_timestamp"),
+        red_ref.get("source_timestamp"),
+        red_ref.get("updated_at"),
+    )
+    section1_ms = elapsed_ms(section1_started)
 
     st.markdown("### 1. Data & Feature Preparation")
     a1, a2, a3, a4 = st.columns(4)
@@ -61,72 +77,66 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     c2.metric("OHLC normalized", "YES" if normalized_ready else "NO")
     c3.metric("Red Bar reference", "READY" if reference_ready else "PENDING")
 
-    st.markdown("#### Post-collection preparation flow")
-    st.code(
-        "1-minute candles collected\n"
-        "-> Session candles normalized\n"
-        "-> Opening and previous-session context loaded\n"
-        "-> Red candle candidates evaluated\n"
-        "-> NEXT_RED_CANDLE reference calculated\n"
-        "-> High, low and midpoint persisted\n"
-        "-> Stored option behaviour added as supporting evidence",
-        language=None,
-    )
+    render_option_positioning_summary(st, option_context.get("directional_bias"))
+    render_timing_caption(st, refreshed_at=section1_refreshed, prepared_ms=section1_ms)
 
     rows = [
-        {
-            "stage": "Collected candle file",
-            "status": "AVAILABLE" if candle_path.exists() else "MISSING",
-            "detail": str(candle_path),
-        },
-        {
-            "stage": "Required OHLC columns",
-            "status": "READY" if candle_columns_ready else "MISSING",
-            "detail": ", ".join(sorted(required_columns)),
-        },
-        {
-            "stage": "Session candle normalization",
-            "status": "READY" if normalized_ready else "NOT READY",
-            "detail": f"raw={raw_candle_count}; completed_valid={candle_count}",
-        },
-        {
-            "stage": "NEXT_RED_CANDLE reference",
-            "status": "READY" if reference_ready else "PENDING",
-            "detail": str(red_ref.get("source_timestamp") or "Not detected/persisted"),
-        },
+        {"stage": "Collected candle file", "status": "AVAILABLE" if candle_path.exists() else "MISSING", "detail": str(candle_path)},
+        {"stage": "Required OHLC columns", "status": "READY" if candle_columns_ready else "MISSING", "detail": ", ".join(sorted(required_columns))},
+        {"stage": "Session candle normalization", "status": "READY" if normalized_ready else "NOT READY", "detail": f"raw={raw_candle_count}; completed_valid={candle_count}"},
+        {"stage": "NEXT_RED_CANDLE reference", "status": "READY" if reference_ready else "PENDING", "detail": str(red_ref.get("source_timestamp") or "Not detected/persisted")},
         {
             "stage": "Reference geometry",
             "status": "READY" if reference_ready else "PENDING",
             "detail": (
-                f"High={red_ref.get('source_high')}, "
-                f"Low={red_ref.get('source_low')}, "
+                f"High={red_ref.get('source_high')}, Low={red_ref.get('source_low')}, "
                 f"Midpoint={red_ref.get('level_value') or red_ref.get('midpoint')}"
                 if reference_ready else "Awaiting Red Bar reference"
             ),
         },
     ]
-    st.dataframe(_arrow_safe_rows(rows), width="stretch", hide_index=True)
-
-    st.markdown("#### Option Behaviour Inputs")
-    st.caption(
-        "Option-chain evidence confirms or contradicts the Red Bar price direction. "
-        "It does not replace the midpoint-cross authority."
-    )
     option_rows = option_context.get("rows") or []
-    if option_rows:
-        st.dataframe(_arrow_safe_rows(option_rows), width="stretch", hide_index=True)
-    else:
-        st.warning(str(option_context.get("detail") or "Option context is unavailable."))
+
+    with st.expander("View candle and feature preparation details"):
+        st.dataframe(_arrow_safe_rows(rows), width="stretch", hide_index=True)
+
+    with st.expander("View option behaviour details"):
+        if option_rows:
+            st.dataframe(_arrow_safe_rows(option_rows), width="stretch", hide_index=True)
+        else:
+            st.warning(str(option_context.get("detail") or "Option context is unavailable."))
+
+    with st.expander("View refresh and performance details"):
+        st.dataframe(
+            _arrow_safe_rows(timing_rows(
+                section_name="Section 1 preparation",
+                refreshed_at=section1_refreshed,
+                prepared_ms=section1_ms,
+            )),
+            width="stretch",
+            hide_index=True,
+        )
+
+    with st.expander("View preparation flow"):
+        st.code(
+            "1-minute candles collected\n"
+            "-> Session candles normalized\n"
+            "-> Opening and previous-session context loaded\n"
+            "-> Red candle candidates evaluated\n"
+            "-> NEXT_RED_CANDLE reference calculated\n"
+            "-> High, low and midpoint persisted\n"
+            "-> Stored option behaviour added as supporting evidence",
+            language=None,
+        )
 
     if readiness == "READY":
         st.success("Red Bar strategy inputs are prepared for setup detection.")
     elif readiness == "PARTIAL":
-        st.warning(
-            "Candle inputs are available, but the NEXT_RED_CANDLE reference is not yet persisted."
-        )
+        st.warning("Candle inputs are available, but the NEXT_RED_CANDLE reference is not yet persisted.")
     else:
         st.error("Red Bar input preparation cannot start until cached 1-minute OHLC data is available.")
 
+    section2_started = section_timer()
     setup = build_red_bar_setup_state(
         database,
         instrument_key,
@@ -134,6 +144,17 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         reference=red_ref,
         option_bias=option_context.get("directional_bias"),
     )
+    section2_refreshed = latest_timestamp(
+        red_ref.get("source_timestamp"),
+        red_ref.get("updated_at"),
+        *[
+            row.get("observed")
+            for row in setup.get("rows", [])
+            if row.get("observed") not in (None, "", "Not persisted", "Unavailable", "Not detected", "Not confirmed")
+        ],
+    )
+    section2_ms = elapsed_ms(section2_started)
+
     st.markdown("### 2. Strategy State & Setup Detection")
     st.caption(
         "Read-only trace of reference creation, midpoint crossing and confirmation. "
@@ -146,7 +167,21 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     s4.metric("Option alignment", setup["option_alignment"])
     st.write(f"**Waiting for:** {setup['waiting_for']}")
     st.write(f"**Current blocker:** {setup['blocker']}")
-    st.dataframe(_arrow_safe_rows(setup["rows"]), width="stretch", hide_index=True)
+    render_timing_caption(st, refreshed_at=section2_refreshed, prepared_ms=section2_ms)
+
+    with st.expander("View condition-by-condition trace"):
+        st.dataframe(_arrow_safe_rows(setup["rows"]), width="stretch", hide_index=True)
+
+    with st.expander("View Section 2 refresh and performance details"):
+        st.dataframe(
+            _arrow_safe_rows(timing_rows(
+                section_name="Section 2 setup trace",
+                refreshed_at=section2_refreshed,
+                prepared_ms=section2_ms,
+            )),
+            width="stretch",
+            hide_index=True,
+        )
 
     st.info(
         "This page does not run detection, alter reference levels, fetch new option data, or change execution behavior."
