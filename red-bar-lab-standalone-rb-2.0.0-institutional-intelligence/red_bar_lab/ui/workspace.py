@@ -19,10 +19,12 @@ from red_bar_lab.ui.workspace_page_runtime import (
 
 
 # Compatibility contracts retained for architecture tests and audit searches:
+# operations_center,
 # paper_trading.RedBarPaperAutomationService = AttributionAwarePaperAutomationService
 # paper_trading._render_candidate_workbench_fragment = build_candidate_workbench_wrapper(...)
 # paper_trading._render_paper_exit_engine_panel = build_paper_exit_panel_wrapper(...)
 # shadow_directional_diagnostics,
+# "Shadow Directional": shadow_directional_diagnostics
 
 install_paper_time_display()
 shared_ui.PaperExitEngine = PaperExitEngine
