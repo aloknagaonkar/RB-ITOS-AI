@@ -23,6 +23,8 @@ from red_bar_lab.ui.workspace_page_runtime import (
 # paper_trading.RedBarPaperAutomationService = AttributionAwarePaperAutomationService
 # paper_trading._render_candidate_workbench_fragment = build_candidate_workbench_wrapper(...)
 # paper_trading._render_paper_exit_engine_panel = build_paper_exit_panel_wrapper(...)
+# live_trading,
+# intelligence,
 # shadow_directional_diagnostics,
 # "Shadow Directional": shadow_directional_diagnostics
 
