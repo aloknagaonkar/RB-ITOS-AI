@@ -4,15 +4,17 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from red_bar_lab.execution.bundles import build_rsi_reversal_bundle
+from red_bar_lab.execution.bundles import RSI_EXTREME_REVERSAL, build_rsi_reversal_bundle
 from red_bar_lab.execution.rsi_extreme_reversal import RsiExtremeReversalEngine
+from red_bar_lab.ui.strategy_bundle_lifecycle import (
+    CONSUMING_STATES,
+    consumed_contract_keys,
+    read_scoped_execution_events,
+    strategy_owned,
+)
 
 IST = ZoneInfo("Asia/Kolkata")
 RSI_SOURCE = "RSI_EXTREME_REVERSAL_V1"
-CONSUMING_STATES = {
-    "QUEUED", "APPROVED", "ORDER_OPENED", "POSITION_OPENED", "EXECUTED",
-    "FILLED", "OPEN", "CLOSED", "EXITED", "COMPLETE", "COMPLETED",
-}
 
 
 def _text(value: object) -> str:
@@ -44,38 +46,27 @@ def _as_ist(value: object) -> pd.Timestamp | None:
         return None
 
 
-def _execution_events(database, signal_id: str) -> list[dict[str, object]]:
-    if not signal_id or not hasattr(database, "read_execution_state_events"):
-        return []
-    try:
-        return list(database.read_execution_state_events(signal_id=signal_id, limit=200) or [])
-    except Exception:
-        return []
-
-
-def _consumed_slots(database, signal_id: str) -> tuple[int, list[dict[str, str]]]:
-    events = _execution_events(database, signal_id)
-    consumed_keys: set[str] = set()
-    rows: list[dict[str, str]] = []
-    for index, event in enumerate(events, start=1):
-        state = str(event.get("state") or event.get("status") or "").upper()
-        contract_key = str(
-            event.get("instrument_key")
-            or event.get("instrument_token")
-            or event.get("tradingsymbol")
-            or event.get("order_id")
-            or f"event-{index}"
-        )
-        consumes = state in CONSUMING_STATES
-        if consumes:
-            consumed_keys.add(contract_key)
-        rows.append({
-            "state": state or "Unavailable",
-            "contract_or_order": contract_key,
-            "consumes_slot": "YES" if consumes else "NO",
-            "timestamp": _text(event.get("timestamp")),
-        })
-    return min(2, len(consumed_keys)), rows
+def _not_ready(reason: str) -> dict[str, object]:
+    return {
+        "signal_state": "NOT AVAILABLE",
+        "normalized_intent": "OBSERVE / WAIT",
+        "bundle_state": "NOT CREATED",
+        "final_outcome": "OBSERVE",
+        "signal_id": "Not created",
+        "bundle_id": "Not created",
+        "strategy_owner": "RSI Extreme Reversal",
+        "signal_age": "Unavailable",
+        "entry_capacity": "0 of 2 consumed",
+        "next_step": "Wait for a confirmed RSI reversal signal.",
+        "raw_rows": [],
+        "normalization_rows": [],
+        "freshness_rows": [],
+        "bundle_rows": [],
+        "lifecycle_rows": [],
+        "decision_reason": reason,
+        "applied_rule": "Armed or incomplete RSI states do not create a bundle.",
+        "refreshed_at": None,
+    }
 
 
 def build_rsi_signal_resolution(
@@ -92,29 +83,24 @@ def build_rsi_signal_resolution(
     ]
     signal = _latest(signals, ("confirmation_timestamp", "detected_at"))
     if not signal:
-        return {
-            "signal_state": "NOT AVAILABLE",
-            "normalized_intent": "OBSERVE / WAIT",
-            "bundle_state": "NOT CREATED",
-            "final_outcome": "OBSERVE",
-            "signal_id": "Not created",
-            "bundle_id": "Not created",
-            "strategy_owner": "RSI Extreme Reversal",
-            "signal_age": "Unavailable",
-            "entry_capacity": "0 of 2 consumed",
-            "next_step": "Wait for a confirmed RSI reversal signal.",
-            "raw_rows": [],
-            "normalization_rows": [],
-            "freshness_rows": [],
-            "bundle_rows": [],
-            "lifecycle_rows": [],
-            "decision_reason": "No confirmed RSI reversal signal is available.",
-            "applied_rule": "Armed or incomplete RSI states do not create a bundle.",
-            "refreshed_at": None,
-        }
+        return _not_ready("No confirmed RSI reversal signal is available.")
 
-    signal_id = str(signal.get("signal_id") or "")
-    consumed_slots, lifecycle_rows = _consumed_slots(database, signal_id)
+    try:
+        preview = build_rsi_reversal_bundle(
+            signal,
+            instrument_key=instrument_key,
+            entry_slots_consumed=0,
+        )
+    except ValueError as exc:
+        return _not_ready(str(exc))
+
+    events = read_scoped_execution_events(
+        database,
+        strategy_id=RSI_EXTREME_REVERSAL,
+        bundle_id=preview.bundle_id,
+        signal_id=preview.primary_signal_id,
+    )
+    consumed_slots = min(2, len(consumed_contract_keys(events)))
     bundle = build_rsi_reversal_bundle(
         signal,
         instrument_key=instrument_key,
@@ -129,21 +115,21 @@ def build_rsi_signal_resolution(
     attempts = list(database.read_signal_attempts(instrument_key, trading_date) or [])
     matching_rsi = [
         row for row in attempts
-        if str(row.get("signal_id") or "") == signal_id
-        and str(row.get("signal_source") or row.get("source") or RSI_SOURCE).upper() == RSI_SOURCE
+        if str(row.get("signal_id") or "") == bundle.primary_signal_id
+        and strategy_owned(row, RSI_EXTREME_REVERSAL)
     ]
     duplicate = len(matching_rsi) > 1
 
     if duplicate:
         lifecycle_state = "DUPLICATE"
         final_outcome = "HOLD"
-        reason = "The same RSI stable signal identity appears more than once in RSI-owned records."
+        reason = "The same RSI stable signal identity appears more than once in explicitly RSI-owned records."
         rule = "Deduplication is scoped to RSI_EXTREME_REVERSAL plus canonical event identity."
     elif consumed_slots >= bundle.entry_slots_allowed:
         lifecycle_state = "CONSUMED"
         final_outcome = "HOLD"
-        reason = "Both RSI contract-entry slots have been consumed."
-        rule = "One RSI bundle allows two independently executable contracts."
+        reason = "Both RSI contract-entry slots have been consumed by this RSI bundle."
+        rule = "Consumption is scoped by strategy ID, bundle ID and contract identity."
     elif not fresh:
         lifecycle_state = "STALE"
         final_outcome = "HOLD"
@@ -152,7 +138,7 @@ def build_rsi_signal_resolution(
     elif consumed_slots == 1:
         lifecycle_state = "PARTIALLY_CONSUMED"
         final_outcome = "FORWARD"
-        reason = "One RSI entry slot remains available for contract selection."
+        reason = "One RSI entry slot remains available for this RSI bundle."
         rule = "RSI bundle capacity progresses 0/2 → 1/2 → 2/2."
     else:
         lifecycle_state = "FRESH"
@@ -160,13 +146,29 @@ def build_rsi_signal_resolution(
         reason = "A fresh RSI-owned bundle has two available contract-entry slots."
         rule = "Only confirmed RSI reversal evidence is included in this bundle."
 
+    lifecycle_rows = [
+        {
+            "state": str(event.get("state") or event.get("status") or "Unavailable"),
+            "bundle_id": _text(event.get("bundle_id")),
+            "contract_or_order": _text(
+                event.get("contract_instrument_key") or event.get("instrument_key")
+                or event.get("instrument_token") or event.get("tradingsymbol")
+                or event.get("order_id")
+            ),
+            "consumes_slot": "YES" if str(event.get("state") or event.get("status") or "").upper() in CONSUMING_STATES else "NO",
+            "ownership_scope": _text(event.get("ownership_scope")),
+            "timestamp": _text(event.get("timestamp")),
+        }
+        for event in events
+    ]
     raw_rows = [
-        {"field": "Signal ID", "value": signal_id or "Unavailable"},
+        {"field": "Signal ID", "value": bundle.primary_signal_id or "Unavailable"},
         {"field": "Source engine", "value": RSI_SOURCE},
         {"field": "Detection timestamp", "value": _text(signal.get("detected_at"))},
         {"field": "Direction", "value": bundle.direction},
         {"field": "RSI armed value", "value": _text(signal.get("rsi_armed_value"))},
         {"field": "RSI confirmation value", "value": _text(signal.get("rsi_confirmation_value"))},
+        {"field": "Cross-back timestamp", "value": _text(signal.get("rsi_crossback_timestamp") or signal.get("confirmation_timestamp"))},
         {"field": "Signal age", "value": f"{age_seconds:.1f} seconds" if age_seconds is not None else "Unavailable"},
     ]
     normalization_rows = [
@@ -180,7 +182,7 @@ def build_rsi_signal_resolution(
     freshness_rows = [
         {"check": "Bundle created from confirmed RSI signal", "status": "PASS", "detail": bundle.detected_at},
         {"check": "Within recorded fresh-until", "status": "PASS" if fresh else "WAIT", "detail": bundle.fresh_until},
-        {"check": "Duplicate within RSI strategy", "status": "YES" if duplicate else "NO", "detail": f"RSI-owned matches={len(matching_rsi)}"},
+        {"check": "Duplicate within RSI strategy", "status": "YES" if duplicate else "NO", "detail": f"Explicit RSI-owned matches={len(matching_rsi)}"},
         {"check": "Entry slots remaining", "status": str(bundle.entry_slots_allowed - consumed_slots), "detail": f"{consumed_slots} of {bundle.entry_slots_allowed} consumed"},
     ]
     bundle_rows = [
@@ -203,7 +205,7 @@ def build_rsi_signal_resolution(
         "normalized_intent": f"BUY {bundle.option_side}",
         "bundle_state": lifecycle_state,
         "final_outcome": final_outcome,
-        "signal_id": signal_id or "Not created",
+        "signal_id": bundle.primary_signal_id or "Not created",
         "bundle_id": bundle.bundle_id,
         "strategy_owner": "RSI Extreme Reversal",
         "signal_age": f"{age_seconds:.1f} sec" if age_seconds is not None else "Unavailable",
