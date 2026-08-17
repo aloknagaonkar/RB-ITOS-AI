@@ -103,6 +103,31 @@ def test_version_mismatch_does_not_enter_exact_or_versioned_tier():
     assert row["historical"]["sample_count"] == 20
 
 
+def test_coverage_diagnostics_are_propagated_without_changing_outcome():
+    result = build_opportunity_history_gate(
+        {"candidates": [_candidate()]},
+        opportunity_context=_opportunity(),
+        historical_records=[_record() for _ in range(20)],
+        history_source={
+            "source_status": "READY",
+            "source_reason": "COMPLETED_TRADES_NORMALIZED",
+            "coverage": {
+                "coverage_status": "PARTIAL",
+                "matching_readiness": "PARTIAL_VERSIONED_MATCHING",
+                "excursion_readiness": "PARTIAL_MFE_MAE",
+                "missing_fields": ["mfe_points"],
+            },
+        },
+    )
+    row = result["rows"][0]
+    assert row["historical_outcome"] == "PASS"
+    assert row["history_coverage_status"] == "PARTIAL"
+    assert row["history_matching_readiness"] == "PARTIAL_VERSIONED_MATCHING"
+    assert row["history_excursion_readiness"] == "PARTIAL_MFE_MAE"
+    assert row["history_missing_fields"] == ["mfe_points"]
+    assert result["history_coverage"]["coverage_status"] == "PARTIAL"
+
+
 def test_v2_gate_remains_read_only():
     row = _build(_candidate(), [])
     assert row["persisted"] is False
