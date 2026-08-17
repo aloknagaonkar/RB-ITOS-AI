@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from red_bar_lab.ui.strategy_opportunity_history_gate import (
     build_opportunity_history_gate,
     forward_candidates_for_risk,
@@ -67,9 +69,9 @@ def test_opportunity_passes_with_positive_cost_adjusted_edge():
     )
     row = result["rows"][0]
     assert row["opportunity_outcome"] == "PASS"
-    assert row["opportunity"]["initial_risk"] == 3.0
-    assert row["opportunity"]["effective_risk"] == 3.7
-    assert row["opportunity"]["expected_net_edge"] == 4.8
+    assert row["opportunity"]["initial_risk"] == pytest.approx(3.0)
+    assert row["opportunity"]["effective_risk"] == pytest.approx(3.7)
+    assert row["opportunity"]["expected_net_edge"] == pytest.approx(4.8)
     assert row["combined_outcome"] == "FORWARD_WITHOUT_HISTORICAL_SUPPORT"
 
 
