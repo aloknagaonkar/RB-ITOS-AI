@@ -20,6 +20,7 @@ from red_bar_lab.ui.paper_consistency import (
 from red_bar_lab.ui._shared import *
 from red_bar_lab.ui.pages import (
     committee_diagnostics,
+    directional_regime_strategy,
     historical_intelligence,
     institutional_intelligence,
     intelligence,
@@ -32,7 +33,9 @@ from red_bar_lab.ui.pages import (
     performance_diagnostics,
     previous_session_context,
     red_bar_diagnostics,
+    red_bar_strategy,
     research_lab,
+    rsi_extreme_reversal_strategy,
     shadow_directional_diagnostics,
     signal_explorer,
     trade_history,
@@ -85,6 +88,9 @@ paper_trading.render_page = build_paper_page_wrapper(paper_trading.render_page)
 
 _PAGE_MODULES = {
     "Operations Center": operations_center,
+    "Red Bar Strategy": red_bar_strategy,
+    "RSI Extreme Reversal": rsi_extreme_reversal_strategy,
+    "Directional Regime Intelligence": directional_regime_strategy,
     "Live Trading": live_trading,
     "Paper Trading": paper_trading,
     "Research Lab": research_lab,
@@ -120,7 +126,11 @@ def render(settings: RedBarSettings) -> None:
     st.sidebar.markdown("---")
     st.sidebar.subheader("Workspace")
     workspace_pages = (
-        "Operations Center", "Live Trading", "Paper Trading", "Research Lab", "Shadow Directional", "Historical Intelligence",
+        "Operations Center",
+        "Red Bar Strategy",
+        "RSI Extreme Reversal",
+        "Directional Regime Intelligence",
+        "Live Trading", "Paper Trading", "Research Lab", "Shadow Directional", "Historical Intelligence",
         "Signal Explorer", "Level Explorer", "PD Startup Readiness", "Previous Session Context", "Red Bar Diagnostics",
         "Committee Gate Trace", "Performance Hard Block Trace", "Opportunity Reward Trace",
         "Trade History", "Institutional Intelligence", "Intelligence",
