@@ -9,7 +9,7 @@ from typing import Mapping, Sequence
 from uuid import uuid4
 
 
-SHADOW_EVALUATION_JOURNAL_VERSION = "SHADOW-EVALUATION-JOURNAL-V1"
+SHADOW_EVALUATION_JOURNAL_VERSION = "SHADOW-EVALUATION-JOURNAL-V2"
 _LOCK = RLock()
 
 
@@ -19,15 +19,7 @@ def _journal_path(runs_root: Path | str) -> Path:
     return path
 
 
-def append_evaluation_cycle(
-    runs_root: Path | str,
-    row: Mapping[str, object],
-) -> dict[str, object]:
-    """Append one restart-safe architecture evaluation cycle.
-
-    The journal is audit-only. It does not reserve capital, consume bundles,
-    create positions, mutate execution queues, or submit orders.
-    """
+def append_evaluation_cycle(runs_root: Path | str, row: Mapping[str, object]) -> dict[str, object]:
     payload = deepcopy(dict(row))
     payload.setdefault("evaluation_id", f"EVAL-{uuid4().hex[:20].upper()}")
     payload.setdefault("recorded_at", datetime.now().astimezone().isoformat())
@@ -38,7 +30,6 @@ def append_evaluation_cycle(
     payload["position_created"] = False
     payload["order_created"] = False
     payload["order_submitted"] = False
-
     path = _journal_path(runs_root)
     with _LOCK:
         with path.open("a", encoding="utf-8") as handle:
@@ -47,18 +38,14 @@ def append_evaluation_cycle(
 
 
 def read_evaluation_cycles(
-    runs_root: Path | str,
-    *,
-    limit: int = 1000,
-    strategy_id: str | None = None,
-    trading_date: str | None = None,
+    runs_root: Path | str, *, limit: int = 1000,
+    strategy_id: str | None = None, trading_date: str | None = None,
 ) -> list[dict[str, object]]:
     path = _journal_path(runs_root)
     if not path.exists():
         return []
     with _LOCK:
         lines = path.read_text(encoding="utf-8").splitlines()
-
     rows: list[dict[str, object]] = []
     for line in reversed(lines):
         try:
@@ -75,24 +62,32 @@ def read_evaluation_cycles(
     return rows
 
 
-def summarize_evaluation_cycles(
-    rows: Sequence[Mapping[str, object]],
-) -> dict[str, object]:
+def summarize_evaluation_cycles(rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
     copied = [dict(row) for row in rows]
     by_strategy: dict[str, int] = {}
     by_terminal: dict[str, int] = {}
-    routed = 0
-    healthy = 0
+    routed = healthy = 0
+    run_ids: set[str] = set()
+    legacy_run_fallback: set[str] = set()
     for row in copied:
         strategy = str(row.get("strategy_id") or "UNKNOWN")
         terminal = str(row.get("terminal_section") or "UNKNOWN")
         by_strategy[strategy] = by_strategy.get(strategy, 0) + 1
         by_terminal[terminal] = by_terminal.get(terminal, 0) + 1
+        cycle_id = str(row.get("orchestration_cycle_id") or "")
+        if cycle_id:
+            run_ids.add(cycle_id)
+        else:
+            started = str(row.get("started_at") or "")[:19]
+            if started:
+                legacy_run_fallback.add(started)
         if str(row.get("section_10d_outcome") or "") == "ROUTED_SHADOW_ONLY":
             routed += 1
         if str(row.get("section_9_outcome") or "") == "SHADOW_HANDOFF_READY_DISABLED":
             healthy += 1
     return {
+        "orchestration_run_count": len(run_ids) + len(legacy_run_fallback),
+        "strategy_evaluation_count": len(copied),
         "cycle_count": len(copied),
         "healthy_candidate_count": healthy,
         "shadow_routed_count": routed,
@@ -105,8 +100,6 @@ def summarize_evaluation_cycles(
 
 
 __all__ = [
-    "SHADOW_EVALUATION_JOURNAL_VERSION",
-    "append_evaluation_cycle",
-    "read_evaluation_cycles",
-    "summarize_evaluation_cycles",
+    "SHADOW_EVALUATION_JOURNAL_VERSION", "append_evaluation_cycle",
+    "read_evaluation_cycles", "summarize_evaluation_cycles",
 ]
