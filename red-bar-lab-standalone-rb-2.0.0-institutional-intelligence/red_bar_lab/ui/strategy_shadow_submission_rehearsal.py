@@ -10,6 +10,7 @@ from red_bar_lab.ui.strategy_live_activation_readiness import (
     build_live_activation_readiness,
     render_live_activation_readiness,
 )
+from red_bar_lab.ui.strategy_shadow_evidence_registry import record_shadow_result
 
 
 SHADOW_REHEARSAL_VERSION = "SHADOW-SUBMISSION-REHEARSAL-V1"
@@ -167,6 +168,7 @@ def build_shadow_submission_rehearsal(
 
 
 def render_shadow_submission_rehearsal(result: Mapping[str, object]) -> None:
+    record_shadow_result(result)
     st.markdown("#### 9E. Shadow Submission Rehearsal and Execution Boundary Gate")
     st.caption(
         "Rehearses the final handoff entirely in memory. It identifies the first live-action boundary "
