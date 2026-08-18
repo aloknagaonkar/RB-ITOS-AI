@@ -55,7 +55,12 @@ def _identity_complete(row: Mapping[str, object]) -> bool:
 
 
 def _admitted(row: Mapping[str, object]) -> bool:
-    return _text(row.get("new_chain_decision")).upper() == "ADMIT_READ_ONLY"
+    return bool(
+        _text(row.get("new_chain_decision")).upper() == "ADMIT_READ_ONLY"
+        or row.get("shadow_handoff_ready") is True
+        or _text(row.get("shadow_rehearsal_outcome")).upper()
+        == "SHADOW_HANDOFF_READY_DISABLED"
+    )
 
 
 def build_unified_shadow_routes(
