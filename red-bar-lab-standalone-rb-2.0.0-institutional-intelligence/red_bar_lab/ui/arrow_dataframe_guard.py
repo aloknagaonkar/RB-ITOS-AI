@@ -7,17 +7,35 @@ import pandas as pd
 
 
 _GUARD_MARKER = "_rb_arrow_dataframe_guard_installed"
+_NESTED_TYPES = (Mapping, list, tuple, set)
 
 
 def _display_text(value: object) -> str:
     if value is None:
         return ""
-    if isinstance(value, (Mapping, list, tuple, set)):
+    if isinstance(value, _NESTED_TYPES):
         try:
             return json.dumps(value, sort_keys=True, default=str)
         except (TypeError, ValueError):
             return str(value)
+    try:
+        if bool(pd.isna(value)):
+            return ""
+    except (TypeError, ValueError):
+        pass
     return str(value)
+
+
+def _is_null_scalar(value: object) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, _NESTED_TYPES):
+        return False
+    try:
+        result = pd.isna(value)
+        return bool(result) if isinstance(result, (bool, int)) else False
+    except (TypeError, ValueError):
+        return False
 
 
 def arrow_safe_frame(data: object) -> object:
@@ -41,10 +59,10 @@ def arrow_safe_frame(data: object) -> object:
 
     for column in frame.columns:
         series = frame[column]
-        non_null = [value for value in series.tolist() if value is not None and not pd.isna(value)]
+        non_null = [value for value in series.tolist() if not _is_null_scalar(value)]
         if not non_null:
             continue
-        has_nested = any(isinstance(value, (Mapping, list, tuple, set)) for value in non_null)
+        has_nested = any(isinstance(value, _NESTED_TYPES) for value in non_null)
         type_families = {
             "bool" if isinstance(value, bool)
             else "number" if isinstance(value, (int, float)) and not isinstance(value, bool)
