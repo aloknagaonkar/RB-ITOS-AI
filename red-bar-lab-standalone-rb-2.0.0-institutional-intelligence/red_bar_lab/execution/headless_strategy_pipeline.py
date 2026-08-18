@@ -122,7 +122,12 @@ def _first_blocking_terminal(result: Mapping[str, object]) -> tuple[str, str]:
         ("5C", result.get("metadata_context_5c"), ("metadata_context_status",), {"READY", "PARTIAL"}),
         ("5D", result.get("safeguarded"), ("outcome",), {"READY_FOR_RANKING"}),
         ("5E", result.get("ranking"), ("outcome",), {"SELECTED", "PARTIAL"}),
-        ("6", result.get("candidate"), ("outcome",), {"READY", "CANDIDATE_READY", "FORWARD"}),
+        (
+            "6",
+            result.get("candidate"),
+            ("outcome",),
+            {"READY", "CANDIDATE_READY", "HANDOFF_READY", "FORWARD"},
+        ),
         ("7", result.get("opportunity"), ("outcome",), {"FORWARD", "APPROVED", "READY"}),
         ("8A", result.get("risk"), ("outcome",), {"READY", "RISK_READY_READ_ONLY", "FORWARD"}),
         ("8B", result.get("portfolio"), ("outcome",), {"READY", "PORTFOLIO_READY_READ_ONLY", "FORWARD"}),
