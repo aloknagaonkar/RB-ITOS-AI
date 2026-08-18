@@ -9,17 +9,31 @@ from red_bar_lab.ui.strategy_account_admission import (
     DEFAULT_POLICY,
     _number,
     build_final_admission,
-    build_portfolio_admission,
+    build_portfolio_admission as _build_portfolio_admission_v1,
     render_account_admission as _render_account_admission_v1,
 )
-from red_bar_lab.ui.strategy_admission_priority import (
-    AdmissionPriorityPolicy,
-    DEFAULT_POLICY as DEFAULT_PRIORITY_POLICY,
-    prioritize_candidates,
-)
+from red_bar_lab.ui.strategy_admission_priority import prioritize_admission_rows
+from red_bar_lab.ui.strategy_monetary_exposure import apply_monetary_exposure_admission
 
 
-STRATEGY_RISK_PROPOSAL_VERSION = "STRATEGY-RISK-PROPOSAL-V2-PRIORITIZED"
+STRATEGY_RISK_PROPOSAL_VERSION = "STRATEGY-RISK-PROPOSAL-V1"
+
+
+def build_portfolio_admission(
+    opportunity_result: Mapping[str, object],
+    risk_result: Mapping[str, object],
+    *,
+    account_context: Mapping[str, object] | None = None,
+    policy: AccountAdmissionPolicy = DEFAULT_POLICY,
+) -> dict[str, object]:
+    """Run stable conflict admission, then add monetary concentration controls."""
+    base = _build_portfolio_admission_v1(
+        opportunity_result,
+        risk_result,
+        account_context=account_context,
+        policy=policy,
+    )
+    return apply_monetary_exposure_admission(base, account_context=account_context)
 
 
 def _strategy_limits(context: Mapping[str, object]) -> dict[str, dict[str, float | None]]:
@@ -44,7 +58,6 @@ def build_capital_reservation_proposal(
     portfolio_result: Mapping[str, object],
     *,
     account_context: Mapping[str, object] | None = None,
-    priority_policy: AdmissionPriorityPolicy = DEFAULT_PRIORITY_POLICY,
 ) -> dict[str, object]:
     """Build prioritized sequential capital proposals with independent strategy-risk budgets."""
     context = dict(account_context or {})
@@ -56,12 +69,10 @@ def build_capital_reservation_proposal(
     strategy_limits = _strategy_limits(context)
     proposed_strategy_risk: dict[str, float] = {}
     rows: list[dict[str, object]] = []
-    prioritized = prioritize_candidates(
-        list(portfolio_result.get("rows") or []),
-        policy=priority_policy,
-    )
+    prioritized = prioritize_admission_rows(portfolio_result.get("rows") or [])
 
-    for candidate in prioritized:
+    for raw in prioritized:
+        candidate = dict(raw)
         opportunity = dict(candidate.get("opportunity") or {})
         strategy_id = str(candidate.get("strategy_id") or "")
         lots = int(_number(candidate.get("proposed_lots")) or default_lots)
@@ -158,7 +169,6 @@ def build_capital_reservation_proposal(
         "capital_remaining_after_all_proposals": round(remaining, 2) if remaining is not None else None,
         "proposed_strategy_risk": {key: round(value, 2) for key, value in proposed_strategy_risk.items()},
         "strategy_risk_proposal_version": STRATEGY_RISK_PROPOSAL_VERSION,
-        "admission_priority_version": priority_policy.policy_version,
         "policy_action": "OBSERVE_ONLY",
         "persisted": False,
         "reserved": False,
@@ -173,32 +183,34 @@ def render_account_admission(
     final_result: Mapping[str, object],
 ) -> None:
     _render_account_admission_v1(portfolio_result, reservation_result, final_result)
-    rows = [dict(row) for row in reservation_result.get("rows") or []]
-    st.markdown("##### 8C.1 Deterministic Admission Allocation Priority")
+    st.markdown("#### 8B.1 Monetary Exposure and Concentration")
     st.caption(
-        "Read-only ordering used for cumulative capital and strategy-risk simulation. "
-        "It does not change strategy signals or reserve resources."
+        "Read-only CE/PE, expiry and strike concentration. Limits affect admission only when explicitly configured."
     )
-    if not rows:
-        st.info("No candidate is available for admission-priority evaluation.")
-        return
-    st.dataframe(
-        [{key: row.get(key) for key in (
-            "admission_priority_rank", "candidate_id", "strategy_id", "role",
-            "candidate_score", "ranking_score", "combined_outcome",
-            "capital_before_proposal", "capital_remaining_after_proposal",
-            "reservation_outcome", "admission_priority_reason",
-        )} for row in rows],
-        width="stretch",
-        hide_index=True,
-    )
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("CE capital", float(portfolio_result.get("ce_capital_exposure") or 0.0))
+    c2.metric("PE capital", float(portfolio_result.get("pe_capital_exposure") or 0.0))
+    c3.metric("CE risk", float(portfolio_result.get("ce_risk_exposure") or 0.0))
+    c4.metric("PE risk", float(portfolio_result.get("pe_risk_exposure") or 0.0))
+    rows = [dict(row) for row in portfolio_result.get("rows") or []]
+    if rows:
+        st.dataframe(
+            [{key: row.get(key) for key in (
+                "candidate_id", "strategy_id", "role", "contract_side",
+                "contract_exposure_key", "contract_identity_confidence",
+                "candidate_capital_exposure", "candidate_risk_exposure",
+                "projected_side_capital_exposure", "projected_side_risk_exposure",
+                "projected_expiry_capital_exposure", "projected_expiry_risk_exposure",
+                "projected_same_strike_positions", "portfolio_outcome", "portfolio_reason",
+            )} for row in rows],
+            width="stretch",
+            hide_index=True,
+        )
 
 
 __all__ = [
     "AccountAdmissionPolicy",
-    "AdmissionPriorityPolicy",
     "DEFAULT_POLICY",
-    "DEFAULT_PRIORITY_POLICY",
     "build_portfolio_admission",
     "build_capital_reservation_proposal",
     "build_final_admission",
