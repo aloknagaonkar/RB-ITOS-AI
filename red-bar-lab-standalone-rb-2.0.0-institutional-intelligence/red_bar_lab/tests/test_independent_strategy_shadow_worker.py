@@ -9,6 +9,7 @@ import pandas as pd
 
 from red_bar_lab.execution.independent_strategy_shadow_worker import (
     IndependentStrategyShadowWorker,
+    _freshness,
     evaluate_shadow_strategy_cycle,
 )
 from red_bar_lab.strategy.models import ReferenceLevel
@@ -58,9 +59,14 @@ def test_cycle_evaluates_all_three_strategies_without_production_authority():
     record = result.as_record()
     assert result.status == "READY"
     assert result.scan_identity.endswith("2026-08-18T12:24:00+05:30")
-    assert "status" in result.red_bar
+    assert result.red_bar["input_state"] == "READY"
+    assert result.red_bar["reference_level_count"] == 1
     assert "status" in result.directional_regime
+    assert "freshness_state" in result.directional_regime
     assert "status" in result.rsi_reversal
+    assert "historical_signal_count" in result.rsi_reversal
+    assert "fresh_signal_count" in result.rsi_reversal
+    assert record["evaluation_source"] == "INDEPENDENT_STRATEGY_SHADOW_WORKER"
     assert record["shadow_only"] is True
     assert record["production_persistence"] is False
     assert record["capital_reserved"] is False
@@ -69,6 +75,47 @@ def test_cycle_evaluates_all_three_strategies_without_production_authority():
     assert result.directional_regime["production_persisted"] is False
     assert result.red_bar["production_persisted"] is False
     assert result.rsi_reversal["production_persisted"] is False
+
+
+def test_cycle_reports_missing_red_bar_reference_inputs():
+    result = evaluate_shadow_strategy_cycle(
+        candles(),
+        reference_levels=[],
+        instrument_key="NSE_INDEX|Nifty 50",
+        now=pd.Timestamp("2026-08-18 12:30:30", tz="Asia/Kolkata"),
+    )
+    assert result.red_bar["status"] == "INPUT_UNAVAILABLE"
+    assert result.red_bar["input_state"] == "REFERENCE_LEVELS_UNAVAILABLE"
+    assert result.red_bar["reference_level_count"] == 0
+    assert result.red_bar["current_action"] == "WAIT_FOR_REFERENCE_LEVELS"
+
+
+def test_freshness_classifies_fresh_stale_and_future_events():
+    evaluated = pd.Timestamp("2026-08-18 10:04:00", tz="Asia/Kolkata")
+    fresh = _freshness(
+        detected_at="2026-08-18T10:00:00+05:30",
+        fresh_until="2026-08-18T10:05:00+05:30",
+        evaluated_at=evaluated,
+    )
+    stale = _freshness(
+        detected_at="2026-08-18T09:50:00+05:30",
+        fresh_until="2026-08-18T09:55:00+05:30",
+        evaluated_at=evaluated,
+    )
+    future = _freshness(
+        detected_at="2026-08-18T10:10:00+05:30",
+        fresh_until="2026-08-18T10:15:00+05:30",
+        evaluated_at=evaluated,
+    )
+
+    assert fresh["freshness_state"] == "FRESH"
+    assert fresh["fresh"] is True
+    assert fresh["current_action"] == "SHADOW_CANDIDATE"
+    assert stale["freshness_state"] == "STALE"
+    assert stale["fresh"] is False
+    assert stale["current_action"] == "OBSERVE_ONLY"
+    assert future["freshness_state"] == "FUTURE_TIMESTAMP"
+    assert future["fresh"] is False
 
 
 def test_worker_writes_separate_journal_once_and_refreshes_heartbeat(tmp_path: Path):
