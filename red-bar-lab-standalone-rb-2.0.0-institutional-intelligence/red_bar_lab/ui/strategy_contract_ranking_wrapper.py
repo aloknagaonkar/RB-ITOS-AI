@@ -32,6 +32,10 @@ from red_bar_lab.ui.strategy_candidate_readiness import (
     build_candidate_readiness,
     render_candidate_readiness,
 )
+from red_bar_lab.ui.strategy_contract_context_views import (
+    render_contract_execution_metadata_5c,
+    render_contract_market_context_5b,
+)
 from red_bar_lab.ui.strategy_contract_market_context import enrich_contract_market_context
 from red_bar_lab.ui.strategy_contract_ranking import (
     POLICIES as RANKING_POLICIES,
@@ -113,7 +117,7 @@ def _candidate_copy_with_contract_fields(candidate_result, ranking):
 
 
 def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
-    """Append read-only Sections 5B-5E, 6A-6C, 7A-7C, 8A-8D and 9A-9E after Section 5A."""
+    """Append canonical Sections 5B-5E and downstream read-only stages after 5A."""
     policy = POLICIES[page]
     ranking_policy = RANKING_POLICIES[policy.strategy_id]
     safeguard_policy = SAFEGUARD_POLICIES[policy.strategy_id]
@@ -152,6 +156,10 @@ def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
                 "bundle_timestamp": "Unavailable",
                 "snapshot_timestamp": "Unavailable",
                 "contract_rows": [],
+                "market_context_status": "UNAVAILABLE",
+                "market_context_reason": "Database or instrument context is unavailable.",
+                "metadata_context_status": "UNAVAILABLE",
+                "metadata_context_reason": "No contract metadata can be resolved.",
             }
         else:
             readiness = build_contract_data_readiness(
@@ -165,6 +173,9 @@ def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
                 database=database,
                 instrument_key=str(instrument_key),
             )
+
+        render_contract_market_context_5b(readiness)
+        render_contract_execution_metadata_5c(readiness)
 
         safeguarded = apply_contract_safeguards(readiness, policy=safeguard_policy)
         render_contract_safeguards(safeguarded)
