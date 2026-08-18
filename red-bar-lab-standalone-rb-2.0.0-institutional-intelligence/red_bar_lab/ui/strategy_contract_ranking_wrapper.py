@@ -10,7 +10,7 @@ from red_bar_lab.ui.option_chain_directional_evidence import (
 from red_bar_lab.ui.option_chain_directional_evidence_view import (
     render_option_chain_directional_evidence_5e,
 )
-from red_bar_lab.ui.strategy_account_admission import (
+from red_bar_lab.ui.strategy_account_admission_v2 import (
     build_capital_reservation_proposal,
     build_final_admission,
     build_portfolio_admission,
@@ -51,7 +51,7 @@ from red_bar_lab.ui.strategy_opportunity_history_gate_v2 import (
     forward_candidates_for_risk,
     render_opportunity_history_gate,
 )
-from red_bar_lab.ui.strategy_risk_readiness import build_risk_readiness
+from red_bar_lab.ui.strategy_scoped_risk import build_risk_readiness
 from red_bar_lab.ui.strategy_risk_readiness_view import render_risk_readiness_8a
 
 
