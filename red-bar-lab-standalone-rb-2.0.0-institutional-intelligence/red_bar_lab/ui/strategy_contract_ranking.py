@@ -11,17 +11,26 @@ class ContractRankingPolicy:
     strategy_id: str
     policy_version: str
     maximum_contracts: int
-    spread_weight: float = 0.30
+    spread_weight: float = 0.35
     volume_weight: float = 0.25
     oi_weight: float = 0.25
-    delta_weight: float = 0.20
+    delta_weight: float = 0.10
+    iv_evidence_weight: float = 0.05
+    preferred_abs_delta_min: float = 0.40
+    preferred_abs_delta_max: float = 0.60
 
+
+_DRI_POLICY = ContractRankingPolicy(
+    "DIRECTIONAL_REGIME", "DRI-CONTRACT-RANKING-V1", 1
+)
 
 POLICIES: Mapping[str, ContractRankingPolicy] = {
     "RED_BAR": ContractRankingPolicy("RED_BAR", "RB-CONTRACT-RANKING-V1", 1),
-    "DIRECTIONAL_REGIME": ContractRankingPolicy("DIRECTIONAL_REGIME", "DRI-CONTRACT-RANKING-V1", 1),
-    "DIRECTIONAL_REGIME_INTELLIGENCE": ContractRankingPolicy("DIRECTIONAL_REGIME_INTELLIGENCE", "DRI-CONTRACT-RANKING-V1", 1),
-    "RSI_EXTREME_REVERSAL": ContractRankingPolicy("RSI_EXTREME_REVERSAL", "RSI-CONTRACT-RANKING-V1", 2),
+    "DIRECTIONAL_REGIME": _DRI_POLICY,
+    "DIRECTIONAL_REGIME_INTELLIGENCE": _DRI_POLICY,
+    "RSI_EXTREME_REVERSAL": ContractRankingPolicy(
+        "RSI_EXTREME_REVERSAL", "RSI-CONTRACT-RANKING-V1", 2
+    ),
 }
 
 
@@ -30,6 +39,10 @@ def _number(value, default=0.0):
         return float(value)
     except (TypeError, ValueError):
         return float(default)
+
+
+def _available(value: object) -> bool:
+    return value not in (None, "", "Unavailable", "UNAVAILABLE")
 
 
 def _normalize_positive(values: list[float]) -> list[float]:
@@ -53,8 +66,19 @@ def _normalize_inverse(values: list[float]) -> list[float]:
 
 def _selected_role(policy: ContractRankingPolicy, position: int) -> str:
     if policy.maximum_contracts == 1:
-        return "ENTRY_1"
+        return "PRIMARY"
     return f"ENTRY_{position}"
+
+
+def _delta_quality(value: object, policy: ContractRankingPolicy) -> tuple[float, str]:
+    if not _available(value):
+        return 0.0, "UNAVAILABLE"
+    absolute = abs(_number(value))
+    if policy.preferred_abs_delta_min <= absolute <= policy.preferred_abs_delta_max:
+        return 1.0, "AVAILABLE"
+    center = (policy.preferred_abs_delta_min + policy.preferred_abs_delta_max) / 2.0
+    distance = abs(absolute - center)
+    return max(0.0, 1.0 - distance / max(center, 0.01)), "AVAILABLE"
 
 
 def rank_strategy_contracts(
@@ -63,20 +87,41 @@ def rank_strategy_contracts(
     policy: ContractRankingPolicy,
 ) -> dict[str, object]:
     rows = [dict(row) for row in (readiness.get("contract_rows") or [])]
-    eligible = [
-        row for row in rows
-        if bool(row.get("hard_safeguard_pass", row.get("liquidity_ready")))
-        and bool(row.get("execution_metadata_ready", row.get("execution_metadata_complete", True)))
-    ]
+    upstream_outcome = str(readiness.get("outcome") or "UNAVAILABLE")
     base = {
         **dict(readiness),
+        "strategy_id": policy.strategy_id,
         "policy_version": policy.policy_version,
         "maximum_contracts": policy.maximum_contracts,
-        "eligible_count": len(eligible),
+        "eligible_count": 0,
         "selected_count": 0,
         "ranked_rows": [],
         "selected_rows": [],
+        "persisted": False,
+        "reserved": False,
+        "bundle_consumed": False,
+        "executed": False,
     }
+
+    if upstream_outcome != "READY_FOR_RANKING":
+        return {
+            **base,
+            "outcome": upstream_outcome,
+            "reason": str(readiness.get("reason") or "Section 5A-5D is not ready for ranking."),
+            "next_step": "Resolve the first blocked Section 5 prerequisite; do not rank or execute.",
+        }
+
+    eligible = [
+        row for row in rows
+        if bool(row.get("hard_safeguard_pass", row.get("liquidity_ready")))
+        and bool(
+            row.get(
+                "execution_metadata_ready",
+                row.get("execution_metadata_complete", True),
+            )
+        )
+    ]
+    base["eligible_count"] = len(eligible)
     if not eligible:
         return {
             **base,
@@ -88,29 +133,40 @@ def rank_strategy_contracts(
     spreads = [_number(row.get("spread_pct"), 999.0) for row in eligible]
     volumes = [_number(row.get("volume")) for row in eligible]
     open_interest = [_number(row.get("oi")) for row in eligible]
-    deltas = [abs(_number(row.get("delta"), 0.5)) for row in eligible]
     spread_scores = _normalize_inverse(spreads)
     volume_scores = _normalize_positive(volumes)
     oi_scores = _normalize_positive(open_interest)
-    delta_scores = [max(0.0, 1.0 - abs(value - 0.5) / 0.5) for value in deltas]
 
-    scored = []
+    scored: list[dict[str, object]] = []
     for index, row in enumerate(eligible):
+        delta_quality, delta_status = _delta_quality(row.get("delta"), policy)
+        iv_status = "AVAILABLE" if _available(row.get("iv")) else "UNAVAILABLE"
+        iv_quality = 1.0 if iv_status == "AVAILABLE" else 0.0
         score = 100.0 * (
             policy.spread_weight * spread_scores[index]
             + policy.volume_weight * volume_scores[index]
             + policy.oi_weight * oi_scores[index]
-            + policy.delta_weight * delta_scores[index]
+            + policy.delta_weight * delta_quality
+            + policy.iv_evidence_weight * iv_quality
         )
-        scored.append({
-            **row,
-            "spread_score": round(spread_scores[index] * 100.0, 3),
-            "volume_score": round(volume_scores[index] * 100.0, 3),
-            "oi_score": round(oi_scores[index] * 100.0, 3),
-            "delta_score": round(delta_scores[index] * 100.0, 3),
-            "score": round(score, 3),
-            "ranking_decision": "ELIGIBLE",
-        })
+        scored.append(
+            {
+                **row,
+                "spread_quality": round(spread_scores[index] * 100.0, 3),
+                "volume_quality": round(volume_scores[index] * 100.0, 3),
+                "oi_quality": round(oi_scores[index] * 100.0, 3),
+                "delta_quality": round(delta_quality * 100.0, 3),
+                "iv_evidence": round(iv_quality * 100.0, 3),
+                "spread_score": round(spread_scores[index] * 100.0, 3),
+                "volume_score": round(volume_scores[index] * 100.0, 3),
+                "oi_score": round(oi_scores[index] * 100.0, 3),
+                "delta_score": round(delta_quality * 100.0, 3),
+                "delta_evidence_status": delta_status,
+                "iv_evidence_status": iv_status,
+                "score": round(score, 3),
+                "ranking_decision": "ELIGIBLE",
+            }
+        )
 
     scored.sort(
         key=lambda row: (
@@ -122,7 +178,7 @@ def rank_strategy_contracts(
             str(row.get("instrument_key") or row.get("trading_symbol") or ""),
         )
     )
-    distinct = []
+    distinct: list[dict[str, object]] = []
     seen: set[str] = set()
     for row in scored:
         identity = str(row.get("instrument_key") or row.get("trading_symbol") or "")
@@ -148,10 +204,16 @@ def rank_strategy_contracts(
 
     if len(selected) >= policy.maximum_contracts:
         outcome = "SELECTED"
-        reason = f"{len(selected)} distinct strategy-owned contract(s) proposed under {policy.policy_version}."
+        reason = (
+            f"{len(selected)} distinct strategy-owned contract(s) proposed under "
+            f"{policy.policy_version}."
+        )
     elif selected:
         outcome = "PARTIAL"
-        reason = f"Only {len(selected)} distinct eligible contract(s) are available for a capacity of {policy.maximum_contracts}."
+        reason = (
+            f"Only {len(selected)} distinct eligible contract(s) are available for a "
+            f"capacity of {policy.maximum_contracts}."
+        )
     else:
         outcome = "REJECTED"
         reason = "No distinct eligible contract remained after deterministic ranking."
@@ -166,13 +228,14 @@ def rank_strategy_contracts(
         "selected_rows": [dict(row) for row in selected],
         "next_step": (
             "Expose the proposed selection to Section 6 candidate readiness."
-            if selected else "Wait for a new eligible contract snapshot."
+            if selected
+            else "Wait for a new eligible contract snapshot."
         ),
     }
 
 
 def render_strategy_contract_ranking(result: Mapping[str, object]) -> None:
-    st.markdown("#### 5E. Deterministic Ranking & Proposed Selection")
+    st.markdown("#### 5E. Deterministic Ranking, Audit & Proposed Selection")
     st.caption(
         "Runs only after 5A data readiness, 5B market context, 5C execution metadata "
         "and 5D absolute safeguards. Proposed contracts remain read-only."
@@ -191,7 +254,7 @@ def render_strategy_contract_ranking(result: Mapping[str, object]) -> None:
         st.dataframe(
             [
                 {
-                    "role": row.get("ranking_decision") or _selected_role(POLICIES[str(result.get("strategy_id"))], index),
+                    "role": row.get("ranking_decision"),
                     "rank": row.get("rank", index),
                     "instrument_key": row.get("instrument_key"),
                     "trading_symbol": row.get("trading_symbol"),
