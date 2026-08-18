@@ -6,10 +6,11 @@ import streamlit as st
 
 
 def render_option_chain_directional_evidence_5e(result: Mapping[str, object]) -> None:
-    st.markdown("#### 5E. Option-Chain Directional Evidence")
+    st.markdown("##### Supporting Option-Chain Directional Evidence")
     st.caption(
-        "Supporting read-only evidence from the exact Section 5A snapshot and nearest earlier "
-        "ONLINE snapshot. It does not change strategy direction, selected contracts, or admission."
+        "Supporting read-only evidence attached to Section 5E from the exact Section 5A "
+        "snapshot and nearest earlier ONLINE snapshot. It does not create another numbered "
+        "stage and does not change strategy direction, selected contracts, or admission."
     )
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("OI direction", str(result.get("direction") or "UNAVAILABLE"))
