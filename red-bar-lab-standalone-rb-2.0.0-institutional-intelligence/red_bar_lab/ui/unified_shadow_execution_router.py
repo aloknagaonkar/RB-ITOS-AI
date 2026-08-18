@@ -13,6 +13,7 @@ SUPPORTED_STRATEGIES = frozenset(
         "RED_BAR",
         "DIRECTIONAL_REGIME",
         "DIRECTIONAL_REGIME_INTELLIGENCE",
+        "RSI_EXTREME_REVERSAL",
         "RSI_EXTREME_REVERSAL_V1",
         "REFERENCE_LEVEL",
     }
@@ -72,10 +73,7 @@ def build_unified_shadow_routes(
     for raw in shadow_evidence:
         source = dict(raw)
         strategy = _strategy(source)
-        normalized = {
-            **source,
-            "strategy_id": strategy,
-        }
+        normalized = {**source, "strategy_id": strategy}
         route_id = _route_id(normalized)
         reasons: list[str] = []
 
@@ -169,8 +167,8 @@ def render_unified_shadow_routes(result: Mapping[str, object]) -> None:
     rows = [dict(row) for row in result.get("rows") or []]
     if not rows:
         st.info(
-            "No Section 9E shadow evidence is available. Open a strategy page and let "
-            "Sections 4–9E complete to produce a shadow route."
+            "No Section 9E shadow evidence is available. The background architecture "
+            "runner or a strategy-page evaluation must produce a shadow handoff first."
         )
         return
 
