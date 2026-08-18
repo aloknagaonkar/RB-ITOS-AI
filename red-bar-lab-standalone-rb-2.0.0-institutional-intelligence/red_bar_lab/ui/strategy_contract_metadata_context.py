@@ -6,7 +6,11 @@ from typing import Mapping
 import pandas as pd
 
 
-METADATA_CONTEXT_VERSION = "CONTRACT-METADATA-CONTEXT-V1"
+METADATA_CONTEXT_VERSION = "CONTRACT-METADATA-CONTEXT-V2"
+NIFTY_EXECUTION_POLICY_VERSION = "NIFTY-UPSTOX-EXECUTION-METADATA-V1"
+_NIFTY_UNDERLYING_KEYS = frozenset({"NSE_INDEX|NIFTY 50", "NSE_INDEX|NIFTY50"})
+_NIFTY_LOT_SIZE = 75.0
+_NSE_FO_TICK_SIZE = 0.05
 
 
 def _timestamp(value: object) -> pd.Timestamp | None:
@@ -84,6 +88,47 @@ def _artifact_row(chain: pd.DataFrame, side: str, strike: float | None) -> dict[
     return dict(matches.iloc[-1].to_dict())
 
 
+def _upstox_key(value: object) -> str | None:
+    text = str(value or "").strip()
+    return text if text.upper().startswith("NSE_FO|") else None
+
+
+def _apply_known_nifty_execution_policy(
+    row: dict[str, object],
+    *,
+    underlying_key: str,
+    sources: dict[str, str],
+) -> None:
+    """Fill only deterministic Upstox/NIFTY execution fields with explicit provenance.
+
+    This is deliberately narrow. Unknown underlyings and non-NSE_FO contracts remain
+    unavailable rather than receiving inferred execution metadata.
+    """
+    normalized_underlying = str(underlying_key or "").strip().upper()
+    if normalized_underlying not in _NIFTY_UNDERLYING_KEYS:
+        return
+
+    executable_key = _upstox_key(row.get("instrument_key"))
+    if executable_key is None:
+        return
+
+    if row.get("instrument_token") in (None, "", "Unavailable"):
+        row["instrument_token"] = executable_key.split("|", 1)[1]
+        sources["instrument_token"] = "UPSTOX_INSTRUMENT_KEY_TOKEN"
+    if row.get("trading_symbol") in (None, "", "Unavailable"):
+        row["trading_symbol"] = executable_key
+        sources["trading_symbol"] = "UPSTOX_EXECUTABLE_INSTRUMENT_KEY_ALIAS"
+    if row.get("exchange") in (None, "", "Unavailable"):
+        row["exchange"] = "NSE_FO"
+        sources["exchange"] = "UPSTOX_INSTRUMENT_KEY_SEGMENT"
+    if (_number(row.get("lot_size")) or 0) <= 0:
+        row["lot_size"] = _NIFTY_LOT_SIZE
+        sources["lot_size"] = f"STATIC_POLICY:{NIFTY_EXECUTION_POLICY_VERSION}"
+    if (_number(row.get("tick_size")) or 0) <= 0:
+        row["tick_size"] = _NSE_FO_TICK_SIZE
+        sources["tick_size"] = f"STATIC_POLICY:{NIFTY_EXECUTION_POLICY_VERSION}"
+
+
 def enrich_contract_execution_metadata(
     readiness: Mapping[str, object],
     *,
@@ -129,6 +174,7 @@ def enrich_contract_execution_metadata(
 
     enriched: list[dict[str, object]] = []
     complete = 0
+    policy_enriched = 0
     for raw in rows:
         row = dict(raw)
         side = str(row.get("option_side") or "").upper()
@@ -171,6 +217,15 @@ def enrich_contract_execution_metadata(
             else:
                 sources[field] = "UNAVAILABLE"
 
+        before = dict(sources)
+        _apply_known_nifty_execution_policy(
+            row,
+            underlying_key=instrument_key,
+            sources=sources,
+        )
+        if sources != before:
+            policy_enriched += 1
+
         required = (
             row.get("instrument_token") not in (None, "", "Unavailable"),
             row.get("trading_symbol") not in (None, "", "Unavailable"),
@@ -181,6 +236,7 @@ def enrich_contract_execution_metadata(
         row["execution_metadata_complete"] = all(required)
         row["execution_metadata_sources"] = sources
         row["metadata_context_version"] = METADATA_CONTEXT_VERSION
+        row["metadata_policy_version"] = NIFTY_EXECUTION_POLICY_VERSION
         row["metadata_context_read_only"] = True
         complete += int(all(required))
         enriched.append(row)
@@ -190,8 +246,13 @@ def enrich_contract_execution_metadata(
         **result,
         "contract_rows": enriched,
         "metadata_context_status": status,
-        "metadata_context_reason": f"{complete} of {len(rows)} contract rows have complete execution metadata.",
+        "metadata_context_reason": (
+            f"{complete} of {len(rows)} contract rows have complete execution metadata; "
+            f"{policy_enriched} row(s) used the controlled NIFTY execution policy."
+        ),
         "metadata_complete_count": complete,
+        "metadata_policy_enriched_count": policy_enriched,
+        "metadata_policy_version": NIFTY_EXECUTION_POLICY_VERSION,
         "metadata_context_version": METADATA_CONTEXT_VERSION,
         "metadata_context_read_only": True,
     }
