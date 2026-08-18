@@ -145,7 +145,10 @@ def test_processed_identity_blocks_duplicate_without_mutating_input(monkeypatch)
         evaluation_time=pd.Timestamp("2026-08-21 09:35", tz=IST),
         trade_rows=[],
     )
-    original = first.next_state
+    original = RedBarV2WorkerState(
+        processed_candidate_ids=first.next_state.processed_candidate_ids,
+        consumed_reversal_ids=first.next_state.consumed_reversal_ids,
+    )
     second = worker.evaluate(
         candles=_candles(),
         instrument_key="NIFTY",
