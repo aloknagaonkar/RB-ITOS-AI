@@ -15,7 +15,7 @@ PAGE_MODULE_PATHS = {
     "Live Trading": "red_bar_lab.ui.pages.live_trading",
     "Paper Trading": "red_bar_lab.ui.pages.paper_trading",
     "Paper Architecture Reconciliation": (
-        "red_bar_lab.ui.pages.paper_architecture_reconciliation"
+        "red_bar_lab.ui.pages.paper_architecture_reconciliation_v2"
     ),
     "Research Lab": "red_bar_lab.ui.pages.research_lab",
     "Shadow Directional": "red_bar_lab.ui.pages.shadow_directional_diagnostics",
