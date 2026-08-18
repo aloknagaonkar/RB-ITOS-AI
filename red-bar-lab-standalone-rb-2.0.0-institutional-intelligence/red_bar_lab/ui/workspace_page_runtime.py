@@ -93,10 +93,12 @@ def _configure_paper_trading(paper_trading: ModuleType) -> None:
     from red_bar_lab.execution.attribution_automation import (
         AttributionAwarePaperAutomationService,
     )
-    from red_bar_lab.ui.active_trade_views import build_paper_page_wrapper
     from red_bar_lab.ui.paper_consistency import (
         build_candidate_workbench_wrapper,
         build_paper_exit_panel_wrapper,
+    )
+    from red_bar_lab.ui.paper_operational_wrapper import (
+        build_operational_paper_page_wrapper,
     )
 
     paper_trading.RedBarPaperAutomationService = AttributionAwarePaperAutomationService
@@ -106,7 +108,9 @@ def _configure_paper_trading(paper_trading: ModuleType) -> None:
     paper_trading._render_paper_exit_engine_panel = build_paper_exit_panel_wrapper(
         shared_ui._render_paper_exit_engine_panel
     )
-    paper_trading.render_page = build_paper_page_wrapper(paper_trading.render_page)
+    paper_trading.render_page = build_operational_paper_page_wrapper(
+        paper_trading.render_page
+    )
 
 
 def _configure_research_lab(research_lab: ModuleType) -> None:
