@@ -6,6 +6,11 @@ from typing import Mapping
 
 import streamlit as st
 
+from red_bar_lab.ui.strategy_live_activation_readiness import (
+    build_live_activation_readiness,
+    render_live_activation_readiness,
+)
+
 
 SHADOW_REHEARSAL_VERSION = "SHADOW-SUBMISSION-REHEARSAL-V1"
 
@@ -131,7 +136,7 @@ def build_shadow_submission_rehearsal(
             "submitted": False,
             "policy_action": "OBSERVE_ONLY",
             "next_step": (
-                "Section 10 may define an explicitly disabled activation checklist and approval boundary."
+                "Section 9F may audit live-activation prerequisites without enabling execution."
                 if outcome == "SHADOW_HANDOFF_READY_DISABLED"
                 else "Resolve the exact shadow-rehearsal wait reason."
             ),
@@ -174,25 +179,28 @@ def render_shadow_submission_rehearsal(result: Mapping[str, object]) -> None:
     rows = [dict(row) for row in result.get("rows") or []]
     if not rows:
         st.info("No Section 9D validated mapping is available for shadow rehearsal.")
-        return
-    st.dataframe([
-        {key: row.get(key) for key in (
-            "shadow_rehearsal_id", "adapter_mapping_validation_id", "candidate_id",
-            "strategy_id", "broker_adapter", "entry_client_order_id",
-            "protective_client_order_id", "fingerprint_matches",
-            "duplicate_submission_prevented", "shadow_handoff_ready",
-            "shadow_rehearsal_outcome", "shadow_rehearsal_reason",
-        )}
-        for row in rows
-    ], width="stretch", hide_index=True)
-    for row in rows:
-        with st.expander(f"View shadow execution-boundary rehearsal for {row.get('candidate_id')}"):
-            st.dataframe(list(row.get("shadow_rehearsal_checks") or []), width="stretch", hide_index=True)
-            st.json(row.get("execution_boundary_state") or {})
-            st.write(f"**Outcome:** {row.get('shadow_rehearsal_outcome')}")
-            st.write(f"**Exact reason:** {row.get('shadow_rehearsal_reason')}")
-            st.write(f"**Next step:** {row.get('next_step')}")
-            st.write("**Safety:** Live activation is not allowed and no external side effect occurred.")
+    else:
+        st.dataframe([
+            {key: row.get(key) for key in (
+                "shadow_rehearsal_id", "adapter_mapping_validation_id", "candidate_id",
+                "strategy_id", "broker_adapter", "entry_client_order_id",
+                "protective_client_order_id", "fingerprint_matches",
+                "duplicate_submission_prevented", "shadow_handoff_ready",
+                "shadow_rehearsal_outcome", "shadow_rehearsal_reason",
+            )}
+            for row in rows
+        ], width="stretch", hide_index=True)
+        for row in rows:
+            with st.expander(f"View shadow execution-boundary rehearsal for {row.get('candidate_id')}"):
+                st.dataframe(list(row.get("shadow_rehearsal_checks") or []), width="stretch", hide_index=True)
+                st.json(row.get("execution_boundary_state") or {})
+                st.write(f"**Outcome:** {row.get('shadow_rehearsal_outcome')}")
+                st.write(f"**Exact reason:** {row.get('shadow_rehearsal_reason')}")
+                st.write(f"**Next step:** {row.get('next_step')}")
+                st.write("**Safety:** Live activation is not allowed and no external side effect occurred.")
+
+    activation_audit = build_live_activation_readiness(result)
+    render_live_activation_readiness(activation_audit)
 
 
 __all__ = [
