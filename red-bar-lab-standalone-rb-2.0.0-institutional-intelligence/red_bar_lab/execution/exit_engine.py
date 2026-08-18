@@ -54,7 +54,19 @@ def _resolved_strategy_source(
     ):
         if position.get(name) not in (None, ""):
             context[name] = position.get(name)
-    if position.get("rsi_signal_id") not in (None, ""):
+
+    explicit_source = str(
+        context.get("execution_strategy_source")
+        or context.get("signal_source")
+        or context.get("source")
+        or ""
+    ).strip()
+    signal_id = str(context.get("signal_id") or "").strip()
+    if (
+        not explicit_source
+        and not signal_id
+        and context.get("rsi_signal_id") not in (None, "")
+    ):
         context["execution_strategy_source"] = RSI_STRATEGY_SOURCE
     return execution_strategy_source(context)
 
@@ -221,8 +233,6 @@ class PaperExitEngine:
             _num(position.get("protected_stop_price")),
             _num(position.get("effective_stop")),
         )
-        # During the RSI-only delay window, ignore a dynamic stop persisted by
-        # an earlier monitor tick. The configured hard stop remains active.
         if not dynamic_protection_enabled:
             previous_protected_stop = 0.0
 
@@ -236,9 +246,7 @@ class PaperExitEngine:
         if trailing_stop is not None and trailing_stop > 0:
             stop_candidates.append(("TRAILING_STOP", trailing_stop, 3))
         if previous_protected_stop > 0:
-            stop_candidates.append(
-                ("PROTECTED_STOP", previous_protected_stop, 4)
-            )
+            stop_candidates.append(("PROTECTED_STOP", previous_protected_stop, 4))
 
         effective_stop_reason = None
         effective_stop = None
@@ -253,13 +261,9 @@ class PaperExitEngine:
             confirmation_high = _num(signal.get("confirmation_high"))
             confirmation_low = _num(signal.get("confirmation_low"))
             if direction == "BEARISH" and confirmation_high > 0:
-                nifty_thesis = (
-                    "INVALID" if current_underlying > confirmation_high else "VALID"
-                )
+                nifty_thesis = "INVALID" if current_underlying > confirmation_high else "VALID"
             elif direction == "BULLISH" and confirmation_low > 0:
-                nifty_thesis = (
-                    "INVALID" if current_underlying < confirmation_low else "VALID"
-                )
+                nifty_thesis = "INVALID" if current_underlying < confirmation_low else "VALID"
 
         underlying_5m_close = None
         underlying_ema10 = None
@@ -303,9 +307,7 @@ class PaperExitEngine:
                 for state in (option_vwap, option_ema, option_momentum)
             )
             if rel_volume is not None:
-                volume_health = (
-                    "HEALTHY" if _num(rel_volume) >= 1.0 else "WEAK"
-                )
+                volume_health = "HEALTHY" if _num(rel_volume) >= 1.0 else "WEAK"
 
         if pcr_supportive is True and oi_supportive is True:
             shadow_oi_pcr = "SUPPORTIVE"
@@ -347,8 +349,7 @@ class PaperExitEngine:
                 shadow_warnings.append("OPTION_TECHNICAL_BREAKDOWN")
             if shadow_warnings:
                 reasons.append(
-                    "SHADOW_EXIT_WARNINGS="
-                    + ",".join(dict.fromkeys(shadow_warnings))
+                    "SHADOW_EXIT_WARNINGS=" + ",".join(dict.fromkeys(shadow_warnings))
                 )
 
         health = 100.0
@@ -380,9 +381,7 @@ class PaperExitEngine:
             reasons.append("Trailing profit protection active.")
         elif profit_lock_active:
             action = "HOLD / LOCK PROFIT"
-            reasons.append(
-                f"Minimum profit lock armed at ₹{profit_lock_price:.2f}."
-            )
+            reasons.append(f"Minimum profit lock armed at ₹{profit_lock_price:.2f}.")
         elif breakeven_armed:
             action = "HOLD / PROTECT"
             reasons.append("Breakeven protection armed.")
@@ -424,14 +423,14 @@ class PaperExitEngine:
             action=action,
             health_score=round(health, 1),
             hard_exit_reason=hard_exit_reason,
-            effective_stop=(round(effective_stop, 2) if effective_stop is not None else None),
+            effective_stop=round(effective_stop, 2) if effective_stop is not None else None,
             initial_stop=round(initial_stop, 2) if initial_stop > 0 else None,
-            breakeven_price=(round(breakeven_price, 2) if breakeven_price is not None else None),
+            breakeven_price=round(breakeven_price, 2) if breakeven_price is not None else None,
             breakeven_armed=breakeven_armed,
             profit_lock_active=profit_lock_active,
-            profit_lock_price=(round(profit_lock_price, 2) if profit_lock_price is not None else None),
+            profit_lock_price=round(profit_lock_price, 2) if profit_lock_price is not None else None,
             trailing_active=trailing_active,
-            trailing_stop=(round(trailing_stop, 2) if trailing_stop is not None else None),
+            trailing_stop=round(trailing_stop, 2) if trailing_stop is not None else None,
             target1=round(target1, 2) if target1 > 0 else None,
             target2=round(target2, 2) if target2 > 0 else None,
             pnl_pct=round(pnl_pct, 2),
@@ -447,7 +446,7 @@ class PaperExitEngine:
             shadow_greeks=shadow_greeks,
             reasons=tuple(reasons),
             next_trigger=next_trigger,
-            underlying_5m_close=(round(underlying_5m_close, 2) if underlying_5m_close is not None else None),
-            underlying_ema10=(round(underlying_ema10, 2) if underlying_ema10 is not None else None),
+            underlying_5m_close=round(underlying_5m_close, 2) if underlying_5m_close is not None else None,
+            underlying_ema10=round(underlying_ema10, 2) if underlying_ema10 is not None else None,
             ema10_trend=ema10_trend,
         )
