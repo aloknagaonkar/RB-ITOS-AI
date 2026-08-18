@@ -18,6 +18,7 @@ PAGE_MODULE_PATHS = {
         "red_bar_lab.ui.pages.paper_architecture_reconciliation_v4"
     ),
     "Research Lab": "red_bar_lab.ui.pages.research_lab",
+    "Red Bar V2 Validation": "red_bar_lab.ui.pages.red_bar_v2_validation",
     "Shadow Directional": "red_bar_lab.ui.pages.shadow_directional_diagnostics",
     "Historical Intelligence": "red_bar_lab.ui.pages.historical_intelligence",
     "Signal Explorer": "red_bar_lab.ui.pages.signal_explorer",
@@ -137,11 +138,11 @@ def _configure_research_lab(research_lab: ModuleType) -> None:
     from red_bar_lab.ui.historical_dri_relevant_coverage import (
         build_relevant_coverage_wrapper,
     )
-    from red_bar_lab.ui.historical_red_bar_v2_windows import (
-        build_red_bar_v2_window_wrapper,
-    )
     from red_bar_lab.ui.red_bar_v2_promotion_panel import (
         build_red_bar_v2_promotion_wrapper,
+    )
+    from red_bar_lab.ui.historical_red_bar_v2_windows import (
+        build_red_bar_v2_window_wrapper,
     )
 
     historical_dri_10day_ui.HistoricalOptionChainSyncService = _research_option_sync_factory
