@@ -4,10 +4,10 @@ from functools import wraps
 from types import ModuleType
 from typing import Mapping
 
-from red_bar_lab.ui.strategy_contract_readiness import (
-    build_contract_data_readiness,
-    render_contract_data_readiness,
+from red_bar_lab.ui.strategy_contract_context_views import (
+    render_contract_data_readiness_5a,
 )
+from red_bar_lab.ui.strategy_contract_readiness import build_contract_data_readiness
 from red_bar_lab.ui.strategy_execution_source_gate import (
     POLICIES,
     build_execution_source_gate,
@@ -15,7 +15,7 @@ from red_bar_lab.ui.strategy_execution_source_gate import (
 
 
 def build_contract_readiness_page_wrapper(module: ModuleType, page: str):
-    """Append Section 5A after the existing Sections 1-4 without page rewrites."""
+    """Append canonical Section 5A after the existing Sections 1-4."""
     policy = POLICIES[page]
     original_builder = getattr(module, policy.builder_name)
     original_render = module.render_page
@@ -71,7 +71,7 @@ def build_contract_readiness_page_wrapper(module: ModuleType, page: str):
                 database=database,
                 instrument_key=str(instrument_key),
             )
-        render_contract_data_readiness(readiness)
+        render_contract_data_readiness_5a(readiness)
         return result
 
     setattr(module, policy.builder_name, capture_resolution)
