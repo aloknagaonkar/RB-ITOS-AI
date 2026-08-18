@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Sequence
 
 from red_bar_lab.services.historical_strategy_runner import (
@@ -72,9 +73,13 @@ class RedBarV2HistoricalStrategyAdapter:
             )
         except Exception as exc:
             if self.evidence_store is not None:
-                self.evidence_store.record_replay_error(
-                    instrument_key=instrument_key,
-                    trading_date=trading_date.isoformat(),
+                self.evidence_store.record_replay(
+                    SimpleNamespace(
+                        trading_date=trading_date.isoformat(),
+                        instrument_key=instrument_key,
+                        admitted_candidates=0,
+                        blocked_candidates=0,
+                    ),
                     error=f"{type(exc).__name__}:{exc}",
                 )
             raise
