@@ -9,6 +9,7 @@ from red_bar_lab.ui._shared import (
     _cached_database,
     st,
 )
+from red_bar_lab.ui.arrow_dataframe_guard import install as install_arrow_dataframe_guard
 from red_bar_lab.ui.paper_time_display import install as install_paper_time_display
 from red_bar_lab.ui.workspace_page_runtime import (
     PAGE_MODULE_PATHS as _PAGE_MODULE_PATHS,
@@ -29,6 +30,7 @@ from red_bar_lab.ui.workspace_page_runtime import (
 # shadow_directional_diagnostics,
 # "Shadow Directional": shadow_directional_diagnostics
 
+install_arrow_dataframe_guard(st)
 install_paper_time_display()
 shared_ui.PaperExitEngine = PaperExitEngine
 install_import_compatibility()
