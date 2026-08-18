@@ -21,20 +21,10 @@ def test_reconciliation_page_is_registered_after_paper_trading():
 
 def test_section_10_status_sequence_is_explicit():
     assert [row["section"] for row in SECTION_10_STAGES] == [
-        "10A",
-        "10B",
-        "10C",
-        "10D",
-        "10E",
-        "10F",
+        "10A", "10B", "10C", "10D", "10E", "10F",
     ]
     assert [row["status"] for row in SECTION_10_STAGES] == [
-        "COMPLETED",
-        "COMPLETED",
-        "NEXT",
-        "PENDING",
-        "PENDING",
-        "PENDING",
+        "COMPLETED", "COMPLETED", "COMPLETED", "NEXT", "PENDING", "PENDING",
     ]
 
 
@@ -63,6 +53,7 @@ def test_reconciliation_snapshot_is_read_only_and_does_not_mutate_orders():
     assert result["order_count"] == 2
     assert result["open_order_count"] == 1
     assert result["closed_order_count"] == 1
+    assert result["comparison"]["counts"]["NOT_COMPARABLE"] == 2
     assert result["source_read_only"] is True
     assert result["persisted"] is False
     assert result["execution_allowed"] is False
@@ -103,7 +94,5 @@ def test_reconciliation_snapshot_preserves_strategy_ownership():
         for row in result["performance_ledger"]["strategy_rows"]
     }
     assert sources == {
-        "RED_BAR",
-        "DIRECTIONAL_REGIME",
-        "RSI_EXTREME_REVERSAL_V1",
+        "RED_BAR", "DIRECTIONAL_REGIME", "RSI_EXTREME_REVERSAL_V1",
     }
