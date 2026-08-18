@@ -87,6 +87,21 @@ def _trade_row(
     }
 
 
+def _event_is_due(
+    decision: RedBarV2DirectionDecision,
+    evaluation_time: pd.Timestamp,
+) -> bool:
+    """Return True only when the historical event is observable by this tick."""
+    if decision.context_timestamp is None:
+        return False
+    event_time = pd.Timestamp(decision.context_timestamp)
+    if evaluation_time.tzinfo is not None and event_time.tzinfo is None:
+        event_time = event_time.tz_localize(evaluation_time.tzinfo)
+    elif evaluation_time.tzinfo is None and event_time.tzinfo is not None:
+        event_time = event_time.tz_localize(None)
+    return event_time <= evaluation_time
+
+
 def replay_red_bar_v2_day(
     candles: pd.DataFrame,
     *,
@@ -162,9 +177,11 @@ def replay_red_bar_v2_day(
                 evaluation_time=evaluation_time,
                 expected_timestamp=candle_timestamp,
             )
-            decision = evaluate_initial_direction(reference, snapshot_1m)
-            if decision.direction is not None:
-                initial_processed = True
+            initial = evaluate_initial_direction(reference, snapshot_1m)
+            if _event_is_due(initial, evaluation_time):
+                decision = initial
+                if initial.direction is not None:
+                    initial_processed = True
         elif current_direction is not None and evaluation_time.minute % 5 == 0:
             snapshot_5m = build_latest_snapshot(
                 frame,
@@ -182,22 +199,22 @@ def replay_red_bar_v2_day(
                         snapshot_5m,
                         previous_direction=current_direction,
                     )
-                    if reversal.direction is not None:
+                    if (
+                        reversal.direction is not None
+                        and reversal.direction != current_direction
+                        and _event_is_due(reversal, evaluation_time)
+                    ):
                         decision = reversal
                         pending_reversal = reversal
 
         if decision is not None:
-            identity = None
-            duplicate = False
-            consumed = False
             admission = evaluate_candidate_admission(
                 decision,
                 trade_state,
                 duplicate_signal=False,
                 reversal_already_consumed=False,
             )
-            identity = admission.decision_id
-            duplicate = identity in processed_candidates
+            duplicate = admission.decision_id in processed_candidates
             consumed = bool(
                 admission.reversal_event_id
                 and admission.reversal_event_id in consumed_reversals
@@ -269,7 +286,10 @@ def replay_red_bar_v2_day(
                     snapshot_1m,
                     current_state=provisional_state,
                 )
-                if upgrade.event_type.value == "FULL_DIRECTIONAL_ALIGNMENT":
+                if (
+                    upgrade.event_type.value == "FULL_DIRECTIONAL_ALIGNMENT"
+                    and _event_is_due(upgrade, evaluation_time)
+                ):
                     events.append(
                         ReplayEvent(
                             timestamp=evaluation_time.to_pydatetime(),
