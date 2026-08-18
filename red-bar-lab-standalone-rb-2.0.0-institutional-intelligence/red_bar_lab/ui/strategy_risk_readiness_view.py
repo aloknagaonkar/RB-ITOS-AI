@@ -1,8 +1,19 @@
 from __future__ import annotations
 
+import json
 from typing import Mapping
 
 import streamlit as st
+
+
+def _display_value(value: object) -> object:
+    """Return an Arrow-safe display value without changing the underlying context."""
+    if isinstance(value, (list, tuple, set, Mapping)):
+        try:
+            return json.dumps(value, sort_keys=True, default=str)
+        except (TypeError, ValueError):
+            return str(value)
+    return value
 
 
 def render_risk_readiness_8a(result: Mapping[str, object]) -> None:
@@ -31,7 +42,9 @@ def render_risk_readiness_8a(result: Mapping[str, object]) -> None:
                 [
                     {
                         "field": field,
-                        "value": details.get("value") if isinstance(details, Mapping) else None,
+                        "value": _display_value(
+                            details.get("value") if isinstance(details, Mapping) else None
+                        ),
                         "source": details.get("source") if isinstance(details, Mapping) else "UNAVAILABLE",
                         "authoritative": details.get("authoritative") if isinstance(details, Mapping) else False,
                         "evaluated_at": details.get("evaluated_at") if isinstance(details, Mapping) else None,
