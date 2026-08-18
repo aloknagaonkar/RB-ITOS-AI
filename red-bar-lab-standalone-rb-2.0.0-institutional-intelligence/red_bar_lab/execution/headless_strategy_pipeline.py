@@ -50,7 +50,7 @@ from red_bar_lab.ui.strategy_shadow_submission_rehearsal import (
 )
 
 
-HEADLESS_PIPELINE_VERSION = "HEADLESS-SECTIONS-4-9-V1"
+HEADLESS_PIPELINE_VERSION = "HEADLESS-SECTIONS-4-9-V2"
 
 
 def _candidate_copy_with_contract_fields(candidate_result, ranking):
@@ -94,30 +94,47 @@ def _outcome(result: Mapping[str, object] | None, *names: str) -> str:
     return "NOT_EVALUATED"
 
 
-def _terminal(result: Mapping[str, object]) -> tuple[str, str]:
+def _reason(result: Mapping[str, object] | None, fallback: str) -> str:
+    row = dict(result or {})
+    for name in (
+        "reason", "blocking_reason", "decision_reason", "dominant_reason",
+        "route_reason", "activation_reason", "live_activation_audit_reason",
+    ):
+        value = row.get(name)
+        if value not in (None, ""):
+            return str(value)
+    return fallback
+
+
+def _first_blocking_terminal(result: Mapping[str, object]) -> tuple[str, str]:
+    """Return the first authoritative stop, never the last downstream placeholder."""
     stages = (
-        ("9F", result.get("live_activation"), ("outcome",)),
-        ("9E", result.get("shadow_rehearsal"), ("outcome",)),
-        ("9D", result.get("adapter_mapping"), ("outcome",)),
-        ("9C", result.get("payload_preview"), ("outcome",)),
-        ("9B", result.get("order_specification"), ("outcome",)),
-        ("9A", result.get("committee"), ("outcome",)),
-        ("8D", result.get("final_admission"), ("outcome", "decision")),
-        ("8C", result.get("reservation"), ("outcome",)),
-        ("8B", result.get("portfolio"), ("outcome",)),
-        ("8A", result.get("risk"), ("outcome",)),
-        ("7", result.get("opportunity"), ("outcome",)),
-        ("6", result.get("candidate"), ("outcome",)),
-        ("5D", result.get("ranking"), ("outcome",)),
-        ("5C", result.get("safeguarded"), ("outcome",)),
-        ("5A", result.get("readiness"), ("outcome",)),
-        ("4", result.get("gate"), ("final_outcome",)),
+        ("4", result.get("gate"), ("final_outcome",), {"FORWARD_TO_CONTRACT_SELECTION"}),
+        ("5A", result.get("readiness_5a"), ("outcome",), {"READY_FOR_RANKING"}),
+        ("5B", result.get("market_context_5b"), ("market_context_status",), {"READY"}),
+        ("5C", result.get("metadata_context_5c"), ("metadata_context_status",), {"READY", "PARTIAL"}),
+        ("5D", result.get("safeguarded"), ("outcome",), {"READY_FOR_RANKING"}),
+        ("5E", result.get("ranking"), ("outcome",), {"SELECTED", "PARTIAL"}),
+        ("6", result.get("candidate"), ("outcome",), {"READY", "CANDIDATE_READY", "FORWARD"}),
+        ("7", result.get("opportunity"), ("outcome",), {"FORWARD", "APPROVED", "READY"}),
+        ("8A", result.get("risk"), ("outcome",), {"READY", "RISK_READY_READ_ONLY", "FORWARD"}),
+        ("8B", result.get("portfolio"), ("outcome",), {"READY", "PORTFOLIO_READY_READ_ONLY", "FORWARD"}),
+        ("8C", result.get("reservation"), ("outcome",), {"PROPOSED_READ_ONLY", "READY", "FORWARD"}),
+        ("8D", result.get("final_admission"), ("outcome", "decision"), {"ADMIT_READ_ONLY", "APPROVED", "FORWARD"}),
+        ("9A", result.get("committee"), ("outcome",), {"APPROVED", "COMMITTEE_APPROVED", "FORWARD"}),
+        ("9B", result.get("order_specification"), ("outcome",), {"READY", "ORDER_SPECIFICATION_READY"}),
+        ("9C", result.get("payload_preview"), ("outcome",), {"READY", "BROKER_PAYLOAD_PREVIEW_READY"}),
+        ("9D", result.get("adapter_mapping"), ("outcome",), {"READY", "ADAPTER_MAPPING_VALID"}),
+        ("9E", result.get("shadow_rehearsal"), ("outcome",), {"SHADOW_HANDOFF_READY_DISABLED"}),
     )
-    for section, raw, names in stages:
-        outcome = _outcome(raw if isinstance(raw, Mapping) else {}, *names)
-        if outcome not in {"NOT_EVALUATED", "", "NONE"}:
-            return section, outcome
-    return "1-3", "NO_PIPELINE_RESULT"
+    for section, raw, names, success in stages:
+        mapping = raw if isinstance(raw, Mapping) else {}
+        outcome = _outcome(mapping, *names).upper()
+        if outcome in {"NOT_EVALUATED", "", "NONE"}:
+            return section, f"{section}_NOT_EVALUATED"
+        if outcome not in success:
+            return section, _reason(mapping, outcome)
+    return "10E", "PAPER_ACTIVATION_BLOCKED_BY_DESIGN"
 
 
 def evaluate_sections_4_to_9(
@@ -137,22 +154,23 @@ def evaluate_sections_4_to_9(
     safeguard_policy = SAFEGUARD_POLICIES[policy.strategy_id]
     gate = build_execution_source_gate(resolution, policy)
 
-    readiness = build_contract_data_readiness(
+    readiness_5a = build_contract_data_readiness(
         gate=gate,
         resolution=resolution,
         database=database,
         instrument_key=str(instrument_key),
     )
-    readiness = enrich_contract_market_context(
-        readiness,
+    market_context_5b = enrich_contract_market_context(
+        readiness_5a,
         database=database,
         instrument_key=str(instrument_key),
     )
-    safeguarded = apply_contract_safeguards(readiness, policy=safeguard_policy)
+    metadata_context_5c = dict(market_context_5b)
+    safeguarded = apply_contract_safeguards(metadata_context_5c, policy=safeguard_policy)
     ranking = rank_strategy_contracts(safeguarded, policy=ranking_policy)
     audit = build_selection_audit(ranking, policy=ranking_policy)
     option_direction = build_option_chain_directional_evidence(
-        readiness,
+        readiness_5a,
         database=database,
         instrument_key=str(instrument_key),
     )
@@ -183,16 +201,9 @@ def evaluate_sections_4_to_9(
         historical_records = list(history_source.get("records") or [])
 
     discovered_risk_context = load_account_risk_context(database)
-    supplied_risk_context = (
-        account_risk_context if isinstance(account_risk_context, Mapping) else {}
-    )
-    risk_context = merge_account_context(
-        discovered_risk_context,
-        supplied_risk_context,
-    )
-    supplied_opportunity_context = (
-        opportunity_context if isinstance(opportunity_context, Mapping) else {}
-    )
+    supplied_risk_context = account_risk_context if isinstance(account_risk_context, Mapping) else {}
+    risk_context = merge_account_context(discovered_risk_context, supplied_risk_context)
+    supplied_opportunity_context = opportunity_context if isinstance(opportunity_context, Mapping) else {}
     opportunity_source = build_opportunity_context(
         downstream_candidates,
         historical_records=historical_records,
@@ -212,15 +223,8 @@ def evaluate_sections_4_to_9(
     risk["account_context_evaluated_at"] = risk_context.get("context_evaluated_at")
     risk["account_context_provenance"] = risk_context.get("field_provenance")
 
-    portfolio = build_portfolio_admission(
-        opportunity,
-        risk,
-        account_context=risk_context,
-    )
-    reservation = build_capital_reservation_proposal(
-        portfolio,
-        account_context=risk_context,
-    )
+    portfolio = build_portfolio_admission(opportunity, risk, account_context=risk_context)
+    reservation = build_capital_reservation_proposal(portfolio, account_context=risk_context)
     final_admission = build_final_admission(
         reservation,
         execution_source_gate=gate,
@@ -239,7 +243,10 @@ def evaluate_sections_4_to_9(
         "strategy_id": policy.strategy_id,
         "resolution": dict(resolution or {}),
         "gate": gate,
-        "readiness": readiness,
+        "readiness": readiness_5a,
+        "readiness_5a": readiness_5a,
+        "market_context_5b": market_context_5b,
+        "metadata_context_5c": metadata_context_5c,
         "safeguarded": safeguarded,
         "ranking": ranking,
         "audit": audit,
@@ -266,7 +273,7 @@ def evaluate_sections_4_to_9(
         "order_created": False,
         "order_submitted": False,
     }
-    section, reason = _terminal(result)
+    section, reason = _first_blocking_terminal(result)
     result["terminal_section"] = section
     result["terminal_reason"] = reason
     return result
