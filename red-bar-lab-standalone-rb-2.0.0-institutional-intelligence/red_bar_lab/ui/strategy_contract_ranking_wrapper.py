@@ -73,6 +73,10 @@ from red_bar_lab.ui.strategy_order_specification import (
 )
 from red_bar_lab.ui.strategy_scoped_risk import build_risk_readiness
 from red_bar_lab.ui.strategy_risk_readiness_view import render_risk_readiness_8a
+from red_bar_lab.ui.strategy_shadow_submission_rehearsal import (
+    build_shadow_submission_rehearsal,
+    render_shadow_submission_rehearsal,
+)
 
 
 def _candidate_copy_with_contract_fields(candidate_result, ranking):
@@ -109,7 +113,7 @@ def _candidate_copy_with_contract_fields(candidate_result, ranking):
 
 
 def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
-    """Append read-only Sections 5B-5E, 6A-6C, 7A-7C, 8A-8D and 9A-9D after Section 5A."""
+    """Append read-only Sections 5B-5E, 6A-6C, 7A-7C, 8A-8D and 9A-9E after Section 5A."""
     policy = POLICIES[page]
     ranking_policy = RANKING_POLICIES[policy.strategy_id]
     safeguard_policy = SAFEGUARD_POLICIES[policy.strategy_id]
@@ -280,6 +284,8 @@ def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
         render_broker_payload_preview(payload_preview)
         adapter_mapping = build_adapter_mapping_validation(payload_preview)
         render_adapter_mapping_validation(adapter_mapping)
+        shadow_rehearsal = build_shadow_submission_rehearsal(adapter_mapping)
+        render_shadow_submission_rehearsal(shadow_rehearsal)
         return result
 
     setattr(module, policy.builder_name, capture_resolution)
