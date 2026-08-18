@@ -9,7 +9,7 @@ def test_display_value_serializes_nested_values_for_arrow_tables():
     assert _display_value(("A", "B")) == '["A", "B"]'
 
 
-def test_display_value_preserves_scalar_values():
-    assert _display_value(10000.0) == 10000.0
-    assert _display_value(False) is False
-    assert _display_value(None) is None
+def test_display_value_normalizes_scalars_to_one_text_column():
+    assert _display_value(10000.0) == "10000.0"
+    assert _display_value(False) == "False"
+    assert _display_value(None) == ""
