@@ -4,15 +4,18 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any
 
-from red_bar_lab.execution.execution_policy import RSI_EXIT_MODE
+from red_bar_lab.execution.execution_policy import (
+    RSI_DYNAMIC_PROTECTION_DELAY_SECONDS,
+    RSI_EXIT_MODE,
+    RSI_STRATEGY_SOURCE,
+    execution_strategy_source,
+)
 
 # Retired RB-0.7.9 compatibility markers. These strings are intentionally
 # non-executable and exist only for legacy source-inspection tests:
 # breakeven_trigger_pct: float = 15.0
 # trailing_trigger_pct: float = 20.0
 # trailing_distance_pct: float = 10.0
-
-RSI_DYNAMIC_PROTECTION_DELAY_SECONDS = 300.0
 
 
 def _num(value: Any, default: float = 0.0) -> float:
@@ -34,6 +37,26 @@ def _position_age_seconds(position: dict[str, object]) -> float | None:
         return max(0.0, (now - entry).total_seconds())
     except (TypeError, ValueError):
         return None
+
+
+def _resolved_strategy_source(
+    position: dict[str, object],
+    signal: dict[str, object] | None,
+) -> str:
+    """Resolve primary ownership without letting support metadata take over."""
+    context = dict(signal or {})
+    for name in (
+        "execution_strategy_source",
+        "signal_source",
+        "source",
+        "signal_id",
+        "rsi_signal_id",
+    ):
+        if position.get(name) not in (None, ""):
+            context[name] = position.get(name)
+    if position.get("rsi_signal_id") not in (None, ""):
+        context["execution_strategy_source"] = RSI_STRATEGY_SOURCE
+    return execution_strategy_source(context)
 
 
 @dataclass(frozen=True)
@@ -76,8 +99,8 @@ class PaperExitEngine:
     """CE/PE paper exit decision engine.
 
     Operational exit authority is deterministic. The fixed profit target is
-    informational-only; trend continuation/exit is controlled by the completed
-    underlying 5-minute candle relative to EMA10. OI/PCR/Greeks remain shadow.
+    informational-only. Premium protection is immediate for non-RSI strategies
+    and delayed for RSI Extreme Reversal only. OI/PCR/Greeks remain shadow.
     """
 
     def __init__(
@@ -150,16 +173,23 @@ class PaperExitEngine:
 
         reasons: list[str] = []
         hard_exit_reason = None
-        rsi_premium_only = str(exit_mode).upper() == RSI_EXIT_MODE
-        age_seconds = _position_age_seconds(position)
-        dynamic_protection_enabled = not rsi_premium_only or (
-            age_seconds is None
-            or age_seconds >= self.rsi_dynamic_protection_delay_seconds
+        premium_protection_only = str(exit_mode).upper() == RSI_EXIT_MODE
+        strategy_source = _resolved_strategy_source(position, signal)
+        strategy_delay_seconds = (
+            self.rsi_dynamic_protection_delay_seconds
+            if strategy_source == RSI_STRATEGY_SOURCE
+            else 0.0
         )
-        if rsi_premium_only and not dynamic_protection_enabled:
+        age_seconds = _position_age_seconds(position)
+        dynamic_protection_enabled = (
+            strategy_delay_seconds <= 0.0
+            or age_seconds is None
+            or age_seconds >= strategy_delay_seconds
+        )
+        if not dynamic_protection_enabled:
             reasons.append(
                 "RSI_DYNAMIC_PROTECTION_DELAY_ACTIVE="
-                f"{int(self.rsi_dynamic_protection_delay_seconds)}s"
+                f"{int(strategy_delay_seconds)}s"
             )
 
         breakeven_armed = bool(
@@ -191,9 +221,9 @@ class PaperExitEngine:
             _num(position.get("protected_stop_price")),
             _num(position.get("effective_stop")),
         )
-        # During the RSI delay window, ignore a dynamic stop persisted by an
-        # earlier monitor tick. The original configured hard stop remains live.
-        if rsi_premium_only and not dynamic_protection_enabled:
+        # During the RSI-only delay window, ignore a dynamic stop persisted by
+        # an earlier monitor tick. The configured hard stop remains active.
+        if not dynamic_protection_enabled:
             previous_protected_stop = 0.0
 
         stop_candidates: list[tuple[str, float, int]] = []
@@ -296,16 +326,16 @@ class PaperExitEngine:
             hard_exit_reason = effective_stop_reason
         elif eod_due:
             hard_exit_reason = "EOD_EXIT"
-        elif not rsi_premium_only and ema10_exit_reason:
+        elif not premium_protection_only and ema10_exit_reason:
             hard_exit_reason = ema10_exit_reason
-        elif not rsi_premium_only and nifty_thesis == "INVALID":
+        elif not premium_protection_only and nifty_thesis == "INVALID":
             hard_exit_reason = "NIFTY_INVALIDATION"
-        elif not rsi_premium_only and opposite_red_bar_confirmed:
+        elif not premium_protection_only and opposite_red_bar_confirmed:
             hard_exit_reason = "OPPOSITE_RED_BAR"
-        elif not rsi_premium_only and technical_failures >= 2:
+        elif not premium_protection_only and technical_failures >= 2:
             hard_exit_reason = "OPTION_TECHNICAL_BREAKDOWN"
 
-        if rsi_premium_only:
+        if premium_protection_only:
             shadow_warnings = []
             if ema10_exit_reason:
                 shadow_warnings.append(ema10_exit_reason)
@@ -356,15 +386,15 @@ class PaperExitEngine:
         elif breakeven_armed:
             action = "HOLD / PROTECT"
             reasons.append("Breakeven protection armed.")
-        elif health < 50 and not rsi_premium_only:
+        elif health < 50 and not premium_protection_only:
             action = "EXIT"
             reasons.append("Trade health below 50.")
-        elif health < 70 and not rsi_premium_only:
+        elif health < 70 and not premium_protection_only:
             action = "TIGHTEN"
             reasons.append("Trade health weakening.")
-        elif rsi_premium_only:
+        elif premium_protection_only:
             action = "HOLD"
-            reasons.append("RSI premium-protection exit remains authoritative.")
+            reasons.append("Premium-protection exit remains authoritative.")
         else:
             action = "HOLD"
             reasons.append("No operational exit trigger.")
