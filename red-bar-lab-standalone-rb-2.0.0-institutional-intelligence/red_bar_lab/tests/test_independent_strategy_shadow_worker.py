@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import json
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -70,7 +71,7 @@ def test_cycle_evaluates_all_three_strategies_without_production_authority():
     assert result.rsi_reversal["production_persisted"] is False
 
 
-def test_worker_writes_separate_journal_once_per_completed_candle(tmp_path: Path):
+def test_worker_writes_separate_journal_once_and_refreshes_heartbeat(tmp_path: Path):
     now = pd.Timestamp("2026-08-18 12:30:30", tz="Asia/Kolkata")
     worker = IndependentStrategyShadowWorker(
         candle_loader=candles,
@@ -90,6 +91,37 @@ def test_worker_writes_separate_journal_once_per_completed_candle(tmp_path: Path
     assert worker.journal_path.exists()
     assert len(worker.journal_path.read_text(encoding="utf-8").splitlines()) == 1
 
+    assert worker.status_path.exists()
+    status = json.loads(worker.status_path.read_text(encoding="utf-8"))
+    assert status["reason"] == "COMPLETED_CANDLE_ALREADY_SCANNED"
+    assert status["shadow_only"] is True
+    assert status["production_persistence"] is False
+    assert status["capital_reserved"] is False
+    assert status["bundle_consumed"] is False
+    assert status["order_submitted"] is False
+
     assert not (tmp_path / "fresh_setup_bundles_v43").exists()
     assert not (tmp_path / "fresh_setup_signals_v43").exists()
     assert not (tmp_path / "rsi_extreme_reversal_v1").exists()
+
+
+def test_worker_publishes_error_heartbeat_without_production_writes(tmp_path: Path):
+    worker = IndependentStrategyShadowWorker(
+        candle_loader=lambda: (_ for _ in ()).throw(RuntimeError("provider down")),
+        reference_level_loader=levels,
+        instrument_key="NSE_INDEX|Nifty 50",
+        runs_root=tmp_path,
+        now_provider=lambda: pd.Timestamp("2026-08-18 12:30:30", tz="Asia/Kolkata"),
+        poll_seconds=1,
+    )
+
+    try:
+        worker.run_once()
+    except RuntimeError as exc:
+        worker.write_error_status(exc)
+
+    status = json.loads(worker.status_path.read_text(encoding="utf-8"))
+    assert status["status"] == "ERROR"
+    assert status["reason"] == "RuntimeError:provider down"
+    assert status["production_persistence"] is False
+    assert not worker.journal_path.exists()
