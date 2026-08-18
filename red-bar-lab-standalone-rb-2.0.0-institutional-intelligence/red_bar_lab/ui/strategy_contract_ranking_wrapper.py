@@ -20,6 +20,10 @@ from red_bar_lab.ui.strategy_account_context_source import (
     load_account_risk_context,
     merge_account_context,
 )
+from red_bar_lab.ui.strategy_broker_payload_preview import (
+    build_broker_payload_preview,
+    render_broker_payload_preview,
+)
 from red_bar_lab.ui.strategy_candidate_readiness import (
     build_candidate_readiness,
     render_candidate_readiness,
@@ -101,7 +105,7 @@ def _candidate_copy_with_contract_fields(candidate_result, ranking):
 
 
 def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
-    """Append read-only Sections 5B-5E, 6A-6C, 7A-7C, 8A-8D and 9A-9B after Section 5A."""
+    """Append read-only Sections 5B-5E, 6A-6C, 7A-7C, 8A-8D and 9A-9C after Section 5A."""
     policy = POLICIES[page]
     ranking_policy = RANKING_POLICIES[policy.strategy_id]
     safeguard_policy = SAFEGUARD_POLICIES[policy.strategy_id]
@@ -268,6 +272,8 @@ def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
         render_execution_committee(committee_result)
         order_specification = build_order_specification(committee_result)
         render_order_specification(order_specification)
+        payload_preview = build_broker_payload_preview(order_specification)
+        render_broker_payload_preview(payload_preview)
         return result
 
     setattr(module, policy.builder_name, capture_resolution)
