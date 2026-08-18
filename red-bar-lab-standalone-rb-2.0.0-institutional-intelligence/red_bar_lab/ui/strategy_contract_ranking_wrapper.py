@@ -10,6 +10,12 @@ from red_bar_lab.ui.option_chain_directional_evidence import (
 from red_bar_lab.ui.option_chain_directional_evidence_view import (
     render_option_chain_directional_evidence_5e,
 )
+from red_bar_lab.ui.strategy_account_admission import (
+    build_capital_reservation_proposal,
+    build_final_admission,
+    build_portfolio_admission,
+    render_account_admission,
+)
 from red_bar_lab.ui.strategy_candidate_readiness import (
     build_candidate_readiness,
     render_candidate_readiness,
@@ -29,10 +35,6 @@ from red_bar_lab.ui.strategy_contract_safeguards import (
 from red_bar_lab.ui.strategy_contract_selection_audit import (
     build_selection_audit,
     render_selection_audit,
-)
-from red_bar_lab.ui.strategy_execution_decision_gate import (
-    build_execution_decision_gate,
-    render_execution_decision_gate,
 )
 from red_bar_lab.ui.strategy_execution_source_gate import POLICIES, build_execution_source_gate
 from red_bar_lab.ui.strategy_historical_performance_source import load_completed_trade_history
@@ -68,7 +70,10 @@ def _candidate_copy_with_contract_fields(candidate_result, ranking):
             str(candidate.get("role") or ""),
         )
         source = by_identity.get(key, {})
-        for field in ("ltp", "bid", "ask", "spread_pct", "volume", "oi", "iv", "delta"):
+        for field in (
+            "ltp", "bid", "ask", "spread_pct", "volume", "oi", "iv", "delta",
+            "expiry", "strike", "instrument_token", "instrument_key",
+        ):
             if candidate.get(field) is None:
                 candidate[field] = source.get(field)
         candidates.append(candidate)
@@ -77,7 +82,7 @@ def _candidate_copy_with_contract_fields(candidate_result, ranking):
 
 
 def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
-    """Append read-only Sections 5B-5E, 6A-6C, 7A-7C and 8A-8B after Section 5A."""
+    """Append read-only Sections 5B-5E, 6A-6C, 7A-7C and 8A-8D after Section 5A."""
     policy = POLICIES[page]
     ranking_policy = RANKING_POLICIES[policy.strategy_id]
     safeguard_policy = SAFEGUARD_POLICIES[policy.strategy_id]
@@ -206,12 +211,21 @@ def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
         risk_result = build_risk_readiness(risk_input, risk_context=risk_context)
         render_risk_readiness_8a(risk_result)
 
-        execution_decision = build_execution_decision_gate(
+        portfolio_result = build_portfolio_admission(
             opportunity_result,
             risk_result,
-            execution_source_gate=gate,
+            account_context=risk_context,
         )
-        render_execution_decision_gate(execution_decision)
+        reservation_result = build_capital_reservation_proposal(
+            portfolio_result,
+            account_context=risk_context,
+        )
+        final_admission = build_final_admission(
+            reservation_result,
+            execution_source_gate=gate,
+            account_context=risk_context,
+        )
+        render_account_admission(portfolio_result, reservation_result, final_admission)
         return result
 
     setattr(module, policy.builder_name, capture_resolution)
