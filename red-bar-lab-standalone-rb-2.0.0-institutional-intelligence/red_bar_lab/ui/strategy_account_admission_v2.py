@@ -12,7 +12,7 @@ from red_bar_lab.ui.strategy_account_admission import (
     build_portfolio_admission as _build_portfolio_admission_v1,
     render_account_admission as _render_account_admission_v1,
 )
-from red_bar_lab.ui.strategy_admission_priority import prioritize_admission_rows
+from red_bar_lab.ui.strategy_admission_priority import prioritize_candidates
 from red_bar_lab.ui.strategy_monetary_exposure import apply_monetary_exposure_admission
 
 
@@ -69,7 +69,7 @@ def build_capital_reservation_proposal(
     strategy_limits = _strategy_limits(context)
     proposed_strategy_risk: dict[str, float] = {}
     rows: list[dict[str, object]] = []
-    prioritized = prioritize_admission_rows(portfolio_result.get("rows") or [])
+    prioritized = prioritize_candidates(portfolio_result.get("rows") or [])
 
     for raw in prioritized:
         candidate = dict(raw)
