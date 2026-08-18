@@ -128,6 +128,10 @@ def _configure_research_lab(research_lab: ModuleType) -> None:
     from red_bar_lab.services.evidence_replay import (
         EvidenceAwareHistoricalDecisionReplayService,
     )
+    from red_bar_lab.services.red_bar_v2_historical_validation import (
+        red_bar_v2_strategy_registry,
+        run_red_bar_v2_historical_strategy_validation,
+    )
     from red_bar_lab.ui.historical_dri_10day import build_10day_validation_wrapper
     from red_bar_lab.ui.historical_dri_20day import build_20day_validation_wrapper
     from red_bar_lab.ui.historical_dri_relevant_coverage import (
@@ -139,6 +143,10 @@ def _configure_research_lab(research_lab: ModuleType) -> None:
 
     historical_dri_10day_ui.HistoricalOptionChainSyncService = _research_option_sync_factory
     research_lab.HistoricalDecisionReplayService = EvidenceAwareHistoricalDecisionReplayService
+    research_lab.default_strategy_registry = red_bar_v2_strategy_registry
+    research_lab.run_historical_strategy_validation = (
+        run_red_bar_v2_historical_strategy_validation
+    )
     research_lab.render_page = build_10day_validation_wrapper(
         research_lab.render_page, research_lab
     )
