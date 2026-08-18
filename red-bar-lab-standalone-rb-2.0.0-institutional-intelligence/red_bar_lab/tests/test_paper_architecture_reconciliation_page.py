@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from red_bar_lab.ui.pages.paper_architecture_reconciliation import (
+from red_bar_lab.ui.pages.paper_architecture_reconciliation_v2 import (
     SECTION_10_STAGES,
     build_reconciliation_snapshot,
 )
@@ -14,7 +14,7 @@ def test_reconciliation_page_is_registered_after_paper_trading():
     page = "Paper Architecture Reconciliation"
 
     assert PAGE_MODULE_PATHS[page] == (
-        "red_bar_lab.ui.pages.paper_architecture_reconciliation"
+        "red_bar_lab.ui.pages.paper_architecture_reconciliation_v2"
     )
     assert pages.index(page) == pages.index("Paper Trading") + 1
 
@@ -24,8 +24,10 @@ def test_section_10_status_sequence_is_explicit():
         "10A", "10B", "10C", "10D", "10E", "10F",
     ]
     assert [row["status"] for row in SECTION_10_STAGES] == [
-        "COMPLETED", "COMPLETED", "COMPLETED", "NEXT", "PENDING", "PENDING",
+        "COMPLETED", "COMPLETED", "COMPLETED", "COMPLETED", "NEXT", "PENDING",
     ]
+    assert SECTION_10_STAGES[3]["authority"] == "SHADOW_ONLY"
+    assert SECTION_10_STAGES[4]["authority"] == "DISABLED"
 
 
 def test_reconciliation_snapshot_is_read_only_and_does_not_mutate_orders():
@@ -54,12 +56,34 @@ def test_reconciliation_snapshot_is_read_only_and_does_not_mutate_orders():
     assert result["open_order_count"] == 1
     assert result["closed_order_count"] == 1
     assert result["comparison"]["counts"]["NOT_COMPARABLE"] == 2
+    assert result["shadow_router"]["outcome"] == "NO_SHADOW_EVIDENCE"
     assert result["source_read_only"] is True
     assert result["persisted"] is False
     assert result["execution_allowed"] is False
     assert result["paper_order_created"] is False
     assert result["queue_state_changed"] is False
     assert result["capital_reserved"] is False
+
+
+def test_reconciliation_snapshot_builds_shadow_routes_from_evidence():
+    evidence = [
+        {
+            "strategy_id": "RED_BAR",
+            "signal_id": "RB-1",
+            "bundle_id": "BUNDLE-1",
+            "candidate_id": "CANDIDATE-1",
+            "snapshot_timestamp": "2026-08-18T09:20:00+05:30",
+            "evaluation_timestamp": "2026-08-18T09:20:01+05:30",
+            "new_chain_decision": "ADMIT_READ_ONLY",
+        }
+    ]
+
+    result = build_reconciliation_snapshot([], evidence)
+
+    assert result["shadow_router"]["outcome"] == "ROUTED_SHADOW_ONLY"
+    assert result["shadow_router"]["routed_count"] == 1
+    assert result["shadow_router"]["execution_enabled"] is False
+    assert result["shadow_router"]["position_created"] is False
 
 
 def test_reconciliation_snapshot_preserves_strategy_ownership():
