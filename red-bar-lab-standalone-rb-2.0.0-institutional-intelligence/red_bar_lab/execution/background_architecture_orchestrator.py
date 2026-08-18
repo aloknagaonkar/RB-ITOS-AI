@@ -25,10 +25,25 @@ from red_bar_lab.ui.strategy_shadow_evidence_registry import record_shadow_evide
 from red_bar_lab.ui.unified_shadow_execution_router import build_unified_shadow_routes
 
 
-BACKGROUND_ARCHITECTURE_ORCHESTRATOR_VERSION = "BACKGROUND-ARCHITECTURE-ORCHESTRATOR-V2"
+BACKGROUND_ARCHITECTURE_ORCHESTRATOR_VERSION = "BACKGROUND-ARCHITECTURE-ORCHESTRATOR-V3"
 IST = ZoneInfo("Asia/Kolkata")
 _LOCK = RLock()
 _ACTIVE: "BackgroundArchitectureOrchestrator | None" = None
+
+_SECTION_OUTCOME_FIELDS = (
+    ("4", "section_4_outcome"),
+    ("5A", "section_5a_outcome"),
+    ("5B", "section_5b_outcome"),
+    ("5C", "section_5c_outcome"),
+    ("5D", "section_5d_outcome"),
+    ("5E", "section_5e_outcome"),
+    ("6", "section_6_outcome"),
+    ("7", "section_7_outcome"),
+    ("8", "section_8_outcome"),
+    ("9", "section_9_outcome"),
+    ("10D", "section_10d_outcome"),
+    ("10E", "section_10e_outcome"),
+)
 
 
 def _outcome(result: Mapping[str, object] | None, *keys: str) -> str:
@@ -38,6 +53,31 @@ def _outcome(result: Mapping[str, object] | None, *keys: str) -> str:
         if value not in (None, ""):
             return str(value)
     return "NOT_EVALUATED"
+
+
+def _apply_downstream_skips(row: Mapping[str, object]) -> dict[str, object]:
+    """Make the audit trail explicit after the first authoritative blocker.
+
+    The blocking section keeps its real outcome and reason. Every later section is
+    marked SKIPPED_BLOCKED_AT_<SECTION> so the UI never implies that downstream
+    decision logic was independently evaluated after an earlier stop.
+    """
+    result = dict(row)
+    terminal = str(result.get("terminal_section") or "").upper()
+    indexes = {section: index for index, (section, _) in enumerate(_SECTION_OUTCOME_FIELDS)}
+    if terminal not in indexes:
+        return result
+
+    skipped_value = f"SKIPPED_BLOCKED_AT_{terminal}"
+    terminal_index = indexes[terminal]
+    for _, field in _SECTION_OUTCOME_FIELDS[terminal_index + 1 :]:
+        result[field] = skipped_value
+
+    # Compatibility summary mirrors canonical 5E while preserving the new detail fields.
+    result["section_5_outcome"] = result.get("section_5e_outcome")
+    result["downstream_skip_applied"] = terminal_index < len(_SECTION_OUTCOME_FIELDS) - 1
+    result["downstream_skip_reason"] = skipped_value
+    return result
 
 
 def _read_cached_candles(layout, instrument_key: str, trading_date: str):
@@ -225,6 +265,7 @@ class BackgroundArchitectureOrchestrator:
                     "shadow_route_count": router.get("routed_count", 0),
                     "source_read_only": True, "execution_allowed": False,
                 }
+                row = _apply_downstream_skips(row)
             except Exception as exc:
                 row = {
                     "orchestration_cycle_id": cycle_id,
