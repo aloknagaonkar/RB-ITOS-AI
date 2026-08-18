@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from red_bar_lab.ui.pages.paper_architecture_reconciliation_v3 import (
+from red_bar_lab.ui.pages.paper_architecture_reconciliation_v4 import (
     SECTION_10_STAGES,
     build_reconciliation_snapshot,
 )
@@ -14,7 +14,7 @@ def test_reconciliation_page_is_registered_after_paper_trading():
     page = "Paper Architecture Reconciliation"
 
     assert PAGE_MODULE_PATHS[page] == (
-        "red_bar_lab.ui.pages.paper_architecture_reconciliation_v3"
+        "red_bar_lab.ui.pages.paper_architecture_reconciliation_v4"
     )
     assert pages.index(page) == pages.index("Paper Trading") + 1
 
