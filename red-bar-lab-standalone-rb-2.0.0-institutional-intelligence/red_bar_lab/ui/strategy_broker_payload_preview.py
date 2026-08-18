@@ -156,12 +156,11 @@ def build_broker_payload_preview(
             "submission_enabled": False,
             "broker_client_attached": False,
             "credentials_attached": False,
-            "endpoint_attached": False,
             "entry_order": entry_payload,
             "protective_stop_order": protective_payload,
         }
         sensitive_free = not _contains_sensitive_key(payload)
-        check("Credential and endpoint exclusion", sensitive_free, "SENSITIVE_OR_ENDPOINT_FIELD_PRESENT")
+        check("Credential and transport exclusion", sensitive_free, "SENSITIVE_OR_TRANSPORT_FIELD_PRESENT")
         hard_disabled = (
             policy.submission_enabled is False
             and payload["submission_enabled"] is False
@@ -188,7 +187,7 @@ def build_broker_payload_preview(
             "submission_enabled": False,
             "broker_client_attached": False,
             "credentials_attached": False,
-            "endpoint_attached": False,
+            "transport_attached": False,
             "broker_payload_created": False,
             "order_created": False,
             "order_submitted": False,
@@ -215,7 +214,7 @@ def build_broker_payload_preview(
         "submission_enabled": False,
         "broker_client_attached": False,
         "credentials_attached": False,
-        "endpoint_attached": False,
+        "transport_attached": False,
         "broker_payload_created": False,
         "order_created": False,
         "order_submitted": False,
@@ -230,7 +229,7 @@ def build_broker_payload_preview(
 def render_broker_payload_preview(result: Mapping[str, object]) -> None:
     st.markdown("#### 9C. Disabled Broker Payload Preview")
     st.caption(
-        "Translates ready order specifications into credential-free, endpoint-free previews. "
+        "Translates ready order specifications into credential-free, transport-free previews. "
         "Submission is hard-disabled and no broker client is attached."
     )
     c1, c2, c3 = st.columns(3)
@@ -258,7 +257,7 @@ def render_broker_payload_preview(result: Mapping[str, object]) -> None:
             st.write(f"**Fingerprint:** {row.get('payload_fingerprint_sha256') or 'UNAVAILABLE'}")
             st.write(f"**Outcome:** {row.get('broker_payload_preview_outcome')}")
             st.write(f"**Exact reason:** {row.get('broker_payload_preview_reason')}")
-            st.write("**Safety:** Credentials, endpoint, broker client and submission capability are absent.")
+            st.write("**Safety:** Credentials, transport configuration, broker client and submission capability are absent.")
 
 
 __all__ = [
