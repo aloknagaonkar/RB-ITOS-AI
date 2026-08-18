@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import math
 from statistics import median
 from typing import Mapping, Sequence
@@ -7,7 +8,22 @@ from typing import Mapping, Sequence
 import streamlit as st
 
 
-SOURCE_VERSION = "OPPORTUNITY-CONTEXT-SOURCE-V1"
+SOURCE_VERSION = "OPPORTUNITY-CONTEXT-SOURCE-V2"
+
+
+@dataclass(frozen=True)
+class OpportunityInputPolicy:
+    policy_version: str = "OPPORTUNITY-INPUT-POLICY-V1"
+    premium_risk_fraction: float = 0.25
+    minimum_spread_multiple: float = 2.0
+    minimum_tick_multiple: float = 4.0
+    favourable_excursion_r_multiple: float = 2.5
+    adverse_excursion_r_multiple: float = 1.0
+    charge_fraction_per_unit: float = 0.001
+    minimum_charge_per_unit: float = 0.02
+
+
+DEFAULT_INPUT_POLICY = OpportunityInputPolicy()
 
 
 def _number(value: object) -> float | None:
@@ -70,26 +86,60 @@ def _explicit_candidate_context(
     return result
 
 
+def _round_to_tick(value: float, tick: float | None) -> float:
+    if tick is None or tick <= 0:
+        return round(value, 4)
+    return round(round(value / tick) * tick, 4)
+
+
+def _policy_inputs(
+    candidate: Mapping[str, object],
+    *,
+    entry: float | None,
+    bid: float | None,
+    ask: float | None,
+    policy: OpportunityInputPolicy,
+) -> dict[str, float | None]:
+    """Build conservative research inputs; never grants execution authority."""
+    if entry is None or entry <= 0:
+        return {"stop": None, "charges": None, "mfe": None, "mae": None, "risk": None}
+    tick = _number(candidate.get("tick_size"))
+    spread = max(0.0, ask - bid) if ask is not None and bid is not None else 0.0
+    risk = max(
+        entry * policy.premium_risk_fraction,
+        spread * policy.minimum_spread_multiple,
+        (tick or 0.0) * policy.minimum_tick_multiple,
+    )
+    risk = min(risk, entry * 0.80)
+    stop = _round_to_tick(max(tick or 0.01, entry - risk), tick)
+    actual_risk = max(0.0, entry - stop)
+    charges = max(policy.minimum_charge_per_unit, entry * policy.charge_fraction_per_unit)
+    return {
+        "stop": stop if 0 < stop < entry else None,
+        "charges": round(charges, 4),
+        "mfe": round(actual_risk * policy.favourable_excursion_r_multiple, 4),
+        "mae": round(actual_risk * policy.adverse_excursion_r_multiple, 4),
+        "risk": round(actual_risk, 4),
+    }
+
+
 def build_opportunity_context(
     candidate_result: Mapping[str, object],
     *,
     historical_records: Sequence[Mapping[str, object]] | None = None,
     account_context: Mapping[str, object] | None = None,
     explicit_context: Mapping[str, object] | None = None,
+    input_policy: OpportunityInputPolicy = DEFAULT_INPUT_POLICY,
 ) -> dict[str, object]:
-    """Build candidate-scoped opportunity inputs without inventing stops or targets."""
+    """Build candidate-scoped, provenance-labelled, read-only opportunity inputs."""
     records = [dict(row) for row in (historical_records or [])]
     account = dict(account_context or {})
     explicit = dict(explicit_context or {})
     available_cash = _number(account.get("available_cash"))
     reserved_capital = _number(account.get("reserved_capital")) or 0.0
-    available_capital = (
-        available_cash - reserved_capital if available_cash is not None else None
-    )
+    available_capital = available_cash - reserved_capital if available_cash is not None else None
     account_lots = _number(account.get("proposed_lots"))
-    account_charge = _number(
-        _first(account, "estimated_charges_per_unit", "option_charges_per_unit")
-    )
+    account_charge = _number(_first(account, "estimated_charges_per_unit", "option_charges_per_unit"))
 
     candidates: dict[str, dict[str, object]] = {}
     provenance: dict[str, dict[str, dict[str, object]]] = {}
@@ -114,15 +164,15 @@ def build_opportunity_context(
             if value in (None, "") and derived not in (None, ""):
                 value = derived
                 source = derived_source
+            authoritative = source in {
+                "EXPLICIT_CALLER_OVERRIDE", "CANDIDATE",
+                "CANDIDATE_EMBEDDED_OPPORTUNITY", "ACCOUNT_CONTEXT",
+                "HISTORICAL_STRATEGY_SIDE_MEDIAN",
+            } or source.startswith("APPROVED_READ_ONLY_POLICY:")
             field_sources[name] = {
                 "value": value,
                 "source": source if value not in (None, "") else "UNAVAILABLE",
-                "authoritative": source in {
-                    "EXPLICIT_CALLER_OVERRIDE",
-                    "CANDIDATE",
-                    "CANDIDATE_EMBEDDED_OPPORTUNITY",
-                    "ACCOUNT_CONTEXT",
-                },
+                "authoritative": authoritative,
             }
             return value
 
@@ -131,46 +181,41 @@ def build_opportunity_context(
         ask = _number(candidate.get("ask"))
         quote_slippage = max(0.0, ask - entry) if ask is not None and entry is not None else None
         historical_mfe, historical_mae, historical_samples = _historical_excursions(candidate, records)
+        policy_values = _policy_inputs(candidate, entry=entry, bid=bid, ask=ask, policy=input_policy)
+        policy_source = f"APPROVED_READ_ONLY_POLICY:{input_policy.policy_version}"
 
         stop = resolve(
             "initial_option_stop",
             ("initial_stop", "stop_price", "stop_loss_price", "stop_loss"),
+            derived=policy_values["stop"],
+            derived_source=policy_source,
         )
         slippage = resolve(
-            "estimated_slippage",
-            ("slippage", "slippage_per_unit"),
-            derived=quote_slippage,
-            derived_source="QUOTE_DERIVED_BUY_IMPACT",
+            "estimated_slippage", ("slippage", "slippage_per_unit"),
+            derived=quote_slippage, derived_source="QUOTE_DERIVED_BUY_IMPACT",
         )
         charges = resolve(
-            "estimated_charges",
-            ("charges", "charges_per_unit", "estimated_costs_per_unit"),
-            derived=account_charge,
-            derived_source="ACCOUNT_CONTEXT",
+            "estimated_charges", ("charges", "charges_per_unit", "estimated_costs_per_unit"),
+            derived=account_charge if account_charge is not None else policy_values["charges"],
+            derived_source="ACCOUNT_CONTEXT" if account_charge is not None else policy_source,
         )
         mfe = resolve(
-            "expected_favourable_excursion",
-            ("expected_mfe", "mfe_points"),
-            derived=historical_mfe,
-            derived_source="HISTORICAL_STRATEGY_SIDE_MEDIAN",
+            "expected_favourable_excursion", ("expected_mfe", "mfe_points"),
+            derived=historical_mfe if historical_mfe is not None else policy_values["mfe"],
+            derived_source="HISTORICAL_STRATEGY_SIDE_MEDIAN" if historical_mfe is not None else policy_source,
         )
         mae = resolve(
-            "expected_adverse_excursion",
-            ("expected_mae", "mae_points"),
-            derived=historical_mae,
-            derived_source="HISTORICAL_STRATEGY_SIDE_MEDIAN",
+            "expected_adverse_excursion", ("expected_mae", "mae_points"),
+            derived=historical_mae if historical_mae is not None else policy_values["mae"],
+            derived_source="HISTORICAL_STRATEGY_SIDE_MEDIAN" if historical_mae is not None else policy_source,
         )
         capital = resolve(
-            "available_capital",
-            ("available_cash",),
-            derived=available_capital,
-            derived_source="ACCOUNT_CONTEXT",
+            "available_capital", ("available_cash",),
+            derived=available_capital, derived_source="ACCOUNT_CONTEXT",
         )
         lots = resolve(
-            "proposed_lots",
-            ("lots",),
-            derived=account_lots,
-            derived_source="ACCOUNT_CONTEXT",
+            "proposed_lots", ("lots",),
+            derived=account_lots, derived_source="ACCOUNT_CONTEXT",
         )
 
         candidates[cid] = {
@@ -186,21 +231,20 @@ def build_opportunity_context(
             "available_capital": _number(capital),
             "proposed_lots": int(_number(lots)) if _number(lots) is not None else None,
             "historical_excursion_sample_count": historical_samples,
+            "opportunity_input_policy_version": input_policy.policy_version,
+            "policy_initial_risk_points": policy_values["risk"],
             "opportunity_context_source_version": SOURCE_VERSION,
             "source_read_only": True,
         }
         provenance[cid] = field_sources
 
-    top_level = {
-        key: value
-        for key, value in explicit.items()
-        if key not in {"candidates", "field_provenance"}
-    }
+    top_level = {key: value for key, value in explicit.items() if key not in {"candidates", "field_provenance"}}
     return {
         **top_level,
         "candidates": candidates,
         "field_provenance": provenance,
         "source_version": SOURCE_VERSION,
+        "input_policy_version": input_policy.policy_version,
         "source_read_only": True,
         "persisted": False,
         "reserved": False,
@@ -211,22 +255,21 @@ def build_opportunity_context(
 def render_opportunity_context_source(context: Mapping[str, object]) -> None:
     st.markdown("#### 7A.1 Opportunity Input Sources")
     st.caption(
-        "Stops and targets are never fabricated. Quote-derived slippage and historical excursion medians are labelled explicitly."
+        "Explicit and historical inputs take priority. Missing stop, cost and excursion inputs may use the approved read-only research policy; every source is labelled and no execution authority is granted."
     )
     rows = []
     for candidate_id, fields in (context.get("field_provenance") or {}).items():
         if not isinstance(fields, Mapping):
             continue
         for field, detail in fields.items():
-            if not isinstance(detail, Mapping):
-                continue
-            rows.append({
-                "candidate_id": candidate_id,
-                "field": field,
-                "value": detail.get("value"),
-                "source": detail.get("source"),
-                "authoritative": detail.get("authoritative"),
-            })
+            if isinstance(detail, Mapping):
+                rows.append({
+                    "candidate_id": candidate_id,
+                    "field": field,
+                    "value": detail.get("value"),
+                    "source": detail.get("source"),
+                    "authoritative": detail.get("authoritative"),
+                })
     if rows:
         st.dataframe(rows, width="stretch", hide_index=True)
     else:
@@ -234,7 +277,6 @@ def render_opportunity_context_source(context: Mapping[str, object]) -> None:
 
 
 __all__ = [
-    "SOURCE_VERSION",
-    "build_opportunity_context",
-    "render_opportunity_context_source",
+    "SOURCE_VERSION", "OpportunityInputPolicy", "DEFAULT_INPUT_POLICY",
+    "build_opportunity_context", "render_opportunity_context_source",
 ]
