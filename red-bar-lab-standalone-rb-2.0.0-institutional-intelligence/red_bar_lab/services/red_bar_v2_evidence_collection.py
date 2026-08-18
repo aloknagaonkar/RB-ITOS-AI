@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections import Counter
+
 from dataclasses import asdict, dataclass
 from datetime import datetime
 import json
@@ -47,6 +49,18 @@ class RedBarV2EvidenceStore:
             handle.write(json.dumps(row, sort_keys=True, default=str) + "\n")
 
     def record_replay(self, result: Any, *, error: str | None = None) -> None:
+        candidate_events = [
+            event
+            for event in (getattr(result, "events", ()) or ())
+            if getattr(event, "event_type", None) == "CANDIDATE_ADMISSION"
+        ]
+        admission_code_counts = dict(
+            Counter(
+                str(getattr(event, "admission_code", None) or "UNKNOWN")
+                for event in candidate_events
+            )
+        )
+
         self._append(
             self.paths.replay,
             {
@@ -54,6 +68,8 @@ class RedBarV2EvidenceStore:
                 "instrument_key": getattr(result, "instrument_key", None),
                 "admitted_candidates": int(getattr(result, "admitted_candidates", 0) or 0),
                 "blocked_candidates": int(getattr(result, "blocked_candidates", 0) or 0),
+                "candidate_event_count": len(candidate_events),
+                "admission_code_counts": admission_code_counts,
                 "error": error,
             },
         )

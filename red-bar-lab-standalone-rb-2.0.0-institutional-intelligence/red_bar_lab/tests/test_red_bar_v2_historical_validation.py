@@ -122,3 +122,105 @@ def test_replay_failure_is_recorded_fail_closed(tmp_path, monkeypatch):
 
     text = store.paths.replay.read_text(encoding="utf-8")
     assert "ValueError:bad replay" in text
+
+
+def test_zero_volume_index_session_is_blocked_before_replay(monkeypatch):
+    import pandas as pd
+
+    from red_bar_lab.services import red_bar_v2_historical_validation as validation
+
+    class Reader:
+        def read_day(self, instrument_key, trading_date, interval_minutes=1):
+            return pd.DataFrame(
+                {
+                    "timestamp": pd.date_range(
+                        "2026-08-18 09:15",
+                        periods=30,
+                        freq="1min",
+                        tz="Asia/Kolkata",
+                    ),
+                    "open": [100.0] * 30,
+                    "high": [101.0] * 30,
+                    "low": [99.0] * 30,
+                    "close": [100.0] * 30,
+                    "volume": [0.0] * 30,
+                }
+            )
+
+    def fail_if_replay_runs(*args, **kwargs):
+        raise AssertionError("Replay must not run without a genuine VWAP source.")
+
+    monkeypatch.setattr(
+        validation,
+        "replay_red_bar_v2_day",
+        fail_if_replay_runs,
+    )
+
+    adapter = validation.RedBarV2HistoricalStrategyAdapter(Reader())
+    result = adapter.run_day(
+        "NSE_INDEX|Nifty 50",
+        pd.Timestamp("2026-08-18").date(),
+    )
+
+    assert result.ready is False
+    assert result.fidelity == "BLOCKED"
+    assert result.rows == ()
+    assert result.global_replay_ready is False
+    assert result.strategy_relevant_status == "BLOCKED"
+    assert "VWAP_SOURCE_UNAVAILABLE" in result.readiness_reason
+    assert "no positive traded volume" in result.readiness_reason
+
+
+def test_positive_volume_session_continues_to_replay(monkeypatch):
+    import pandas as pd
+    from types import SimpleNamespace
+
+    from red_bar_lab.services import red_bar_v2_historical_validation as validation
+
+    class Reader:
+        def read_day(self, instrument_key, trading_date, interval_minutes=1):
+            return pd.DataFrame(
+                {
+                    "timestamp": pd.date_range(
+                        "2026-08-18 09:15",
+                        periods=30,
+                        freq="1min",
+                        tz="Asia/Kolkata",
+                    ),
+                    "open": [100.0] * 30,
+                    "high": [101.0] * 30,
+                    "low": [99.0] * 30,
+                    "close": [100.0] * 30,
+                    "volume": [1000.0] * 30,
+                }
+            )
+
+    called = {"value": False}
+
+    def fake_replay(candles, *, instrument_key):
+        called["value"] = True
+        return SimpleNamespace(
+            trading_date="2026-08-18",
+            instrument_key=instrument_key,
+            admitted_candidates=0,
+            blocked_candidates=0,
+            final_trade_state="FLAT",
+            events=(),
+        )
+
+    monkeypatch.setattr(
+        validation,
+        "replay_red_bar_v2_day",
+        fake_replay,
+    )
+
+    adapter = validation.RedBarV2HistoricalStrategyAdapter(Reader())
+    result = adapter.run_day(
+        "TEST_VOLUME_INSTRUMENT",
+        pd.Timestamp("2026-08-18").date(),
+    )
+
+    assert called["value"] is True
+    assert result.ready is True
+    assert result.fidelity == "UNDERLYING_ONLY"
+    assert result.strategy_relevant_status == "READY"

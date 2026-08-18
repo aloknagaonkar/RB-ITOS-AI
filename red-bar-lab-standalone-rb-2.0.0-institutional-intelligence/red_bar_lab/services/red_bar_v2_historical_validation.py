@@ -5,6 +5,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Sequence
 
+import pandas as pd
+
 from red_bar_lab.services.historical_strategy_runner import (
     build_historical_strategy_validation_engine,
 )
@@ -64,6 +66,45 @@ class RedBarV2HistoricalStrategyAdapter:
                 fidelity="BLOCKED",
                 readiness_reason="NO_CACHED_ONE_MINUTE_CANDLES",
                 coverage_basis="UNDERLYING_1M",
+                global_replay_ready=False,
+                strategy_relevant_status="BLOCKED",
+                strategy_relevant_reason=(
+                    "Red Bar V2 requires cached one-minute underlying candles."
+                ),
+            )
+
+        volume = pd.to_numeric(candles.get("volume"), errors="coerce")
+        positive_volume_rows = int((volume > 0).sum()) if volume is not None else 0
+
+        if positive_volume_rows == 0:
+            reason = (
+                "VWAP_SOURCE_UNAVAILABLE: underlying index candles contain no "
+                "positive traded volume; genuine VWAP cannot be calculated."
+            )
+
+            if self.evidence_store is not None:
+                self.evidence_store.record_replay(
+                    SimpleNamespace(
+                        trading_date=trading_date.isoformat(),
+                        instrument_key=instrument_key,
+                        admitted_candidates=0,
+                        blocked_candidates=0,
+                        events=(),
+                    ),
+                    error=None,
+                )
+
+            return DayValidationResult(
+                trading_date=trading_date,
+                ready=False,
+                fidelity="BLOCKED",
+                readiness_reason=reason,
+                rows=(),
+                coverage_basis="UNDERLYING_1M_ZERO_VOLUME",
+                candle_coverage_pct=100.0,
+                global_replay_ready=False,
+                strategy_relevant_status="BLOCKED",
+                strategy_relevant_reason=reason,
             )
 
         try:
@@ -125,7 +166,10 @@ class RedBarV2HistoricalStrategyAdapter:
             candle_coverage_pct=100.0,
             global_replay_ready=True,
             strategy_relevant_status="READY",
-            strategy_relevant_reason="Red Bar V2 requires underlying one-minute OHLCV only.",
+            strategy_relevant_reason=(
+                "Red Bar V2 replay used positive-volume underlying candles "
+                "and calculated genuine session VWAP."
+            ),
         )
 
 

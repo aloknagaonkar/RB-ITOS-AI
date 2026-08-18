@@ -267,6 +267,12 @@ def replay_red_bar_v2_day(
                         "trend_strength": admission.trend_strength,
                         "decision_id": admission.decision_id,
                         "reversal_event_id": admission.reversal_event_id,
+                        "admission_reason": admission.admission_reason,
+                        "reference_timestamp": admission.reference_timestamp,
+                        "context_timestamp": admission.context_timestamp,
+                        "active_trade_count": admission.active_trade_count,
+                        "previous_trade_status": admission.previous_trade_status,
+                        "conditions": dict(admission.conditions),
                     },
                 )
             )

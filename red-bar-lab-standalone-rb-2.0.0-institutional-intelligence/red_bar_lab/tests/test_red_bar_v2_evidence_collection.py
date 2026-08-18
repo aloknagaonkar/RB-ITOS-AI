@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from types import SimpleNamespace
 
@@ -44,6 +45,28 @@ def test_collects_sqlite_and_jsonl_evidence(tmp_path):
             instrument_key="NIFTY",
             admitted_candidates=2,
             blocked_candidates=3,
+            events=(
+                SimpleNamespace(
+                    event_type="CANDIDATE_ADMISSION",
+                    admission_code="INITIAL_BULLISH_ALIGNMENT",
+                ),
+                SimpleNamespace(
+                    event_type="CANDIDATE_ADMISSION",
+                    admission_code="RSI_NOT_ALIGNED",
+                ),
+                SimpleNamespace(
+                    event_type="CANDIDATE_ADMISSION",
+                    admission_code="RSI_NOT_ALIGNED",
+                ),
+                SimpleNamespace(
+                    event_type="CANDIDATE_ADMISSION",
+                    admission_code="VWAP_NOT_ALIGNED",
+                ),
+                SimpleNamespace(
+                    event_type="CANDIDATE_ADMISSION",
+                    admission_code="MIDPOINT_NOT_ALIGNED",
+                ),
+            ),
         )
     )
     store.record_parity(SimpleNamespace(matches=True, mismatch_fields=()))
@@ -61,6 +84,17 @@ def test_collects_sqlite_and_jsonl_evidence(tmp_path):
     assert evidence.unit_tests_passed == 88
     assert evidence.replay_sessions == 1
     assert evidence.replay_candidates == 5
+
+    replay_payload = json.loads(
+        store.paths.replay.read_text(encoding="utf-8").strip()
+    )
+    assert replay_payload["candidate_event_count"] == 5
+    assert replay_payload["admission_code_counts"] == {
+        "INITIAL_BULLISH_ALIGNMENT": 1,
+        "MIDPOINT_NOT_ALIGNED": 1,
+        "RSI_NOT_ALIGNED": 2,
+        "VWAP_NOT_ALIGNED": 1,
+    }
     assert evidence.replay_errors == 0
     assert evidence.parity_comparisons == 2
     assert evidence.parity_mismatches == 1

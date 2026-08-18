@@ -161,6 +161,16 @@ def test_reversal_before_exit_is_blocked_then_admitted_after_close(monkeypatch):
     assert any(event.admission_code == "ACTIVE_TRADE_BLOCK" for event in admissions)
     assert admissions[-1].candidate_allowed is True
     assert admissions[-1].admission_code == "REVERSAL_CONTEXT_ALIGNED_FLAT"
+
+    for event in admissions:
+        assert "admission_reason" in event.details
+        assert "conditions" in event.details
+        assert "reference_ready" in event.details["conditions"]
+        assert "context_fresh" in event.details["conditions"]
+        assert "rsi_aligned" in event.details["conditions"]
+        assert "vwap_aligned" in event.details["conditions"]
+        assert "midpoint_aligned" in event.details["conditions"]
+
     assert result.admitted_candidates == 2
     assert result.closed_trades == 1
 
