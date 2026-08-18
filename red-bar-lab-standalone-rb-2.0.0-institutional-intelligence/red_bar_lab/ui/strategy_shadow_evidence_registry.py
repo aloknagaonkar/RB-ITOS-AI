@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import datetime
 from threading import RLock
 from typing import Mapping, Sequence
 
@@ -32,7 +31,6 @@ def _decision(row: Mapping[str, object]) -> tuple[str, str]:
         row.get("shadow_rehearsal_outcome") or ""
     ).upper() == "SHADOW_HANDOFF_READY_DISABLED":
         return "ADMIT_READ_ONLY", "SHADOW_HANDOFF_READY_DISABLED"
-
     for name in (
         "committee_decision", "committee_outcome", "final_admission_decision",
         "admission_decision", "final_decision", "decision", "outcome",
@@ -59,6 +57,51 @@ def _identity(row: Mapping[str, object]) -> tuple[str, ...]:
     )
 
 
+def _store(rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    copied = [deepcopy(dict(row)) for row in rows]
+    with _LOCK:
+        for evidence in copied:
+            key = _identity(evidence)
+            _ROWS[:] = [row for row in _ROWS if _identity(row) != key]
+            _ROWS.append(evidence)
+        if len(_ROWS) > _MAX_ROWS:
+            del _ROWS[:-_MAX_ROWS]
+        size = len(_ROWS)
+    return {
+        "captured_count": len(copied),
+        "registry_size": size,
+        "registry_version": SHADOW_EVIDENCE_REGISTRY_VERSION,
+        "source_read_only": True,
+        "persisted": False,
+    }
+
+
+def record_shadow_result(result: Mapping[str, object]) -> dict[str, object]:
+    """Capture a completed Section 9E result in bounded process memory."""
+    captured: list[dict[str, object]] = []
+    for raw in result.get("rows") or []:
+        row = dict(raw)
+        decision, reason = _decision(row)
+        captured.append({
+            **row,
+            "strategy_id": _text(row.get("strategy_id")),
+            "signal_id": _text(row.get("signal_id")),
+            "bundle_id": _text(row.get("bundle_id")),
+            "candidate_id": _text(row.get("candidate_id")),
+            "snapshot_timestamp": _text(row.get("snapshot_timestamp")),
+            "evaluation_timestamp": _timestamp(row),
+            "new_chain_decision": decision,
+            "new_chain_reason": reason,
+            "registry_version": SHADOW_EVIDENCE_REGISTRY_VERSION,
+            "source_read_only": True,
+            "persisted": False,
+            "reserved": False,
+            "bundle_consumed": False,
+            "submitted": False,
+        })
+    return _store(captured)
+
+
 def record_shadow_evidence(
     *,
     page: str,
@@ -80,7 +123,7 @@ def record_shadow_evidence(
     for raw in sources:
         row = dict(raw)
         decision, reason = _decision(row)
-        evidence = {
+        captured.append({
             **row,
             "page": page,
             "strategy_id": _text(row.get("strategy_id") or strategy_id),
@@ -99,24 +142,8 @@ def record_shadow_evidence(
             "reserved": False,
             "bundle_consumed": False,
             "submitted": False,
-        }
-        captured.append(evidence)
-
-    with _LOCK:
-        for evidence in captured:
-            key = _identity(evidence)
-            _ROWS[:] = [row for row in _ROWS if _identity(row) != key]
-            _ROWS.append(deepcopy(evidence))
-        if len(_ROWS) > _MAX_ROWS:
-            del _ROWS[:-_MAX_ROWS]
-
-    return {
-        "captured_count": len(captured),
-        "registry_size": len(_ROWS),
-        "registry_version": SHADOW_EVIDENCE_REGISTRY_VERSION,
-        "source_read_only": True,
-        "persisted": False,
-    }
+        })
+    return _store(captured)
 
 
 def read_shadow_evidence() -> list[dict[str, object]]:
@@ -131,6 +158,7 @@ def clear_shadow_evidence_for_tests() -> None:
 
 __all__ = [
     "SHADOW_EVIDENCE_REGISTRY_VERSION",
+    "record_shadow_result",
     "record_shadow_evidence",
     "read_shadow_evidence",
     "clear_shadow_evidence_for_tests",
