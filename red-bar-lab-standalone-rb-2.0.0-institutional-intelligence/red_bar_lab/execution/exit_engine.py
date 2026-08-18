@@ -42,8 +42,16 @@ def _position_age_seconds(position: dict[str, object]) -> float | None:
 def _resolved_strategy_source(
     position: dict[str, object],
     signal: dict[str, object] | None,
+    *,
+    exit_mode: str,
 ) -> str:
-    """Resolve primary ownership without letting support metadata take over."""
+    """Resolve primary ownership without letting support metadata take over.
+
+    Explicit strategy identity is authoritative. Legacy rows that contain no
+    strategy or signal identity retain compatibility with the historical RSI
+    contract: ``RSI_PREMIUM_PROTECTION_ONLY`` implies RSI ownership for delay
+    timing only. An RSI support identifier never overrides an explicit owner.
+    """
     context = dict(signal or {})
     for name in (
         "execution_strategy_source",
@@ -62,12 +70,11 @@ def _resolved_strategy_source(
         or ""
     ).strip()
     signal_id = str(context.get("signal_id") or "").strip()
-    if (
-        not explicit_source
-        and not signal_id
-        and context.get("rsi_signal_id") not in (None, "")
-    ):
-        context["execution_strategy_source"] = RSI_STRATEGY_SOURCE
+    if not explicit_source and not signal_id:
+        if context.get("rsi_signal_id") not in (None, ""):
+            context["execution_strategy_source"] = RSI_STRATEGY_SOURCE
+        elif str(exit_mode or "").upper() == RSI_EXIT_MODE:
+            context["execution_strategy_source"] = RSI_STRATEGY_SOURCE
     return execution_strategy_source(context)
 
 
@@ -186,7 +193,11 @@ class PaperExitEngine:
         reasons: list[str] = []
         hard_exit_reason = None
         premium_protection_only = str(exit_mode).upper() == RSI_EXIT_MODE
-        strategy_source = _resolved_strategy_source(position, signal)
+        strategy_source = _resolved_strategy_source(
+            position,
+            signal,
+            exit_mode=exit_mode,
+        )
         strategy_delay_seconds = (
             self.rsi_dynamic_protection_delay_seconds
             if strategy_source == RSI_STRATEGY_SOURCE
