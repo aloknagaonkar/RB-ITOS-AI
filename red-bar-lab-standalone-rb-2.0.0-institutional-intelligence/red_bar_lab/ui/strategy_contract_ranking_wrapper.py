@@ -16,6 +16,10 @@ from red_bar_lab.ui.strategy_account_admission import (
     build_portfolio_admission,
     render_account_admission,
 )
+from red_bar_lab.ui.strategy_account_context_source import (
+    load_account_risk_context,
+    merge_account_context,
+)
 from red_bar_lab.ui.strategy_candidate_readiness import (
     build_candidate_readiness,
     render_candidate_readiness,
@@ -72,7 +76,8 @@ def _candidate_copy_with_contract_fields(candidate_result, ranking):
         source = by_identity.get(key, {})
         for field in (
             "ltp", "bid", "ask", "spread_pct", "volume", "oi", "iv", "delta",
-            "expiry", "strike", "instrument_token", "instrument_key",
+            "expiry", "strike", "instrument_token", "instrument_key", "exchange",
+            "trading_symbol", "lot_size", "tick_size",
         ):
             if candidate.get(field) is None:
                 candidate[field] = source.get(field)
@@ -204,11 +209,21 @@ def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
         render_opportunity_history_gate(opportunity_result)
         render_history_coverage(history_source.get("coverage") or build_history_coverage([]))
 
-        risk_context = kwargs.get("account_risk_context")
-        if not isinstance(risk_context, Mapping):
-            risk_context = {}
+        discovered_risk_context = load_account_risk_context(database)
+        supplied_risk_context = kwargs.get("account_risk_context")
+        if not isinstance(supplied_risk_context, Mapping):
+            supplied_risk_context = {}
+        risk_context = merge_account_context(
+            discovered_risk_context,
+            supplied_risk_context,
+        )
+
         risk_input = forward_candidates_for_risk(opportunity_result)
         risk_result = build_risk_readiness(risk_input, risk_context=risk_context)
+        risk_result["account_context_status"] = risk_context.get("context_status")
+        risk_result["account_context_source_version"] = risk_context.get("context_source_version")
+        risk_result["account_context_evaluated_at"] = risk_context.get("context_evaluated_at")
+        risk_result["account_context_provenance"] = risk_context.get("field_provenance")
         render_risk_readiness_8a(risk_result)
 
         portfolio_result = build_portfolio_admission(
