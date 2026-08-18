@@ -11,6 +11,10 @@ from red_bar_lab.ui.strategy_attribution import (
     build_strategy_attribution,
     build_strategy_performance_summary,
 )
+from red_bar_lab.ui.strategy_performance_ledger import (
+    build_strategy_performance_ledger,
+    render_strategy_performance_ledger,
+)
 
 
 ARCHIVED_STATUSES = {"ARCHIVED", "DUPLICATE", "DUPLICATE_TRADE"}
@@ -355,6 +359,13 @@ def render_strategy_attribution(database) -> None:
             })
 
 
+@_fragment("5s")
+def render_performance_ledger(database) -> None:
+    orders = [dict(row) for row in (database.read_paper_execution_orders("PAPER-STD") or [])]
+    result = build_strategy_performance_ledger(orders)
+    render_strategy_performance_ledger(result)
+
+
 @_fragment("10s")
 def render_candidates_and_queue(database, trading_date: str) -> None:
     active_queue = [row for row in _safe_queue(database) if str(row.get("status") or "").upper() in ACTIVE_QUEUE_STATUSES]
@@ -395,6 +406,7 @@ def build_paper_page_wrapper(original):
         render_trading_overview(proxy, instrument_key, trading_date)
         render_current_trades(proxy)
         render_strategy_attribution(proxy)
+        render_performance_ledger(proxy)
         render_candidates_and_queue(proxy, trading_date)
         render_recent_exits(proxy)
         with st.expander("Advanced Details & Diagnostics", expanded=False):
@@ -412,6 +424,7 @@ __all__ = [
     "render_trading_overview",
     "render_current_trades",
     "render_strategy_attribution",
+    "render_performance_ledger",
     "render_candidates_and_queue",
     "render_recent_exits",
 ]
