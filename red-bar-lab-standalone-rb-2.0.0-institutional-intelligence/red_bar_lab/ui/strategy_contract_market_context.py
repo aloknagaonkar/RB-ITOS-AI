@@ -5,6 +5,8 @@ from typing import Mapping
 
 import pandas as pd
 
+from red_bar_lab.ui.strategy_contract_metadata_context import enrich_contract_execution_metadata
+
 
 def _number(value: object) -> float | None:
     try:
@@ -80,11 +82,7 @@ def enrich_contract_market_context(
     instrument_key: str,
     artifact_loader=_load_artifact,
 ) -> dict[str, object]:
-    """Attach spot and ATM from the exact Section 5A point-in-time snapshot.
-
-    The selected snapshot timestamp is authoritative. No current quote, later snapshot,
-    or cross-strategy context is consulted.
-    """
+    """Attach exact-snapshot spot, ATM and execution metadata without look-ahead."""
     result = dict(readiness)
     base = {
         **result,
@@ -94,6 +92,7 @@ def enrich_contract_market_context(
         "atm_source": str(result.get("atm_source") or "UNAVAILABLE"),
         "market_context_status": "UNAVAILABLE",
         "market_context_reason": "Section 5A snapshot context is unavailable.",
+        "market_context_required": True,
     }
     snapshot_ts = _timestamp(result.get("snapshot_timestamp"))
     bundle_ts = _timestamp(result.get("bundle_timestamp"))
@@ -167,7 +166,7 @@ def enrich_contract_market_context(
         status = "READY"
         reason = "Spot and ATM are aligned to the exact Section 5A snapshot timestamp."
 
-    return {
+    resolved = {
         **base,
         "spot_price": spot,
         "atm_strike": atm,
@@ -176,3 +175,19 @@ def enrich_contract_market_context(
         "market_context_status": status,
         "market_context_reason": reason,
     }
+    resolved = enrich_contract_execution_metadata(
+        resolved,
+        database=database,
+        instrument_key=instrument_key,
+        artifact_loader=artifact_loader,
+    )
+    if status != "READY" and str(resolved.get("outcome") or "") == "READY_FOR_RANKING":
+        resolved["outcome"] = "WAIT"
+        resolved["reason"] = (
+            "Point-in-time spot and ATM are required before strike-distance safeguards and ranking."
+        )
+        resolved["ready_for_ranking"] = 0
+        resolved["next_step"] = (
+            "Capture authoritative point-in-time spot and ATM; do not rank or hand off a contract."
+        )
+    return resolved
