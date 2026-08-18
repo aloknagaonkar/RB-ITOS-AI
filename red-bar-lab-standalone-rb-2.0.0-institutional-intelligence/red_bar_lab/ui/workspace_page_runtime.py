@@ -15,7 +15,7 @@ PAGE_MODULE_PATHS = {
     "Live Trading": "red_bar_lab.ui.pages.live_trading",
     "Paper Trading": "red_bar_lab.ui.pages.paper_trading",
     "Paper Architecture Reconciliation": (
-        "red_bar_lab.ui.pages.paper_architecture_reconciliation_v3"
+        "red_bar_lab.ui.pages.paper_architecture_reconciliation_v4"
     ),
     "Research Lab": "red_bar_lab.ui.pages.research_lab",
     "Shadow Directional": "red_bar_lab.ui.pages.shadow_directional_diagnostics",
@@ -35,6 +35,16 @@ PAGE_MODULE_PATHS = {
 
 _CACHED_CANDLE_PAGES = frozenset(
     {"Red Bar Strategy", "RSI Extreme Reversal", "Directional Regime Intelligence"}
+)
+_BACKGROUND_BOOTSTRAP_PAGES = frozenset(
+    {
+        "Operations Center",
+        "Red Bar Strategy",
+        "RSI Extreme Reversal",
+        "Directional Regime Intelligence",
+        "Paper Trading",
+        "Paper Architecture Reconciliation",
+    }
 )
 _MODULE_CACHE: dict[str, ModuleType] = {}
 _CONFIGURED: set[str] = set()
@@ -144,6 +154,14 @@ def configure_page(page: str, module: ModuleType) -> ModuleType:
         _configure_paper_trading(module)
     elif page == "Research Lab":
         _configure_research_lab(module)
+    if page in _BACKGROUND_BOOTSTRAP_PAGES:
+        from red_bar_lab.ui.background_architecture_runtime import (
+            build_background_architecture_bootstrap_wrapper,
+        )
+
+        module.render_page = build_background_architecture_bootstrap_wrapper(
+            module.render_page
+        )
     _CONFIGURED.add(page)
     return module
 
