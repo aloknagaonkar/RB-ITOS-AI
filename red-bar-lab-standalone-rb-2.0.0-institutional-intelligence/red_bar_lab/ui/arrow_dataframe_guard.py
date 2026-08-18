@@ -5,6 +5,11 @@ from collections.abc import Mapping, Sequence
 
 import pandas as pd
 
+try:
+    from pandas.io.formats.style import Styler
+except (ImportError, ModuleNotFoundError):
+    Styler = ()  # type: ignore[assignment,misc]
+
 
 _GUARD_MARKER = "_rb_arrow_dataframe_guard_installed"
 _NESTED_TYPES = (Mapping, list, tuple, set)
@@ -40,7 +45,7 @@ def _is_null_scalar(value: object) -> bool:
 
 def arrow_safe_frame(data: object) -> object:
     """Normalize only mixed/nested display columns before Arrow serialization."""
-    if isinstance(data, pd.io.formats.style.Styler):
+    if Styler and isinstance(data, Styler):
         return data
     if isinstance(data, pd.DataFrame):
         frame = data.copy()
