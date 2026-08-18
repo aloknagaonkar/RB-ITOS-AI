@@ -112,6 +112,25 @@ def test_policy_charge_is_used_when_account_charge_is_unavailable():
     assert source["source"].startswith("APPROVED_READ_ONLY_POLICY:")
 
 
+def test_paper_account_policy_supplies_capital_and_one_lot_when_snapshot_missing():
+    result = build_opportunity_context(
+        {"candidates": [candidate()]},
+        historical_records=[],
+        account_context={
+            "daily_realized_pnl": 500.0,
+            "portfolio_exposure": 2500.0,
+            "reserved_capital": 1000.0,
+        },
+    )
+    row = result["candidates"]["RSI-1"]
+    assert row["available_capital"] == 97000.0
+    assert row["proposed_lots"] == 1
+    provenance = result["field_provenance"]["RSI-1"]
+    assert provenance["available_capital"]["source"].startswith("PAPER_ACCOUNT_POLICY:")
+    assert provenance["available_capital"]["authoritative"] is True
+    assert provenance["proposed_lots"]["source"].startswith("PAPER_ACCOUNT_POLICY:")
+
+
 def test_adapter_is_read_only():
     result = build_opportunity_context(
         {"candidates": [candidate()]},
