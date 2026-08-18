@@ -46,6 +46,10 @@ from red_bar_lab.ui.strategy_history_coverage import (
     build_history_coverage,
     render_history_coverage,
 )
+from red_bar_lab.ui.strategy_opportunity_context_source import (
+    build_opportunity_context,
+    render_opportunity_context_source,
+)
 from red_bar_lab.ui.strategy_opportunity_history_gate_v2 import (
     build_opportunity_history_gate,
     forward_candidates_for_risk,
@@ -77,7 +81,9 @@ def _candidate_copy_with_contract_fields(candidate_result, ranking):
         for field in (
             "ltp", "bid", "ask", "spread_pct", "volume", "oi", "iv", "delta",
             "expiry", "strike", "instrument_token", "instrument_key", "exchange",
-            "trading_symbol", "lot_size", "tick_size",
+            "trading_symbol", "lot_size", "tick_size", "initial_option_stop",
+            "initial_stop", "stop_price", "estimated_slippage", "estimated_charges",
+            "expected_favourable_excursion", "expected_adverse_excursion",
         ):
             if candidate.get(field) is None:
                 candidate[field] = source.get(field)
@@ -181,9 +187,6 @@ def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
         render_candidate_readiness(candidate_result)
 
         downstream_candidates = _candidate_copy_with_contract_fields(candidate_result, ranking)
-        opportunity_context = kwargs.get("opportunity_context")
-        if not isinstance(opportunity_context, Mapping):
-            opportunity_context = {}
 
         supplied_history = kwargs.get("historical_trade_records")
         if isinstance(supplied_history, (list, tuple)):
@@ -200,15 +203,6 @@ def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
             history_source = load_completed_trade_history(database)
             historical_records = list(history_source.get("records") or [])
 
-        opportunity_result = build_opportunity_history_gate(
-            downstream_candidates,
-            opportunity_context=opportunity_context,
-            historical_records=historical_records,
-            history_source=history_source,
-        )
-        render_opportunity_history_gate(opportunity_result)
-        render_history_coverage(history_source.get("coverage") or build_history_coverage([]))
-
         discovered_risk_context = load_account_risk_context(database)
         supplied_risk_context = kwargs.get("account_risk_context")
         if not isinstance(supplied_risk_context, Mapping):
@@ -217,6 +211,26 @@ def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
             discovered_risk_context,
             supplied_risk_context,
         )
+
+        supplied_opportunity_context = kwargs.get("opportunity_context")
+        if not isinstance(supplied_opportunity_context, Mapping):
+            supplied_opportunity_context = {}
+        opportunity_context = build_opportunity_context(
+            downstream_candidates,
+            historical_records=historical_records,
+            account_context=risk_context,
+            explicit_context=supplied_opportunity_context,
+        )
+
+        opportunity_result = build_opportunity_history_gate(
+            downstream_candidates,
+            opportunity_context=opportunity_context,
+            historical_records=historical_records,
+            history_source=history_source,
+        )
+        render_opportunity_history_gate(opportunity_result)
+        render_opportunity_context_source(opportunity_context)
+        render_history_coverage(history_source.get("coverage") or build_history_coverage([]))
 
         risk_input = forward_candidates_for_risk(opportunity_result)
         risk_result = build_risk_readiness(risk_input, risk_context=risk_context)
