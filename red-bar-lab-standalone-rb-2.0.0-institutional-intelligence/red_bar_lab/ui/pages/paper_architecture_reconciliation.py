@@ -4,6 +4,9 @@ from typing import Mapping, Sequence
 
 import streamlit as st
 
+from red_bar_lab.ui.paper_architecture_comparison import (
+    build_paper_architecture_comparison,
+)
 from red_bar_lab.ui.strategy_attribution import (
     build_strategy_attribution,
     build_strategy_performance_summary,
@@ -12,6 +15,7 @@ from red_bar_lab.ui.strategy_performance_ledger import (
     build_strategy_performance_ledger,
     render_strategy_performance_ledger,
 )
+from red_bar_lab.ui.strategy_shadow_evidence_registry import read_shadow_evidence
 
 
 SECTION_10_STAGES = (
@@ -30,13 +34,13 @@ SECTION_10_STAGES = (
     {
         "section": "10C",
         "name": "Legacy RB093 vs New Sections 4–9F Comparison",
-        "status": "NEXT",
+        "status": "COMPLETED",
         "authority": "READ_ONLY",
     },
     {
         "section": "10D",
         "name": "Unified Shadow Execution Router",
-        "status": "PENDING",
+        "status": "NEXT",
         "authority": "SHADOW_ONLY",
     },
     {
@@ -93,9 +97,11 @@ def _safe_telemetry(database, order: Mapping[str, object]):
 
 def build_reconciliation_snapshot(
     orders: Sequence[Mapping[str, object]],
+    shadow_evidence: Sequence[Mapping[str, object]] | None = None,
 ) -> dict[str, object]:
-    """Build the read-only Section 10 page summary without mutating source rows."""
+    """Build the read-only Section 10 summary without mutating source rows."""
     copied = [dict(row) for row in orders]
+    evidence = [dict(row) for row in (shadow_evidence or [])]
     open_count = sum(
         str(row.get("status") or "").upper() == "OPEN" for row in copied
     )
@@ -105,11 +111,13 @@ def build_reconciliation_snapshot(
     return {
         "stages": [dict(row) for row in SECTION_10_STAGES],
         "orders": copied,
+        "shadow_evidence": evidence,
         "order_count": len(copied),
         "open_order_count": open_count,
         "closed_order_count": closed_count,
         "attribution_summary": build_strategy_performance_summary(copied),
         "performance_ledger": build_strategy_performance_ledger(copied),
+        "comparison": build_paper_architecture_comparison(copied, evidence),
         "source_read_only": True,
         "persisted": False,
         "execution_allowed": False,
@@ -193,15 +201,11 @@ def _render_attribution(database, snapshot: Mapping[str, object]) -> None:
                     "Entry mode": item.get("entry_mode"),
                     "Queue source": item.get("queue_source"),
                     "Opened by": item.get("opened_by"),
-                    "Supporting intelligence": item.get(
-                        "supporting_intelligence_text"
-                    ),
+                    "Supporting intelligence": item.get("supporting_intelligence_text"),
                     "Candidate rank": item.get("candidate_rank"),
                     "Candidate score": item.get("candidate_score"),
                     "Selection score": item.get("selection_score"),
-                    "Execution probability %": item.get(
-                        "execution_probability_pct"
-                    ),
+                    "Execution probability %": item.get("execution_probability_pct"),
                     "Expected value %": item.get("expected_value_pct"),
                     "Exit-policy owner": item.get("exit_policy_owner"),
                     "Exit policy": item.get("exit_policy"),
@@ -213,30 +217,76 @@ def _render_attribution(database, snapshot: Mapping[str, object]) -> None:
             )
 
 
+def _render_comparison(snapshot: Mapping[str, object]) -> None:
+    result = dict(snapshot.get("comparison") or {})
+    counts = dict(result.get("counts") or {})
+    st.markdown("### 10C. Legacy RB093 vs New Sections 4–9F Comparison")
+    st.caption(
+        "Matches only equivalent strategy/signal/candidate evidence evaluated at or "
+        "before the legacy decision time. Current or later data is never substituted."
+    )
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Shadow evidence", int(result.get("shadow_evidence_count") or 0))
+    c2.metric("Comparable", int(result.get("comparable_count") or 0))
+    c3.metric("Agree execute", int(counts.get("AGREE_EXECUTE") or 0))
+    c4.metric("Legacy only", int(counts.get("LEGACY_ONLY_EXECUTE") or 0))
+    c5.metric("Not comparable", int(counts.get("NOT_COMPARABLE") or 0))
+
+    rows = [dict(row) for row in result.get("rows") or []]
+    if not rows:
+        st.info("No legacy orders or captured Section 4–9F evidence are available.")
+        return
+    st.dataframe(
+        [
+            {
+                "Category": row.get("comparison_category"),
+                "Order": row.get("order_id"),
+                "Legacy Strategy": row.get("legacy_strategy"),
+                "Legacy Signal": row.get("legacy_signal_id"),
+                "Legacy Contract": row.get("legacy_contract"),
+                "Legacy Time": row.get("legacy_decision_timestamp"),
+                "New Decision": row.get("new_chain_decision"),
+                "New Signal": row.get("new_signal_id"),
+                "New Candidate": row.get("new_candidate_id"),
+                "New Time": row.get("new_evaluation_timestamp"),
+                "Reason": row.get("comparison_reason"),
+            }
+            for row in rows[:500]
+        ],
+        width="stretch",
+        hide_index=True,
+    )
+    if int(counts.get("NOT_COMPARABLE") or 0):
+        st.info(
+            "Historical trades without captured, time-safe Sections 4–9F evidence remain "
+            "NOT_COMPARABLE. Open each strategy page during future shadow operation so "
+            "Section 9E evidence is captured before any later legacy execution."
+        )
+    st.write(
+        "**Boundary:** comparison is process-local and read-only; it does not replay with "
+        "future data, persist evidence, mutate RB093, or create paper orders."
+    )
+
+
 def _render_pending_architecture() -> None:
     st.markdown("### Reconciliation Roadmap")
     c1, c2 = st.columns(2)
     with c1:
-        st.markdown("#### 10C. Legacy vs New Decision Comparison")
-        st.info(
-            "Next: compare active RB093 decisions with the read-only Sections "
-            "4–9F outcome for the same strategy, signal, candidate and timestamp."
-        )
         st.markdown("#### 10D. Unified Shadow Execution Router")
-        st.caption(
-            "Pending. It will accept independently owned Red Bar, DRI and RSI "
-            "candidates but will initially have no paper-order authority."
+        st.info(
+            "Next: accept independently owned Red Bar, DRI and RSI candidates through "
+            "one disabled, idempotent shadow-routing boundary."
         )
     with c2:
         st.markdown("#### 10E. Controlled Paper-Only Activation")
         st.caption(
-            "Pending. Requires explicit feature flags, durable idempotency, "
-            "atomic paper reservation and restart recovery."
+            "Pending. Requires explicit feature flags, durable idempotency, atomic paper "
+            "reservation and restart recovery."
         )
         st.markdown("#### 10F. Legacy Migration Decision")
         st.caption(
-            "Pending. KEEP_LEGACY, HYBRID, NEW_ROUTER_PRIMARY or RETIRE_LEGACY "
-            "will be selected only from comparison evidence."
+            "Pending. KEEP_LEGACY, HYBRID, NEW_ROUTER_PRIMARY or RETIRE_LEGACY will be "
+            "selected only from comparison evidence."
         )
 
 
@@ -252,13 +302,14 @@ def render_page(
     del settings, layout, token, underlying_name, instrument_key, interval
 
     orders = _read_orders(database)
-    snapshot = build_reconciliation_snapshot(orders)
+    shadow_evidence = read_shadow_evidence()
+    snapshot = build_reconciliation_snapshot(orders, shadow_evidence)
 
     st.subheader("Section 10 — Paper Architecture Reconciliation")
     st.caption(
-        "Read-only bridge between the active legacy RB093 paper executor and the "
-        "new institutional Sections 4–9F chain. This page cannot open, close, "
-        "reserve, consume or submit anything."
+        "Read-only bridge between the active legacy RB093 paper executor and the new "
+        "institutional Sections 4–9F chain. This page cannot open, close, reserve, "
+        "consume or submit anything."
     )
 
     c1, c2, c3, c4 = st.columns(4)
@@ -268,18 +319,19 @@ def render_page(
     c4.metric("Execution authority", "READ ONLY")
 
     st.warning(
-        "Active paper orders continue to be opened by the legacy RB093 paper "
-        "automation. Sections 9A–9F and this reconciliation page do not execute orders."
+        "Active paper orders continue to be opened by the legacy RB093 paper automation. "
+        "Sections 9A–9F and this reconciliation page do not execute orders."
     )
 
     _render_stage_status(snapshot)
     _render_attribution(database, snapshot)
     render_strategy_performance_ledger(snapshot["performance_ledger"])
+    _render_comparison(snapshot)
     _render_pending_architecture()
 
     st.write(
-        "**Safety boundary:** no persistence, queue mutation, capital reservation, "
-        "bundle consumption, position creation or broker submission is available here."
+        "**Safety boundary:** no persistence, queue mutation, capital reservation, bundle "
+        "consumption, position creation or broker submission is available here."
     )
 
 
