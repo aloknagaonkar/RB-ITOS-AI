@@ -14,6 +14,9 @@ PAGE_MODULE_PATHS = {
     "Directional Regime Intelligence": "red_bar_lab.ui.pages.directional_regime_strategy",
     "Live Trading": "red_bar_lab.ui.pages.live_trading",
     "Paper Trading": "red_bar_lab.ui.pages.paper_trading",
+    "Paper Architecture Reconciliation": (
+        "red_bar_lab.ui.pages.paper_architecture_reconciliation"
+    ),
     "Research Lab": "red_bar_lab.ui.pages.research_lab",
     "Shadow Directional": "red_bar_lab.ui.pages.shadow_directional_diagnostics",
     "Historical Intelligence": "red_bar_lab.ui.pages.historical_intelligence",
