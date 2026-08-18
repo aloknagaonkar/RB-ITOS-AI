@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
 import json
 from pathlib import Path
 import time
@@ -25,7 +24,7 @@ from red_bar_lab.strategy.signal_engine import scan_reference_levels
 
 
 IST = "Asia/Kolkata"
-SOURCE_VERSION = "INDEPENDENT-STRATEGY-SHADOW-WORKER-V1"
+SOURCE_VERSION = "INDEPENDENT-STRATEGY-SHADOW-WORKER-V2"
 
 
 @dataclass(frozen=True)
@@ -228,11 +227,9 @@ class IndependentStrategyShadowWorker:
         self.previous_regime_loader = previous_regime_loader
         self.poll_seconds = max(1, int(poll_seconds))
         safe = _safe_instrument(instrument_key)
-        self.journal_path = (
-            self.runs_root
-            / "independent_strategy_shadow_v1"
-            / f"{safe}.jsonl"
-        )
+        self.shadow_root = self.runs_root / "independent_strategy_shadow_v1"
+        self.journal_path = self.shadow_root / f"{safe}.jsonl"
+        self.status_path = self.shadow_root / f"{safe}.status.json"
         self._last_scan_identity: str | None = None
 
     def _now(self) -> object:
@@ -261,6 +258,16 @@ class IndependentStrategyShadowWorker:
             )
         return True
 
+    def _write_status(self, result: ShadowStrategyScanResult) -> None:
+        """Atomically publish liveness without touching production stores."""
+        self.status_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.status_path.with_suffix(self.status_path.suffix + ".tmp")
+        temporary.write_text(
+            json.dumps(result.as_record(), indent=2, default=str),
+            encoding="utf-8",
+        )
+        temporary.replace(self.status_path)
+
     def run_once(self) -> ShadowStrategyScanResult:
         result = evaluate_shadow_strategy_cycle(
             self.candle_loader(),
@@ -274,19 +281,41 @@ class IndependentStrategyShadowWorker:
             ),
         )
         if result.scan_identity == self._last_scan_identity:
-            return ShadowStrategyScanResult(
+            duplicate = ShadowStrategyScanResult(
                 **{**result.__dict__, "reason": "COMPLETED_CANDLE_ALREADY_SCANNED"}
             )
+            self._write_status(duplicate)
+            return duplicate
         written = self._append_once(result)
         self._last_scan_identity = result.scan_identity
-        return ShadowStrategyScanResult(
+        completed = ShadowStrategyScanResult(
             **{**result.__dict__, "journal_written": written}
         )
+        self._write_status(completed)
+        return completed
+
+    def write_error_status(self, exc: Exception) -> None:
+        evaluated_at = _as_ist(self._now()).isoformat()
+        result = ShadowStrategyScanResult(
+            status="ERROR",
+            reason=f"{type(exc).__name__}:{exc}",
+            scan_identity=self._last_scan_identity,
+            instrument_key=self.instrument_key,
+            evaluated_at=evaluated_at,
+            latest_completed_candle=None,
+            red_bar={"status": "NOT_EVALUATED"},
+            directional_regime={"status": "NOT_EVALUATED"},
+            rsi_reversal={"status": "NOT_EVALUATED"},
+        )
+        self._write_status(result)
 
     def run_forever(self, *, stop_requested: Callable[[], bool] | None = None) -> None:
-        """Run until stopped; evaluation remains idempotent per completed candle."""
+        """Run until stopped; one failed poll does not terminate the process."""
         while not (stop_requested and stop_requested()):
-            self.run_once()
+            try:
+                self.run_once()
+            except Exception as exc:
+                self.write_error_status(exc)
             time.sleep(self.poll_seconds)
 
 
