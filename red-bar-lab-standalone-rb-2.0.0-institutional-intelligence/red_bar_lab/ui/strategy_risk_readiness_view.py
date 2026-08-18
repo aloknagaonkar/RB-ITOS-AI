@@ -19,7 +19,28 @@ def render_risk_readiness_8a(result: Mapping[str, object]) -> None:
     c4.metric("Blocked", int(result.get("blocked_count") or 0))
     st.write(f"**Risk policy:** {result.get('policy_version')}")
     st.write(f"**Risk context available:** {'YES' if result.get('risk_context_available') else 'NO'}")
+    st.write(f"**Account-context status:** {result.get('account_context_status') or 'UNAVAILABLE'}")
+    st.write(f"**Account-context adapter:** {result.get('account_context_source_version') or 'UNAVAILABLE'}")
+    st.write(f"**Context evaluated at:** {result.get('account_context_evaluated_at') or 'UNAVAILABLE'}")
     st.write("**Policy action:** OBSERVE_ONLY — no persistence, reservation, bundle consumption or order submission")
+
+    provenance = result.get("account_context_provenance")
+    if isinstance(provenance, Mapping) and provenance:
+        with st.expander("Where did the account and risk values come from?"):
+            st.dataframe(
+                [
+                    {
+                        "field": field,
+                        "value": details.get("value") if isinstance(details, Mapping) else None,
+                        "source": details.get("source") if isinstance(details, Mapping) else "UNAVAILABLE",
+                        "authoritative": details.get("authoritative") if isinstance(details, Mapping) else False,
+                        "evaluated_at": details.get("evaluated_at") if isinstance(details, Mapping) else None,
+                    }
+                    for field, details in provenance.items()
+                ],
+                width="stretch",
+                hide_index=True,
+            )
 
     rows = list(result.get("rows") or [])
     if not rows:
