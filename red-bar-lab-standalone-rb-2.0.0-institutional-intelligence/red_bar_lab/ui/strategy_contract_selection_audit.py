@@ -25,7 +25,6 @@ def _weighted_contribution(row: Mapping[str, object], component: str, weight: fl
 
 
 def _arrow_safe_rows(rows) -> list[dict[str, object]]:
-    """Keep each dataframe column type stable for Streamlit/PyArrow serialization."""
     values = [dict(row) for row in (rows or [])]
     if not values:
         return []
@@ -59,7 +58,7 @@ def build_selection_audit(
     *,
     policy: ContractRankingPolicy,
 ) -> dict[str, object]:
-    """Explain a read-only proposed selection and prepare a non-persisted handoff view."""
+    """Explain Section 5E ranking and prepare a non-persisted handoff view."""
     selected = [dict(row) for row in (ranking.get("selected_rows") or [])]
     ranked = [dict(row) for row in (ranking.get("ranked_rows") or [])]
 
@@ -67,7 +66,13 @@ def build_selection_audit(
         {"policy field": "Strategy ID", "value": str(policy.strategy_id)},
         {"policy field": "Policy version", "value": str(policy.policy_version)},
         {"policy field": "Maximum proposed contracts", "value": str(policy.maximum_contracts)},
-        {"policy field": "Preferred absolute delta", "value": f"{policy.preferred_abs_delta_min:.2f} to {policy.preferred_abs_delta_max:.2f}"},
+        {
+            "policy field": "Preferred absolute delta",
+            "value": (
+                f"{policy.preferred_abs_delta_min:.2f} to "
+                f"{policy.preferred_abs_delta_max:.2f}"
+            ),
+        },
     ]
     for _, label, weight_name in _COMPONENTS:
         policy_rows.append(
@@ -120,7 +125,9 @@ def build_selection_audit(
                 "policy_version": policy.policy_version,
                 "signal_id": str(ranking.get("signal_id") or "Not created"),
                 "bundle_id": str(ranking.get("bundle_id") or "Not created"),
-                "snapshot_timestamp": str(ranking.get("snapshot_timestamp") or "Unavailable"),
+                "snapshot_timestamp": str(
+                    ranking.get("snapshot_timestamp") or "Unavailable"
+                ),
                 "requested_side": str(ranking.get("requested_side") or "Unavailable"),
                 "role": _handoff_role(policy, row, index),
                 "rank": row.get("rank", index),
@@ -142,13 +149,17 @@ def build_selection_audit(
         outcome = "HANDOFF_READY_READ_ONLY"
         reason = (
             f"{len(handoff_rows)} strategy-owned proposed contract(s) are fully auditable "
-            "and may be inspected by a later independent candidate/risk stage."
+            "and may be inspected by Section 6 candidate readiness."
         )
-        next_step = "Build a separate read-only candidate handoff gate; do not persist or execute yet."
+        next_step = (
+            "Evaluate the proposed records in Section 6; do not persist or execute yet."
+        )
     else:
         outcome = "NO_HANDOFF"
         reason = str(ranking.get("reason") or "No proposed contract is available.")
-        next_step = "Resolve Section 5A/5B readiness before any candidate handoff is evaluated."
+        next_step = (
+            "Resolve the first blocked Section 5A-5E prerequisite before Section 6."
+        )
 
     return {
         "outcome": outcome,
@@ -169,10 +180,11 @@ def build_selection_audit(
 
 
 def render_selection_audit(result: Mapping[str, object]) -> None:
-    st.markdown("#### 5C. Selection Audit & Read-Only Handoff Readiness")
+    st.markdown("##### 5E Audit. Ranking Explanation & Read-Only Handoff")
     st.caption(
-        "Explains every ranking component and exposes a non-persisted handoff view. "
-        "No candidate, reservation, bundle consumption, sizing, position, or order is created."
+        "Explains the Section 5E score components and exposes a non-persisted handoff "
+        "view for Section 6. No candidate, reservation, bundle consumption, position, "
+        "or order is created."
     )
 
     c1, c2, c3, c4 = st.columns(4)
@@ -186,7 +198,11 @@ def render_selection_audit(result: Mapping[str, object]) -> None:
     st.write("**Persisted / reserved / bundle consumed / executed:** NO / NO / NO / NO")
 
     with st.expander("View active strategy-owned ranking policy"):
-        st.dataframe(_arrow_safe_rows(result.get("policy_rows") or []), width="stretch", hide_index=True)
+        st.dataframe(
+            _arrow_safe_rows(result.get("policy_rows") or []),
+            width="stretch",
+            hide_index=True,
+        )
 
     with st.expander("View score-component audit"):
         rows = _arrow_safe_rows(result.get("audit_rows") or [])
@@ -200,4 +216,4 @@ def render_selection_audit(result: Mapping[str, object]) -> None:
         if rows:
             st.dataframe(rows, width="stretch", hide_index=True)
         else:
-            st.info("No contract is ready for a later candidate/risk handoff.")
+            st.info("No contract is ready for Section 6 candidate readiness.")
