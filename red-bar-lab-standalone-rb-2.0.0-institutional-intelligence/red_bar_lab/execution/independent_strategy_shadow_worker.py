@@ -24,7 +24,8 @@ from red_bar_lab.strategy.signal_engine import scan_reference_levels
 
 
 IST = "Asia/Kolkata"
-SOURCE_VERSION = "INDEPENDENT-STRATEGY-SHADOW-WORKER-V2"
+SOURCE_VERSION = "INDEPENDENT-STRATEGY-SHADOW-WORKER-V3"
+EVALUATION_SOURCE = "INDEPENDENT_STRATEGY_SHADOW_WORKER"
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,7 @@ class ShadowStrategyScanResult:
         return {
             **self.__dict__,
             "source_version": SOURCE_VERSION,
+            "evaluation_source": EVALUATION_SOURCE,
             "shadow_only": True,
             "production_persistence": False,
             "capital_reserved": False,
@@ -102,6 +104,41 @@ def _latest_attempt(records: list[dict[str, object]]) -> dict[str, object] | Non
     )
 
 
+def _freshness(
+    *,
+    detected_at: object,
+    fresh_until: object,
+    evaluated_at: pd.Timestamp,
+) -> dict[str, object]:
+    try:
+        detected = _as_ist(detected_at)
+        expiry = _as_ist(fresh_until)
+    except (TypeError, ValueError):
+        return {
+            "freshness_state": "UNAVAILABLE",
+            "fresh": False,
+            "age_seconds": None,
+            "current_action": "OBSERVE_ONLY",
+        }
+
+    age_seconds = (evaluated_at - detected).total_seconds()
+    if evaluated_at < detected:
+        state = "FUTURE_TIMESTAMP"
+        fresh = False
+    elif evaluated_at <= expiry:
+        state = "FRESH"
+        fresh = True
+    else:
+        state = "STALE"
+        fresh = False
+    return {
+        "freshness_state": state,
+        "fresh": fresh,
+        "age_seconds": max(0.0, age_seconds),
+        "current_action": "SHADOW_CANDIDATE" if fresh else "OBSERVE_ONLY",
+    }
+
+
 def evaluate_shadow_strategy_cycle(
     candles: pd.DataFrame,
     *,
@@ -126,25 +163,43 @@ def evaluate_shadow_strategy_cycle(
             latest_completed_candle=None,
             red_bar={"status": "NOT_EVALUATED", "attempt_count": 0},
             directional_regime={"status": "NOT_EVALUATED"},
-            rsi_reversal={"status": "NOT_EVALUATED", "signal_count": 0},
+            rsi_reversal={"status": "NOT_EVALUATED", "historical_signal_count": 0},
         )
 
     latest = _as_ist(one.iloc[-1]["timestamp"])
     latest_text = latest.isoformat()
     scan_identity = f"{instrument_key}|1M|{latest_text}"
 
-    red_bar_scan = scan_reference_levels(one, tuple(reference_levels))
-    red_bar_attempts = [_attempt_record(item) for item in red_bar_scan.attempts]
-    latest_red_bar = _latest_attempt(red_bar_attempts)
-    red_bar = {
-        "status": "SIGNAL_AVAILABLE" if latest_red_bar else "NO_SIGNAL",
-        "attempt_count": len(red_bar_attempts),
-        "active_count": len(red_bar_scan.active),
-        "awaiting_count": len(red_bar_scan.awaiting),
-        "failed_count": len(red_bar_scan.failed),
-        "latest_attempt": latest_red_bar,
-        "production_persisted": False,
-    }
+    levels = tuple(reference_levels)
+    if levels:
+        red_bar_scan = scan_reference_levels(one, levels)
+        red_bar_attempts = [_attempt_record(item) for item in red_bar_scan.attempts]
+        latest_red_bar = _latest_attempt(red_bar_attempts)
+        red_bar = {
+            "status": "SIGNAL_AVAILABLE" if latest_red_bar else "NO_SIGNAL",
+            "input_state": "READY",
+            "reference_level_count": len(levels),
+            "attempt_count": len(red_bar_attempts),
+            "active_count": len(red_bar_scan.active),
+            "awaiting_count": len(red_bar_scan.awaiting),
+            "failed_count": len(red_bar_scan.failed),
+            "latest_attempt": latest_red_bar,
+            "current_action": "OBSERVE_ONLY",
+            "production_persisted": False,
+        }
+    else:
+        red_bar = {
+            "status": "INPUT_UNAVAILABLE",
+            "input_state": "REFERENCE_LEVELS_UNAVAILABLE",
+            "reference_level_count": 0,
+            "attempt_count": 0,
+            "active_count": 0,
+            "awaiting_count": 0,
+            "failed_count": 0,
+            "latest_attempt": None,
+            "current_action": "WAIT_FOR_REFERENCE_LEVELS",
+            "production_persisted": False,
+        }
 
     if len(one) >= 35 and len(five) >= 35:
         snapshot = StatefulMultiTimeframeRegimeEngine().evaluate(
@@ -158,22 +213,54 @@ def evaluate_shadow_strategy_cycle(
             five_minute_regime=five_regime,
             instrument_key=instrument_key,
         )
+        preview = dict(early.bundle or {})
+        original_source = preview.get("source")
+        freshness = (
+            _freshness(
+                detected_at=preview.get("detected_at"),
+                fresh_until=preview.get("fresh_until"),
+                evaluated_at=evaluated,
+            )
+            if preview
+            else {
+                "freshness_state": "UNAVAILABLE",
+                "fresh": False,
+                "age_seconds": None,
+                "current_action": "OBSERVE_ONLY",
+            }
+        )
         directional = {
-            "status": early.status,
+            "detection_status": early.status,
+            "status": (
+                "FRESH_SIGNAL"
+                if freshness["fresh"]
+                else "HISTORICAL_SIGNAL"
+                if preview
+                else early.status
+            ),
             "reason": early.reason,
             "current_regime": snapshot.get("current_regime"),
             "five_minute_regime": snapshot.get("five_minute_regime"),
             "bullish_score": snapshot.get("bullish_score"),
             "bearish_score": snapshot.get("bearish_score"),
             "early_direction": early.direction,
-            "early_bundle_preview": dict(early.bundle or {}),
+            "early_bundle_preview": preview,
+            "original_source": original_source,
+            "evaluation_source": EVALUATION_SOURCE,
+            **freshness,
             "production_persisted": False,
         }
     else:
         directional = {
             "status": "UNAVAILABLE",
+            "detection_status": "UNAVAILABLE",
             "reason": f"INSUFFICIENT_COMPLETED_CANDLES:1M={len(one)};5M={len(five)}",
             "early_bundle_preview": {},
+            "freshness_state": "UNAVAILABLE",
+            "fresh": False,
+            "age_seconds": None,
+            "current_action": "OBSERVE_ONLY",
+            "evaluation_source": EVALUATION_SOURCE,
             "production_persisted": False,
         }
 
@@ -184,11 +271,49 @@ def evaluate_shadow_strategy_cycle(
             instrument_key=instrument_key,
         )
     ]
-    latest_rsi = rsi_signals[-1] if rsi_signals else None
+    latest_historical = rsi_signals[-1] if rsi_signals else None
+    fresh_rsi = []
+    for signal in rsi_signals:
+        freshness = _freshness(
+            detected_at=signal.get("detected_at"),
+            fresh_until=signal.get("fresh_until"),
+            evaluated_at=evaluated,
+        )
+        if freshness["fresh"]:
+            fresh_rsi.append(signal)
+    latest_fresh = fresh_rsi[-1] if fresh_rsi else None
+    latest_freshness = (
+        _freshness(
+            detected_at=latest_historical.get("detected_at"),
+            fresh_until=latest_historical.get("fresh_until"),
+            evaluated_at=evaluated,
+        )
+        if latest_historical
+        else {
+            "freshness_state": "UNAVAILABLE",
+            "fresh": False,
+            "age_seconds": None,
+            "current_action": "OBSERVE_ONLY",
+        }
+    )
     rsi = {
-        "status": "SIGNAL_AVAILABLE" if latest_rsi else "NO_SIGNAL",
-        "signal_count": len(rsi_signals),
-        "latest_signal": latest_rsi,
+        "status": (
+            "FRESH_SIGNAL_AVAILABLE"
+            if latest_fresh
+            else "HISTORICAL_SIGNALS_ONLY"
+            if latest_historical
+            else "NO_SIGNAL"
+        ),
+        "historical_signal_count": len(rsi_signals),
+        "fresh_signal_count": len(fresh_rsi),
+        "latest_historical_signal": latest_historical,
+        "latest_fresh_signal": latest_fresh,
+        "original_source": (
+            latest_historical.get("source") if latest_historical else None
+        ),
+        "evaluation_source": EVALUATION_SOURCE,
+        **latest_freshness,
+        "current_action": "SHADOW_CANDIDATE" if latest_fresh else "OBSERVE_ONLY",
         "production_persisted": False,
     }
 
@@ -259,7 +384,6 @@ class IndependentStrategyShadowWorker:
         return True
 
     def _write_status(self, result: ShadowStrategyScanResult) -> None:
-        """Atomically publish liveness without touching production stores."""
         self.status_path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.status_path.with_suffix(self.status_path.suffix + ".tmp")
         temporary.write_text(
@@ -310,7 +434,6 @@ class IndependentStrategyShadowWorker:
         self._write_status(result)
 
     def run_forever(self, *, stop_requested: Callable[[], bool] | None = None) -> None:
-        """Run until stopped; one failed poll does not terminate the process."""
         while not (stop_requested and stop_requested()):
             try:
                 self.run_once()
