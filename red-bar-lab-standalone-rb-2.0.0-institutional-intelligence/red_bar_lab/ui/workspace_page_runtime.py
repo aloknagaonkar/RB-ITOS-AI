@@ -137,6 +137,9 @@ def _configure_research_lab(research_lab: ModuleType) -> None:
     from red_bar_lab.ui.historical_dri_relevant_coverage import (
         build_relevant_coverage_wrapper,
     )
+    from red_bar_lab.ui.historical_red_bar_v2_windows import (
+        build_red_bar_v2_window_wrapper,
+    )
     from red_bar_lab.ui.red_bar_v2_promotion_panel import (
         build_red_bar_v2_promotion_wrapper,
     )
@@ -154,6 +157,9 @@ def _configure_research_lab(research_lab: ModuleType) -> None:
         research_lab.render_page, research_lab
     )
     research_lab.render_page = build_relevant_coverage_wrapper(research_lab.render_page)
+    research_lab.render_page = build_red_bar_v2_window_wrapper(
+        research_lab.render_page
+    )
     research_lab.render_page = build_red_bar_v2_promotion_wrapper(
         research_lab.render_page
     )
