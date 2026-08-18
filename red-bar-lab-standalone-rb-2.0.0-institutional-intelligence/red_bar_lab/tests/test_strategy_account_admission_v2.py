@@ -70,10 +70,13 @@ def test_other_strategy_has_independent_risk_budget():
         },
         account_context=account(limit=400.0, consumed=100.0),
     )
-    first, second = result["rows"]
-    assert first["reservation_outcome"] == "PROPOSED_READ_ONLY"
-    assert second["reservation_outcome"] == "PROPOSED_READ_ONLY"
-    assert second["strategy_risk_consumed_before"] == 0.0
+    by_candidate = {item["candidate_id"]: item for item in result["rows"]}
+    assert by_candidate["RSI-1"]["reservation_outcome"] == "PROPOSED_READ_ONLY"
+    assert by_candidate["DRI-1"]["reservation_outcome"] == "PROPOSED_READ_ONLY"
+    assert by_candidate["RSI-1"]["strategy_risk_consumed_before"] == 100.0
+    assert by_candidate["DRI-1"]["strategy_risk_consumed_before"] == 0.0
+    assert by_candidate["DRI-1"]["admission_priority_rank"] == 1
+    assert by_candidate["RSI-1"]["admission_priority_rank"] == 2
 
 
 def test_missing_strategy_scope_waits_without_fabricating_limit():
