@@ -18,6 +18,7 @@ from red_bar_lab.execution.shadow_evaluation_journal import (
 
 IST = ZoneInfo("Asia/Kolkata")
 SECTION_10_STAGES = previous.SECTION_10_STAGES
+build_reconciliation_snapshot = previous.build_reconciliation_snapshot
 
 
 def _render_background_evidence(settings) -> None:
@@ -147,4 +148,8 @@ def render_page(
     )
 
 
-__all__ = ["SECTION_10_STAGES", "render_page"]
+__all__ = [
+    "SECTION_10_STAGES",
+    "build_reconciliation_snapshot",
+    "render_page",
+]
