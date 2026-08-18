@@ -8,7 +8,7 @@ from typing import Mapping, Sequence
 import streamlit as st
 
 
-SOURCE_VERSION = "OPPORTUNITY-CONTEXT-SOURCE-V2"
+SOURCE_VERSION = "OPPORTUNITY-CONTEXT-SOURCE-V3"
 
 
 @dataclass(frozen=True)
@@ -23,7 +23,15 @@ class OpportunityInputPolicy:
     minimum_charge_per_unit: float = 0.02
 
 
+@dataclass(frozen=True)
+class PaperAccountPolicy:
+    policy_version: str = "PAPER-ACCOUNT-CAPITAL-V1"
+    starting_cash: float = 100000.0
+    default_proposed_lots: int = 1
+
+
 DEFAULT_INPUT_POLICY = OpportunityInputPolicy()
+DEFAULT_PAPER_ACCOUNT_POLICY = PaperAccountPolicy()
 
 
 def _number(value: object) -> float | None:
@@ -123,6 +131,21 @@ def _policy_inputs(
     }
 
 
+def _paper_available_capital(
+    account: Mapping[str, object],
+    policy: PaperAccountPolicy,
+) -> tuple[float, str]:
+    explicit_cash = _number(account.get("available_cash"))
+    reserved = _number(account.get("reserved_capital")) or 0.0
+    if explicit_cash is not None:
+        return max(0.0, explicit_cash - reserved), "ACCOUNT_CONTEXT"
+
+    realized = _number(account.get("daily_realized_pnl")) or 0.0
+    exposure = _number(account.get("portfolio_exposure")) or 0.0
+    available = policy.starting_cash + realized - exposure - reserved
+    return max(0.0, available), f"PAPER_ACCOUNT_POLICY:{policy.policy_version}"
+
+
 def build_opportunity_context(
     candidate_result: Mapping[str, object],
     *,
@@ -130,15 +153,19 @@ def build_opportunity_context(
     account_context: Mapping[str, object] | None = None,
     explicit_context: Mapping[str, object] | None = None,
     input_policy: OpportunityInputPolicy = DEFAULT_INPUT_POLICY,
+    paper_account_policy: PaperAccountPolicy = DEFAULT_PAPER_ACCOUNT_POLICY,
 ) -> dict[str, object]:
     """Build candidate-scoped, provenance-labelled, read-only opportunity inputs."""
     records = [dict(row) for row in (historical_records or [])]
     account = dict(account_context or {})
     explicit = dict(explicit_context or {})
-    available_cash = _number(account.get("available_cash"))
-    reserved_capital = _number(account.get("reserved_capital")) or 0.0
-    available_capital = available_cash - reserved_capital if available_cash is not None else None
+    available_capital, capital_source = _paper_available_capital(account, paper_account_policy)
     account_lots = _number(account.get("proposed_lots"))
+    if account_lots is None:
+        account_lots = float(paper_account_policy.default_proposed_lots)
+        lots_source = f"PAPER_ACCOUNT_POLICY:{paper_account_policy.policy_version}"
+    else:
+        lots_source = "ACCOUNT_CONTEXT"
     account_charge = _number(_first(account, "estimated_charges_per_unit", "option_charges_per_unit"))
 
     candidates: dict[str, dict[str, object]] = {}
@@ -168,7 +195,7 @@ def build_opportunity_context(
                 "EXPLICIT_CALLER_OVERRIDE", "CANDIDATE",
                 "CANDIDATE_EMBEDDED_OPPORTUNITY", "ACCOUNT_CONTEXT",
                 "HISTORICAL_STRATEGY_SIDE_MEDIAN",
-            } or source.startswith("APPROVED_READ_ONLY_POLICY:")
+            } or source.startswith("APPROVED_READ_ONLY_POLICY:") or source.startswith("PAPER_ACCOUNT_POLICY:")
             field_sources[name] = {
                 "value": value,
                 "source": source if value not in (None, "") else "UNAVAILABLE",
@@ -211,11 +238,11 @@ def build_opportunity_context(
         )
         capital = resolve(
             "available_capital", ("available_cash",),
-            derived=available_capital, derived_source="ACCOUNT_CONTEXT",
+            derived=available_capital, derived_source=capital_source,
         )
         lots = resolve(
             "proposed_lots", ("lots",),
-            derived=account_lots, derived_source="ACCOUNT_CONTEXT",
+            derived=account_lots, derived_source=lots_source,
         )
 
         candidates[cid] = {
@@ -232,6 +259,7 @@ def build_opportunity_context(
             "proposed_lots": int(_number(lots)) if _number(lots) is not None else None,
             "historical_excursion_sample_count": historical_samples,
             "opportunity_input_policy_version": input_policy.policy_version,
+            "paper_account_policy_version": paper_account_policy.policy_version,
             "policy_initial_risk_points": policy_values["risk"],
             "opportunity_context_source_version": SOURCE_VERSION,
             "source_read_only": True,
@@ -245,6 +273,8 @@ def build_opportunity_context(
         "field_provenance": provenance,
         "source_version": SOURCE_VERSION,
         "input_policy_version": input_policy.policy_version,
+        "paper_account_policy_version": paper_account_policy.policy_version,
+        "paper_starting_cash": paper_account_policy.starting_cash,
         "source_read_only": True,
         "persisted": False,
         "reserved": False,
@@ -255,7 +285,7 @@ def build_opportunity_context(
 def render_opportunity_context_source(context: Mapping[str, object]) -> None:
     st.markdown("#### 7A.1 Opportunity Input Sources")
     st.caption(
-        "Explicit and historical inputs take priority. Missing stop, cost and excursion inputs may use the approved read-only research policy; every source is labelled and no execution authority is granted."
+        "Explicit and historical inputs take priority. Missing stop, cost and excursion inputs may use the approved read-only research policy. Paper capital may use the read-only paper-account policy; every source is labelled and no execution authority is granted."
     )
     rows = []
     for candidate_id, fields in (context.get("field_provenance") or {}).items():
@@ -278,5 +308,6 @@ def render_opportunity_context_source(context: Mapping[str, object]) -> None:
 
 __all__ = [
     "SOURCE_VERSION", "OpportunityInputPolicy", "DEFAULT_INPUT_POLICY",
+    "PaperAccountPolicy", "DEFAULT_PAPER_ACCOUNT_POLICY",
     "build_opportunity_context", "render_opportunity_context_source",
 ]
