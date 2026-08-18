@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import json
 from pathlib import Path
 import sys
+import time
 from typing import Iterable, Mapping
 from zoneinfo import ZoneInfo
 
@@ -13,6 +14,10 @@ import pandas as pd
 from red_bar_lab.config import RedBarSettings, UNDERLYINGS
 from red_bar_lab.execution.independent_strategy_shadow_worker import (
     IndependentStrategyShadowWorker,
+)
+from red_bar_lab.execution.process_lock import ProcessLock, WorkerAlreadyRunning
+from red_bar_lab.execution.strategy_shadow_comparison import (
+    StrategyShadowComparisonService,
 )
 from red_bar_lab.services.stateful_regime_store import StatefulRegimeStore
 from red_bar_lab.services.upstox_service import (
@@ -70,6 +75,92 @@ def reference_levels_from_rows(
         except (TypeError, ValueError):
             continue
     return tuple(levels)
+
+
+def _read_latest_jsonl(path: Path) -> dict[str, object] | None:
+    if not path.exists():
+        return None
+    latest = None
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            latest = value
+    return latest
+
+
+def _latest_from_directory(root: Path, safe: str) -> dict[str, object] | None:
+    direct = root / f"{safe}.jsonl"
+    latest = _read_latest_jsonl(direct)
+    if latest is not None:
+        return latest
+    candidates = sorted(root.glob("*.jsonl"), key=lambda path: path.stat().st_mtime)
+    for path in reversed(candidates):
+        latest = _read_latest_jsonl(path)
+        if latest is not None:
+            return latest
+    return None
+
+
+def _legacy_red_bar_snapshot(
+    database: RedBarDatabase,
+    instrument_key: str,
+    trading_date: str,
+) -> dict[str, object] | None:
+    methods = (
+        lambda: database.read_signal_attempts(instrument_key, trading_date),
+        lambda: database.read_signal_attempts(instrument_key=instrument_key, trading_date=trading_date),
+        lambda: database.read_signal_attempts(instrument_key, trading_date, limit=500),
+    )
+    rows = None
+    for method in methods:
+        try:
+            rows = method()
+            break
+        except TypeError:
+            continue
+        except Exception:
+            return None
+    records = [dict(row) for row in (rows or []) if isinstance(row, Mapping)]
+    if not records:
+        return None
+    latest = max(
+        records,
+        key=lambda row: str(
+            row.get("confirmation_timestamp")
+            or row.get("cross_timestamp")
+            or row.get("timestamp")
+            or ""
+        ),
+    )
+    return {"status": latest.get("state") or latest.get("status"), "latest_attempt": latest}
+
+
+def build_legacy_snapshot_loader(
+    *,
+    settings: RedBarSettings,
+    database: RedBarDatabase,
+    instrument_key: str,
+):
+    safe = _safe_instrument(instrument_key)
+
+    def load() -> dict[str, object]:
+        trading_date = datetime.now(IST).date().isoformat()
+        return {
+            "red_bar": _legacy_red_bar_snapshot(database, instrument_key, trading_date),
+            "directional_regime": _latest_from_directory(
+                settings.runs_root / "fresh_setup_bundles_v43", safe
+            ),
+            "rsi_reversal": _latest_from_directory(
+                settings.runs_root / "rsi_extreme_reversal_v1", safe
+            ),
+        }
+
+    return load
 
 
 def build_worker(
@@ -132,18 +223,44 @@ def _status_path(settings: RedBarSettings, instrument_key: str) -> Path:
     )
 
 
-def print_status(settings: RedBarSettings, instrument_key: str) -> int:
-    path = _status_path(settings, instrument_key)
+def _comparison_status_path(settings: RedBarSettings, instrument_key: str) -> Path:
+    return (
+        settings.runs_root
+        / "independent_strategy_comparison_v1"
+        / f"{_safe_instrument(instrument_key)}.status.json"
+    )
+
+
+def _lock_path(settings: RedBarSettings, instrument_key: str) -> Path:
+    return (
+        settings.runs_root
+        / "independent_strategy_shadow_v1"
+        / f"{_safe_instrument(instrument_key)}.lock"
+    )
+
+
+def _print_json_file(path: Path, label: str) -> int:
     if not path.exists():
-        print(f"No shadow-worker status is available at {path}")
+        print(f"No {label} is available at {path}")
         return 1
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        print(f"Unable to read shadow-worker status: {exc}", file=sys.stderr)
+        print(f"Unable to read {label}: {exc}", file=sys.stderr)
         return 2
     print(json.dumps(payload, indent=2, default=str))
     return 0
+
+
+def print_status(settings: RedBarSettings, instrument_key: str) -> int:
+    return _print_json_file(_status_path(settings, instrument_key), "shadow-worker status")
+
+
+def print_comparison_status(settings: RedBarSettings, instrument_key: str) -> int:
+    return _print_json_file(
+        _comparison_status_path(settings, instrument_key),
+        "strategy-comparison status",
+    )
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -166,15 +283,16 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--poll-seconds", type=int, default=5)
     parser.add_argument("--lookback-days", type=int, default=7)
-    parser.add_argument(
-        "--once",
-        action="store_true",
-        help="Evaluate one poll and exit.",
-    )
+    parser.add_argument("--once", action="store_true", help="Evaluate one poll and exit.")
     parser.add_argument(
         "--status",
         action="store_true",
         help="Print the latest heartbeat/status JSON and exit.",
+    )
+    parser.add_argument(
+        "--comparison-status",
+        action="store_true",
+        help="Print the latest legacy-versus-shadow comparison JSON and exit.",
     )
     return parser
 
@@ -186,6 +304,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.status:
         return print_status(settings, instrument_key)
+    if args.comparison_status:
+        return print_comparison_status(settings, instrument_key)
 
     try:
         token = resolve_access_token("")
@@ -203,30 +323,66 @@ def main(argv: list[str] | None = None) -> int:
         poll_seconds=max(1, args.poll_seconds),
         lookback_days=max(2, args.lookback_days),
     )
+    comparison = StrategyShadowComparisonService(
+        runs_root=settings.runs_root,
+        instrument_key=instrument_key,
+        legacy_snapshot_loader=build_legacy_snapshot_loader(
+            settings=settings,
+            database=database,
+            instrument_key=instrument_key,
+        ),
+    )
+    lock = ProcessLock(
+        _lock_path(settings, instrument_key),
+        f"Independent Strategy Shadow Worker [{instrument_key}]",
+    )
 
     print("Independent Strategy Shadow Worker")
     print(f"Instrument: {instrument_key}")
     print(f"Poll interval: {worker.poll_seconds} seconds")
     print(f"Journal: {worker.journal_path}")
     print(f"Heartbeat: {worker.status_path}")
+    print(f"Comparison journal: {comparison.journal_path}")
+    print(f"Comparison status: {comparison.status_path}")
+    print(f"Process lock: {lock.path}")
     print("Mode: SHADOW ONLY — no production persistence, reservation or orders")
 
-    if args.once:
-        try:
-            result = worker.run_once()
-        except Exception as exc:
-            worker.write_error_status(exc)
-            print(f"Shadow poll failed: {type(exc).__name__}: {exc}", file=sys.stderr)
-            return 1
-        print(json.dumps(result.as_record(), indent=2, default=str))
-        return 0
-
-    print("Press Ctrl+C to stop.")
     try:
-        worker.run_forever()
+        lock.acquire()
+    except WorkerAlreadyRunning as exc:
+        print(f"WORKER_ALREADY_RUNNING: {exc}", file=sys.stderr)
+        return 3
+
+    try:
+        if args.once:
+            try:
+                result = worker.run_once()
+            except Exception as exc:
+                worker.write_error_status(exc)
+                print(f"Shadow poll failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+                return 1
+            comparison_result = comparison.compare_and_record(result.as_record())
+            print(json.dumps(result.as_record(), indent=2, default=str))
+            print("Comparison:")
+            print(json.dumps(comparison_result, indent=2, default=str))
+            return 0
+
+        print("Press Ctrl+C to stop.")
+        last_compared_identity = None
+        while True:
+            try:
+                result = worker.run_once()
+                if result.scan_identity and result.scan_identity != last_compared_identity:
+                    comparison.compare_and_record(result.as_record())
+                    last_compared_identity = result.scan_identity
+            except Exception as exc:
+                worker.write_error_status(exc)
+            time.sleep(worker.poll_seconds)
     except KeyboardInterrupt:
         print("\nShadow worker stopped cleanly.")
-    return 0
+        return 0
+    finally:
+        lock.release()
 
 
 if __name__ == "__main__":
@@ -235,7 +391,9 @@ if __name__ == "__main__":
 
 __all__ = [
     "reference_levels_from_rows",
+    "build_legacy_snapshot_loader",
     "build_worker",
     "print_status",
+    "print_comparison_status",
     "main",
 ]
