@@ -22,7 +22,6 @@ def build_background_architecture_bootstrap_wrapper(original):
         *args,
         **kwargs,
     ):
-        del token, underlying_name, interval
         ensure_background_architecture_orchestrator(
             settings=settings,
             layout=layout,
@@ -33,10 +32,10 @@ def build_background_architecture_bootstrap_wrapper(original):
             settings,
             layout,
             database,
-            None,
-            None,
+            token,
+            underlying_name,
             instrument_key,
-            None,
+            interval,
             *args,
             **kwargs,
         )
