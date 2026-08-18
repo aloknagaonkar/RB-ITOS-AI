@@ -25,7 +25,10 @@ def _candles() -> pd.DataFrame:
             open_price = 100.0 + index
             close_price = open_price + 0.5
         elif index < 10:
-            open_price = 106.0 - (index - 5) * 0.2
+            # Keep the 09:20-09:25 aggregate non-red so it is intentionally
+            # skipped. The following completed 09:25-09:30 candle is the first
+            # eligible red five-minute reference.
+            open_price = 105.0 + (index - 5) * 0.2
             close_price = open_price + 0.1
         elif index < 15:
             open_price = 106.0 - (index - 10) * 0.5
