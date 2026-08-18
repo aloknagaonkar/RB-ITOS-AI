@@ -180,11 +180,10 @@ def build_selection_audit(
 
 
 def render_selection_audit(result: Mapping[str, object]) -> None:
-    st.markdown("##### 5E Audit. Ranking Explanation & Read-Only Handoff")
+    st.markdown("##### Ranking Audit & Read-Only Handoff Details")
     st.caption(
-        "Explains the Section 5E score components and exposes a non-persisted handoff "
-        "view for Section 6. No candidate, reservation, bundle consumption, position, "
-        "or order is created."
+        "Supporting detail for Section 5E. It explains the score components and exposes "
+        "a non-persisted handoff view for Section 6 without creating another numbered stage."
     )
 
     c1, c2, c3, c4 = st.columns(4)
