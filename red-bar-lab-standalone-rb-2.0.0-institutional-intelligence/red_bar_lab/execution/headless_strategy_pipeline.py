@@ -97,8 +97,15 @@ def _outcome(result: Mapping[str, object] | None, *names: str) -> str:
 def _reason(result: Mapping[str, object] | None, fallback: str) -> str:
     row = dict(result or {})
     for name in (
-        "reason", "blocking_reason", "decision_reason", "dominant_reason",
-        "route_reason", "activation_reason", "live_activation_audit_reason",
+        "metadata_context_reason",
+        "market_context_reason",
+        "reason",
+        "blocking_reason",
+        "decision_reason",
+        "dominant_reason",
+        "route_reason",
+        "activation_reason",
+        "live_activation_audit_reason",
     ):
         value = row.get(name)
         if value not in (None, ""):
