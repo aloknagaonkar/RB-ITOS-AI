@@ -169,3 +169,53 @@ def test_metadata_enrichment_is_read_only():
     assert original["contract_rows"][0]["instrument_token"] is None
     assert result["metadata_context_read_only"] is True
     assert result["contract_rows"][0]["metadata_context_read_only"] is True
+
+
+def test_known_nifty_upstox_key_receives_controlled_execution_metadata():
+    values = readiness()
+    values["contract_rows"][0]["instrument_key"] = "NSE_FO|1002"
+    sparse_chain = pd.DataFrame([
+        {
+            "strike": 25000,
+            "call_instrument_key": "NSE_FO|1002",
+            "call_expiry": "2026-08-27",
+            "spot_price": 25020.0,
+        }
+    ])
+
+    result = enrich_contract_execution_metadata(
+        values,
+        database=Database(snapshot_rows()),
+        instrument_key="NSE_INDEX|Nifty 50",
+        artifact_loader=lambda path: sparse_chain,
+    )
+
+    row = result["contract_rows"][0]
+    assert result["metadata_context_status"] == "READY"
+    assert row["instrument_token"] == "1002"
+    assert row["trading_symbol"] == "NSE_FO|1002"
+    assert row["exchange"] == "NSE_FO"
+    assert row["lot_size"] == 75.0
+    assert row["tick_size"] == 0.05
+    assert row["execution_metadata_sources"]["lot_size"].startswith("STATIC_POLICY:")
+
+
+def test_unknown_underlying_does_not_receive_nifty_policy():
+    values = readiness()
+    values["contract_rows"][0]["instrument_key"] = "NSE_FO|1002"
+    sparse_chain = pd.DataFrame([
+        {
+            "strike": 25000,
+            "call_instrument_key": "NSE_FO|1002",
+        }
+    ])
+
+    result = enrich_contract_execution_metadata(
+        values,
+        database=Database(snapshot_rows()),
+        instrument_key="NSE_INDEX|Unknown Index",
+        artifact_loader=lambda path: sparse_chain,
+    )
+
+    assert result["metadata_context_status"] == "UNAVAILABLE"
+    assert result["metadata_complete_count"] == 0
