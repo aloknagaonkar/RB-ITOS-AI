@@ -50,6 +50,21 @@ def test_router_routes_admitted_candidate_without_side_effects():
     assert row["router_version"] == UNIFIED_SHADOW_ROUTER_VERSION
 
 
+def test_router_accepts_direct_section_9e_shadow_ready_row():
+    result = build_unified_shadow_routes(
+        [
+            _evidence(
+                new_chain_decision=None,
+                shadow_handoff_ready=True,
+                shadow_rehearsal_outcome="SHADOW_HANDOFF_READY_DISABLED",
+            )
+        ]
+    )
+
+    assert result["routed_count"] == 1
+    assert result["rows"][0]["route_outcome"] == "ROUTED_SHADOW_ONLY"
+
+
 def test_router_id_is_deterministic():
     first = build_unified_shadow_routes([_evidence()])["rows"][0]
     second = build_unified_shadow_routes([_evidence()])["rows"][0]
@@ -87,7 +102,7 @@ def test_router_preserves_independent_strategy_ownership():
                 candidate_id="DRI-CANDIDATE-1",
             ),
             _evidence(
-                strategy_id="RSI_EXTREME_REVERSAL_V1",
+                strategy_id="RSI_EXTREME_REVERSAL",
                 signal_id="RSI-1",
                 bundle_id="RSI-BUNDLE-1",
                 candidate_id="RSI-CANDIDATE-1",
@@ -99,7 +114,7 @@ def test_router_preserves_independent_strategy_ownership():
     assert {row["strategy_id"] for row in result["rows"]} == {
         "RED_BAR",
         "DIRECTIONAL_REGIME",
-        "RSI_EXTREME_REVERSAL_V1",
+        "RSI_EXTREME_REVERSAL",
     }
 
 
