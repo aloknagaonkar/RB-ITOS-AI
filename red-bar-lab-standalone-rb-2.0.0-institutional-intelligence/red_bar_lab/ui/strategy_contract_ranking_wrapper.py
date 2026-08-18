@@ -59,6 +59,10 @@ from red_bar_lab.ui.strategy_opportunity_history_gate_v2 import (
     forward_candidates_for_risk,
     render_opportunity_history_gate,
 )
+from red_bar_lab.ui.strategy_order_specification import (
+    build_order_specification,
+    render_order_specification,
+)
 from red_bar_lab.ui.strategy_scoped_risk import build_risk_readiness
 from red_bar_lab.ui.strategy_risk_readiness_view import render_risk_readiness_8a
 
@@ -97,7 +101,7 @@ def _candidate_copy_with_contract_fields(candidate_result, ranking):
 
 
 def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
-    """Append read-only Sections 5B-5E, 6A-6C, 7A-7C, 8A-8D and 9A after Section 5A."""
+    """Append read-only Sections 5B-5E, 6A-6C, 7A-7C, 8A-8D and 9A-9B after Section 5A."""
     policy = POLICIES[page]
     ranking_policy = RANKING_POLICIES[policy.strategy_id]
     safeguard_policy = SAFEGUARD_POLICIES[policy.strategy_id]
@@ -262,6 +266,8 @@ def build_contract_ranking_page_wrapper(module: ModuleType, page: str):
 
         committee_result = build_execution_committee(final_admission)
         render_execution_committee(committee_result)
+        order_specification = build_order_specification(committee_result)
+        render_order_specification(order_specification)
         return result
 
     setattr(module, policy.builder_name, capture_resolution)
