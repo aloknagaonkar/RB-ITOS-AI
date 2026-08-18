@@ -49,8 +49,8 @@ def _text(value: object, fallback: str = "Not recorded") -> str:
 def normalize_strategy_source(order: Mapping[str, object]) -> str:
     """Resolve the primary strategy without treating supporting filters as owners."""
     explicit = str(order.get("execution_strategy_source") or "").strip().upper()
-    if explicit in _SOURCE_ALIASES:
-        return _SOURCE_ALIASES[explicit]
+    if explicit:
+        return _SOURCE_ALIASES.get(explicit, explicit)
 
     signal_id = str(order.get("signal_id") or "").strip().upper()
     rsi_signal_id = str(order.get("rsi_signal_id") or "").strip().upper()
