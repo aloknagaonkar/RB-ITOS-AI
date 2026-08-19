@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from typing import Iterable
 from zoneinfo import ZoneInfo
 
@@ -12,6 +12,9 @@ INDIA_TZ = ZoneInfo("Asia/Kolkata")
 EXPECTED_INDEX_ROWS = 375
 EXPECTED_SESSION_START = time(9, 15)
 EXPECTED_SESSION_END = time(15, 29)
+RESEARCH_EXIT_START = time(9, 30)
+RESEARCH_EXIT_END = time(15, 25)
+RESEARCH_EXIT_INTERVAL_MINUTES = 5
 
 
 @dataclass(frozen=True)
@@ -188,15 +191,26 @@ def evaluate_session_completeness(
     )
 
 
+def _default_research_exit_times() -> tuple[time, ...]:
+    anchor = datetime.combine(date(2000, 1, 1), RESEARCH_EXIT_START)
+    end = datetime.combine(date(2000, 1, 1), RESEARCH_EXIT_END)
+    values: list[time] = []
+    while anchor <= end:
+        values.append(anchor.time())
+        anchor += timedelta(minutes=RESEARCH_EXIT_INTERVAL_MINUTES)
+    return tuple(values)
+
+
 def deterministic_research_exit_timestamps(
     trading_date: str | date,
     *,
-    local_times: Iterable[time] = (time(10, 30), time(12, 30), time(14, 30)),
+    local_times: Iterable[time] | None = None,
 ) -> tuple[pd.Timestamp, ...]:
     session_date = (
         trading_date if isinstance(trading_date, date) else date.fromisoformat(trading_date)
     )
+    times = tuple(local_times) if local_times is not None else _default_research_exit_times()
     return tuple(
         pd.Timestamp(datetime.combine(session_date, value, tzinfo=INDIA_TZ)).tz_convert("UTC")
-        for value in local_times
+        for value in times
     )
