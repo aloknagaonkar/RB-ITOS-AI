@@ -14,6 +14,9 @@ from red_bar_lab.execution.paper_strategy_authority import (
 )
 from red_bar_lab.market.upstox_intelligence import UnifiedUpstoxMarketIntelligenceService
 from red_bar_lab.market.paper_adapter import UpstoxPaperMarketAdapter
+from red_bar_lab.services.red_bar_v2_current_session import (
+    evaluate_current_session_red_bar_v2,
+)
 from red_bar_lab.services.red_bar_v2_paper_signal_bridge import (
     publish_v2_snapshot_to_paper_signals,
 )
@@ -28,35 +31,16 @@ def _parser():
             "quotes. This process never sends broker orders."
         )
     )
-    parser.add_argument(
-        "--interval-seconds",
-        type=int,
-        default=5,
-    )
-    parser.add_argument(
-        "--capital",
-        type=float,
-        default=100000.0,
-    )
+    parser.add_argument("--interval-seconds", type=int, default=5)
+    parser.add_argument("--capital", type=float, default=100000.0)
     parser.add_argument(
         "--underlying",
         choices=("NIFTY 50", "BANK NIFTY"),
         default="NIFTY 50",
     )
-    parser.add_argument(
-        "--lots",
-        type=int,
-        default=1,
-    )
-    parser.add_argument(
-        "--minimum-score",
-        type=float,
-        default=65.0,
-    )
-    parser.add_argument(
-        "--once",
-        action="store_true",
-    )
+    parser.add_argument("--lots", type=int, default=1)
+    parser.add_argument("--minimum-score", type=float, default=65.0)
+    parser.add_argument("--once", action="store_true")
     return parser
 
 
@@ -68,13 +52,9 @@ def main() -> int:
             "within Zerodha quote API rate limits."
         )
 
-    access_token = os.getenv(
-        "UPSTOX_ACCESS_TOKEN", ""
-    ).strip()
+    access_token = os.getenv("UPSTOX_ACCESS_TOKEN", "").strip()
     if not access_token:
-        raise SystemExit(
-            "UPSTOX_ACCESS_TOKEN is required."
-        )
+        raise SystemExit("UPSTOX_ACCESS_TOKEN is required.")
 
     logging.basicConfig(
         level=logging.INFO,
@@ -90,9 +70,6 @@ def main() -> int:
         raise SystemExit(
             f"Paper strategy authority is blocked: {authority_reason}"
         )
-    # The existing automation already consults this optional callable before
-    # candidate scoring. Attach the reversible authority gate to this process
-    # instance without changing the stable database schema or execution engine.
     database.execution_source_enabled = authority.source_enabled
 
     upstox = RedBarUpstoxService(access_token)
@@ -170,6 +147,12 @@ def main() -> int:
         try:
             cycle_started = datetime.now(ist)
             trading_date = cycle_started.date().isoformat()
+            live_v2 = evaluate_current_session_red_bar_v2(
+                upstox=upstox,
+                database=database,
+                settings=settings,
+                instrument_key=UNDERLYINGS[args.underlying],
+            )
             bridge = publish_v2_snapshot_to_paper_signals(
                 database_path=settings.database_path,
                 artifacts_root=settings.artifacts_root,
@@ -183,28 +166,18 @@ def main() -> int:
             )
 
             totals["signals_seen"] += int(report.signals_seen)
-            totals["candidates_scored"] += int(
-                report.candidates_scored
-            )
-            totals["orders_opened"] += int(
-                report.paper_orders_opened
-            )
-            totals["orders_closed"] += int(
-                report.paper_orders_closed
-            )
+            totals["candidates_scored"] += int(report.candidates_scored)
+            totals["orders_opened"] += int(report.paper_orders_opened)
+            totals["orders_closed"] += int(report.paper_orders_closed)
             totals["signals_skipped"] += int(report.skipped)
 
-            recent_diagnostics = (
-                database.read_paper_signal_diagnostics(limit=1)
-            )
+            recent_diagnostics = database.read_paper_signal_diagnostics(limit=1)
             latest = recent_diagnostics[0] if recent_diagnostics else {}
             last_decision = (
                 latest.get("final_decision")
                 or (
                     "MONITORING"
-                    if database.read_open_paper_execution_orders(
-                        "PAPER-STD"
-                    )
+                    if database.read_open_paper_execution_orders("PAPER-STD")
                     else bridge.status
                 )
             )
@@ -220,9 +193,7 @@ def main() -> int:
             heartbeat = datetime.now(ist).isoformat()
             current_state = (
                 "MONITORING_POSITION"
-                if database.read_open_paper_execution_orders(
-                    "PAPER-STD"
-                )
+                if database.read_open_paper_execution_orders("PAPER-STD")
                 else "WAITING_FOR_V2_SIGNAL"
             )
             database.upsert_paper_monitor_status(
@@ -239,15 +210,17 @@ def main() -> int:
                     "last_decision": last_decision,
                     "last_reason": latest.get("reason") or bridge.reason,
                     "last_error": (
-                        " | ".join(report.errors[:3])
-                        if report.errors else None
+                        " | ".join(report.errors[:3]) if report.errors else None
                     ),
                 }
             )
 
             logging.info(
-                "v2_bridge=%s bridge_reason=%s signals=%s scored=%s opened=%s "
-                "closed=%s skipped=%s errors=%s decision=%s reason=%s",
+                "v2_live=%s live_reason=%s v2_bridge=%s bridge_reason=%s "
+                "signals=%s scored=%s opened=%s closed=%s skipped=%s "
+                "errors=%s decision=%s reason=%s",
+                live_v2.status,
+                live_v2.reason,
                 bridge.status,
                 bridge.reason,
                 report.signals_seen,
