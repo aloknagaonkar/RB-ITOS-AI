@@ -25,9 +25,17 @@ from red_bar_lab.storage.artifacts import ArtifactLayout
 INDEX_KEY = "NSE_INDEX|Nifty 50"
 
 
+def _optional_text(value: object) -> str | None:
+    """Return trimmed manifest text, treating blank/NaN values as absent."""
+    if value is None or pd.isna(value):
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 def _parse_exit_timestamps(value: object) -> tuple[pd.Timestamp, ...]:
-    text = str(value or "").strip()
-    if not text or text.lower() == "nan":
+    text = _optional_text(value)
+    if text is None:
         return ()
     return tuple(
         pd.Timestamp(item.strip())
@@ -37,8 +45,8 @@ def _parse_exit_timestamps(value: object) -> tuple[pd.Timestamp, ...]:
 
 
 def _required(row: pd.Series, name: str) -> str:
-    value = str(row.get(name) or "").strip()
-    if not value or value.lower() == "nan":
+    value = _optional_text(row.get(name))
+    if value is None:
         raise ValueError(f"Manifest row is missing required column value: {name}")
     return value
 
@@ -85,23 +93,16 @@ def main() -> None:
         if futures_candles.empty:
             raise ValueError(f"Missing futures cache for {trading_date}: {futures_key}")
 
-        expected = str(row.get("expected_regime") or "").strip()
         days.append(
             RedBarV2ValidationDay(
                 trading_date=trading_date.isoformat(),
                 index_candles=index_candles,
                 futures_candles=futures_candles,
                 futures_instrument_key=futures_key,
-                futures_symbol=(
-                    str(row.get("futures_symbol")).strip()
-                    if pd.notna(row.get("futures_symbol")) else None
-                ),
-                futures_expiry=(
-                    str(row.get("futures_expiry")).strip()
-                    if pd.notna(row.get("futures_expiry")) else None
-                ),
+                futures_symbol=_optional_text(row.get("futures_symbol")),
+                futures_expiry=_optional_text(row.get("futures_expiry")),
                 exit_timestamps=_parse_exit_timestamps(row.get("exit_timestamps")),
-                expected_regime=expected or None,
+                expected_regime=_optional_text(row.get("expected_regime")),
             )
         )
 
