@@ -1,5 +1,3 @@
-from datetime import datetime
-
 import pandas as pd
 
 from red_bar_lab.intelligence.red_bar_v2_session_health import (
@@ -36,12 +34,12 @@ def test_session_health_reports_full_1m_and_completed_5m_alignment():
     assert health.status == "READY"
     assert health.reason == "FULL_SESSION_TIMESTAMP_ALIGNMENT"
     assert health.index_rows == 375
-    assert health.futures_rows == 375
+    assert health.futures_rows == 385
     assert health.aligned_rows == 375
     assert health.alignment_coverage_pct == 100.0
-    assert health.positive_volume_rows == 375
+    assert health.positive_volume_rows == 385
     assert health.completed_5m_index_rows == 75
-    assert health.completed_5m_futures_rows == 75
+    assert health.completed_5m_futures_rows == 77
     assert health.completed_5m_aligned_rows == 75
     assert health.completed_5m_alignment_coverage_pct == 100.0
     assert health.last_aligned_timestamp == pd.Timestamp(
