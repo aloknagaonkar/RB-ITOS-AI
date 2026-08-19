@@ -91,7 +91,7 @@ def test_router_rejects_incomplete_identity():
     assert "INCOMPLETE_EXECUTION_IDENTITY" in row["route_reason"]
 
 
-def test_router_preserves_independent_strategy_ownership():
+def test_router_rejects_retired_strategy_evidence_but_preserves_identity():
     result = build_unified_shadow_routes(
         [
             _evidence(strategy_id="RED_BAR", signal_id="RB-1"),
@@ -110,12 +110,24 @@ def test_router_preserves_independent_strategy_ownership():
         ]
     )
 
-    assert result["routed_count"] == 3
+    assert result["routed_count"] == 1
+    assert result["not_routed_count"] == 2
     assert {row["strategy_id"] for row in result["rows"]} == {
         "RED_BAR",
         "DIRECTIONAL_REGIME",
         "RSI_EXTREME_REVERSAL",
     }
+
+    rows_by_strategy = {row["strategy_id"]: row for row in result["rows"]}
+    assert rows_by_strategy["RED_BAR"]["route_outcome"] == "ROUTED_SHADOW_ONLY"
+    for strategy_id in ("DIRECTIONAL_REGIME", "RSI_EXTREME_REVERSAL"):
+        row = rows_by_strategy[strategy_id]
+        assert row["route_outcome"] == "NOT_ROUTED"
+        assert "UNSUPPORTED_STRATEGY" in row["route_reason"]
+        assert row["strategy_owner_preserved"] is True
+        assert row["bundle_owner_preserved"] is True
+        assert row["execution_enabled"] is False
+        assert row["order_submitted"] is False
 
 
 def test_duplicate_route_identity_is_not_routed_twice_in_same_batch():
