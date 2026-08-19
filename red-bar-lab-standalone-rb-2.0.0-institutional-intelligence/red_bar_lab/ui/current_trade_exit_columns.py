@@ -12,12 +12,23 @@ IST = ZoneInfo("Asia/Kolkata")
 
 def _protection_stage(health) -> str:
     if health.trailing_active:
-        return "TRAILING"
+        return "TRAILING ACTIVE"
     if health.profit_lock_active:
-        return "PROFIT LOCK"
+        return "PROFIT LOCK ACTIVE"
     if health.breakeven_armed:
-        return "BREAKEVEN"
-    return "HARD STOP"
+        return "BREAKEVEN ACTIVE"
+    return "HARD STOP ACTIVE"
+
+
+def _trail_moved(health) -> str:
+    if not health.trailing_active:
+        return "NO — NOT ARMED"
+    initial = health.initial_stop
+    effective = health.effective_stop
+    if initial is None or effective is None:
+        return "YES"
+    movement = float(effective) - float(initial)
+    return f"YES {movement:+.2f}"
 
 
 def _price(value: object) -> str:
