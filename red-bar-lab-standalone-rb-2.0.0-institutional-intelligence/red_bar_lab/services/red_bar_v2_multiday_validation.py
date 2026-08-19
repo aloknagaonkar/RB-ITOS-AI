@@ -4,13 +4,17 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 import json
 from pathlib import Path
-from typing import Callable, Iterable, Sequence
+from typing import Callable, Sequence
 
 import pandas as pd
 
 from red_bar_lab.services.red_bar_v2_futures_replay_service import (
     MonitoredRedBarV2FuturesReplayResult,
     run_monitored_red_bar_v2_futures_replay,
+)
+from red_bar_lab.services.red_bar_v2_validation_diagnostics import (
+    diagnose_session_regime,
+    evaluate_session_completeness,
 )
 
 
@@ -30,11 +34,25 @@ class RedBarV2ValidationDay:
 class RedBarV2ValidationDayResult:
     trading_date: str
     regime: str
+    regime_reason: str
     expected_regime: str | None
     regime_matches_expectation: bool | None
+    session_open: float | None
+    session_close: float | None
+    session_high: float | None
+    session_low: float | None
+    net_points: float | None
+    net_return_pct: float | None
+    travelled_points: float | None
+    directional_efficiency: float | None
+    intraday_range_pct: float | None
     health_status: str
     health_reason: str
+    session_completeness_status: str
+    session_completeness_reason: str
+    session_coverage_pct: float
     index_rows: int
+    expected_index_rows: int
     futures_rows: int
     aligned_rows: int
     alignment_coverage_pct: float
@@ -57,6 +75,8 @@ class RedBarV2MultiDayValidationResult:
     total_days: int
     ready_days: int
     blocked_days: int
+    complete_days: int
+    partial_days: int
     total_admitted_candidates: int
     total_blocked_candidates: int
     total_closed_trades: int
@@ -66,43 +86,8 @@ class RedBarV2MultiDayValidationResult:
     csv_path: Path
 
 
-def _normalise_candles(candles: pd.DataFrame) -> pd.DataFrame:
-    if candles is None or candles.empty:
-        return pd.DataFrame()
-    frame = candles.copy()
-    if "timestamp" in frame.columns:
-        frame["timestamp"] = pd.to_datetime(frame["timestamp"], errors="coerce")
-        frame = frame.dropna(subset=["timestamp"]).set_index("timestamp")
-    if not isinstance(frame.index, pd.DatetimeIndex):
-        return pd.DataFrame()
-    return frame.sort_index()
-
-
 def classify_session_regime(index_candles: pd.DataFrame) -> str:
-    """Classify a session for validation grouping, not trading decisions.
-
-    TREND_UP / TREND_DOWN require both material net displacement and directional
-    efficiency. Remaining sessions are grouped as RANGE. Thresholds are fixed
-    validation metadata and are not consumed by the Decision Engine.
-    """
-    frame = _normalise_candles(index_candles)
-    if frame.empty or "close" not in frame.columns or len(frame) < 2:
-        return "UNAVAILABLE"
-
-    close = pd.to_numeric(frame["close"], errors="coerce").dropna()
-    if len(close) < 2 or float(close.iloc[0]) == 0:
-        return "UNAVAILABLE"
-
-    net_return_pct = (float(close.iloc[-1]) / float(close.iloc[0]) - 1.0) * 100.0
-    travelled = float(close.diff().abs().sum())
-    net_points = abs(float(close.iloc[-1]) - float(close.iloc[0]))
-    efficiency = net_points / travelled if travelled > 0 else 0.0
-
-    if net_return_pct >= 0.35 and efficiency >= 0.25:
-        return "TREND_UP"
-    if net_return_pct <= -0.35 and efficiency >= 0.25:
-        return "TREND_DOWN"
-    return "RANGE"
+    return diagnose_session_regime(index_candles).regime
 
 
 def _admission_metrics(
@@ -147,7 +132,6 @@ def run_red_bar_v2_multiday_validation(
     artifacts_root: str | Path,
     replay_runner: Callable[..., MonitoredRedBarV2FuturesReplayResult] = run_monitored_red_bar_v2_futures_replay,
 ) -> RedBarV2MultiDayValidationResult:
-    """Run historical-only monitored replay across multiple validation days."""
     if not days:
         raise ValueError("Multi-day validation requires at least one day.")
 
@@ -163,9 +147,10 @@ def run_red_bar_v2_multiday_validation(
             futures_expiry=day.futures_expiry,
             exit_timestamps=day.exit_timestamps,
         )
-        regime = classify_session_regime(day.index_candles)
+        regime = diagnose_session_regime(day.index_candles)
+        completeness = evaluate_session_completeness(day.index_candles)
         expected = day.expected_regime.upper() if day.expected_regime else None
-        regime_match = regime == expected if expected else None
+        regime_match = regime.regime == expected if expected else None
         bullish, bearish, reversals, block_episodes, block_occurrences, admitted_count = (
             _admission_metrics(monitored)
         )
@@ -174,19 +159,31 @@ def run_red_bar_v2_multiday_validation(
         day_results.append(
             RedBarV2ValidationDayResult(
                 trading_date=day.trading_date,
-                regime=regime,
+                regime=regime.regime,
+                regime_reason=regime.reason,
                 expected_regime=expected,
                 regime_matches_expectation=regime_match,
+                session_open=regime.session_open,
+                session_close=regime.session_close,
+                session_high=regime.session_high,
+                session_low=regime.session_low,
+                net_points=regime.net_points,
+                net_return_pct=regime.net_return_pct,
+                travelled_points=regime.travelled_points,
+                directional_efficiency=regime.directional_efficiency,
+                intraday_range_pct=regime.intraday_range_pct,
                 health_status=health.status,
                 health_reason=health.reason,
+                session_completeness_status=completeness.status,
+                session_completeness_reason=completeness.reason,
+                session_coverage_pct=completeness.coverage_pct,
                 index_rows=health.index_rows,
+                expected_index_rows=completeness.expected_rows,
                 futures_rows=health.futures_rows,
                 aligned_rows=health.aligned_rows,
                 alignment_coverage_pct=health.alignment_coverage_pct,
                 completed_5m_aligned_rows=health.completed_5m_aligned_rows,
-                completed_5m_alignment_coverage_pct=(
-                    health.completed_5m_alignment_coverage_pct
-                ),
+                completed_5m_alignment_coverage_pct=health.completed_5m_alignment_coverage_pct,
                 admitted_candidates=replay.admitted_candidates,
                 blocked_candidates=replay.blocked_candidates,
                 closed_trades=replay.closed_trades,
@@ -212,6 +209,8 @@ def run_red_bar_v2_multiday_validation(
         "total_days": len(day_results),
         "ready_days": sum(item.health_status == "READY" for item in day_results),
         "blocked_days": sum(item.health_status != "READY" for item in day_results),
+        "complete_days": sum(item.session_completeness_status == "COMPLETE" for item in day_results),
+        "partial_days": sum(item.session_completeness_status == "PARTIAL" for item in day_results),
         "total_admitted_candidates": sum(item.admitted_candidates for item in day_results),
         "total_blocked_candidates": sum(item.blocked_candidates for item in day_results),
         "total_closed_trades": sum(item.closed_trades for item in day_results),
@@ -229,6 +228,8 @@ def run_red_bar_v2_multiday_validation(
         total_days=summary["total_days"],
         ready_days=summary["ready_days"],
         blocked_days=summary["blocked_days"],
+        complete_days=summary["complete_days"],
+        partial_days=summary["partial_days"],
         total_admitted_candidates=summary["total_admitted_candidates"],
         total_blocked_candidates=summary["total_blocked_candidates"],
         total_closed_trades=summary["total_closed_trades"],
