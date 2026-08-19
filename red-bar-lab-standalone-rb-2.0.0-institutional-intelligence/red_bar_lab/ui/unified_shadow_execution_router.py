@@ -11,10 +11,6 @@ UNIFIED_SHADOW_ROUTER_VERSION = "UNIFIED-SHADOW-EXECUTION-ROUTER-V1"
 SUPPORTED_STRATEGIES = frozenset(
     {
         "RED_BAR",
-        "DIRECTIONAL_REGIME",
-        "DIRECTIONAL_REGIME_INTELLIGENCE",
-        "RSI_EXTREME_REVERSAL",
-        "RSI_EXTREME_REVERSAL_V1",
         "REFERENCE_LEVEL",
     }
 )
@@ -160,8 +156,9 @@ def build_unified_shadow_routes(
 def render_unified_shadow_routes(result: Mapping[str, object]) -> None:
     st.markdown("### 10D. Unified Shadow Execution Router")
     st.caption(
-        "Routes independently owned Red Bar, DRI and RSI admissions through one "
-        "deterministic in-memory boundary. Paper and live execution remain disabled."
+        "Routes Red Bar admissions through one deterministic in-memory boundary. "
+        "Legacy reference-level evidence remains available for comparison only. "
+        "Paper and live execution remain disabled."
     )
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Router outcome", str(result.get("outcome") or "NO_SHADOW_EVIDENCE"))
