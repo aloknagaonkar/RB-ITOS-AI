@@ -7,8 +7,9 @@ from typing import Iterable
 
 import pandas as pd
 
-from red_bar_lab.intelligence.red_bar_v2_futures_context import (
-    RedBarV2VwapSourceHealth,
+from red_bar_lab.intelligence.red_bar_v2_session_health import (
+    RedBarV2SessionVwapHealth,
+    build_session_vwap_source_health,
 )
 from red_bar_lab.operations.red_bar_v2_vwap_source import (
     persist_red_bar_v2_vwap_health,
@@ -19,13 +20,18 @@ from red_bar_lab.services.red_bar_v2_futures_historical_replay import (
 from red_bar_lab.services.red_bar_v2_historical_replay import (
     RedBarV2ReplayResult,
 )
+from red_bar_lab.services.red_bar_v2_lifecycle_validation import (
+    ReplayEventEpisode,
+    summarize_replay_event_episodes,
+)
 
 
 @dataclass(frozen=True)
 class MonitoredRedBarV2FuturesReplayResult:
     replay: RedBarV2ReplayResult
-    health: RedBarV2VwapSourceHealth
+    health: RedBarV2SessionVwapHealth
     health_path: Path
+    event_episodes: tuple[ReplayEventEpisode, ...]
 
 
 def run_monitored_red_bar_v2_futures_replay(
@@ -39,15 +45,33 @@ def run_monitored_red_bar_v2_futures_replay(
     futures_expiry: str | None = None,
     exit_timestamps: Iterable[datetime | pd.Timestamp] = (),
 ) -> MonitoredRedBarV2FuturesReplayResult:
-    replay, health = replay_red_bar_v2_day_with_futures_vwap(
+    replay, evaluation_health = replay_red_bar_v2_day_with_futures_vwap(
         index_candles,
         futures_candles,
         instrument_key=instrument_key,
         vwap_instrument_key=vwap_instrument_key,
         exit_timestamps=exit_timestamps,
     )
+    session_health = build_session_vwap_source_health(
+        index_candles,
+        futures_candles,
+        instrument_key=instrument_key,
+        vwap_instrument_key=vwap_instrument_key,
+    )
+
+    # A failed strategy-evaluation source gate must never be hidden by a
+    # session-level alignment result.
+    if evaluation_health.status != "READY" and session_health.status == "READY":
+        session_health = RedBarV2SessionVwapHealth(
+            **{
+                **session_health.__dict__,
+                "status": evaluation_health.status,
+                "reason": evaluation_health.reason,
+            }
+        )
+
     persisted = persist_red_bar_v2_vwap_health(
-        health,
+        session_health,
         artifacts_root=artifacts_root,
         trading_date=replay.trading_date,
         futures_symbol=futures_symbol,
@@ -55,6 +79,7 @@ def run_monitored_red_bar_v2_futures_replay(
     )
     return MonitoredRedBarV2FuturesReplayResult(
         replay=replay,
-        health=health,
+        health=session_health,
         health_path=persisted,
+        event_episodes=summarize_replay_event_episodes(replay),
     )
