@@ -67,6 +67,17 @@ def _last_timestamp(frame: pd.DataFrame) -> datetime | None:
     return pd.Timestamp(frame.index[-1]).to_pydatetime()
 
 
+def _latest_source_timestamp(candles: pd.DataFrame | None) -> pd.Timestamp | None:
+    if candles is None or candles.empty:
+        return None
+    values = pd.to_datetime(
+        candles["timestamp"] if "timestamp" in candles.columns else candles.index,
+        errors="coerce",
+    )
+    valid = values[~pd.isna(values)]
+    return pd.Timestamp(valid.max()) if len(valid) else None
+
+
 def build_session_vwap_source_health(
     index_candles: pd.DataFrame,
     futures_candles: pd.DataFrame,
@@ -75,15 +86,19 @@ def build_session_vwap_source_health(
     vwap_instrument_key: str,
 ) -> RedBarV2SessionVwapHealth:
     """Measure the full completed session at both one- and five-minute levels."""
-    if index_candles is None or index_candles.empty:
-        evaluation_time = pd.Timestamp.now(tz="UTC")
-    else:
-        index_times = pd.to_datetime(
-            index_candles["timestamp"] if "timestamp" in index_candles.columns else index_candles.index,
-            errors="coerce",
+    latest_candidates = [
+        value
+        for value in (
+            _latest_source_timestamp(index_candles),
+            _latest_source_timestamp(futures_candles),
         )
-        valid = index_times[~pd.isna(index_times)]
-        evaluation_time = pd.Timestamp(valid.max()) + pd.Timedelta(minutes=1)
+        if value is not None
+    ]
+    evaluation_time = (
+        max(latest_candidates) + pd.Timedelta(minutes=1)
+        if latest_candidates
+        else pd.Timestamp.now(tz="UTC")
+    )
 
     index_1m = completed_candles(
         index_candles, evaluation_time=evaluation_time, interval_minutes=1
