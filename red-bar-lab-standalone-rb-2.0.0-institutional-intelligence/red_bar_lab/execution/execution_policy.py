@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from typing import Mapping
 
 RSI_STRATEGY_SOURCE = "RSI_EXTREME_REVERSAL_V1"
+RED_BAR_V2_STRATEGY_SOURCE = "RED_BAR_V2"
+DIRECTIONAL_REGIME_STRATEGY_SOURCE = "DIRECTIONAL_REGIME_INTELLIGENCE"
 STANDARD_EXIT_MODE = "STANDARD_MULTI_FACTOR"
 RSI_EXIT_MODE = "RSI_PREMIUM_PROTECTION_ONLY"
 
@@ -37,6 +39,20 @@ def execution_strategy_source(signal: Mapping[str, object] | None) -> str:
         or ""
     ).upper().strip()
     signal_id = str(row.get("signal_id") or "").upper().strip()
+    level_type = str(row.get("level_type") or "").upper().strip()
+    if (
+        source == RED_BAR_V2_STRATEGY_SOURCE
+        or signal_id.startswith("RBV2-")
+        or level_type == RED_BAR_V2_STRATEGY_SOURCE
+    ):
+        return RED_BAR_V2_STRATEGY_SOURCE
+    if (
+        source == DIRECTIONAL_REGIME_STRATEGY_SOURCE
+        or signal_id.startswith("DRI-")
+        or signal_id.startswith("DRI7-")
+        or level_type.startswith("DIRECTIONAL_REGIME")
+    ):
+        return DIRECTIONAL_REGIME_STRATEGY_SOURCE
     if (
         source == RSI_STRATEGY_SOURCE
         or signal_id.startswith("RSI7-")
