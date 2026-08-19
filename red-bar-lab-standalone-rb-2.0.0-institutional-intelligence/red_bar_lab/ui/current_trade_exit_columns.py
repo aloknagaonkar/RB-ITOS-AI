@@ -36,6 +36,30 @@ def _new_protection(health) -> str:
     return f"{_price(initial)} → {_price(effective)}"
 
 
+def _insert_protection_after_pnl(
+    row: dict[str, object],
+    *,
+    trailing_stop: float | None,
+    stage: str,
+    new_protection: str,
+) -> dict[str, object]:
+    ordered: dict[str, object] = {}
+    inserted = False
+    for key, value in row.items():
+        ordered[key] = value
+        if key == "P&L":
+            ordered["Trailing Stop"] = trailing_stop
+            ordered["Stage"] = stage
+            ordered["New Protection"] = new_protection
+            inserted = True
+
+    if not inserted:
+        ordered["Trailing Stop"] = trailing_stop
+        ordered["Stage"] = stage
+        ordered["New Protection"] = new_protection
+    return ordered
+
+
 def install(active_trade_views_module: Any) -> None:
     """Add only essential protection fields to the existing Current Trades row."""
     if getattr(active_trade_views_module, "_exit_columns_installed", False):
@@ -62,14 +86,19 @@ def install(active_trade_views_module: Any) -> None:
                 ),
             )
 
-            item["Trailing Stop"] = (
+            trailing_stop = (
                 round(float(health.trailing_stop), 2)
                 if health.trailing_stop is not None
                 else None
             )
-            item["Stage"] = _protection_stage(health)
-            item["New Protection"] = _new_protection(health)
-            enriched.append(item)
+            enriched.append(
+                _insert_protection_after_pnl(
+                    item,
+                    trailing_stop=trailing_stop,
+                    stage=_protection_stage(health),
+                    new_protection=_new_protection(health),
+                )
+            )
 
         return enriched
 
