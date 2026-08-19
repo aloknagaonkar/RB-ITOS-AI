@@ -12,6 +12,8 @@ from red_bar_lab.ui.strategy_section_summary import (
     section_timer,
     timing_rows,
 )
+from red_bar_lab.operations.red_bar_v2_ui_snapshot import read_red_bar_v2_ui_snapshot
+from red_bar_lab.ui.red_bar_v2_legacy_panel import render_red_bar_v2_legacy_panel
 
 
 def _read_cached_candles(layout, instrument_key, trading_date):
@@ -35,7 +37,7 @@ def _render_rows(rows, empty_message):
 def render_page(settings, layout, database, token, underlying_name, instrument_key, interval) -> None:
     st.subheader("Red Bar Strategy")
     st.caption(
-        "Independent Red Bar strategy observability. Sections 1-3 are read-only and do "
+        "Independent Red Bar strategy observability. Sections 1-4 are read-only and do "
         "not create signals, bundles, contracts, orders or positions."
     )
 
@@ -235,7 +237,10 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
             )), width="stretch", hide_index=True,
         )
 
+    snapshot = read_red_bar_v2_ui_snapshot(settings.artifacts_root)
+    render_red_bar_v2_legacy_panel(st, snapshot)
+
     st.info(
-        "Sections 1-3 are read-only. The displayed Red Bar bundle is constructed in memory "
+        "Sections 1-4 are read-only. The displayed Red Bar bundle is constructed in memory "
         "for observability; opening this page does not persist, forward, consume or execute it."
     )
