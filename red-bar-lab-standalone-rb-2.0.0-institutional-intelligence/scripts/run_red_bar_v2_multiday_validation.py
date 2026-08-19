@@ -65,8 +65,8 @@ def main() -> None:
         "--research-exits",
         action="store_true",
         help=(
-            "Inject validation-only exits at 10:30, 12:30 and 14:30 IST when "
-            "a manifest row has no explicit exit_timestamps."
+            "Inject validation-only exits every five minutes from 09:30 through "
+            "15:25 IST when a manifest row has no explicit exit_timestamps."
         ),
     )
     args = parser.parse_args()
