@@ -93,7 +93,10 @@ class AttributionAwarePaperAutomationService(
             result = super().process_new_signals(*args, **kwargs)
         finally:
             self.database = original_database
-        self._last_attribution_reconciliation = (
-            self._reconcile_attribution()
-        )
+        # Attribution reconciliation is historical/observational maintenance.
+        # Never execute it synchronously inside the live paper monitor cycle.
+        self._last_attribution_reconciliation = {
+            "status": "DEFERRED",
+            "reason": "INLINE_RECONCILIATION_DISABLED_FOR_LIVE_MONITOR",
+        }
         return result

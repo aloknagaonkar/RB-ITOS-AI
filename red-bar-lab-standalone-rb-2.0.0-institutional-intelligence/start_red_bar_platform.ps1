@@ -45,6 +45,20 @@ else {
     Write-Host "UPSTOX_ACCESS_TOKEN not set; paper monitor was not auto-started." -ForegroundColor Yellow
 }
 
+$positionMonitorCommand = @"
+Set-Location '$PWD'
+`$env:UPSTOX_ACCESS_TOKEN='$env:UPSTOX_ACCESS_TOKEN'
+.\run_position_monitor.ps1 -IntervalSeconds 5 -Underlying '$Underlying'
+"@
+
+Start-Process powershell -ArgumentList @(
+    "-NoExit",
+    "-Command",
+    $positionMonitorCommand
+)
+
+Write-Host "Fast paper-position monitor started in a separate PowerShell window." -ForegroundColor Green
+
 Write-Host "Starting Red Bar Lab UI..." -ForegroundColor Green
 
 .\run_red_bar.ps1

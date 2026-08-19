@@ -163,6 +163,7 @@ def main() -> int:
             report = automation.run_cycle(
                 trading_date=trading_date,
                 lots=max(1, int(args.lots)),
+                monitor_positions=False,
             )
 
             totals["signals_seen"] += int(report.signals_seen)
