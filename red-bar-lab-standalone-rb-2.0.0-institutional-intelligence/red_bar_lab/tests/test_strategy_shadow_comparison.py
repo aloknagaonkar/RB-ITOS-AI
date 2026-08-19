@@ -32,6 +32,21 @@ def directional_record(
     }
 
 
+def red_bar_record():
+    return {
+        "status": "SIGNAL_AVAILABLE",
+        "latest_attempt": {
+            "signal_id": "RB-1",
+            "direction": "BEARISH",
+            "level_type": "NEXT_RED_CANDLE",
+            "confirmation_timestamp": "2026-08-18T15:29:00+05:30",
+            "level_value": 24165.45,
+            "invalidation_level": 24202.85,
+            "fresh_until": "2026-08-18T15:33:00+05:30",
+        },
+    }
+
+
 def test_comparison_matches_normalized_strategy_records():
     result = compare_strategy_records(
         "directional_regime",
@@ -128,26 +143,33 @@ def test_missing_legacy_record_is_readiness_not_mismatch():
     assert result["match"] is None
 
 
-def test_service_counts_exact_and_equivalent_matches(tmp_path: Path):
-    legacy_dri = directional_record(
-        signal_id="SIG-CONFIRMED",
-        setup_type="BEARISH_STRUCTURE_BREAK",
-        detected_at="2026-08-18T15:25:00+05:30",
-        fresh_until="2026-08-18T15:40:00+05:30",
-    )
+def test_service_compares_only_active_red_bar_strategy(tmp_path: Path):
+    red_bar = red_bar_record()
     service = StrategyShadowComparisonService(
         runs_root=tmp_path,
         instrument_key="NSE_INDEX|Nifty 50",
         legacy_snapshot_loader=lambda: {
-            "directional_regime": legacy_dri,
+            "red_bar": red_bar,
+            "directional_regime": directional_record(),
+            "rsi_reversal": {
+                "latest_historical_signal": {
+                    "signal_id": "RSI-OLD",
+                    "direction": "BULLISH",
+                }
+            },
         },
     )
     shadow = {
         "scan_identity": "NSE_INDEX|Nifty 50|1M|2026-08-18T15:29:00+05:30",
         "evaluated_at": "2026-08-18T15:30:00+05:30",
-        "red_bar": {"status": "INPUT_UNAVAILABLE"},
+        "red_bar": red_bar,
         "directional_regime": directional_record(),
-        "rsi_reversal": {"status": "NO_SIGNAL"},
+        "rsi_reversal": {
+            "latest_historical_signal": {
+                "signal_id": "RSI-OLD",
+                "direction": "BULLISH",
+            }
+        },
     }
 
     payload = service.compare_and_record(shadow)
@@ -155,9 +177,10 @@ def test_service_counts_exact_and_equivalent_matches(tmp_path: Path):
     assert payload["comparison_status"] == "MATCH"
     assert payload["comparable_strategy_count"] == 1
     assert payload["matching_strategy_count"] == 1
-    assert payload["exact_match_strategy_count"] == 0
-    assert payload["equivalent_strategy_count"] == 1
+    assert payload["exact_match_strategy_count"] == 1
+    assert payload["equivalent_strategy_count"] == 0
     assert payload["mismatch_strategy_count"] == 0
+    assert [row["strategy"] for row in payload["comparisons"]] == ["red_bar"]
     assert payload["diagnostic_only"] is True
     assert payload["production_persistence"] is False
     assert payload["execution_allowed"] is False
