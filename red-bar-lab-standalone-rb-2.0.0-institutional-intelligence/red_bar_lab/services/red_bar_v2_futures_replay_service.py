@@ -11,6 +11,10 @@ from red_bar_lab.intelligence.red_bar_v2_session_health import (
     RedBarV2SessionVwapHealth,
     build_session_vwap_source_health,
 )
+from red_bar_lab.operations.red_bar_v2_ui_snapshot import (
+    build_red_bar_v2_ui_snapshot_from_replay,
+    persist_red_bar_v2_ui_snapshot,
+)
 from red_bar_lab.operations.red_bar_v2_vwap_source import (
     persist_red_bar_v2_vwap_health,
 )
@@ -59,8 +63,6 @@ def run_monitored_red_bar_v2_futures_replay(
         vwap_instrument_key=vwap_instrument_key,
     )
 
-    # A failed strategy-evaluation source gate must never be hidden by a
-    # session-level alignment result.
     if evaluation_health.status != "READY" and session_health.status == "READY":
         session_health = RedBarV2SessionVwapHealth(
             **{
@@ -77,9 +79,20 @@ def run_monitored_red_bar_v2_futures_replay(
         futures_symbol=futures_symbol,
         futures_expiry=futures_expiry,
     )
-    return MonitoredRedBarV2FuturesReplayResult(
+    monitored = MonitoredRedBarV2FuturesReplayResult(
         replay=replay,
         health=session_health,
         health_path=persisted,
         event_episodes=summarize_replay_event_episodes(replay),
     )
+    ui_snapshot = build_red_bar_v2_ui_snapshot_from_replay(
+        monitored,
+        futures_instrument_key=vwap_instrument_key,
+        futures_symbol=futures_symbol,
+        futures_expiry=futures_expiry,
+    )
+    persist_red_bar_v2_ui_snapshot(
+        ui_snapshot,
+        artifacts_root=artifacts_root,
+    )
+    return monitored
