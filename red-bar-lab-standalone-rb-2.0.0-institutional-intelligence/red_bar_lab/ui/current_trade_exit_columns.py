@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from red_bar_lab.execution.exit_engine import PaperExitEngine
+
+
+IST = ZoneInfo("Asia/Kolkata")
 
 
 def _protection_stage(health) -> str:
@@ -36,24 +41,55 @@ def _new_protection(health) -> str:
     return f"{_price(initial)} → {_price(effective)}"
 
 
-def _insert_protection_after_pnl(
+def _price_updated(source: dict[str, object]) -> str:
+    raw = (
+        source.get("price_updated_at")
+        or source.get("current_price_timestamp")
+        or source.get("quote_timestamp")
+        or source.get("last_price_timestamp")
+        or source.get("updated_at")
+        or source.get("last_updated")
+    )
+    if raw in (None, ""):
+        return "—"
+    text = str(raw).strip()
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=IST)
+        else:
+            parsed = parsed.astimezone(IST)
+        return parsed.strftime("%H:%M:%S")
+    except (TypeError, ValueError):
+        return text
+
+
+def _insert_live_fields(
     row: dict[str, object],
     *,
+    price_updated: str,
     trailing_stop: float | None,
     stage: str,
     new_protection: str,
 ) -> dict[str, object]:
     ordered: dict[str, object] = {}
-    inserted = False
+    protection_inserted = False
+    timestamp_inserted = False
+
     for key, value in row.items():
         ordered[key] = value
+        if key == "Current":
+            ordered["Price Updated"] = price_updated
+            timestamp_inserted = True
         if key == "P&L":
             ordered["Trailing Stop"] = trailing_stop
             ordered["Stage"] = stage
             ordered["New Protection"] = new_protection
-            inserted = True
+            protection_inserted = True
 
-    if not inserted:
+    if not timestamp_inserted:
+        ordered["Price Updated"] = price_updated
+    if not protection_inserted:
         ordered["Trailing Stop"] = trailing_stop
         ordered["Stage"] = stage
         ordered["New Protection"] = new_protection
@@ -61,7 +97,7 @@ def _insert_protection_after_pnl(
 
 
 def install(active_trade_views_module: Any) -> None:
-    """Add only essential protection fields to the existing Current Trades row."""
+    """Add compact live-price and protection fields to Current Trades rows."""
     if getattr(active_trade_views_module, "_exit_columns_installed", False):
         return
 
@@ -92,8 +128,9 @@ def install(active_trade_views_module: Any) -> None:
                 else None
             )
             enriched.append(
-                _insert_protection_after_pnl(
+                _insert_live_fields(
                     item,
+                    price_updated=_price_updated(source),
                     trailing_stop=trailing_stop,
                     stage=_protection_stage(health),
                     new_protection=_new_protection(health),
