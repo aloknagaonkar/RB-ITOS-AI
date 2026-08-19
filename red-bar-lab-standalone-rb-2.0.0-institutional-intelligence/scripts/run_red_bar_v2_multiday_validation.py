@@ -5,8 +5,6 @@ from datetime import date
 from pathlib import Path
 import sys
 
-# Allow direct execution from the repository root:
-# python .\scripts\run_red_bar_v2_multiday_validation.py <manifest>
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -19,6 +17,9 @@ from red_bar_lab.services.red_bar_v2_multiday_validation import (
     RedBarV2ValidationDay,
     run_red_bar_v2_multiday_validation,
 )
+from red_bar_lab.services.red_bar_v2_validation_diagnostics import (
+    deterministic_research_exit_timestamps,
+)
 from red_bar_lab.storage.artifacts import ArtifactLayout
 
 
@@ -26,7 +27,6 @@ INDEX_KEY = "NSE_INDEX|Nifty 50"
 
 
 def _optional_text(value: object) -> str | None:
-    """Return trimmed manifest text, treating blank/NaN values as absent."""
     if value is None or pd.isna(value):
         return None
     text = str(value).strip()
@@ -61,6 +61,14 @@ def main() -> None:
         default=INDEX_KEY,
         help="Underlying index instrument key",
     )
+    parser.add_argument(
+        "--research-exits",
+        action="store_true",
+        help=(
+            "Inject validation-only exits at 10:30, 12:30 and 14:30 IST when "
+            "a manifest row has no explicit exit_timestamps."
+        ),
+    )
     args = parser.parse_args()
 
     manifest = pd.read_csv(args.manifest)
@@ -93,6 +101,10 @@ def main() -> None:
         if futures_candles.empty:
             raise ValueError(f"Missing futures cache for {trading_date}: {futures_key}")
 
+        exits = _parse_exit_timestamps(row.get("exit_timestamps"))
+        if args.research_exits and not exits:
+            exits = deterministic_research_exit_timestamps(trading_date)
+
         days.append(
             RedBarV2ValidationDay(
                 trading_date=trading_date.isoformat(),
@@ -101,7 +113,7 @@ def main() -> None:
                 futures_instrument_key=futures_key,
                 futures_symbol=_optional_text(row.get("futures_symbol")),
                 futures_expiry=_optional_text(row.get("futures_expiry")),
-                exit_timestamps=_parse_exit_timestamps(row.get("exit_timestamps")),
+                exit_timestamps=exits,
                 expected_regime=_optional_text(row.get("expected_regime")),
             )
         )
@@ -117,7 +129,10 @@ def main() -> None:
     print("Days:", result.total_days)
     print("READY:", result.ready_days)
     print("Blocked:", result.blocked_days)
+    print("Complete sessions:", result.complete_days)
+    print("Partial sessions:", result.partial_days)
     print("Regimes:", ", ".join(result.regimes))
+    print("Research exits:", "ENABLED" if args.research_exits else "DISABLED")
     print("Admitted candidates:", result.total_admitted_candidates)
     print("Blocked candidates:", result.total_blocked_candidates)
     print("Closed trades:", result.total_closed_trades)
@@ -131,9 +146,12 @@ def main() -> None:
         print(
             item.trading_date,
             item.regime,
+            item.regime_reason,
             item.health_status,
-            f"1M={item.aligned_rows}/{item.index_rows}",
-            f"5M={item.completed_5m_aligned_rows}",
+            item.session_completeness_status,
+            f"coverage={item.session_coverage_pct:.1f}%",
+            f"net={item.net_return_pct:.3f}%" if item.net_return_pct is not None else "net=n/a",
+            f"eff={item.directional_efficiency:.3f}" if item.directional_efficiency is not None else "eff=n/a",
             f"admitted={item.admitted_candidates}",
             f"reversals={item.admitted_reversals}",
             f"closed={item.closed_trades}",
