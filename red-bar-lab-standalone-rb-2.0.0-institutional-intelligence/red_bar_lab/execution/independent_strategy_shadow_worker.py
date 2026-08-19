@@ -8,24 +8,16 @@ from typing import Callable, Iterable, Mapping
 
 import pandas as pd
 
-from red_bar_lab.execution.directional_regime_background import (
-    _completed_five_minute,
-    _normalize_one_minute,
-)
-from red_bar_lab.execution.early_directional_entry import (
-    EarlyOneMinuteDirectionalEntryEngine,
-)
-from red_bar_lab.execution.rsi_extreme_reversal import RsiExtremeReversalEngine
-from red_bar_lab.intelligence.stateful_multitimeframe_regime import (
-    StatefulMultiTimeframeRegimeEngine,
-)
+from red_bar_lab.execution.directional_regime_background import _normalize_one_minute
 from red_bar_lab.strategy.models import ReferenceLevel
 from red_bar_lab.strategy.signal_engine import scan_reference_levels
 
 
 IST = "Asia/Kolkata"
-SOURCE_VERSION = "INDEPENDENT-STRATEGY-SHADOW-WORKER-V3"
+SOURCE_VERSION = "INDEPENDENT-STRATEGY-SHADOW-WORKER-V4"
 EVALUATION_SOURCE = "INDEPENDENT_STRATEGY_SHADOW_WORKER"
+RETIRED_DRI_REASON = "STANDALONE_DRI_RETIRED"
+RETIRED_RSI_REASON = "STANDALONE_RSI_REVERSAL_RETIRED"
 
 
 @dataclass(frozen=True)
@@ -104,38 +96,35 @@ def _latest_attempt(records: list[dict[str, object]]) -> dict[str, object] | Non
     )
 
 
-def _freshness(
-    *,
-    detected_at: object,
-    fresh_until: object,
-    evaluated_at: pd.Timestamp,
-) -> dict[str, object]:
-    try:
-        detected = _as_ist(detected_at)
-        expiry = _as_ist(fresh_until)
-    except (TypeError, ValueError):
-        return {
-            "freshness_state": "UNAVAILABLE",
-            "fresh": False,
-            "age_seconds": None,
-            "current_action": "OBSERVE_ONLY",
-        }
-
-    age_seconds = (evaluated_at - detected).total_seconds()
-    if evaluated_at < detected:
-        state = "FUTURE_TIMESTAMP"
-        fresh = False
-    elif evaluated_at <= expiry:
-        state = "FRESH"
-        fresh = True
-    else:
-        state = "STALE"
-        fresh = False
+def _retired_directional_regime() -> dict[str, object]:
     return {
-        "freshness_state": state,
-        "fresh": fresh,
-        "age_seconds": max(0.0, age_seconds),
-        "current_action": "SHADOW_CANDIDATE" if fresh else "OBSERVE_ONLY",
+        "status": "INACTIVE_STRATEGY",
+        "detection_status": "INACTIVE_STRATEGY",
+        "reason": RETIRED_DRI_REASON,
+        "early_bundle_preview": {},
+        "freshness_state": "INACTIVE",
+        "fresh": False,
+        "age_seconds": None,
+        "current_action": "NONE",
+        "evaluation_source": EVALUATION_SOURCE,
+        "production_persisted": False,
+    }
+
+
+def _retired_rsi_reversal() -> dict[str, object]:
+    return {
+        "status": "INACTIVE_STRATEGY",
+        "reason": RETIRED_RSI_REASON,
+        "historical_signal_count": 0,
+        "fresh_signal_count": 0,
+        "latest_historical_signal": None,
+        "latest_fresh_signal": None,
+        "freshness_state": "INACTIVE",
+        "fresh": False,
+        "age_seconds": None,
+        "current_action": "NONE",
+        "evaluation_source": EVALUATION_SOURCE,
+        "production_persisted": False,
     }
 
 
@@ -147,11 +136,13 @@ def evaluate_shadow_strategy_cycle(
     now: object | None = None,
     previous_regime: Mapping[str, object] | None = None,
 ) -> ShadowStrategyScanResult:
-    """Evaluate Red Bar, DRI and RSI without invoking any production writer."""
+    """Evaluate Red Bar only while preserving retired-strategy compatibility fields."""
+    del previous_regime
     evaluated = _as_ist(now or pd.Timestamp.now(tz=IST))
     one = _normalize_one_minute([candles], evaluated)
-    five = _completed_five_minute(one, evaluated)
     evaluated_at = evaluated.isoformat()
+    directional = _retired_directional_regime()
+    rsi = _retired_rsi_reversal()
 
     if one.empty:
         return ShadowStrategyScanResult(
@@ -162,8 +153,8 @@ def evaluate_shadow_strategy_cycle(
             evaluated_at=evaluated_at,
             latest_completed_candle=None,
             red_bar={"status": "NOT_EVALUATED", "attempt_count": 0},
-            directional_regime={"status": "NOT_EVALUATED"},
-            rsi_reversal={"status": "NOT_EVALUATED", "historical_signal_count": 0},
+            directional_regime=directional,
+            rsi_reversal=rsi,
         )
 
     latest = _as_ist(one.iloc[-1]["timestamp"])
@@ -201,125 +192,9 @@ def evaluate_shadow_strategy_cycle(
             "production_persisted": False,
         }
 
-    if len(one) >= 35 and len(five) >= 35:
-        snapshot = StatefulMultiTimeframeRegimeEngine().evaluate(
-            one,
-            five,
-            previous_state=dict(previous_regime or {}),
-        ).as_record()
-        five_regime = str(snapshot.get("five_minute_regime") or "SIDEWAYS")
-        early = EarlyOneMinuteDirectionalEntryEngine().evaluate(
-            one,
-            five_minute_regime=five_regime,
-            instrument_key=instrument_key,
-        )
-        preview = dict(early.bundle or {})
-        original_source = preview.get("source")
-        freshness = (
-            _freshness(
-                detected_at=preview.get("detected_at"),
-                fresh_until=preview.get("fresh_until"),
-                evaluated_at=evaluated,
-            )
-            if preview
-            else {
-                "freshness_state": "UNAVAILABLE",
-                "fresh": False,
-                "age_seconds": None,
-                "current_action": "OBSERVE_ONLY",
-            }
-        )
-        directional = {
-            "detection_status": early.status,
-            "status": (
-                "FRESH_SIGNAL"
-                if freshness["fresh"]
-                else "HISTORICAL_SIGNAL"
-                if preview
-                else early.status
-            ),
-            "reason": early.reason,
-            "current_regime": snapshot.get("current_regime"),
-            "five_minute_regime": snapshot.get("five_minute_regime"),
-            "bullish_score": snapshot.get("bullish_score"),
-            "bearish_score": snapshot.get("bearish_score"),
-            "early_direction": early.direction,
-            "early_bundle_preview": preview,
-            "original_source": original_source,
-            "evaluation_source": EVALUATION_SOURCE,
-            **freshness,
-            "production_persisted": False,
-        }
-    else:
-        directional = {
-            "status": "UNAVAILABLE",
-            "detection_status": "UNAVAILABLE",
-            "reason": f"INSUFFICIENT_COMPLETED_CANDLES:1M={len(one)};5M={len(five)}",
-            "early_bundle_preview": {},
-            "freshness_state": "UNAVAILABLE",
-            "fresh": False,
-            "age_seconds": None,
-            "current_action": "OBSERVE_ONLY",
-            "evaluation_source": EVALUATION_SOURCE,
-            "production_persisted": False,
-        }
-
-    rsi_signals = [
-        signal.as_record()
-        for signal in RsiExtremeReversalEngine().detect(
-            one,
-            instrument_key=instrument_key,
-        )
-    ]
-    latest_historical = rsi_signals[-1] if rsi_signals else None
-    fresh_rsi = []
-    for signal in rsi_signals:
-        freshness = _freshness(
-            detected_at=signal.get("detected_at"),
-            fresh_until=signal.get("fresh_until"),
-            evaluated_at=evaluated,
-        )
-        if freshness["fresh"]:
-            fresh_rsi.append(signal)
-    latest_fresh = fresh_rsi[-1] if fresh_rsi else None
-    latest_freshness = (
-        _freshness(
-            detected_at=latest_historical.get("detected_at"),
-            fresh_until=latest_historical.get("fresh_until"),
-            evaluated_at=evaluated,
-        )
-        if latest_historical
-        else {
-            "freshness_state": "UNAVAILABLE",
-            "fresh": False,
-            "age_seconds": None,
-            "current_action": "OBSERVE_ONLY",
-        }
-    )
-    rsi = {
-        "status": (
-            "FRESH_SIGNAL_AVAILABLE"
-            if latest_fresh
-            else "HISTORICAL_SIGNALS_ONLY"
-            if latest_historical
-            else "NO_SIGNAL"
-        ),
-        "historical_signal_count": len(rsi_signals),
-        "fresh_signal_count": len(fresh_rsi),
-        "latest_historical_signal": latest_historical,
-        "latest_fresh_signal": latest_fresh,
-        "original_source": (
-            latest_historical.get("source") if latest_historical else None
-        ),
-        "evaluation_source": EVALUATION_SOURCE,
-        **latest_freshness,
-        "current_action": "SHADOW_CANDIDATE" if latest_fresh else "OBSERVE_ONLY",
-        "production_persisted": False,
-    }
-
     return ShadowStrategyScanResult(
         status="READY",
-        reason="SHADOW_STRATEGIES_EVALUATED",
+        reason="RED_BAR_SHADOW_EVALUATED",
         scan_identity=scan_identity,
         instrument_key=instrument_key,
         evaluated_at=evaluated_at,
@@ -331,7 +206,7 @@ def evaluate_shadow_strategy_cycle(
 
 
 class IndependentStrategyShadowWorker:
-    """Completed-candle shadow loop; never writes strategy production state."""
+    """Completed-candle Red Bar shadow loop; never writes production strategy state."""
 
     def __init__(
         self,
@@ -428,8 +303,8 @@ class IndependentStrategyShadowWorker:
             evaluated_at=evaluated_at,
             latest_completed_candle=None,
             red_bar={"status": "NOT_EVALUATED"},
-            directional_regime={"status": "NOT_EVALUATED"},
-            rsi_reversal={"status": "NOT_EVALUATED"},
+            directional_regime=_retired_directional_regime(),
+            rsi_reversal=_retired_rsi_reversal(),
         )
         self._write_status(result)
 
