@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import os
 
+from red_bar_lab.execution import paper_order_guard as _paper_order_guard
+
 RED_BAR_V2_SOURCE = "RED_BAR_V2"
 LEGACY_RED_BAR_SOURCE = "REFERENCE_LEVEL"
 DRI_SOURCE = "DIRECTIONAL_REGIME_INTELLIGENCE"
