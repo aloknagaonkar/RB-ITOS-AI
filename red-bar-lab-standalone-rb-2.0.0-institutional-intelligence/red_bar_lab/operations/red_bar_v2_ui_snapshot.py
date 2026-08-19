@@ -57,6 +57,109 @@ class RedBarV2UISnapshot:
         return cls(**values)
 
 
+def _iso(value: Any) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat() if hasattr(value, "isoformat") else str(value)
+
+
+def _details(event: Any | None) -> Mapping[str, Any]:
+    payload = getattr(event, "details", None)
+    return payload if isinstance(payload, Mapping) else {}
+
+
+def build_red_bar_v2_ui_snapshot_from_replay(
+    monitored: Any,
+    *,
+    futures_instrument_key: str,
+    futures_symbol: str | None = None,
+    futures_expiry: str | None = None,
+    mode: str = "SHADOW",
+) -> RedBarV2UISnapshot:
+    replay = monitored.replay
+    health = monitored.health
+    events = list(getattr(replay, "events", ()) or ())
+    admissions = [event for event in events if getattr(event, "event_type", None) == "CANDIDATE_ADMISSION"]
+    upgrades = [event for event in events if getattr(event, "event_type", None) == "STATE_UPGRADE"]
+    closures = [event for event in events if getattr(event, "event_type", None) == "TRADE_CLOSED"]
+    latest_event = events[-1] if events else None
+    latest_admission = admissions[-1] if admissions else None
+    latest_upgrade = upgrades[-1] if upgrades else None
+    admission_details = _details(latest_admission)
+    admission_conditions = admission_details.get("conditions")
+    if not isinstance(admission_conditions, Mapping):
+        admission_conditions = {}
+
+    direction = getattr(latest_admission, "direction", None)
+    option_side = getattr(latest_admission, "option_side", None)
+    trend_strength = admission_details.get("trend_strength")
+    state = admission_details.get("state")
+    if not state and direction:
+        prefix = "CONFIRMED" if trend_strength == "CONFIRMED" else "PROVISIONAL"
+        state = f"{prefix}_{direction}"
+    if not state:
+        state = "REFERENCE_READY" if replay.reference_timestamp else "REFERENCE_NOT_READY"
+
+    entry_type = str(admission_details.get("entry_type") or "").upper()
+    reversal_status = "NO_REVERSAL"
+    if entry_type == "REVERSAL":
+        reversal_status = "REVERSAL_ADMITTED" if getattr(latest_admission, "candidate_allowed", None) else "REVERSAL_REJECTED"
+    elif any("REVERSAL" in str(getattr(event, "admission_code", "")) for event in admissions):
+        reversal_status = "REVERSAL_DETECTED"
+
+    trade_status = str(getattr(replay, "final_trade_state", None) or "FLAT")
+    if closures and trade_status == "FLAT":
+        trade_status = "CLOSED"
+
+    midpoint_aligned = admission_conditions.get("midpoint_aligned")
+    if midpoint_aligned is True:
+        midpoint_confirmation = f"{direction}_CONFIRMED" if direction else "CONFIRMED"
+    elif midpoint_aligned is False:
+        midpoint_confirmation = "WAITING"
+    else:
+        midpoint_confirmation = "WAITING"
+
+    provisional_confirmed = "NOT_APPLICABLE"
+    if trend_strength in {"PROVISIONAL", "CONFIRMED"}:
+        provisional_confirmed = str(trend_strength)
+    if latest_upgrade is not None:
+        provisional_confirmed = "CONFIRMED"
+
+    latest_details = _details(latest_event)
+    return RedBarV2UISnapshot(
+        mode=mode,
+        execution_scope=str(getattr(health, "execution_scope", None) or "HISTORICAL_REPLAY_ONLY"),
+        reference_status="REFERENCE_READY" if replay.reference_timestamp else "REFERENCE_NOT_READY",
+        reference_timestamp=_iso(replay.reference_timestamp),
+        reference_midpoint=getattr(replay, "reference_midpoint", None),
+        index_close=latest_details.get("close_price") or admission_details.get("close_price"),
+        index_rsi=latest_details.get("rsi_value") or admission_details.get("rsi_value"),
+        futures_close=latest_details.get("futures_close") or admission_details.get("futures_close"),
+        futures_vwap=latest_details.get("vwap_value") or admission_details.get("vwap_value"),
+        index_timestamp=_iso(getattr(latest_event, "timestamp", None)),
+        futures_timestamp=_iso(getattr(latest_event, "timestamp", None)),
+        alignment_status=str(getattr(health, "status", None) or "UNAVAILABLE"),
+        directional_state=str(state),
+        direction=direction,
+        option_side=option_side,
+        reversal_status=reversal_status,
+        trade_status=trade_status,
+        trade_id=getattr(latest_admission, "trade_id", None),
+        admission_allowed=getattr(latest_admission, "candidate_allowed", None),
+        admission_code=getattr(latest_admission, "admission_code", None),
+        admission_reason=admission_details.get("admission_reason"),
+        trend_strength=str(trend_strength) if trend_strength else None,
+        provisional_confirmed_state=provisional_confirmed,
+        midpoint_confirmation=midpoint_confirmation,
+        midpoint_aligned=midpoint_aligned if isinstance(midpoint_aligned, bool) else None,
+        last_evaluation_timestamp=_iso(getattr(latest_event, "timestamp", None)),
+        session_completeness="ALIGNED_SESSION" if str(getattr(health, "status", "")) == "READY" else "UNAVAILABLE",
+        futures_instrument_key=futures_instrument_key,
+        futures_symbol=futures_symbol,
+        futures_expiry=futures_expiry,
+    )
+
+
 def snapshot_path(artifacts_root: str | Path) -> Path:
     return Path(artifacts_root) / "operations" / SNAPSHOT_FILENAME
 
