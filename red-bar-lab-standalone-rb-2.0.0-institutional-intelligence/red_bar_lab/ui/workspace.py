@@ -10,6 +10,7 @@ from red_bar_lab.ui._shared import (
     st,
 )
 from red_bar_lab.ui.arrow_dataframe_guard import install as install_arrow_dataframe_guard
+from red_bar_lab.ui.open_trade_row_runtime import install as install_open_trade_row_runtime
 from red_bar_lab.ui.paper_time_display import install as install_paper_time_display
 from red_bar_lab.ui.workspace_page_runtime import (
     PAGE_MODULE_PATHS as _PAGE_MODULE_PATHS,
@@ -78,6 +79,7 @@ def render(settings: RedBarSettings) -> None:
         st.query_params["page"] = page
 
     module = _load_page_module(page)
+    install_open_trade_row_runtime(module)
     module.render_page(
         settings,
         layout,
