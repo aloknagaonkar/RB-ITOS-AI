@@ -4,11 +4,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
-from red_bar_lab.intelligence.red_bar_v2_futures_context import (
-    RedBarV2VwapSourceHealth,
-)
+
+class VwapHealthPayload(Protocol):
+    def to_dict(self) -> dict[str, object]: ...
 
 
 HEALTH_FILENAME = "red_bar_v2_vwap_source_health.json"
@@ -29,7 +29,7 @@ def health_path(artifacts_root: str | Path) -> Path:
 
 
 def persist_red_bar_v2_vwap_health(
-    health: RedBarV2VwapSourceHealth,
+    health: VwapHealthPayload,
     *,
     artifacts_root: str | Path,
     trading_date: str,
@@ -87,15 +87,27 @@ def operations_health_row(
     payload = persisted.payload
     status = persisted.status.upper()
     state = "HEALTHY" if status == "READY" else "CRITICAL" if status == "BLOCKED" else "WARNING"
-    detail = (
-        f"{payload.get('vwap_source_instrument') or '—'} · "
-        f"alignment {payload.get('aligned_rows', 0)}/{payload.get('index_rows', 0)} "
-        f"({payload.get('alignment_coverage_pct', 0)}%) · "
-        f"volume rows {payload.get('positive_volume_rows', 0)} · "
-        f"{payload.get('execution_scope') or 'HISTORICAL_REPLAY_ONLY'}"
+    detail_parts = [
+        str(payload.get("vwap_source_instrument") or "—"),
+        (
+            f"1m {payload.get('aligned_rows', 0)}/{payload.get('index_rows', 0)} "
+            f"({payload.get('alignment_coverage_pct', 0)}%)"
+        ),
+    ]
+    if "completed_5m_aligned_rows" in payload:
+        detail_parts.append(
+            f"5m {payload.get('completed_5m_aligned_rows', 0)}/"
+            f"{payload.get('completed_5m_index_rows', 0)} "
+            f"({payload.get('completed_5m_alignment_coverage_pct', 0)}%)"
+        )
+    detail_parts.extend(
+        (
+            f"volume rows {payload.get('positive_volume_rows', 0)}",
+            str(payload.get("execution_scope") or "HISTORICAL_REPLAY_ONLY"),
+        )
     )
     return {
         "Service": "Red Bar V2 Futures VWAP",
         "State": state,
-        "Detail": detail,
+        "Detail": " · ".join(detail_parts),
     }
