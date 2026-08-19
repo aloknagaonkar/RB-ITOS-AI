@@ -1,4 +1,5 @@
 from datetime import datetime
+import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -40,6 +41,20 @@ def test_regime_classifier_separates_up_down_and_range():
     assert classify_session_regime(_candles(100.0, 101.0)) == "TREND_UP"
     assert classify_session_regime(_candles(101.0, 100.0)) == "TREND_DOWN"
     assert classify_session_regime(_candles(100.0, 100.1)) == "RANGE"
+
+
+def test_manifest_optional_text_treats_blank_and_nan_as_absent():
+    script_path = Path(__file__).resolve().parents[2] / "scripts" / "run_red_bar_v2_multiday_validation.py"
+    spec = importlib.util.spec_from_file_location("red_bar_v2_multiday_cli", script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module._optional_text(None) is None
+    assert module._optional_text(float("nan")) is None
+    assert module._optional_text("   ") is None
+    assert module._optional_text(" RANGE ") == "RANGE"
+    assert module._parse_exit_timestamps(float("nan")) == ()
 
 
 def _runner(index_candles, futures_candles, **kwargs):
