@@ -9,7 +9,6 @@ import pandas as pd
 
 from red_bar_lab.execution.independent_strategy_shadow_worker import (
     IndependentStrategyShadowWorker,
-    _freshness,
     evaluate_shadow_strategy_cycle,
 )
 from red_bar_lab.strategy.models import ReferenceLevel
@@ -49,7 +48,7 @@ def levels():
     ]
 
 
-def test_cycle_evaluates_all_three_strategies_without_production_authority():
+def test_cycle_evaluates_red_bar_and_marks_retired_strategies_inactive():
     result = evaluate_shadow_strategy_cycle(
         candles(),
         reference_levels=levels(),
@@ -58,14 +57,17 @@ def test_cycle_evaluates_all_three_strategies_without_production_authority():
     )
     record = result.as_record()
     assert result.status == "READY"
+    assert result.reason == "RED_BAR_SHADOW_EVALUATED"
     assert result.scan_identity.endswith("2026-08-18T12:24:00+05:30")
     assert result.red_bar["input_state"] == "READY"
     assert result.red_bar["reference_level_count"] == 1
-    assert "status" in result.directional_regime
-    assert "freshness_state" in result.directional_regime
-    assert "status" in result.rsi_reversal
-    assert "historical_signal_count" in result.rsi_reversal
-    assert "fresh_signal_count" in result.rsi_reversal
+    assert result.directional_regime["status"] == "INACTIVE_STRATEGY"
+    assert result.directional_regime["reason"] == "STANDALONE_DRI_RETIRED"
+    assert result.directional_regime["current_action"] == "NONE"
+    assert result.rsi_reversal["status"] == "INACTIVE_STRATEGY"
+    assert result.rsi_reversal["reason"] == "STANDALONE_RSI_REVERSAL_RETIRED"
+    assert result.rsi_reversal["historical_signal_count"] == 0
+    assert result.rsi_reversal["fresh_signal_count"] == 0
     assert record["evaluation_source"] == "INDEPENDENT_STRATEGY_SHADOW_WORKER"
     assert record["shadow_only"] is True
     assert record["production_persistence"] is False
@@ -88,34 +90,8 @@ def test_cycle_reports_missing_red_bar_reference_inputs():
     assert result.red_bar["input_state"] == "REFERENCE_LEVELS_UNAVAILABLE"
     assert result.red_bar["reference_level_count"] == 0
     assert result.red_bar["current_action"] == "WAIT_FOR_REFERENCE_LEVELS"
-
-
-def test_freshness_classifies_fresh_stale_and_future_events():
-    evaluated = pd.Timestamp("2026-08-18 10:04:00", tz="Asia/Kolkata")
-    fresh = _freshness(
-        detected_at="2026-08-18T10:00:00+05:30",
-        fresh_until="2026-08-18T10:05:00+05:30",
-        evaluated_at=evaluated,
-    )
-    stale = _freshness(
-        detected_at="2026-08-18T09:50:00+05:30",
-        fresh_until="2026-08-18T09:55:00+05:30",
-        evaluated_at=evaluated,
-    )
-    future = _freshness(
-        detected_at="2026-08-18T10:10:00+05:30",
-        fresh_until="2026-08-18T10:15:00+05:30",
-        evaluated_at=evaluated,
-    )
-
-    assert fresh["freshness_state"] == "FRESH"
-    assert fresh["fresh"] is True
-    assert fresh["current_action"] == "SHADOW_CANDIDATE"
-    assert stale["freshness_state"] == "STALE"
-    assert stale["fresh"] is False
-    assert stale["current_action"] == "OBSERVE_ONLY"
-    assert future["freshness_state"] == "FUTURE_TIMESTAMP"
-    assert future["fresh"] is False
+    assert result.directional_regime["status"] == "INACTIVE_STRATEGY"
+    assert result.rsi_reversal["status"] == "INACTIVE_STRATEGY"
 
 
 def test_worker_writes_separate_journal_once_and_refreshes_heartbeat(tmp_path: Path):
@@ -141,6 +117,8 @@ def test_worker_writes_separate_journal_once_and_refreshes_heartbeat(tmp_path: P
     assert worker.status_path.exists()
     status = json.loads(worker.status_path.read_text(encoding="utf-8"))
     assert status["reason"] == "COMPLETED_CANDLE_ALREADY_SCANNED"
+    assert status["directional_regime"]["status"] == "INACTIVE_STRATEGY"
+    assert status["rsi_reversal"]["status"] == "INACTIVE_STRATEGY"
     assert status["shadow_only"] is True
     assert status["production_persistence"] is False
     assert status["capital_reserved"] is False
@@ -170,5 +148,7 @@ def test_worker_publishes_error_heartbeat_without_production_writes(tmp_path: Pa
     status = json.loads(worker.status_path.read_text(encoding="utf-8"))
     assert status["status"] == "ERROR"
     assert status["reason"] == "RuntimeError:provider down"
+    assert status["directional_regime"]["status"] == "INACTIVE_STRATEGY"
+    assert status["rsi_reversal"]["status"] == "INACTIVE_STRATEGY"
     assert status["production_persistence"] is False
     assert not worker.journal_path.exists()
