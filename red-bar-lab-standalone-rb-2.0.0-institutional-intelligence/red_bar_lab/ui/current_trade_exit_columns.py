@@ -7,16 +7,37 @@ from red_bar_lab.execution.exit_engine import PaperExitEngine
 
 def _protection_stage(health) -> str:
     if health.trailing_active:
-        return "TRAILING ACTIVE"
+        return "TRAILING"
     if health.profit_lock_active:
-        return "PROFIT LOCK ACTIVE"
+        return "PROFIT LOCK"
     if health.breakeven_armed:
-        return "BREAKEVEN ARMED"
-    return "HARD STOP ONLY"
+        return "BREAKEVEN"
+    return "HARD STOP"
+
+
+def _price(value: object) -> str:
+    if value in (None, ""):
+        return "—"
+    try:
+        return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _new_protection(health) -> str:
+    initial = health.initial_stop
+    effective = health.effective_stop
+    if initial is None and effective is None:
+        return "—"
+    if initial is None:
+        return _price(effective)
+    if effective is None:
+        return _price(initial)
+    return f"{_price(initial)} → {_price(effective)}"
 
 
 def install(active_trade_views_module: Any) -> None:
-    """Add only essential protection fields to the Current Trades table."""
+    """Add only essential protection fields to the existing Current Trades row."""
     if getattr(active_trade_views_module, "_exit_columns_installed", False):
         return
 
@@ -41,9 +62,13 @@ def install(active_trade_views_module: Any) -> None:
                 ),
             )
 
-            item["Trailing Stop"] = health.trailing_stop
+            item["Trailing Stop"] = (
+                round(float(health.trailing_stop), 2)
+                if health.trailing_stop is not None
+                else None
+            )
             item["Stage"] = _protection_stage(health)
-            item["New Protection"] = health.effective_stop
+            item["New Protection"] = _new_protection(health)
             enriched.append(item)
 
         return enriched
