@@ -282,7 +282,7 @@ def render_trading_overview(database, instrument_key: str, trading_date: str) ->
     closed_pnl = sum(float(row.get("realized_pnl") or 0.0) for row in closed_rows)
 
     st.subheader("Paper Trading")
-    st.caption("Operational view Â· duplicates hidden from display Â· live panels refresh without rerunning Committee or execution logic.")
+    st.caption("Operational view · duplicates hidden from display · live panels refresh without rerunning Committee or execution logic.")
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("Direction", direction)
     c2.metric("Action", action)
@@ -291,7 +291,7 @@ def render_trading_overview(database, instrument_key: str, trading_date: str) ->
     c5.metric("Open P&L", f"INR {open_pnl:+,.2f}")
     c6.metric("Closed P&L", f"INR {closed_pnl:+,.2f}")
     st.caption(
-        f"Latest signal: {signal.get('signal_id')} Â· confirmed {signal.get('confirmation_timestamp')}"
+        f"Latest signal: {signal.get('signal_id')} · confirmed {signal.get('confirmation_timestamp')}"
         if signal else "No confirmed bullish or bearish signal is stored for today."
     )
 
@@ -329,7 +329,7 @@ def render_strategy_attribution(database) -> None:
     } for row in summary], width="stretch", hide_index=True)
 
     for item in [_attribution(database, row) for row in orders[:20]]:
-        with st.expander(f"{item['strategy']} Â· {item['contract'] or 'Unknown contract'} Â· {item['order_id']}", expanded=False):
+        with st.expander(f"{item['strategy']} · {item['contract'] or 'Unknown contract'} · {item['order_id']}", expanded=False):
             st.write({
                 "Primary strategy": item["strategy"],
                 "Strategy source": item["strategy_source"],
