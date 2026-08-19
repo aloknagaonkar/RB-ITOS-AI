@@ -10,8 +10,6 @@ import red_bar_lab.ui._shared as shared_ui
 PAGE_MODULE_PATHS = {
     "Operations Center": "red_bar_lab.ui.pages.operations_center",
     "Red Bar Strategy": "red_bar_lab.ui.pages.red_bar_strategy",
-    "RSI Extreme Reversal": "red_bar_lab.ui.pages.rsi_extreme_reversal_strategy",
-    "Directional Regime Intelligence": "red_bar_lab.ui.pages.directional_regime_strategy",
     "Live Trading": "red_bar_lab.ui.pages.live_trading",
     "Paper Trading": "red_bar_lab.ui.pages.paper_trading",
     "Paper Architecture Reconciliation": (
@@ -34,15 +32,19 @@ PAGE_MODULE_PATHS = {
     "Intelligence": "red_bar_lab.ui.pages.intelligence",
 }
 
-_CACHED_CANDLE_PAGES = frozenset(
-    {"Red Bar Strategy", "RSI Extreme Reversal", "Directional Regime Intelligence"}
-)
+# Kept as explicit compatibility metadata only. These modules remain available for
+# historical audit and old artifact interpretation, but are not navigable or loaded
+# by the active workspace.
+RETIRED_PAGE_MODULE_PATHS = {
+    "RSI Extreme Reversal": "red_bar_lab.ui.pages.rsi_extreme_reversal_strategy",
+    "Directional Regime Intelligence": "red_bar_lab.ui.pages.directional_regime_strategy",
+}
+
+_CACHED_CANDLE_PAGES = frozenset({"Red Bar Strategy"})
 _BACKGROUND_BOOTSTRAP_PAGES = frozenset(
     {
         "Operations Center",
         "Red Bar Strategy",
-        "RSI Extreme Reversal",
-        "Directional Regime Intelligence",
         "Paper Trading",
         "Paper Architecture Reconciliation",
     }
@@ -88,12 +90,6 @@ def _configure_strategy_cache(page: str, module: ModuleType) -> None:
     )
 
     module._read_cached_candles = read_cached_strategy_candles
-    if page == "RSI Extreme Reversal":
-        from red_bar_lab.ui.rsi_decision_trace_alignment import (
-            install_rsi_decision_trace_alignment,
-        )
-
-        install_rsi_decision_trace_alignment(module)
     module.render_page = build_strategy_query_cache_wrapper(module.render_page)
     module.render_page = build_execution_source_gate_page_wrapper(module, page)
     module.render_page = build_contract_readiness_page_wrapper(module, page)
