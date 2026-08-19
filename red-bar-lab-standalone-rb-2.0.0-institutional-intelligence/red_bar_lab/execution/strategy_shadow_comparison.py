@@ -9,7 +9,7 @@ import pandas as pd
 
 
 COMPARISON_VERSION = "INDEPENDENT-STRATEGY-COMPARISON-V2"
-STRATEGIES = ("red_bar", "directional_regime", "rsi_reversal")
+STRATEGIES = ("red_bar",)
 DRI_STAGE_WINDOW_SECONDS = 15 * 60
 
 
