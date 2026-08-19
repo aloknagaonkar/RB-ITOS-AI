@@ -67,10 +67,8 @@ class PaperStrategyAuthority:
             return self.v2_paper_active
         if source == LEGACY_RED_BAR_SOURCE:
             return self.legacy_red_bar_v1_enabled
-        if source == DRI_SOURCE:
-            return self.dri_strategy_enabled
-        if source == RSI_REVERSAL_SOURCE:
-            return self.rsi_extreme_reversal_enabled
+        if source in {DRI_SOURCE, RSI_REVERSAL_SOURCE}:
+            return False
         return False
 
     def validate(self) -> tuple[bool, str]:
@@ -93,7 +91,7 @@ class PaperStrategyAuthority:
             "red_bar_v2_mode": self.red_bar_v2_mode.upper(),
             "red_bar_v2_paper_authority": self.v2_paper_active,
             "legacy_red_bar_v1": "ENABLED" if self.legacy_red_bar_v1_enabled else "DISABLED",
-            "dri_strategy": "ENABLED" if self.dri_strategy_enabled else "DISABLED",
-            "rsi_extreme_reversal": "ENABLED" if self.rsi_extreme_reversal_enabled else "DISABLED",
+            "dri_strategy": "RETIRED",
+            "rsi_extreme_reversal": "RETIRED",
             "broker_execution": "ENABLED" if self.broker_execution_enabled else "DISABLED",
         }
