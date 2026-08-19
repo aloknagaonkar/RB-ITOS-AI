@@ -19,6 +19,52 @@ def _flag(value: bool | None) -> str:
     return "YES" if value else "NO"
 
 
+def _rsi_position(value: float | None) -> str:
+    if value is None:
+        return "UNAVAILABLE"
+    if value >= 70.0:
+        return "OVERBOUGHT (ABOVE 70)"
+    if value >= 50.0:
+        return "ABOVE 50"
+    if value <= 30.0:
+        return "OVERSOLD (BELOW 30)"
+    return "BELOW 50"
+
+
+def _vwap_position(close: float | None, vwap: float | None) -> str:
+    if close is None or vwap is None:
+        return "UNAVAILABLE"
+    if close > vwap:
+        return "ABOVE VWAP"
+    if close < vwap:
+        return "BELOW VWAP"
+    return "AT VWAP"
+
+
+def _vwap_gap(close: float | None, vwap: float | None) -> tuple[str, str]:
+    if close is None or vwap is None:
+        return "—", "—"
+    points = float(close) - float(vwap)
+    percentage = (points / float(vwap) * 100.0) if float(vwap) else 0.0
+    return f"{points:+,.2f}", f"{percentage:+.3f}%"
+
+
+def _rsi_vwap_alignment(snapshot: RedBarV2UISnapshot) -> str:
+    if (
+        snapshot.index_rsi is None
+        or snapshot.futures_close is None
+        or snapshot.futures_vwap is None
+    ):
+        return "UNAVAILABLE"
+    rsi_bullish = snapshot.index_rsi >= 50.0
+    futures_above_vwap = snapshot.futures_close > snapshot.futures_vwap
+    if rsi_bullish and futures_above_vwap:
+        return "BULLISH ALIGNED"
+    if not rsi_bullish and not futures_above_vwap:
+        return "BEARISH ALIGNED"
+    return "MIXED / NOT ALIGNED"
+
+
 def render_red_bar_v2_legacy_panel(st, snapshot: RedBarV2UISnapshot | None) -> None:
     st.markdown("### 4. Red Bar V2 Live State")
     st.caption(
@@ -53,6 +99,25 @@ def render_red_bar_v2_legacy_panel(st, snapshot: RedBarV2UISnapshot | None) -> N
     i3.metric("Futures close", _price(snapshot.futures_close))
     i4.metric("Futures VWAP", _price(snapshot.futures_vwap))
     st.caption("RSI source: NIFTY INDEX · VWAP source: CURRENT-MONTH NIFTY FUTURES")
+
+    st.markdown("#### RSI and futures VWAP position")
+    gap_points, gap_percentage = _vwap_gap(
+        snapshot.futures_close,
+        snapshot.futures_vwap,
+    )
+    p1, p2, p3, p4 = st.columns(4)
+    p1.metric("RSI position", _rsi_position(snapshot.index_rsi))
+    p2.metric(
+        "Futures vs VWAP",
+        _vwap_position(snapshot.futures_close, snapshot.futures_vwap),
+    )
+    p3.metric("VWAP gap", gap_points)
+    p4.metric("RSI + VWAP alignment", _rsi_vwap_alignment(snapshot))
+    st.caption(
+        f"Futures-to-VWAP percentage gap: {gap_percentage}. "
+        "RSI is measured on NIFTY index candles; VWAP comparison uses the "
+        "current-month NIFTY futures close against futures VWAP."
+    )
 
     st.markdown("#### Direction, reversal and midpoint")
     d1, d2, d3, d4 = st.columns(4)
