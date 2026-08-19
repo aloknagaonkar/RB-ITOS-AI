@@ -11,21 +11,15 @@ import pandas as pd
 from red_bar_lab.execution.headless_strategy_pipeline import evaluate_sections_4_to_9
 from red_bar_lab.execution.shadow_evaluation_journal import append_evaluation_cycle
 from red_bar_lab.ui.controlled_paper_activation import build_controlled_paper_activation
-from red_bar_lab.ui.strategy_dri_bundle import build_dri_bundle_resolution
-from red_bar_lab.ui.strategy_input_preparation import (
-    prepare_completed_five_minute,
-    prepare_completed_one_minute,
-)
+from red_bar_lab.ui.strategy_input_preparation import prepare_completed_one_minute
 from red_bar_lab.ui.strategy_option_context import build_option_behaviour_snapshot
 from red_bar_lab.ui.strategy_red_bar_bundle import build_red_bar_bundle_resolution
 from red_bar_lab.ui.strategy_red_bar_setup import build_red_bar_owned_setup_state
-from red_bar_lab.ui.strategy_setup_detection import build_dri_setup_state, build_rsi_setup_state
-from red_bar_lab.ui.strategy_signal_resolution import build_rsi_signal_resolution
 from red_bar_lab.ui.strategy_shadow_evidence_registry import record_shadow_evidence
 from red_bar_lab.ui.unified_shadow_execution_router import build_unified_shadow_routes
 
 
-BACKGROUND_ARCHITECTURE_ORCHESTRATOR_VERSION = "BACKGROUND-ARCHITECTURE-ORCHESTRATOR-V3"
+BACKGROUND_ARCHITECTURE_ORCHESTRATOR_VERSION = "BACKGROUND-ARCHITECTURE-ORCHESTRATOR-V4-RED-BAR-ONLY"
 IST = ZoneInfo("Asia/Kolkata")
 _LOCK = RLock()
 _ACTIVE: "BackgroundArchitectureOrchestrator | None" = None
@@ -73,7 +67,6 @@ def _apply_downstream_skips(row: Mapping[str, object]) -> dict[str, object]:
     for _, field in _SECTION_OUTCOME_FIELDS[terminal_index + 1 :]:
         result[field] = skipped_value
 
-    # Compatibility summary mirrors canonical 5E while preserving the new detail fields.
     result["section_5_outcome"] = result.get("section_5e_outcome")
     result["downstream_skip_applied"] = terminal_index < len(_SECTION_OUTCOME_FIELDS) - 1
     result["downstream_skip_reason"] = skipped_value
@@ -115,52 +108,8 @@ def _red_bar_resolution(*, settings, layout, database, instrument_key, trading_d
     }
 
 
-def _dri_resolution(*, settings, layout, database, instrument_key, trading_date):
-    path, candles = _read_cached_candles(layout, instrument_key, trading_date)
-    one_minute = prepare_completed_one_minute(candles, trading_date)
-    five_minute = prepare_completed_five_minute(one_minute, trading_date)
-    option_context = build_option_behaviour_snapshot(database, instrument_key, trading_date)
-    setup = build_dri_setup_state(
-        settings.runs_root, instrument_key, trading_date,
-        option_bias=option_context.get("directional_bias"),
-    )
-    resolution = build_dri_bundle_resolution(
-        database=database, runs_root=settings.runs_root,
-        instrument_key=instrument_key, trading_date=trading_date,
-    )
-    return {
-        "page": "Directional Regime Intelligence",
-        "strategy_id": "DIRECTIONAL_REGIME_INTELLIGENCE",
-        "candle_path": str(path), "raw_candle_count": len(candles),
-        "prepared_candle_count": len(one_minute),
-        "five_minute_candle_count": len(five_minute),
-        "section_1_outcome": "READY" if len(one_minute) >= 35 and len(five_minute) >= 35 else "PARTIAL",
-        "section_2_outcome": _outcome(setup, "status"), "setup": setup,
-        "option_context": option_context, "resolution": resolution,
-    }
-
-
-def _rsi_resolution(*, settings, layout, database, instrument_key, trading_date):
-    path, candles = _read_cached_candles(layout, instrument_key, trading_date)
-    prepared = prepare_completed_one_minute(candles, trading_date)
-    option_context = build_option_behaviour_snapshot(database, instrument_key, trading_date)
-    setup = build_rsi_setup_state(prepared, instrument_key, option_bias=option_context.get("directional_bias"))
-    resolution = build_rsi_signal_resolution(
-        candles=prepared, database=database, settings=settings,
-        instrument_key=instrument_key, trading_date=trading_date,
-    )
-    return {
-        "page": "RSI Extreme Reversal", "strategy_id": "RSI_EXTREME_REVERSAL",
-        "candle_path": str(path), "raw_candle_count": len(candles),
-        "prepared_candle_count": len(prepared),
-        "section_1_outcome": "READY" if len(prepared) >= 2 else "NOT_READY",
-        "section_2_outcome": _outcome(setup, "status"), "setup": setup,
-        "option_context": option_context, "resolution": resolution,
-    }
-
-
 class BackgroundArchitectureOrchestrator:
-    """Continuously evaluate Sections 1-10E without execution authority."""
+    """Continuously evaluate Red Bar Sections 1-10E without execution authority."""
 
     def __init__(self, *, settings, layout, database, instrument_key: str, interval_seconds: int = 60):
         self.settings = settings
@@ -200,7 +149,7 @@ class BackgroundArchitectureOrchestrator:
         now = datetime.now(IST)
         trading_date = now.date().isoformat()
         cycle_id = f"ARCH-{now.strftime('%Y%m%dT%H%M%S%f%z')}"
-        builders = (_red_bar_resolution, _dri_resolution, _rsi_resolution)
+        builders = (_red_bar_resolution,)
         rows: list[dict[str, object]] = []
 
         for builder in builders:
