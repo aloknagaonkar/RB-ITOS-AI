@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, timedelta
+from io import BytesIO
 from pathlib import Path
-from typing import Callable, Iterable, Mapping, Protocol, Sequence
+from typing import Iterable, Mapping, Protocol, Sequence
 
 import pandas as pd
 import requests
@@ -139,7 +140,7 @@ def load_upstox_nse_instruments(
     client = session or requests.Session()
     response = client.get(url, timeout=timeout)
     response.raise_for_status()
-    payload = pd.read_json(response.content, compression="gzip")
+    payload = pd.read_json(BytesIO(response.content), compression="gzip")
     return [dict(row) for row in payload.to_dict(orient="records")]
 
 
@@ -203,6 +204,37 @@ def resolve_expired_nifty_future(
     )
 
 
+def _resolve_contract_for_date(
+    trading_date: date,
+    *,
+    active_instruments: Sequence[Mapping[str, object]],
+    expired_gateway: ExpiredFuturesGateway,
+) -> tuple[NiftyFuturesContract, str]:
+    """Prefer the true expired current-month contract before today's BOD file.
+
+    Current BOD instruments may contain later expiries that were already listed on
+    an older trading date. Selecting from BOD first would incorrectly map July
+    sessions to the August contract. The expired API is therefore authoritative
+    whenever it exposes a monthly future for the requested historical date.
+    """
+    try:
+        return (
+            resolve_expired_nifty_future(
+                expired_gateway,
+                trading_date=trading_date,
+            ),
+            "EXPIRED",
+        )
+    except NiftyFuturesResolutionError:
+        return (
+            resolve_nifty_monthly_future(
+                active_instruments,
+                as_of_date=trading_date,
+            ),
+            "ACTIVE",
+        )
+
+
 def _write_expired_day(
     historical: RedBarHistoricalService,
     gateway: ExpiredFuturesGateway,
@@ -244,35 +276,27 @@ def backfill_nifty_futures_history(
     manifest_rows: list[dict[str, object]] = []
 
     for trading_date in sorted(set(trading_dates)):
-        contract: NiftyFuturesContract | None = None
-        source_type = "ACTIVE"
         try:
-            contract = resolve_nifty_monthly_future(
-                active_instruments,
-                as_of_date=trading_date,
+            contract, source_type = _resolve_contract_for_date(
+                trading_date,
+                active_instruments=active_instruments,
+                expired_gateway=expired_gateway,
             )
-        except NiftyFuturesResolutionError:
-            source_type = "EXPIRED"
-            try:
-                contract = resolve_expired_nifty_future(
-                    expired_gateway,
-                    trading_date=trading_date,
+        except Exception as exc:
+            results.append(
+                FuturesBackfillDayResult(
+                    trading_date=trading_date.isoformat(),
+                    status="BLOCKED",
+                    source_type="UNRESOLVED",
+                    instrument_key=None,
+                    trading_symbol=None,
+                    expiry=None,
+                    rows=0,
+                    cache_path=None,
+                    reason=str(exc),
                 )
-            except Exception as exc:
-                results.append(
-                    FuturesBackfillDayResult(
-                        trading_date=trading_date.isoformat(),
-                        status="BLOCKED",
-                        source_type=source_type,
-                        instrument_key=None,
-                        trading_symbol=None,
-                        expiry=None,
-                        rows=0,
-                        cache_path=None,
-                        reason=str(exc),
-                    )
-                )
-                continue
+            )
+            continue
 
         try:
             if source_type == "ACTIVE":
