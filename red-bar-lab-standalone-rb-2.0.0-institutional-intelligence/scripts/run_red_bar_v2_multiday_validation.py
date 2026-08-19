@@ -3,6 +3,13 @@ from __future__ import annotations
 import argparse
 from datetime import date
 from pathlib import Path
+import sys
+
+# Allow direct execution from the repository root:
+# python .\scripts\run_red_bar_v2_multiday_validation.py <manifest>
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 import pandas as pd
 
