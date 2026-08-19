@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Iterable, Mapping
 
+from red_bar_lab.config import RedBarSettings
 from red_bar_lab.operations.red_bar_v2_ui_snapshot import RedBarV2UISnapshot
+from red_bar_lab.storage.database import RedBarDatabase
 
 
 def _value(value: Any, fallback: str = "—") -> Any:
@@ -65,7 +67,78 @@ def _rsi_vwap_alignment(snapshot: RedBarV2UISnapshot) -> str:
     return "MIXED / NOT ALIGNED"
 
 
-def render_red_bar_v2_legacy_panel(st, snapshot: RedBarV2UISnapshot | None) -> None:
+def _number(row: Mapping[str, Any], field: str) -> float | None:
+    value = row.get(field)
+    try:
+        return None if value in (None, "") else float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _exit_level(row: Mapping[str, Any]) -> str:
+    current = _number(row, "current_price")
+    stop = _number(row, "stop_price")
+    target1 = _number(row, "target1_price")
+    target2 = _number(row, "target2_price")
+    if current is None:
+        return "WAITING FOR PRICE"
+    if stop is not None and current <= stop:
+        return "AT / BELOW STOP"
+    if target2 is not None and current >= target2:
+        return "TARGET 2 REACHED"
+    if target1 is not None and current >= target1:
+        return "TARGET 1 REACHED"
+    entry = _number(row, "entry_price")
+    if entry is not None and current >= entry:
+        return "PROFIT ZONE"
+    return "BETWEEN ENTRY AND STOP"
+
+
+def _exit_progress_rows(open_orders: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    rows = []
+    for order in open_orders:
+        entry = _number(order, "entry_price")
+        current = _number(order, "current_price")
+        pnl_pct = (
+            ((current - entry) / entry * 100.0)
+            if entry not in (None, 0.0) and current is not None
+            else None
+        )
+        rows.append(
+            {
+                "Trade": _value(order.get("tradingsymbol")),
+                "Source": _value(order.get("execution_strategy_source")),
+                "Entry": _price(entry),
+                "Current": _price(current),
+                "Stop": _price(_number(order, "stop_price")),
+                "Target 1": _price(_number(order, "target1_price")),
+                "Target 2": _price(_number(order, "target2_price")),
+                "Current level": _exit_level(order),
+                "Move %": "—" if pnl_pct is None else f"{pnl_pct:+.2f}%",
+                "Unrealized P&L": _price(_number(order, "unrealized_pnl")),
+                "MFE": _price(_number(order, "mfe_points")),
+                "MAE": _price(_number(order, "mae_points")),
+                "Exit mode": _value(order.get("exit_mode")),
+            }
+        )
+    return rows
+
+
+def _load_open_orders() -> list[dict[str, Any]]:
+    try:
+        settings = RedBarSettings.from_env()
+        database = RedBarDatabase(settings.database_path)
+        database.initialize()
+        return list(database.read_open_paper_execution_orders("PAPER-STD"))
+    except Exception:
+        return []
+
+
+def render_red_bar_v2_legacy_panel(
+    st,
+    snapshot: RedBarV2UISnapshot | None,
+    open_orders: Iterable[Mapping[str, Any]] | None = None,
+) -> None:
     st.markdown("### 4. Red Bar V2 Live State")
     st.caption(
         "Read-only Red Bar V2 observability. Values come from the persisted V2 "
@@ -138,6 +211,18 @@ def render_red_bar_v2_legacy_panel(st, snapshot: RedBarV2UISnapshot | None) -> N
     t3.metric("Admission result", _flag(snapshot.admission_allowed))
     t4.metric("Admission code", _value(snapshot.admission_code))
     st.write(f"**Admission reason:** {_value(snapshot.admission_reason, 'No admission decision published.')}")
+
+    st.markdown("#### Open trade exit-policy progress")
+    active_orders = list(open_orders) if open_orders is not None else _load_open_orders()
+    progress = _exit_progress_rows(active_orders)
+    if progress:
+        st.dataframe(progress, width="stretch", hide_index=True)
+        st.caption(
+            "Current level is descriptive only. The existing paper exit engine "
+            "remains the authority for stop, target, trailing, time and EOD exits."
+        )
+    else:
+        st.info("No open paper trade is currently being monitored.")
 
     with st.expander("View V2 source and timestamp details"):
         rows = [
