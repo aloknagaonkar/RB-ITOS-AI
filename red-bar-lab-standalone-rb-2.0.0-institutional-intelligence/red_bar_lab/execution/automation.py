@@ -1862,14 +1862,20 @@ class RedBarPaperAutomationService:
         *,
         trading_date: str,
         lots: int = 1,
+        monitor_positions: bool = True,
     ) -> AutomationReport:
+        # Position monitoring may be owned by the dedicated fast monitor.
+        if monitor_positions:
+            closed, exit_errors = self.monitor_and_exit()
+        else:
+            closed, exit_errors = 0, []
+
         _, skipped, scored, decision_errors = self.process_new_signals(
             trading_date=trading_date, lots=lots, queue_only=True,
         )
         opened, queue_errors = self.execute_approved_queue(
             trading_date=trading_date, lots=lots,
         )
-        closed, exit_errors = self.monitor_and_exit()
         cycle_now = datetime.now(IST)
         checkpoint_result = TradeCheckpointService(
             self.database,

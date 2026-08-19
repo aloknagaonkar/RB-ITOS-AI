@@ -12,6 +12,9 @@ from red_bar_lab.execution.directional_regime_background import (
 from red_bar_lab.execution.directional_regime_native_signal import (
     DirectionalNativeSignalDatabaseProxy,
 )
+from red_bar_lab.execution.paper_strategy_authority import (
+    PaperStrategyAuthority,
+)
 
 
 class AttributionAwarePaperAutomationService(
@@ -23,7 +26,16 @@ class AttributionAwarePaperAutomationService(
     database/file observation after the existing process has completed.
     """
 
+    @staticmethod
+    def _dri_runtime_enabled() -> bool:
+        return PaperStrategyAuthority.from_env().dri_strategy_enabled
+
     def _refresh_directional_regime_background(self):
+        if not self._dri_runtime_enabled():
+            return {
+                "status": "DISABLED",
+                "reason": "DRI_STRATEGY_DISABLED",
+            }
         runs_root = getattr(self.settings, "runs_root", None)
         if runs_root is None:
             return {
@@ -64,12 +76,13 @@ class AttributionAwarePaperAutomationService(
         ).reconcile()
 
     def process_new_signals(self, *args, **kwargs):
+        dri_enabled = self._dri_runtime_enabled()
         self._last_directional_regime_background_refresh = (
             self._refresh_directional_regime_background()
         )
         original_database = self.database
         runs_root = getattr(self.settings, "runs_root", None)
-        if runs_root is not None:
+        if dri_enabled and runs_root is not None:
             self.database = DirectionalNativeSignalDatabaseProxy(
                 original_database,
                 runs_root=runs_root,
@@ -80,7 +93,10 @@ class AttributionAwarePaperAutomationService(
             result = super().process_new_signals(*args, **kwargs)
         finally:
             self.database = original_database
-        self._last_attribution_reconciliation = (
-            self._reconcile_attribution()
-        )
+        # Attribution reconciliation is historical/observational maintenance.
+        # Never execute it synchronously inside the live paper monitor cycle.
+        self._last_attribution_reconciliation = {
+            "status": "DEFERRED",
+            "reason": "INLINE_RECONCILIATION_DISABLED_FOR_LIVE_MONITOR",
+        }
         return result

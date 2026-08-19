@@ -9,8 +9,17 @@ from red_bar_lab.config import RedBarSettings, UNDERLYINGS
 from red_bar_lab.execution.attribution_automation import (
     AttributionAwarePaperAutomationService,
 )
+from red_bar_lab.execution.paper_strategy_authority import (
+    PaperStrategyAuthority,
+)
 from red_bar_lab.market.upstox_intelligence import UnifiedUpstoxMarketIntelligenceService
 from red_bar_lab.market.paper_adapter import UpstoxPaperMarketAdapter
+from red_bar_lab.services.red_bar_v2_current_session import (
+    evaluate_current_session_red_bar_v2,
+)
+from red_bar_lab.services.red_bar_v2_paper_signal_bridge import (
+    publish_v2_snapshot_to_paper_signals,
+)
 from red_bar_lab.services.upstox_service import RedBarUpstoxService
 from red_bar_lab.storage.database import RedBarDatabase
 
@@ -22,35 +31,16 @@ def _parser():
             "quotes. This process never sends broker orders."
         )
     )
-    parser.add_argument(
-        "--interval-seconds",
-        type=int,
-        default=5,
-    )
-    parser.add_argument(
-        "--capital",
-        type=float,
-        default=100000.0,
-    )
+    parser.add_argument("--interval-seconds", type=int, default=5)
+    parser.add_argument("--capital", type=float, default=100000.0)
     parser.add_argument(
         "--underlying",
         choices=("NIFTY 50", "BANK NIFTY"),
         default="NIFTY 50",
     )
-    parser.add_argument(
-        "--lots",
-        type=int,
-        default=1,
-    )
-    parser.add_argument(
-        "--minimum-score",
-        type=float,
-        default=65.0,
-    )
-    parser.add_argument(
-        "--once",
-        action="store_true",
-    )
+    parser.add_argument("--lots", type=int, default=1)
+    parser.add_argument("--minimum-score", type=float, default=65.0)
+    parser.add_argument("--once", action="store_true")
     return parser
 
 
@@ -62,13 +52,9 @@ def main() -> int:
             "within Zerodha quote API rate limits."
         )
 
-    access_token = os.getenv(
-        "UPSTOX_ACCESS_TOKEN", ""
-    ).strip()
+    access_token = os.getenv("UPSTOX_ACCESS_TOKEN", "").strip()
     if not access_token:
-        raise SystemExit(
-            "UPSTOX_ACCESS_TOKEN is required."
-        )
+        raise SystemExit("UPSTOX_ACCESS_TOKEN is required.")
 
     logging.basicConfig(
         level=logging.INFO,
@@ -78,6 +64,14 @@ def main() -> int:
     settings = RedBarSettings.from_env()
     database = RedBarDatabase(settings.database_path)
     database.initialize()
+    authority = PaperStrategyAuthority.from_env()
+    authority_ready, authority_reason = authority.validate()
+    if not authority_ready:
+        raise SystemExit(
+            f"Paper strategy authority is blocked: {authority_reason}"
+        )
+    database.execution_source_enabled = authority.source_enabled
+
     upstox = RedBarUpstoxService(access_token)
     intelligence = UnifiedUpstoxMarketIntelligenceService(
         upstox,
@@ -103,10 +97,17 @@ def main() -> int:
             "Upstox connection health check: %s",
             health.get("message"),
         )
+    status = authority.status_payload()
     logging.info(
-        "Upstox market-data provider initialized. "
-        "Execution mode=PAPER; live broker orders=DISABLED; "
-        "opportunity/exit trend=NIFTY_5M_EMA10."
+        "Upstox market-data provider initialized. Execution mode=PAPER; "
+        "primary_red_bar=%s; v2_paper_authority=%s; legacy_v1=%s; "
+        "dri=%s; rsi_reversal=%s; live broker orders=%s.",
+        status["primary_red_bar_engine"],
+        status["red_bar_v2_paper_authority"],
+        status["legacy_red_bar_v1"],
+        status["dri_strategy"],
+        status["rsi_extreme_reversal"],
+        status["broker_execution"],
     )
 
     from datetime import datetime
@@ -134,7 +135,10 @@ def main() -> int:
             "current_state": "STARTING",
             "last_signal_id": None,
             "last_decision": "STARTED",
-            "last_reason": "Paper monitor initialized with NIFTY 5m EMA10 trend rules.",
+            "last_reason": (
+                "Red Bar V2 paper authority enabled; Legacy V1, DRI and "
+                "RSI Extreme Reversal disabled; broker execution disabled."
+            ),
             "last_error": None,
         }
     )
@@ -143,35 +147,39 @@ def main() -> int:
         try:
             cycle_started = datetime.now(ist)
             trading_date = cycle_started.date().isoformat()
+            live_v2 = evaluate_current_session_red_bar_v2(
+                upstox=upstox,
+                database=database,
+                settings=settings,
+                instrument_key=UNDERLYINGS[args.underlying],
+            )
+            bridge = publish_v2_snapshot_to_paper_signals(
+                database_path=settings.database_path,
+                artifacts_root=settings.artifacts_root,
+                instrument_key=UNDERLYINGS[args.underlying],
+                authority=authority,
+                now=cycle_started,
+            )
             report = automation.run_cycle(
                 trading_date=trading_date,
                 lots=max(1, int(args.lots)),
+                monitor_positions=False,
             )
 
             totals["signals_seen"] += int(report.signals_seen)
-            totals["candidates_scored"] += int(
-                report.candidates_scored
-            )
-            totals["orders_opened"] += int(
-                report.paper_orders_opened
-            )
-            totals["orders_closed"] += int(
-                report.paper_orders_closed
-            )
+            totals["candidates_scored"] += int(report.candidates_scored)
+            totals["orders_opened"] += int(report.paper_orders_opened)
+            totals["orders_closed"] += int(report.paper_orders_closed)
             totals["signals_skipped"] += int(report.skipped)
 
-            recent_diagnostics = (
-                database.read_paper_signal_diagnostics(limit=1)
-            )
+            recent_diagnostics = database.read_paper_signal_diagnostics(limit=1)
             latest = recent_diagnostics[0] if recent_diagnostics else {}
             last_decision = (
                 latest.get("final_decision")
                 or (
                     "MONITORING"
-                    if database.read_open_paper_execution_orders(
-                        "PAPER-STD"
-                    )
-                    else "WAITING"
+                    if database.read_open_paper_execution_orders("PAPER-STD")
+                    else bridge.status
                 )
             )
             if latest.get("final_decision") == "OPENED":
@@ -186,10 +194,8 @@ def main() -> int:
             heartbeat = datetime.now(ist).isoformat()
             current_state = (
                 "MONITORING_POSITION"
-                if database.read_open_paper_execution_orders(
-                    "PAPER-STD"
-                )
-                else "WAITING_FOR_SIGNAL"
+                if database.read_open_paper_execution_orders("PAPER-STD")
+                else "WAITING_FOR_V2_SIGNAL"
             )
             database.upsert_paper_monitor_status(
                 {
@@ -201,19 +207,23 @@ def main() -> int:
                     "underlying_name": args.underlying,
                     **totals,
                     "current_state": current_state,
-                    "last_signal_id": latest.get("signal_id"),
+                    "last_signal_id": latest.get("signal_id") or bridge.signal_id,
                     "last_decision": last_decision,
-                    "last_reason": latest.get("reason"),
+                    "last_reason": latest.get("reason") or bridge.reason,
                     "last_error": (
-                        " | ".join(report.errors[:3])
-                        if report.errors else None
+                        " | ".join(report.errors[:3]) if report.errors else None
                     ),
                 }
             )
 
             logging.info(
-                "paper automation signals=%s scored=%s opened=%s "
-                "closed=%s skipped=%s errors=%s decision=%s reason=%s",
+                "v2_live=%s live_reason=%s v2_bridge=%s bridge_reason=%s "
+                "signals=%s scored=%s opened=%s closed=%s skipped=%s "
+                "errors=%s decision=%s reason=%s",
+                live_v2.status,
+                live_v2.reason,
+                bridge.status,
+                bridge.reason,
                 report.signals_seen,
                 report.candidates_scored,
                 report.paper_orders_opened,
@@ -221,7 +231,7 @@ def main() -> int:
                 report.skipped,
                 len(report.errors),
                 last_decision,
-                latest.get("reason"),
+                latest.get("reason") or bridge.reason,
             )
             for error in report.errors:
                 logging.warning("paper automation: %s", error)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import red_bar_lab.ui._shared as shared_ui
+import red_bar_lab.ui.active_trade_views as active_trade_views
 from red_bar_lab.execution.exit_engine import PaperExitEngine
 from red_bar_lab.ui._shared import (
     ArtifactLayout,
@@ -10,6 +11,8 @@ from red_bar_lab.ui._shared import (
     st,
 )
 from red_bar_lab.ui.arrow_dataframe_guard import install as install_arrow_dataframe_guard
+from red_bar_lab.ui.current_trade_exit_columns import install as install_current_trade_exit_columns
+from red_bar_lab.ui.open_trade_row_runtime import install as install_open_trade_row_runtime
 from red_bar_lab.ui.paper_time_display import install as install_paper_time_display
 from red_bar_lab.ui.workspace_page_runtime import (
     PAGE_MODULE_PATHS as _PAGE_MODULE_PATHS,
@@ -32,6 +35,7 @@ from red_bar_lab.ui.workspace_page_runtime import (
 
 install_arrow_dataframe_guard(st)
 install_paper_time_display()
+install_current_trade_exit_columns(active_trade_views)
 shared_ui.PaperExitEngine = PaperExitEngine
 install_import_compatibility()
 
@@ -78,6 +82,7 @@ def render(settings: RedBarSettings) -> None:
         st.query_params["page"] = page
 
     module = _load_page_module(page)
+    install_open_trade_row_runtime(module)
     module.render_page(
         settings,
         layout,

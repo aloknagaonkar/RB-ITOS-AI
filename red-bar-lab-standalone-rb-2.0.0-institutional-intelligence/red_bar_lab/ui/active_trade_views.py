@@ -226,7 +226,6 @@ class ActiveTradeViewDatabaseProxy:
 
     def __init__(self, database) -> None:
         self._database = database
-        self._archive_duplicate_rows()
 
     def __getattr__(self, name: str):
         return getattr(self._database, name)
@@ -261,14 +260,12 @@ class ActiveTradeViewDatabaseProxy:
             return
 
     def read_candidate_lifecycle(self, *args, **kwargs):
-        self._archive_duplicate_rows()
         return [row for row in self._database.read_candidate_lifecycle(*args, **kwargs) if not _is_duplicate(row)]
 
     def read_trade_selection_evaluations(self, *args, **kwargs):
         return [row for row in self._database.read_trade_selection_evaluations(*args, **kwargs) if not _is_duplicate(row)]
 
     def read_execution_queue(self, *args, **kwargs):
-        self._archive_duplicate_rows()
         return [row for row in self._database.read_execution_queue(*args, **kwargs) if not _is_duplicate(row)]
 
 
@@ -285,14 +282,14 @@ def render_trading_overview(database, instrument_key: str, trading_date: str) ->
     closed_pnl = sum(float(row.get("realized_pnl") or 0.0) for row in closed_rows)
 
     st.subheader("Paper Trading")
-    st.caption("Operational view · duplicates archived · live panels refresh without rerunning Committee or execution logic.")
+    st.caption("Operational view · duplicates hidden from display · live panels refresh without rerunning Committee or execution logic.")
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("Direction", direction)
     c2.metric("Action", action)
     c3.metric("Open Trades", len(open_rows))
     c4.metric("Active Queue", len(active_queue))
-    c5.metric("Open P&L", f"₹{open_pnl:+,.2f}")
-    c6.metric("Closed P&L", f"₹{closed_pnl:+,.2f}")
+    c5.metric("Open P&L", f"INR {open_pnl:+,.2f}")
+    c6.metric("Closed P&L", f"INR {closed_pnl:+,.2f}")
     st.caption(
         f"Latest signal: {signal.get('signal_id')} · confirmed {signal.get('confirmation_timestamp')}"
         if signal else "No confirmed bullish or bearish signal is stored for today."
