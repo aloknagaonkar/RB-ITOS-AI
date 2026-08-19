@@ -65,3 +65,12 @@ def test_research_exit_timestamps_are_deterministic_utc_values():
         "2026-08-18T07:00:00+00:00",
         "2026-08-18T09:00:00+00:00",
     ]
+
+
+def test_default_research_exit_grid_runs_every_five_minutes():
+    exits = deterministic_research_exit_timestamps("2026-08-18")
+
+    assert len(exits) == 72
+    assert exits[0].isoformat() == "2026-08-18T04:00:00+00:00"
+    assert exits[1].isoformat() == "2026-08-18T04:05:00+00:00"
+    assert exits[-1].isoformat() == "2026-08-18T09:55:00+00:00"
