@@ -222,7 +222,7 @@ def render_red_bar_v2_legacy_panel(
             "remains the authority for stop, target, trailing, time and EOD exits."
         )
     else:
-        st.info("No open paper trade is currently being monitored.")
+        st.caption("No open paper trade is currently being monitored.")
 
     with st.expander("View V2 source and timestamp details"):
         rows = [
