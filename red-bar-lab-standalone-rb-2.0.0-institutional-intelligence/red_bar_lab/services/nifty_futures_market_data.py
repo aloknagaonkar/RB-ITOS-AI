@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Mapping, Sequence
 
 from red_bar_lab.execution.underlying_candle_readiness import (
@@ -65,19 +65,25 @@ def _value(candle: object, mapping_names: tuple[str, ...], index: int) -> object
     return None
 
 
-def _timestamp(candle: object) -> datetime | None:
+def _timestamp(candle: object, *, reference: datetime) -> datetime | None:
     raw = _value(candle, ("timestamp", "time", "datetime", "date"), 0)
     if isinstance(raw, datetime):
-        return raw
-    text = str(raw or "").strip()
-    if not text:
-        return None
-    if text.endswith("Z"):
-        text = text[:-1] + "+00:00"
-    try:
-        return datetime.fromisoformat(text)
-    except ValueError:
-        return None
+        parsed = raw
+    else:
+        text = str(raw or "").strip()
+        if not text:
+            return None
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    if parsed.tzinfo is None and reference.tzinfo is not None:
+        parsed = parsed.replace(tzinfo=reference.tzinfo)
+    if parsed.tzinfo is not None and reference.tzinfo is not None:
+        parsed = parsed.astimezone(reference.tzinfo)
+    return parsed
 
 
 def _number(value: Any) -> float | None:
@@ -89,11 +95,24 @@ def _number(value: Any) -> float | None:
         return None
 
 
-def _latest_candle(candles: list[object]) -> object | None:
-    dated = [(stamp, candle) for candle in candles if (stamp := _timestamp(candle))]
+def _latest_completed_candle(
+    candles: list[object],
+    *,
+    now: datetime,
+    interval_minutes: int,
+) -> object | None:
+    interval = max(1, int(interval_minutes))
+    current_bucket = now.replace(second=0, microsecond=0)
+    current_bucket -= timedelta(minutes=current_bucket.minute % interval)
+    expected_completed = current_bucket - timedelta(minutes=interval)
+    dated = []
+    for candle in candles:
+        stamp = _timestamp(candle, reference=now)
+        if stamp is not None and stamp <= expected_completed:
+            dated.append((stamp, candle))
     if dated:
         return max(dated, key=lambda item: item[0])[1]
-    return candles[-1] if candles else None
+    return None
 
 
 def assess_nifty_futures_market_data(
@@ -139,7 +158,11 @@ def assess_nifty_futures_market_data(
         interval_minutes=interval_minutes,
         stale_after_seconds=stale_after_seconds,
     )
-    latest = _latest_candle(candles)
+    latest = _latest_completed_candle(
+        candles,
+        now=now,
+        interval_minutes=interval_minutes,
+    )
     latest_volume = _number(
         _value(latest, ("volume", "vol", "traded_volume"), 5)
     ) if latest is not None else None
@@ -157,11 +180,11 @@ def assess_nifty_futures_market_data(
         volume=latest_volume,
     )
 
-    status = "READY" if candles else "MISSING"
+    status = "READY" if latest is not None else "MISSING"
     reason = (
-        "Active NIFTY futures candles, volume and OI were collected."
-        if candles
-        else "Active NIFTY futures candle collection is empty."
+        "Latest completed NIFTY futures candle, volume and OI were collected."
+        if latest is not None
+        else "No completed NIFTY futures candle is available."
     )
     return NiftyFuturesMarketData(
         status=status,
