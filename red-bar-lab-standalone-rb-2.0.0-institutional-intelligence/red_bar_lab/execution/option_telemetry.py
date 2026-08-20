@@ -8,6 +8,10 @@ from time import perf_counter
 from typing import Any, Mapping, Sequence
 from zoneinfo import ZoneInfo
 
+from red_bar_lab.execution.option_chain_readiness import (
+    assess_option_chain_completeness,
+)
+
 IST = ZoneInfo("Asia/Kolkata")
 RSI_STRATEGY_SOURCE = "RSI_EXTREME_REVERSAL_V1"
 RED_BAR_STRATEGY_SOURCES = frozenset({"RED_BAR", "RED_BAR_V2"})
@@ -19,17 +23,16 @@ ACTIVE_ORDER_STATES = frozenset(
 )
 OBSERVATIONAL_AUTHORITY = "OBSERVATIONAL_ONLY"
 
-# Paper orders persist a human-readable underlying name but older rows do not
-# carry an Upstox underlying instrument key. Keep explicit keys authoritative
-# and use this narrow compatibility map only when they are absent.
 UNDERLYING_NAME_TO_INSTRUMENT_KEY = {
     "NIFTY": "NSE_INDEX|Nifty 50",
     "NIFTY 50": "NSE_INDEX|Nifty 50",
 }
 
-_STRIKE_OI_COLUMNS = {
+_TELEMETRY_EXTENSION_COLUMNS = {
     "call_oi_at_strike": "REAL",
     "put_oi_at_strike": "REAL",
+    "chain_readiness_status": "TEXT",
+    "chain_readiness_reason": "TEXT",
 }
 
 
@@ -89,12 +92,7 @@ def _database_path(database) -> str:
 
 
 def _ensure_strike_oi_columns(database) -> bool:
-    """Add strike-level OI columns to an existing SQLite telemetry table.
-
-    RedBarDatabase remains backward compatible because the migration is
-    additive and guarded by PRAGMA inspection. Test doubles and alternative
-    database adapters without a filesystem path are intentionally ignored.
-    """
+    """Add observational telemetry columns to an existing SQLite table."""
 
     path = _database_path(database)
     if not path:
@@ -114,7 +112,7 @@ def _ensure_strike_oi_columns(database) -> bool:
         if not existing:
             return False
         changed = False
-        for name, definition in _STRIKE_OI_COLUMNS.items():
+        for name, definition in _TELEMETRY_EXTENSION_COLUMNS.items():
             if name not in existing:
                 conn.execute(
                     "ALTER TABLE option_execution_telemetry "
@@ -131,8 +129,10 @@ def _persist_strike_oi(
     telemetry_id: str,
     call_oi: object,
     put_oi: object,
+    chain_readiness_status: object | None = None,
+    chain_readiness_reason: object | None = None,
 ) -> bool:
-    """Persist exact selected-strike Call and Put OI after the base insert."""
+    """Persist selected-strike OI and chain readiness after the base insert."""
 
     path = _database_path(database)
     if not path:
@@ -143,10 +143,19 @@ def _persist_strike_oi(
         cursor = conn.execute(
             """
             UPDATE option_execution_telemetry
-            SET call_oi_at_strike=?, put_oi_at_strike=?
+            SET call_oi_at_strike=?,
+                put_oi_at_strike=?,
+                chain_readiness_status=?,
+                chain_readiness_reason=?
             WHERE telemetry_id=?
             """,
-            (_num(call_oi), _num(put_oi), telemetry_id),
+            (
+                _num(call_oi),
+                _num(put_oi),
+                str(chain_readiness_status or ""),
+                str(chain_readiness_reason or ""),
+                telemetry_id,
+            ),
         )
         conn.commit()
     return cursor.rowcount > 0
@@ -388,7 +397,7 @@ class OptionExecutionTelemetryService:
             _ensure_strike_oi_columns(self.database)
         except Exception as exc:
             errors.append(
-                f"STRIKE_OI_SCHEMA:{type(exc).__name__}:{exc}"
+                f"TELEMETRY_SCHEMA:{type(exc).__name__}:{exc}"
             )
 
         orders = self.database.read_paper_execution_orders(self.account_id)
@@ -531,11 +540,20 @@ class OptionExecutionTelemetryService:
                     _underlying_key(order),
                     str(order.get("expiry") or ""),
                 )
+                chain_rows = chain_by_group.get(group, [])
+                readiness = assess_option_chain_completeness(
+                    chain_rows,
+                    order.get("strike"),
+                )
                 chain = _strike_context(
-                    chain_by_group.get(group, []),
+                    chain_rows,
                     order.get("strike"),
                     order.get("option_type"),
                 )
+                if not readiness.pcr_usable:
+                    chain["pcr_oi"] = None
+                    chain["pcr_source"] = "NOT_AVAILABLE"
+
                 strategy_source = _strategy_source(order)
                 raw_id = (
                     f"{order_id}|{observed.isoformat()}|"
@@ -609,6 +627,8 @@ class OptionExecutionTelemetryService:
                         ),
                         "call_oi_at_strike": chain.get("call_oi"),
                         "put_oi_at_strike": chain.get("put_oi"),
+                        "chain_readiness_status": readiness.status,
+                        "chain_readiness_reason": readiness.reason,
                         "support_classification": classification,
                         "support_reason": reason,
                         "authority": OBSERVATIONAL_AUTHORITY,
@@ -620,6 +640,8 @@ class OptionExecutionTelemetryService:
                     telemetry_id=telemetry_id,
                     call_oi=chain.get("call_oi"),
                     put_oi=chain.get("put_oi"),
+                    chain_readiness_status=readiness.status,
+                    chain_readiness_reason=readiness.reason,
                 )
                 captured += 1
             except Exception as exc:
