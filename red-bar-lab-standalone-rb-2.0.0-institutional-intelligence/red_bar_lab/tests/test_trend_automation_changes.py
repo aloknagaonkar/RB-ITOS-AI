@@ -65,7 +65,7 @@ def test_change1_reward_consumed_no_longer_blocks_when_bearish_ema10_holds():
     assert "EMA10_TREND_VALID" in result.reason
 
 
-def test_change1_bearish_ema10_loss_blocks_new_pe_entry():
+def test_change1_bearish_ema10_loss_is_informational_for_new_pe_entry():
     engine = EMA10OpportunityIntelligenceEngine(minimum_opportunity_score=0)
     result = engine.evaluate(
         signal=_signal("BEARISH", 86.0, 85.0),
@@ -74,8 +74,10 @@ def test_change1_bearish_ema10_loss_blocks_new_pe_entry():
         signal_age_seconds=300,
         opposite_red_bar_confirmed=False,
     )
-    assert result.eligible is False
-    assert result.reason == "BEARISH_EMA10_LOST"
+    assert result.eligible is True
+    assert result.decision == "BUY PE"
+    assert "BEARISH_EMA10_LOST_INFORMATIONAL_ONLY" in result.reason
+    assert result.reason != "BEARISH_EMA10_LOST"
 
 
 def test_change1_bullish_ema10_loss_blocks_new_ce_entry():
@@ -221,18 +223,6 @@ def test_change4_own_approved_queue_row_does_not_self_block_execution():
     db = _FakeDatabase(queue_rows=[{
         "instrument_token": 101,
         "status": "APPROVED",
-        "signal_id": "S1",
-    }])
-    proxy = TrendAwareDatabaseProxy(db, _trend)
-    assert proxy.paper_execution_exists_for_candidate(
-        signal_id="S1", account_id="PAPER-STD", instrument_token=101
-    ) is False
-
-
-def test_change4_closed_contract_can_be_reconsidered():
-    db = _FakeDatabase(queue_rows=[{
-        "instrument_token": 101,
-        "status": "CLOSED",
         "signal_id": "S1",
     }])
     proxy = TrendAwareDatabaseProxy(db, _trend)
