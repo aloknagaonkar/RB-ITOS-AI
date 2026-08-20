@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -76,7 +77,11 @@ def test_current_session_refreshes_snapshot_for_paper(tmp_path, monkeypatch):
         )
         return SimpleNamespace(
             health=SimpleNamespace(status="READY", reason="FULL_TIMESTAMP_ALIGNMENT"),
-            replay=SimpleNamespace(admitted_candidates=1, closed_trades=1),
+            replay=SimpleNamespace(
+                admitted_candidates=1,
+                closed_trades=1,
+                events=(),
+            ),
         )
 
     monkeypatch.setattr(module, "run_monitored_red_bar_v2_futures_replay", fake_run)
@@ -94,3 +99,72 @@ def test_current_session_refreshes_snapshot_for_paper(tmp_path, monkeypatch):
     assert snapshot is not None
     assert snapshot.mode == "PAPER"
     assert snapshot.execution_scope == "PAPER_TRADING_ONLY"
+
+
+def _allowed_event():
+    return SimpleNamespace(
+        timestamp=datetime.fromisoformat("2026-08-20T12:41:00+05:30"),
+        event_type="CANDIDATE_ADMISSION",
+        candidate_allowed=True,
+        direction="BULLISH",
+        option_side="CE",
+        admission_code="FULL_DIRECTIONAL_ALIGNMENT",
+        details={
+            "trend_strength": "CONFIRMED",
+            "admission_reason": "Fresh confirmed bullish candidate.",
+            "conditions": {"midpoint_aligned": True},
+        },
+    )
+
+
+def test_live_session_restores_candidate_when_only_replay_trade_blocks():
+    blocked = RedBarV2UISnapshot(
+        alignment_status="READY",
+        directional_state="CONFIRMED_BULLISH",
+        direction="BULLISH",
+        option_side="CE",
+        trade_status="ACTIVE",
+        trade_id="RBV2-FVWAP-0001",
+        admission_allowed=False,
+        admission_code="ACTIVE_TRADE_BLOCK",
+        admission_reason="Synthetic replay trade remains active.",
+    )
+    monitored = SimpleNamespace(
+        replay=SimpleNamespace(events=(_allowed_event(),)),
+    )
+
+    restored = module._restore_live_candidate_when_replay_only_blocked(
+        blocked,
+        monitored,
+        active_v2_order_exists=False,
+    )
+
+    assert restored.admission_allowed is True
+    assert restored.admission_code == "FULL_DIRECTIONAL_ALIGNMENT"
+    assert restored.direction == "BULLISH"
+    assert restored.option_side == "CE"
+    assert restored.trade_status == "FLAT"
+    assert restored.trade_id is None
+    assert restored.last_evaluation_timestamp == "2026-08-20T12:41:00+05:30"
+
+
+def test_live_session_preserves_block_when_real_v2_order_is_active():
+    blocked = RedBarV2UISnapshot(
+        admission_allowed=False,
+        admission_code="ACTIVE_TRADE_BLOCK",
+        trade_status="ACTIVE",
+        trade_id="PAPER-OPEN",
+    )
+    monitored = SimpleNamespace(
+        replay=SimpleNamespace(events=(_allowed_event(),)),
+    )
+
+    result = module._restore_live_candidate_when_replay_only_blocked(
+        blocked,
+        monitored,
+        active_v2_order_exists=True,
+    )
+
+    assert result is blocked
+    assert result.admission_allowed is False
+    assert result.admission_code == "ACTIVE_TRADE_BLOCK"
