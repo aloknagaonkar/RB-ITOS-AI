@@ -68,6 +68,10 @@ def _restore_live_candidate_when_replay_only_blocked(
     persisted paper orders are the execution authority. Therefore a replay-only
     ACTIVE_TRADE_BLOCK must not suppress a fresh candidate when no real V2
     paper order is active.
+
+    Only admission metadata is restored. Live market timestamps, prices, RSI,
+    VWAP, and alignment fields already written by the current-session context
+    must remain authoritative for the paper-signal freshness gate.
     """
     if active_v2_order_exists:
         return snapshot
@@ -84,7 +88,6 @@ def _restore_live_candidate_when_replay_only_blocked(
     conditions = details.get("conditions")
     if not isinstance(conditions, Mapping):
         conditions = {}
-    timestamp = getattr(event, "timestamp", None)
 
     return replace(
         snapshot,
@@ -115,11 +118,6 @@ def _restore_live_candidate_when_replay_only_blocked(
             conditions.get("midpoint_aligned")
             if isinstance(conditions.get("midpoint_aligned"), bool)
             else None
-        ),
-        last_evaluation_timestamp=(
-            timestamp.isoformat()
-            if hasattr(timestamp, "isoformat")
-            else str(timestamp) if timestamp else snapshot.last_evaluation_timestamp
         ),
     )
 
