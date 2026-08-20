@@ -23,11 +23,15 @@ class RedBarV2ReversalExitResult:
 def confirmed_live_direction(
     snapshot: RedBarV2UISnapshot | None,
 ) -> str | None:
-    """Return a fully aligned live direction from the persisted V2 inputs.
+    """Return the current confirmed Red Bar V2 direction.
 
-    This deliberately uses only the current aligned market inputs. The stored
-    ``snapshot.direction`` can still represent the previously admitted trade,
-    so it is not used to decide whether an opposite reversal is confirmed.
+    A reversal already admitted by the V2 strategy is authoritative for the
+    forced-exit transition. Recomputing direction from a hard RSI-50 split can
+    disagree with the strategy's own confirmed reversal rules and leave the
+    prior option side open after the strategy has moved to the opposite side.
+
+    For backward-compatible snapshots without an admitted reversal, retain the
+    conservative raw RSI, futures-VWAP, and midpoint alignment fallback.
     """
     if snapshot is None:
         return None
@@ -35,6 +39,16 @@ def confirmed_live_direction(
         return None
     if str(snapshot.trend_strength or "").upper() != "CONFIRMED":
         return None
+
+    admitted_direction = str(snapshot.direction or "").upper()
+    reversal_admitted = (
+        str(snapshot.reversal_status or "").upper() == "REVERSAL_ADMITTED"
+        and snapshot.admission_allowed is True
+        and admitted_direction in {"BULLISH", "BEARISH"}
+    )
+    if reversal_admitted:
+        return admitted_direction
+
     required = (
         snapshot.index_close,
         snapshot.index_rsi,
