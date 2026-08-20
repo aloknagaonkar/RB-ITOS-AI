@@ -4,13 +4,19 @@ from red_bar_lab.services.global_readiness_validation import (
     build_global_readiness_shadow_report,
     replay_global_readiness,
 )
+from red_bar_lab.services.nifty_futures_snapshot_store import read_nifty_futures_snapshots
+from red_bar_lab.services.trade_evidence import build_trade_evidence_recommendation
+
+
+def _display_score(value):
+    return "—" if value is None else f"{value:.1f}"
 
 
 def render_page(settings, layout, database, token, underlying_name, instrument_key, interval) -> None:
-    st.subheader("Market Readiness")
+    st.subheader("Trade Evidence & Market Readiness")
     st.caption(
-        "Unified read-only market-data, execution-policy, Red Bar V2 alignment and "
-        "market-hours observations. This page has no execution authority."
+        "Read-only Red Bar V2 trade suggestion, market-data quality, futures confirmation "
+        "and execution-policy evidence. This page never opens, blocks or modifies a trade."
     )
 
     rows = read_global_readiness_snapshots(
@@ -23,6 +29,60 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         return
 
     latest = rows[0]
+    diagnostics = database.read_paper_signal_diagnostics(limit=1)
+    latest_signal = diagnostics[0] if diagnostics else {}
+    futures_rows = read_nifty_futures_snapshots(
+        settings.database_path,
+        underlying_name=underlying_name,
+        limit=1,
+    )
+    latest_futures = futures_rows[0] if futures_rows else {}
+    recommendation = build_trade_evidence_recommendation(
+        readiness=latest,
+        signal_diagnostic=latest_signal,
+        futures_snapshot=latest_futures,
+    )
+
+    st.markdown("### Trade Evidence Recommendation")
+    r1, r2, r3, r4 = st.columns(4)
+    r1.metric("Red Bar direction", recommendation.direction)
+    r2.metric("Suggested option", recommendation.suggested_option)
+    r3.metric("Evidence grade", recommendation.grade)
+    r4.metric("Suggested action", recommendation.action)
+
+    candidate_rows = [{
+        "Signal time": latest_signal.get("confirmation_timestamp") or latest_signal.get("timestamp") or "—",
+        "Suggested contract": recommendation.suggested_contract,
+        "Candidate score": _display_score(recommendation.candidate_score),
+        "Futures state": latest_futures.get("positioning_state") or "—",
+        "Futures strength": latest_futures.get("strength") or latest.get("futures_strength") or "—",
+        "Global readiness": latest.get("overall_status") or "—",
+        "Authority": recommendation.authority,
+    }]
+    st.dataframe(_arrow_safe_rows(candidate_rows), width="stretch", hide_index=True)
+    st.info(recommendation.summary)
+
+    evidence_rows = [
+        {
+            "Category": "Positive",
+            "Evidence": ", ".join(recommendation.positive_evidence) or "NONE",
+        },
+        {
+            "Category": "Caution",
+            "Evidence": ", ".join(recommendation.caution_evidence) or "NONE",
+        },
+        {
+            "Category": "Blocking",
+            "Evidence": ", ".join(recommendation.blocking_evidence) or "NONE",
+        },
+    ]
+    st.dataframe(_arrow_safe_rows(evidence_rows), width="stretch", hide_index=True)
+    st.caption(
+        "Suggested CE/PE and evidence grade are observational only. Red Bar V2 remains "
+        "the paper signal authority, and the existing execution engine remains unchanged."
+    )
+
+    st.markdown("### Market Readiness Detail")
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Overall readiness", latest.get("overall_status") or "—")
     c2.metric("Data readiness", "BLOCKED" if latest.get("blocking_reasons") else "USABLE")
