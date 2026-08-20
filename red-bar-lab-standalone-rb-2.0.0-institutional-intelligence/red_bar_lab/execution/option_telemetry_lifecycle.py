@@ -39,6 +39,24 @@ def _database_path(database) -> str | None:
     return str(value) if value else None
 
 
+def _number(value: object) -> float | None:
+    try:
+        return None if value in (None, "") else float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _first_depth_price(quote: Mapping[str, object], side: str) -> float | None:
+    depth = quote.get("depth")
+    if not isinstance(depth, Mapping):
+        return None
+    levels = depth.get(side)
+    if not isinstance(levels, list) or not levels:
+        return None
+    first = levels[0]
+    return _number(first.get("price")) if isinstance(first, Mapping) else None
+
+
 def initialize_option_telemetry_lifecycle(database) -> bool:
     path = _database_path(database)
     if not path:
@@ -132,6 +150,68 @@ def record_active_telemetry_snapshot(database, order_id: str, telemetry: Mapping
     )
 
 
+def record_exit_telemetry_exact(
+    database,
+    order_id: str,
+    quote: Mapping[str, object] | None,
+    latest_telemetry: Mapping[str, object] | None,
+    *,
+    observed_timestamp: str | None = None,
+) -> bool:
+    """Persist the provider quote used by the exit fill without another API call.
+
+    Quote-time bid, ask, spread, IV and Greeks are preferred. Selected-strike PCR
+    and OI are retained from the most recent chain snapshot when the quote provider
+    does not expose them, and the row is marked PARTIAL_EXACT accordingly.
+    """
+    if not quote:
+        return record_exit_telemetry_fallback(database, order_id, latest_telemetry)
+
+    current = dict(latest_telemetry or {})
+    provider = dict(quote)
+    best_bid = _first_depth_price(provider, "buy")
+    best_ask = _first_depth_price(provider, "sell")
+    spread_points = None
+    spread_pct = None
+    if best_bid is not None and best_ask is not None and best_ask >= best_bid:
+        spread_points = best_ask - best_bid
+        midpoint = (best_bid + best_ask) / 2.0
+        spread_pct = spread_points / midpoint * 100.0 if midpoint > 0 else None
+
+    exact_delta = _number(provider.get("delta"))
+    exact_iv = _number(provider.get("iv"))
+    exact_pcr = _number(provider.get("pcr_oi") or provider.get("pcr"))
+    telemetry = {
+        **current,
+        "observed_timestamp": observed_timestamp,
+        "current_price": _number(provider.get("last_price")),
+        "best_bid": best_bid,
+        "best_ask": best_ask,
+        "spread_points": spread_points,
+        "spread_pct": spread_pct,
+        "iv": exact_iv if exact_iv is not None else current.get("iv"),
+        "delta": exact_delta if exact_delta is not None else current.get("delta"),
+        "gamma": provider.get("gamma") if provider.get("gamma") is not None else current.get("gamma"),
+        "theta": provider.get("theta") if provider.get("theta") is not None else current.get("theta"),
+        "vega": provider.get("vega") if provider.get("vega") is not None else current.get("vega"),
+        "pcr_oi": exact_pcr if exact_pcr is not None else current.get("pcr_oi"),
+    }
+    fully_exact = exact_pcr is not None and exact_delta is not None
+    source = "EXACT_EXIT_QUOTE" if fully_exact else "EXACT_EXIT_QUOTE_WITH_ACTIVE_CONTEXT"
+    quality = "VALID" if fully_exact else "PARTIAL_EXACT"
+    reason = None if fully_exact else "CHAIN_FIELDS_FROM_LAST_ACTIVE"
+    return record_option_telemetry_snapshot(
+        database,
+        order_id=order_id,
+        snapshot_type="EXIT",
+        telemetry=telemetry,
+        observed_timestamp=observed_timestamp,
+        snapshot_source=source,
+        data_quality=quality,
+        reason_code=reason,
+    )
+
+
 def record_exit_telemetry_fallback(database, order_id: str, telemetry: Mapping[str, object] | None) -> bool:
     """Persist a non-blocking EXIT snapshot from the latest active telemetry."""
     quality = "FALLBACK" if telemetry else "UNAVAILABLE"
@@ -178,6 +258,7 @@ __all__ = [
     "initialize_option_telemetry_lifecycle",
     "read_option_telemetry_lifecycle",
     "record_active_telemetry_snapshot",
+    "record_exit_telemetry_exact",
     "record_exit_telemetry_fallback",
     "record_option_telemetry_snapshot",
 ]
