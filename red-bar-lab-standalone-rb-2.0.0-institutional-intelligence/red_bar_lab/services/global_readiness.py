@@ -138,12 +138,13 @@ def assess_global_readiness(
         if hours in {"CLOSED", "MARKET_CLOSED", "OUTSIDE_ENTRY_HOURS"}:
             advisory.append(f"MARKET_HOURS_{hours}")
 
-    if blocking:
-        status = BLOCKED
-        reason = "Global readiness has blocking market-data gaps."
-    elif any(statuses[name] == UNAVAILABLE for name in data_components):
+    unavailable_only = bool(blocking) and all(reason.endswith("_UNAVAILABLE") for reason in blocking)
+    if unavailable_only:
         status = UNAVAILABLE
         reason = "Global readiness cannot be established from the available observations."
+    elif blocking:
+        status = BLOCKED
+        reason = "Global readiness has blocking market-data gaps."
     elif advisory or execution:
         status = DEGRADED
         reason = "Global readiness is observationally usable with advisory or execution-policy conditions."
