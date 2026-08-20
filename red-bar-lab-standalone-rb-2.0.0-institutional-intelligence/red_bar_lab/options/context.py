@@ -52,6 +52,16 @@ def _safe_float(value):
         return None
 
 
+def _signal_trading_date(
+    signal: dict[str, object],
+    entry_timestamp: pd.Timestamp,
+) -> str:
+    value = signal.get("trading_date")
+    if value not in (None, "", "None"):
+        return str(value)
+    return entry_timestamp.date().isoformat()
+
+
 def _max_pain_strike(chain: pd.DataFrame) -> float | None:
     if chain is None or chain.empty:
         return None
@@ -173,7 +183,7 @@ def summarize_option_chain(
     return {
         "signal_id": signal.get("signal_id"),
         "instrument_key": instrument_key,
-        "trading_date": str(signal.get("trading_date")),
+        "trading_date": _signal_trading_date(signal, entry_ts),
         "entry_timestamp": entry_ts.isoformat(),
         "option_expiry": expiry,
         "option_snapshot_timestamp": snap_ts.isoformat(),
