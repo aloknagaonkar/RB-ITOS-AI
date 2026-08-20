@@ -14,11 +14,15 @@ from red_bar_lab.execution.paper_strategy_authority import (
 )
 from red_bar_lab.market.upstox_intelligence import UnifiedUpstoxMarketIntelligenceService
 from red_bar_lab.market.paper_adapter import UpstoxPaperMarketAdapter
+from red_bar_lab.operations.red_bar_v2_ui_snapshot import read_red_bar_v2_ui_snapshot
 from red_bar_lab.services.red_bar_v2_current_session import (
     evaluate_current_session_red_bar_v2,
 )
 from red_bar_lab.services.red_bar_v2_paper_signal_bridge import (
     publish_v2_snapshot_to_paper_signals,
+)
+from red_bar_lab.services.red_bar_v2_reversal_exit import (
+    execute_confirmed_reversal_exits,
 )
 from red_bar_lab.services.upstox_service import RedBarUpstoxService
 from red_bar_lab.storage.database import RedBarDatabase
@@ -153,6 +157,25 @@ def main() -> int:
                 settings=settings,
                 instrument_key=UNDERLYINGS[args.underlying],
             )
+
+            reversal_exit = execute_confirmed_reversal_exits(
+                snapshot=read_red_bar_v2_ui_snapshot(settings.artifacts_root),
+                open_orders=database.read_open_paper_execution_orders("PAPER-STD"),
+                close_position=lambda order_id, reason: automation.engine.close_position(
+                    zerodha=adapter,
+                    order_id=order_id,
+                    exit_reason=reason,
+                ),
+            )
+            if reversal_exit.exited_orders:
+                totals["orders_closed"] += int(reversal_exit.exited_orders)
+                live_v2 = evaluate_current_session_red_bar_v2(
+                    upstox=upstox,
+                    database=database,
+                    settings=settings,
+                    instrument_key=UNDERLYINGS[args.underlying],
+                )
+
             bridge = publish_v2_snapshot_to_paper_signals(
                 database_path=settings.database_path,
                 artifacts_root=settings.artifacts_root,
@@ -197,6 +220,7 @@ def main() -> int:
                 if database.read_open_paper_execution_orders("PAPER-STD")
                 else "WAITING_FOR_V2_SIGNAL"
             )
+            cycle_errors = list(report.errors) + list(reversal_exit.errors)
             database.upsert_paper_monitor_status(
                 {
                     "monitor_id": "PAPER-MONITOR",
@@ -211,29 +235,33 @@ def main() -> int:
                     "last_decision": last_decision,
                     "last_reason": latest.get("reason") or bridge.reason,
                     "last_error": (
-                        " | ".join(report.errors[:3]) if report.errors else None
+                        " | ".join(cycle_errors[:3]) if cycle_errors else None
                     ),
                 }
             )
 
             logging.info(
-                "v2_live=%s live_reason=%s v2_bridge=%s bridge_reason=%s "
-                "signals=%s scored=%s opened=%s closed=%s skipped=%s "
-                "errors=%s decision=%s reason=%s",
+                "v2_live=%s live_reason=%s reversal_exit=%s "
+                "reversal_direction=%s reversal_closed=%s v2_bridge=%s "
+                "bridge_reason=%s signals=%s scored=%s opened=%s closed=%s "
+                "skipped=%s errors=%s decision=%s reason=%s",
                 live_v2.status,
                 live_v2.reason,
+                reversal_exit.status,
+                reversal_exit.confirmed_direction,
+                reversal_exit.exited_orders,
                 bridge.status,
                 bridge.reason,
                 report.signals_seen,
                 report.candidates_scored,
                 report.paper_orders_opened,
-                report.paper_orders_closed,
+                report.paper_orders_closed + reversal_exit.exited_orders,
                 report.skipped,
-                len(report.errors),
+                len(cycle_errors),
                 last_decision,
                 latest.get("reason") or bridge.reason,
             )
-            for error in report.errors:
+            for error in cycle_errors:
                 logging.warning("paper automation: %s", error)
         except Exception as exc:
             logging.exception("paper automation cycle failed")
