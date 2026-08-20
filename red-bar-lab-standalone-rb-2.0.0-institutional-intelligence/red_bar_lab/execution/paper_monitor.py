@@ -31,6 +31,10 @@ from red_bar_lab.services.nifty_futures_positioning_monitor import (
     assess_futures_positioning,
     futures_positioning_log_values,
 )
+from red_bar_lab.services.nifty_futures_positioning_strength import (
+    assess_nifty_futures_positioning_strength,
+    futures_positioning_strength_log_values,
+)
 from red_bar_lab.services.nifty_futures_readiness import (
     assess_nifty_futures_readiness,
     futures_readiness_log_values,
@@ -285,6 +289,12 @@ def main() -> int:
             futures_positioning_values = futures_positioning_log_values(
                 futures_positioning_result
             )
+            futures_strength_result = assess_nifty_futures_positioning_strength(
+                futures_positioning_result
+            )
+            futures_strength_values = futures_positioning_strength_log_values(
+                futures_strength_result
+            )
             futures_readiness_result = assess_nifty_futures_readiness(
                 contract=futures_result,
                 market=futures_market_result,
@@ -375,14 +385,18 @@ def main() -> int:
                 "futures_price_change=%s futures_price_change_pct=%s "
                 "futures_oi_change=%s futures_oi_change_pct=%s "
                 "futures_relative_volume=%s futures_baseline_volume=%s "
-                "futures_baseline_samples=%s futures_readiness=%s "
-                "futures_readiness_reason=%s futures_contract_status=%s "
-                "futures_market_status=%s futures_candle_status=%s "
-                "futures_volume_status=%s futures_oi_status=%s "
-                "futures_positioning_status=%s futures_positioning_state=%s "
-                "futures_blocking_reasons=%s futures_advisory_reasons=%s "
-                "signals=%s scored=%s opened=%s closed=%s skipped=%s "
-                "errors=%s warnings=%s decision=%s reason=%s",
+                "futures_baseline_samples=%s futures_strength_status=%s "
+                "futures_strength_reason=%s futures_strength=%s "
+                "futures_strength_state=%s futures_strength_price_pct=%s "
+                "futures_strength_oi_pct=%s futures_strength_rvol=%s "
+                "futures_readiness=%s futures_readiness_reason=%s "
+                "futures_contract_status=%s futures_market_status=%s "
+                "futures_candle_status=%s futures_volume_status=%s "
+                "futures_oi_status=%s futures_positioning_status=%s "
+                "futures_positioning_state=%s futures_blocking_reasons=%s "
+                "futures_advisory_reasons=%s signals=%s scored=%s opened=%s "
+                "closed=%s skipped=%s errors=%s warnings=%s decision=%s "
+                "reason=%s",
                 live_v2.status,
                 live_v2.reason,
                 reversal_exit.status,
@@ -394,6 +408,7 @@ def main() -> int:
                 *futures_log_values,
                 *futures_market_values,
                 *futures_positioning_values,
+                *futures_strength_values,
                 *futures_readiness_values,
                 report.signals_seen,
                 report.candidates_scored,
