@@ -12,6 +12,9 @@ from red_bar_lab.execution.attribution_automation import (
 from red_bar_lab.execution.paper_strategy_authority import (
     PaperStrategyAuthority,
 )
+from red_bar_lab.execution.underlying_candle_monitoring import (
+    assess_monitor_underlying_candles,
+)
 from red_bar_lab.market.upstox_intelligence import UnifiedUpstoxMarketIntelligenceService
 from red_bar_lab.market.paper_adapter import UpstoxPaperMarketAdapter
 from red_bar_lab.operations.red_bar_v2_ui_snapshot import read_red_bar_v2_ui_snapshot
@@ -47,6 +50,22 @@ def _partition_cycle_messages(report_errors, reversal_errors):
         else:
             errors.append(text)
     return errors, warnings
+
+
+def _candle_diagnostic_log_values(diagnostic):
+    """Return stable log values without giving diagnostics execution authority."""
+
+    readiness = diagnostic.readiness
+    age = readiness.candle_age_seconds
+    return (
+        readiness.status,
+        readiness.reason,
+        "NA" if age is None else f"{age:.1f}",
+        readiness.latest_timestamp or "NA",
+        readiness.expected_completed_timestamp or "NA",
+        diagnostic.bridge_alignment,
+        diagnostic.fetch_error or "NONE",
+    )
 
 
 def _parser():
@@ -204,6 +223,15 @@ def main() -> int:
                 authority=authority,
                 now=cycle_started,
             )
+            candle_diagnostic = assess_monitor_underlying_candles(
+                upstox,
+                instrument_key=UNDERLYINGS[args.underlying],
+                now=cycle_started,
+                bridge_reason=bridge.reason,
+            )
+            candle_log_values = _candle_diagnostic_log_values(
+                candle_diagnostic
+            )
             report = automation.run_cycle(
                 trading_date=trading_date,
                 lots=max(1, int(args.lots)),
@@ -267,8 +295,12 @@ def main() -> int:
             logging.info(
                 "v2_live=%s live_reason=%s reversal_exit=%s "
                 "reversal_direction=%s reversal_closed=%s v2_bridge=%s "
-                "bridge_reason=%s signals=%s scored=%s opened=%s closed=%s "
-                "skipped=%s errors=%s warnings=%s decision=%s reason=%s",
+                "bridge_reason=%s underlying_candle=%s candle_reason=%s "
+                "candle_age_seconds=%s candle_latest=%s "
+                "candle_expected=%s candle_bridge_alignment=%s "
+                "candle_fetch_error=%s signals=%s scored=%s opened=%s "
+                "closed=%s skipped=%s errors=%s warnings=%s decision=%s "
+                "reason=%s",
                 live_v2.status,
                 live_v2.reason,
                 reversal_exit.status,
@@ -276,6 +308,7 @@ def main() -> int:
                 reversal_exit.exited_orders,
                 bridge.status,
                 bridge.reason,
+                *candle_log_values,
                 report.signals_seen,
                 report.candidates_scored,
                 report.paper_orders_opened,
