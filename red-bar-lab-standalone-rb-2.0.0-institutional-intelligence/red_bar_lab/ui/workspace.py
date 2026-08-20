@@ -43,9 +43,10 @@ _PAGE_MODULE_PATHS.setdefault(
     "NIFTY Futures Readiness",
     "red_bar_lab.ui.pages.nifty_futures_readiness",
 )
-# Phase 3 unified readiness remains a separate observational workspace.
+# Phase 3 readiness and trade grading remain a separate observational workspace.
+_PAGE_MODULE_PATHS.pop("Market Readiness", None)
 _PAGE_MODULE_PATHS.setdefault(
-    "Market Readiness",
+    "Trade Evidence",
     "red_bar_lab.ui.pages.market_readiness",
 )
 
@@ -100,6 +101,8 @@ def render(settings: RedBarSettings) -> None:
     st.sidebar.subheader("Workspace")
     workspace_pages = tuple(_PAGE_MODULE_PATHS)
     saved_page = st.query_params.get("page", "Operations Center")
+    if saved_page == "Market Readiness":
+        saved_page = "Trade Evidence"
     if saved_page not in workspace_pages:
         saved_page = "Operations Center"
 
