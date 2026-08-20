@@ -62,6 +62,24 @@ def _payload(value: object) -> dict[str, Any]:
     }
 
 
+def _normalize_timestamp(value: datetime | str) -> str:
+    """Return a canonical ISO-8601 timestamp without changing its offset."""
+
+    if isinstance(value, datetime):
+        return value.isoformat()
+
+    text = str(value).strip()
+    if not text:
+        return text
+
+    parseable = text[:-1] + "+00:00" if text.endswith("Z") else text
+    try:
+        return datetime.fromisoformat(parseable).isoformat()
+    except ValueError:
+        # Persistence remains best-effort for unexpected provider formats.
+        return text
+
+
 def persist_nifty_futures_snapshot(
     database_path: str | Path,
     *,
@@ -81,7 +99,7 @@ def persist_nifty_futures_snapshot(
 
     path = Path(database_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    observed = observed_at.isoformat() if isinstance(observed_at, datetime) else str(observed_at)
+    observed = _normalize_timestamp(observed_at)
     contract_data = _payload(contract)
     market_data = _payload(market)
     positioning_data = _payload(positioning)
@@ -168,7 +186,7 @@ def read_nifty_futures_snapshots(
             """
             SELECT * FROM nifty_futures_diagnostic_snapshots
             WHERE underlying_name = ?
-            ORDER BY observed_at DESC
+            ORDER BY julianday(observed_at) DESC, observed_at DESC
             LIMIT ?
             """,
             (underlying_name, max(1, int(limit))),
