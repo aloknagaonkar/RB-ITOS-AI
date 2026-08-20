@@ -11,6 +11,9 @@ from zoneinfo import ZoneInfo
 from red_bar_lab.execution.option_chain_readiness import (
     assess_option_chain_completeness,
 )
+from red_bar_lab.execution.option_quote_readiness import (
+    assess_option_quote_readiness,
+)
 
 IST = ZoneInfo("Asia/Kolkata")
 RSI_STRATEGY_SOURCE = "RSI_EXTREME_REVERSAL_V1"
@@ -33,6 +36,10 @@ _TELEMETRY_EXTENSION_COLUMNS = {
     "put_oi_at_strike": "REAL",
     "chain_readiness_status": "TEXT",
     "chain_readiness_reason": "TEXT",
+    "quote_readiness_status": "TEXT",
+    "quote_readiness_reason": "TEXT",
+    "quote_age_seconds": "REAL",
+    "quote_observed_timestamp": "TEXT",
 }
 
 
@@ -131,8 +138,12 @@ def _persist_strike_oi(
     put_oi: object,
     chain_readiness_status: object | None = None,
     chain_readiness_reason: object | None = None,
+    quote_readiness_status: object | None = None,
+    quote_readiness_reason: object | None = None,
+    quote_age_seconds: object | None = None,
+    quote_observed_timestamp: object | None = None,
 ) -> bool:
-    """Persist selected-strike OI and chain readiness after the base insert."""
+    """Persist additive chain and quote readiness after the base insert."""
 
     path = _database_path(database)
     if not path:
@@ -146,7 +157,11 @@ def _persist_strike_oi(
             SET call_oi_at_strike=?,
                 put_oi_at_strike=?,
                 chain_readiness_status=?,
-                chain_readiness_reason=?
+                chain_readiness_reason=?,
+                quote_readiness_status=?,
+                quote_readiness_reason=?,
+                quote_age_seconds=?,
+                quote_observed_timestamp=?
             WHERE telemetry_id=?
             """,
             (
@@ -154,6 +169,10 @@ def _persist_strike_oi(
                 _num(put_oi),
                 str(chain_readiness_status or ""),
                 str(chain_readiness_reason or ""),
+                str(quote_readiness_status or ""),
+                str(quote_readiness_reason or ""),
+                _num(quote_age_seconds),
+                str(quote_observed_timestamp or ""),
                 telemetry_id,
             ),
         )
@@ -465,6 +484,10 @@ class OptionExecutionTelemetryService:
                     skipped += 1
                     continue
 
+                quote_readiness = assess_option_quote_readiness(
+                    quote,
+                    observed_at=observed,
+                )
                 latest = (
                     self.database.read_latest_option_execution_telemetry(
                         order_id
@@ -564,6 +587,11 @@ class OptionExecutionTelemetryService:
                     "OT-"
                     + sha1(raw_id.encode("utf-8")).hexdigest()[:20].upper()
                 )
+                quote_timestamp = (
+                    quote_readiness.quote_timestamp.isoformat()
+                    if quote_readiness.quote_timestamp is not None
+                    else None
+                )
                 self.database.insert_option_execution_telemetry(
                     {
                         "telemetry_id": telemetry_id,
@@ -629,6 +657,10 @@ class OptionExecutionTelemetryService:
                         "put_oi_at_strike": chain.get("put_oi"),
                         "chain_readiness_status": readiness.status,
                         "chain_readiness_reason": readiness.reason,
+                        "quote_readiness_status": quote_readiness.status,
+                        "quote_readiness_reason": quote_readiness.reason,
+                        "quote_age_seconds": quote_readiness.quote_age_seconds,
+                        "quote_observed_timestamp": quote_timestamp,
                         "support_classification": classification,
                         "support_reason": reason,
                         "authority": OBSERVATIONAL_AUTHORITY,
@@ -642,6 +674,10 @@ class OptionExecutionTelemetryService:
                     put_oi=chain.get("put_oi"),
                     chain_readiness_status=readiness.status,
                     chain_readiness_reason=readiness.reason,
+                    quote_readiness_status=quote_readiness.status,
+                    quote_readiness_reason=quote_readiness.reason,
+                    quote_age_seconds=quote_readiness.quote_age_seconds,
+                    quote_observed_timestamp=quote_timestamp,
                 )
                 captured += 1
             except Exception as exc:
