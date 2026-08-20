@@ -13,15 +13,28 @@ from red_bar_lab.ui.red_bar_v2_runtime_diagnostics import (
 )
 
 
+def _diagnostic_date_expression(conn: sqlite3.Connection, alias: str = "") -> str:
+    """Return a date expression compatible with old and current diagnostics schemas."""
+    columns = {
+        str(row[1])
+        for row in conn.execute("PRAGMA table_info(paper_signal_diagnostics)")
+    }
+    prefix = f"{alias}." if alias else ""
+    if "trading_date" in columns:
+        return f"{prefix}trading_date"
+    return f"substr({prefix}timestamp, 1, 10)"
+
+
 def _latest_v2_trading_date(database: Any) -> str | None:
     path = getattr(database, "path", None)
     if not path:
         return None
     try:
         with sqlite3.connect(str(path)) as conn:
+            date_expression = _diagnostic_date_expression(conn)
             row = conn.execute(
-                """
-                SELECT trading_date
+                f"""
+                SELECT {date_expression}
                 FROM paper_signal_diagnostics
                 WHERE signal_id LIKE 'RBV2-%'
                 ORDER BY timestamp DESC, id DESC LIMIT 1
