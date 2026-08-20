@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from red_bar_lab.execution.option_telemetry_lifecycle import (
+    record_active_telemetry_snapshot,
+)
 from red_bar_lab.ui.full_trade_card import install as install_full_trade_card
 
 
@@ -36,8 +39,9 @@ def install(active_trade_views_module: Any) -> None:
     """Show latest PCR/Delta and install the selected active-trade Full Card.
 
     The compact table reuses the persisted latest snapshot and performs no
-    provider/API calls. The Full Card is also read-only and loads details only for
-    the selected active order.
+    provider/API calls. Each valid persisted telemetry row is mirrored into the
+    additive lifecycle store as ENTRY for the first observation and ACTIVE for
+    later observations.
     """
     if getattr(active_trade_views_module, "_option_telemetry_columns_installed", False):
         _install_full_card_when_supported(active_trade_views_module)
@@ -51,6 +55,12 @@ def install(active_trade_views_module: Any) -> None:
             order = dict(raw)
             order_id = str(order.get("order_id") or "")
             telemetry = active_trade_views_module._safe_latest_telemetry(database, order_id)
+            if telemetry:
+                try:
+                    record_active_telemetry_snapshot(database, order_id, telemetry)
+                except Exception:
+                    # Lifecycle telemetry is observational and must never block UI.
+                    pass
             checkpoint = active_trade_views_module._safe_checkpoint(database, order)
             attribution = active_trade_views_module.build_strategy_attribution(
                 order,
