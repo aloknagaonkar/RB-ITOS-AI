@@ -10,6 +10,7 @@ from red_bar_lab.services.independent_market_recommendation import (
     build_independent_market_recommendation,
 )
 from red_bar_lab.services.nifty_futures_snapshot_store import read_nifty_futures_snapshots
+from red_bar_lab.services.trade_candidate_snapshot_store import read_latest_trade_candidates
 from red_bar_lab.services.trade_evidence import build_trade_evidence_recommendation
 
 
@@ -19,6 +20,10 @@ def _display_score(value):
 
 def _display_number(value, digits=3):
     return "—" if value is None else f"{float(value):.{digits}f}"
+
+
+def _display_money(value):
+    return "—" if value is None else f"₹{float(value):,.2f}"
 
 
 def _latest_option_context(database_path):
@@ -51,6 +56,46 @@ def _evidence_table(recommendation):
         {"Category": "Caution", "Evidence": ", ".join(recommendation.caution_evidence) or "NONE"},
         {"Category": "Blocking", "Evidence": ", ".join(recommendation.blocking_evidence) or "NONE"},
     ]
+
+
+def _candidate_table_rows(candidates):
+    rows = []
+    for item in candidates:
+        rows.append({
+            "Rank": item.get("rank"),
+            "Role": item.get("role") or "—",
+            "Trade": f"BUY {item.get('option_type')}" if item.get("option_type") in {"CE", "PE"} else "—",
+            "Contract": item.get("tradingsymbol") or "—",
+            "Strike": _display_number(item.get("strike"), 0),
+            "Expiry": item.get("expiry") or "—",
+            "Current entry": _display_money(item.get("current_price")),
+            "Option VWAP": _display_money(item.get("vwap")),
+            "Entry vs VWAP": (
+                "—" if item.get("price_vs_vwap_pct") is None
+                else f"{float(item['price_vs_vwap_pct']):+.2f}%"
+            ),
+            "Delta": _display_number(item.get("delta")),
+            "IV": _display_number(item.get("iv"), 2),
+            "PCR OI": _display_number(item.get("pcr_oi")),
+            "PCR change": _display_number(item.get("pcr_oi_change")),
+            "PCR view": item.get("pcr_view") or item.get("pcr_status") or "UNAVAILABLE",
+            "Underlying RSI": _display_number(item.get("underlying_rsi"), 1),
+            "Option RSI": _display_number(item.get("option_rsi"), 1),
+            "RSI view": item.get("rsi_view") or "UNAVAILABLE",
+            "Volume": _display_number(item.get("volume"), 0),
+            "OI": _display_number(item.get("oi"), 0),
+            "Bid": _display_money(item.get("bid")),
+            "Ask": _display_money(item.get("ask")),
+            "Spread": _display_money(item.get("spread")),
+            "Score": _display_score(item.get("candidate_score")),
+            "Lot size": item.get("lot_size") or "—",
+            "One-lot value": _display_money(item.get("estimated_value")),
+            "Grade": item.get("evidence_grade") or "—",
+            "Action": item.get("suggested_action") or "—",
+            "Observed at": item.get("observed_at") or "—",
+            "Authority": item.get("authority") or "OBSERVATIONAL_ONLY",
+        })
+    return rows
 
 
 def render_page(settings, layout, database, token, underlying_name, instrument_key, interval) -> None:
@@ -120,6 +165,31 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         "Direction comes from NIFTY futures positioning, not Red Bar V2. Delta is the exact "
         "candidate delta when persisted; otherwise it is the latest ATM delta for the suggested side."
     )
+
+    st.markdown("#### Best three independent trade candidates")
+    ranked_candidates = read_latest_trade_candidates(
+        settings.database_path,
+        underlying_name=underlying_name,
+        recommendation_source="INDEPENDENT_MARKET",
+        limit=3,
+    )
+    if ranked_candidates:
+        st.dataframe(
+            _arrow_safe_rows(_candidate_table_rows(ranked_candidates)),
+            width="stretch",
+            hide_index=True,
+        )
+        st.caption(
+            "Rank 1 is Primary, Rank 2 is Safer and Rank 3 is Aggressive. Current entry, "
+            "VWAP, Delta, PCR and RSI are persisted observations. Missing values remain unavailable."
+        )
+    elif independent.suggested_option in {"CE", "PE"}:
+        st.warning(
+            "No ranked candidate snapshot is available yet. The independent direction exists, "
+            "but the candidate collector has not persisted three quote/VWAP/PCR/RSI records."
+        )
+    else:
+        st.info("No CE/PE candidates are shown while the independent recommendation is WAIT or NO TRADE.")
 
     st.markdown("### B. Red Bar V2 Recommendation")
     r1, r2, r3, r4 = st.columns(4)
