@@ -20,6 +20,9 @@ from red_bar_lab.ui.current_trade_exit_columns import install as install_current
 from red_bar_lab.ui.current_trade_option_telemetry import (
     install as install_current_trade_option_telemetry,
 )
+from red_bar_lab.ui.live_trade_card_validation import (
+    install as install_live_trade_card_validation,
+)
 from red_bar_lab.ui.open_trade_row_runtime import install as install_open_trade_row_runtime
 from red_bar_lab.ui.option_indicator_card import install as install_option_indicator_card
 from red_bar_lab.ui.paper_time_display import install as install_paper_time_display
@@ -49,6 +52,7 @@ install_current_trade_exit_columns(active_trade_views)
 install_current_trade_option_telemetry(active_trade_views)
 install_trade_outlook_card(full_trade_card)
 install_option_indicator_card(full_trade_card)
+install_live_trade_card_validation(full_trade_card)
 install_paper_close_telemetry_lifecycle(RedBarPaperExecutionEngine)
 shared_ui.PaperExitEngine = PaperExitEngine
 install_import_compatibility()
