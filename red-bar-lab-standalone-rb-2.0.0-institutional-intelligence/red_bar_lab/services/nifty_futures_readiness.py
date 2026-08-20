@@ -28,6 +28,38 @@ class NiftyFuturesReadiness:
         return self.status == READY
 
 
+def _persist_runtime_snapshot(contract, market, positioning, readiness) -> None:
+    """Best-effort persistence for complete monitor observations only."""
+
+    instrument_key = getattr(market, "instrument_key", None)
+    observed_at = getattr(market, "latest_timestamp", None)
+    if not instrument_key or not observed_at:
+        return
+    try:
+        from red_bar_lab.config import RedBarSettings
+        from red_bar_lab.services.nifty_futures_positioning_strength import (
+            assess_nifty_futures_positioning_strength,
+        )
+        from red_bar_lab.services.nifty_futures_snapshot_store import (
+            persist_nifty_futures_snapshot,
+        )
+
+        strength = assess_nifty_futures_positioning_strength(positioning)
+        persist_nifty_futures_snapshot(
+            RedBarSettings.from_env().database_path,
+            observed_at=str(observed_at),
+            underlying_name="NIFTY 50",
+            contract=contract,
+            market=market,
+            positioning=positioning,
+            strength=strength,
+            readiness=readiness,
+        )
+    except Exception:
+        # Persistence is observational and must never interrupt monitoring.
+        return
+
+
 def assess_nifty_futures_readiness(
     *,
     contract,
@@ -39,6 +71,7 @@ def assess_nifty_futures_readiness(
 
     The result is observational only. It deliberately separates blocking data
     gaps from advisory conditions and does not alter Red Bar V2 execution.
+    Complete runtime observations are persisted best-effort for UI and replay.
     """
 
     if not applicable:
@@ -96,7 +129,7 @@ def assess_nifty_futures_readiness(
         status = READY
         reason = "NIFTY futures contract, completed candle, volume and OI are ready."
 
-    return NiftyFuturesReadiness(
+    result = NiftyFuturesReadiness(
         status=status,
         reason=reason,
         contract_status=contract_status,
@@ -109,6 +142,8 @@ def assess_nifty_futures_readiness(
         blocking_reasons=tuple(blocking),
         advisory_reasons=tuple(advisory),
     )
+    _persist_runtime_snapshot(contract, market, positioning, result)
+    return result
 
 
 def futures_readiness_log_values(result: NiftyFuturesReadiness) -> tuple[str, ...]:
