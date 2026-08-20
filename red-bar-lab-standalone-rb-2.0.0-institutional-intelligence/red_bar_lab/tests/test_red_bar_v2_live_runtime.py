@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 from red_bar_lab.operations.red_bar_v2_ui_snapshot import RedBarV2UISnapshot
 from red_bar_lab.ui.red_bar_v2_live_runtime import resolve_red_bar_v2_live_state
+from red_bar_lab.ui.red_bar_v2_live_state_installer import _latest_v2_trading_date
 
 
 def _database(tmp_path):
@@ -13,7 +14,6 @@ def _database(tmp_path):
             CREATE TABLE paper_signal_diagnostics (
                 id INTEGER PRIMARY KEY,
                 signal_id TEXT,
-                trading_date TEXT,
                 direction TEXT,
                 confirmation_timestamp TEXT,
                 signal_age_seconds REAL,
@@ -60,10 +60,9 @@ def _database(tmp_path):
             """
         )
         conn.execute(
-            "INSERT INTO paper_signal_diagnostics VALUES (1,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO paper_signal_diagnostics VALUES (1,?,?,?,?,?,?,?,?,?)",
             (
                 "RBV2-CURRENT",
-                "2026-08-20",
                 "BEARISH",
                 "2026-08-20T09:31:00+05:30",
                 86.49,
@@ -112,6 +111,10 @@ def _database(tmp_path):
         )
         conn.commit()
     return SimpleNamespace(path=path)
+
+
+def test_latest_v2_date_is_derived_from_timestamp_schema(tmp_path):
+    assert _latest_v2_trading_date(_database(tmp_path)) == "2026-08-20"
 
 
 def test_current_day_runtime_overlays_stale_file_snapshot(tmp_path):
