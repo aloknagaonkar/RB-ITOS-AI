@@ -15,6 +15,15 @@ def _diagnostic_status(latest: Mapping[str, object], *keys: str, default: str = 
     return default
 
 
+def _outside_entry_hours(latest: Mapping[str, object], candle_status: str) -> bool:
+    explicit = _diagnostic_status(latest, "market_hours_status", default="")
+    if explicit:
+        return explicit in {"CLOSED", "MARKET_CLOSED", "OUTSIDE_ENTRY_HOURS"}
+    if candle_status == "MARKET_CLOSED":
+        return True
+    return latest.get("market_hours_ok") is False
+
+
 def build_and_persist_global_readiness(
     *,
     database_path,
@@ -36,7 +45,19 @@ def build_and_persist_global_readiness(
     """
 
     latest = dict(latest_signal_diagnostic or {})
-    candle_status = str(getattr(getattr(candle_diagnostic, "readiness", None), "status", "UNAVAILABLE"))
+    candle_status = str(
+        getattr(getattr(candle_diagnostic, "readiness", None), "status", "UNAVAILABLE")
+    ).upper()
+    outside_hours = _outside_entry_hours(latest, candle_status)
+    market_hours_status = _diagnostic_status(
+        latest,
+        "market_hours_status",
+        default=(
+            "OUTSIDE_ENTRY_HOURS"
+            if outside_hours
+            else "OPEN" if bool(latest.get("market_hours_ok")) else "UNAVAILABLE"
+        ),
+    )
     option_chain_status = _diagnostic_status(
         latest,
         "option_chain_status",
@@ -49,21 +70,31 @@ def build_and_persist_global_readiness(
         "option_quote_status",
         "quote_status",
         "quotes_status",
-        default="READY" if int(getattr(report, "candidates_scored", 0) or 0) > 0 else "UNAVAILABLE",
+        default=(
+            "MARKET_CLOSED"
+            if outside_hours
+            else "READY" if int(getattr(report, "candidates_scored", 0) or 0) > 0 else "UNAVAILABLE"
+        ),
     )
     pcr_status = _diagnostic_status(
         latest,
         "pcr_status",
         "pcr_readiness",
-        default="READY" if latest.get("pcr") is not None else "UNAVAILABLE",
+        default=(
+            "MARKET_CLOSED"
+            if outside_hours
+            else "READY" if latest.get("pcr") is not None else "UNAVAILABLE"
+        ),
     )
-    alignment_status = "ALIGNED" if str(getattr(bridge, "status", "")) in {"PUBLISHED", "READY", "NO_SIGNAL"} else str(getattr(bridge, "status", "UNAVAILABLE"))
+    bridge_status = str(getattr(bridge, "status", "UNAVAILABLE") or "UNAVAILABLE").upper()
+    bridge_reason = str(getattr(bridge, "reason", "") or "").upper()
+    if bridge_status in {"PUBLISHED", "READY", "NO_SIGNAL"}:
+        alignment_status = "ALIGNED"
+    elif outside_hours and bridge_reason == "V2_SNAPSHOT_STALE":
+        alignment_status = "AFTER_HOURS_EXPECTED"
+    else:
+        alignment_status = bridge_status
     source_status = "ENABLED" if bool(getattr(authority, "source_enabled", False)) else "DISABLED"
-    market_hours_status = _diagnostic_status(
-        latest,
-        "market_hours_status",
-        default="OPEN" if bool(latest.get("market_hours_ok")) else "OUTSIDE_ENTRY_HOURS",
-    )
     result = assess_global_readiness(
         underlying_candle=candle_status,
         option_chain=option_chain_status,
