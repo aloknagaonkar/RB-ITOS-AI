@@ -27,6 +27,10 @@ from red_bar_lab.services.nifty_futures_monitoring import (
     NiftyFuturesMonitorResult,
     futures_monitor_log_values,
 )
+from red_bar_lab.services.nifty_futures_positioning_monitor import (
+    assess_futures_positioning,
+    futures_positioning_log_values,
+)
 from red_bar_lab.services.red_bar_v2_current_session import (
     evaluate_current_session_red_bar_v2,
 )
@@ -271,6 +275,12 @@ def main() -> int:
             futures_market_values = futures_market_log_values(
                 futures_market_result
             )
+            futures_positioning_result = assess_futures_positioning(
+                futures_market_result
+            )
+            futures_positioning_values = futures_positioning_log_values(
+                futures_positioning_result
+            )
 
             report = automation.run_cycle(
                 trading_date=trading_date,
@@ -347,7 +357,12 @@ def main() -> int:
                 "futures_volume=%s futures_close=%s "
                 "futures_volume_value=%s futures_oi=%s "
                 "futures_timestamp=%s futures_candle_count=%s "
-                "futures_market_error=%s signals=%s scored=%s opened=%s "
+                "futures_market_error=%s futures_positioning=%s "
+                "futures_positioning_reason=%s futures_state=%s "
+                "futures_price_change=%s futures_price_change_pct=%s "
+                "futures_oi_change=%s futures_oi_change_pct=%s "
+                "futures_relative_volume=%s futures_baseline_volume=%s "
+                "futures_baseline_samples=%s signals=%s scored=%s opened=%s "
                 "closed=%s skipped=%s errors=%s warnings=%s decision=%s "
                 "reason=%s",
                 live_v2.status,
@@ -360,6 +375,7 @@ def main() -> int:
                 *candle_log_values,
                 *futures_log_values,
                 *futures_market_values,
+                *futures_positioning_values,
                 report.signals_seen,
                 report.candidates_scored,
                 report.paper_orders_opened,
