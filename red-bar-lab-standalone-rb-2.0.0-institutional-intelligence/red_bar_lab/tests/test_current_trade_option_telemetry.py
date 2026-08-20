@@ -36,7 +36,7 @@ def _module():
     )
 
 
-def test_active_trade_rows_show_selected_strike_pcr_and_delta():
+def test_active_trade_rows_show_only_pcr_and_delta():
     module = _module()
     install(module)
     database = SimpleNamespace(
@@ -66,12 +66,13 @@ def test_active_trade_rows_show_selected_strike_pcr_and_delta():
     )
     rows = module._compact_trade_rows(attributed)
 
+    assert rows[0]["PCR"] == "1.34"
     assert rows[0]["Delta"] == "-0.427"
-    assert rows[0]["Strike PCR"] == "1.34"
-    assert rows[0]["Call OI"] == "120,000"
-    assert rows[0]["Put OI"] == "160,800"
-    assert rows[0]["IV"] == "14.28"
-    assert rows[0]["PCR Source"] == "OPTION_CHAIN_ROW"
+    assert "Call OI" not in rows[0]
+    assert "Put OI" not in rows[0]
+    assert "IV" not in rows[0]
+    assert "PCR Source" not in rows[0]
+    assert "Telemetry Updated" not in rows[0]
     assert module.calls["telemetry"] == 1
 
 
@@ -86,6 +87,5 @@ def test_missing_telemetry_is_visible_without_failure():
     )
     rows = module._compact_trade_rows(attributed)
 
+    assert rows[0]["PCR"] == "—"
     assert rows[0]["Delta"] == "—"
-    assert rows[0]["Strike PCR"] == "—"
-    assert rows[0]["PCR Source"] == "NOT_AVAILABLE"
