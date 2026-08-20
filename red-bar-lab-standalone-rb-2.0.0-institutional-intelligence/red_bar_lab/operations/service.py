@@ -76,6 +76,20 @@ def _tree_size_mb(path: Path) -> float:
     return round(total / (1024 * 1024), 2)
 
 
+def _signal_id(row: dict[str, object]) -> str:
+    return str(row.get("signal_id") or "")
+
+
+def _readiness_signal_scope(
+    signals: list[dict[str, object]],
+) -> tuple[list[dict[str, object]], str]:
+    """Prefer current Red Bar V2 signals without hiding legacy-only sessions."""
+    v2_signals = [row for row in signals if _signal_id(row).startswith("RBV2-")]
+    if v2_signals:
+        return v2_signals, "RED_BAR_V2"
+    return signals, "ALL_SIGNALS"
+
+
 class RedBarOperationsCenterService:
     def __init__(self, database, settings):
         self.database = database
@@ -102,9 +116,10 @@ class RedBarOperationsCenterService:
             instrument_key, trading_date
         )
 
-        signals = self.database.read_signal_attempts(
+        all_signals = self.database.read_signal_attempts(
             instrument_key, trading_date
         )
+        signals, readiness_scope = _readiness_signal_scope(all_signals)
         confirmed = [
             row for row in signals
             if row.get("confirmation_timestamp")
@@ -114,6 +129,9 @@ class RedBarOperationsCenterService:
             row for row in signals
             if row.get("state") in {"FAILED", "TIMEOUT"}
         ]
+        readiness_ids = {
+            _signal_id(row) for row in confirmed if _signal_id(row)
+        }
 
         market_rows = self.database.read_market_context_snapshots(
             instrument_key, trading_date, trading_date
@@ -124,6 +142,29 @@ class RedBarOperationsCenterService:
         option_rows = self.database.read_option_context_snapshots(
             instrument_key, trading_date, trading_date
         )
+
+        if readiness_ids:
+            market_rows = [
+                row for row in market_rows
+                if _signal_id(row) in readiness_ids
+            ]
+            volume_rows = [
+                row for row in volume_rows
+                if _signal_id(row) in readiness_ids
+            ]
+            option_by_id = {
+                _signal_id(row): row
+                for row in option_rows
+                if _signal_id(row) in readiness_ids
+            }
+            # Older rows could have been persisted with trading_date='None'.
+            # Resolve those by signal id so valid aligned context remains visible.
+            for signal_id in readiness_ids - set(option_by_id):
+                row = self.database.read_option_context_by_signal(signal_id)
+                if row:
+                    option_by_id[signal_id] = row
+            option_rows = list(option_by_id.values())
+
         option_aligned = [
             row for row in option_rows if bool(row.get("entry_aligned"))
         ]
@@ -143,6 +184,11 @@ class RedBarOperationsCenterService:
         pipeline_rows = self.database.read_signal_pipeline_status_range(
             instrument_key, trading_date, trading_date
         )
+        if readiness_ids:
+            pipeline_rows = [
+                row for row in pipeline_rows
+                if _signal_id(row) in readiness_ids
+            ]
         core_ready = sum(
             int(bool(row.get("core_eligible"))) for row in pipeline_rows
         )
@@ -174,8 +220,6 @@ class RedBarOperationsCenterService:
             and row.get("exit_reason") != "NOT_EVALUABLE"
         }
 
-        # AI readiness is deliberately a data-volume readiness indicator,
-        # not a claim of predictive accuracy.
         training_samples = len(completed_trade_ids)
         target_samples = 1000
         readiness_pct = min(
@@ -324,6 +368,7 @@ class RedBarOperationsCenterService:
             "options_context": len(option_aligned),
             "core_ready": core_ready,
             "hybrid_ready": hybrid_ready,
+            "readiness_scope": readiness_scope,
             "pipeline_status": (
                 pipeline_status.get("status")
                 if pipeline_status else "WAITING"
@@ -349,22 +394,15 @@ class RedBarOperationsCenterService:
             ),
         }
 
-        signal_ids = {
-            str(row.get("signal_id"))
-            for row in confirmed
-            if row.get("signal_id")
-        }
+        signal_ids = readiness_ids
         market_ids = {
-            str(row.get("signal_id"))
-            for row in market_rows if row.get("signal_id")
+            _signal_id(row) for row in market_rows if _signal_id(row)
         }
         volume_ids = {
-            str(row.get("signal_id"))
-            for row in volume_rows if row.get("signal_id")
+            _signal_id(row) for row in volume_rows if _signal_id(row)
         }
         option_ids = {
-            str(row.get("signal_id"))
-            for row in option_aligned if row.get("signal_id")
+            _signal_id(row) for row in option_aligned if _signal_id(row)
         }
 
         duplicates = max(
@@ -383,6 +421,7 @@ class RedBarOperationsCenterService:
             "missing_options_context": len(signal_ids - option_ids),
             "incomplete_core": max(0, len(signal_ids) - core_ready),
             "incomplete_hybrid": max(0, len(signal_ids) - hybrid_ready),
+            "readiness_scope": readiness_scope,
             "pipeline_errors": (
                 0
                 if pipeline_status is None
