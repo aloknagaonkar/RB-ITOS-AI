@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from hashlib import sha1
@@ -24,6 +25,11 @@ OBSERVATIONAL_AUTHORITY = "OBSERVATIONAL_ONLY"
 UNDERLYING_NAME_TO_INSTRUMENT_KEY = {
     "NIFTY": "NSE_INDEX|Nifty 50",
     "NIFTY 50": "NSE_INDEX|Nifty 50",
+}
+
+_STRIKE_OI_COLUMNS = {
+    "call_oi_at_strike": "REAL",
+    "put_oi_at_strike": "REAL",
 }
 
 
@@ -77,18 +83,83 @@ def _underlying_key(order: Mapping[str, object]) -> str:
     return UNDERLYING_NAME_TO_INSTRUMENT_KEY.get(underlying_name, "")
 
 
+def _database_path(database) -> str:
+    value = getattr(database, "path", None)
+    return str(value) if value else ""
+
+
+def _ensure_strike_oi_columns(database) -> bool:
+    """Add strike-level OI columns to an existing SQLite telemetry table.
+
+    RedBarDatabase remains backward compatible because the migration is
+    additive and guarded by PRAGMA inspection. Test doubles and alternative
+    database adapters without a filesystem path are intentionally ignored.
+    """
+
+    path = _database_path(database)
+    if not path:
+        return False
+
+    initialize = getattr(database, "initialize", None)
+    if callable(initialize):
+        initialize()
+
+    with sqlite3.connect(path) as conn:
+        existing = {
+            row[1]
+            for row in conn.execute(
+                "PRAGMA table_info(option_execution_telemetry)"
+            )
+        }
+        if not existing:
+            return False
+        changed = False
+        for name, definition in _STRIKE_OI_COLUMNS.items():
+            if name not in existing:
+                conn.execute(
+                    "ALTER TABLE option_execution_telemetry "
+                    f"ADD COLUMN {name} {definition}"
+                )
+                changed = True
+        conn.commit()
+    return changed
+
+
+def _persist_strike_oi(
+    database,
+    *,
+    telemetry_id: str,
+    call_oi: object,
+    put_oi: object,
+) -> bool:
+    """Persist exact selected-strike Call and Put OI after the base insert."""
+
+    path = _database_path(database)
+    if not path:
+        return False
+
+    _ensure_strike_oi_columns(database)
+    with sqlite3.connect(path) as conn:
+        cursor = conn.execute(
+            """
+            UPDATE option_execution_telemetry
+            SET call_oi_at_strike=?, put_oi_at_strike=?
+            WHERE telemetry_id=?
+            """,
+            (_num(call_oi), _num(put_oi), telemetry_id),
+        )
+        conn.commit()
+    return cursor.rowcount > 0
+
+
 def _chain_rows(payload: object) -> list[dict[str, object]]:
     if isinstance(payload, list):
-        return [
-            dict(row) for row in payload if isinstance(row, Mapping)
-        ]
+        return [dict(row) for row in payload if isinstance(row, Mapping)]
     if not isinstance(payload, Mapping):
         return []
     data = payload.get("data")
     if isinstance(data, list):
-        return [
-            dict(row) for row in data if isinstance(row, Mapping)
-        ]
+        return [dict(row) for row in data if isinstance(row, Mapping)]
     rows = payload.get("rows") or payload.get("option_chain") or []
     return [dict(row) for row in rows if isinstance(row, Mapping)]
 
@@ -190,7 +261,7 @@ def classify_option_support(
             "No usable premium/OI/volume/spread evidence."
         )
 
-    reasons = []
+    reasons: list[str] = []
     supportive = 0
     conflicting = 0
     if premium_return_pct is not None:
@@ -313,6 +384,13 @@ class OptionExecutionTelemetryService:
         chain_calls = 0
         chain_hits = 0
 
+        try:
+            _ensure_strike_oi_columns(self.database)
+        except Exception as exc:
+            errors.append(
+                f"STRIKE_OI_SCHEMA:{type(exc).__name__}:{exc}"
+            )
+
         orders = self.database.read_paper_execution_orders(self.account_id)
         active_orders = [
             dict(order)
@@ -324,7 +402,7 @@ class OptionExecutionTelemetryService:
             return TelemetryCaptureResult(
                 0,
                 0,
-                (),
+                tuple(errors),
                 cycle_duration_ms=(perf_counter() - started) * 1000.0,
             )
 
@@ -341,7 +419,8 @@ class OptionExecutionTelemetryService:
             return TelemetryCaptureResult(
                 0,
                 len(active_orders),
-                (f"QUOTE_BATCH:{type(exc).__name__}:{exc}",),
+                tuple(errors)
+                + (f"QUOTE_BATCH:{type(exc).__name__}:{exc}",),
                 cycle_duration_ms=(perf_counter() - started) * 1000.0,
             )
 
@@ -535,6 +614,12 @@ class OptionExecutionTelemetryService:
                         "authority": OBSERVATIONAL_AUTHORITY,
                         "created_at": observed.isoformat(),
                     }
+                )
+                _persist_strike_oi(
+                    self.database,
+                    telemetry_id=telemetry_id,
+                    call_oi=chain.get("call_oi"),
+                    put_oi=chain.get("put_oi"),
                 )
                 captured += 1
             except Exception as exc:
