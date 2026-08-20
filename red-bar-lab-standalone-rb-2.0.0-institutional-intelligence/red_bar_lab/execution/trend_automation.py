@@ -64,24 +64,25 @@ class EMA10OpportunityIntelligenceEngine(OpportunityIntelligenceEngine):
             for item in str(result.reason or "").split("|")
             if item.strip() and item.strip() not in informational_tokens
         ]
+        ema_status = "EMA10_TREND_VALID"
 
-        if rsi_primary:
-            blockers = [
-                item for item in blockers
-                if not item.startswith("EMA10_")
-                and not item.endswith("_EMA10_LOST")
-            ]
-        elif not ready or close is None or ema10 is None:
+        if not ready or close is None or ema10 is None:
             blockers.append("EMA10_DATA_UNAVAILABLE")
+            ema_status = "EMA10_DATA_UNAVAILABLE"
         else:
             close_value = float(close)
             ema_value = float(ema10)
             if direction == "BEARISH" and close_value > ema_value:
-                blockers.append("BEARISH_EMA10_LOST")
+                # Red Bar V2 policy: a bearish close moving above EMA10 remains
+                # visible as continuation evidence, but no longer vetoes an
+                # otherwise eligible PE entry.
+                ema_status = "BEARISH_EMA10_LOST_INFORMATIONAL_ONLY"
             elif direction == "BULLISH" and close_value < ema_value:
                 blockers.append("BULLISH_EMA10_LOST")
+                ema_status = "BULLISH_EMA10_LOST"
             elif direction not in {"BULLISH", "BEARISH"}:
                 blockers.append("EMA10_DIRECTION_UNKNOWN")
+                ema_status = "EMA10_DIRECTION_UNKNOWN"
 
         blockers = list(dict.fromkeys(blockers))
         eligible = not blockers
@@ -93,12 +94,8 @@ class EMA10OpportunityIntelligenceEngine(OpportunityIntelligenceEngine):
                 if eligible else "SKIP"
             ),
             reason=(
-                "RSI_ENTRY_POLICY_PASS | EMA10_INFORMATIONAL_ONLY"
-                if eligible and rsi_primary
-                else (
-                    "OPPORTUNITY_HEALTH_PASS | EMA10_TREND_VALID | "
-                    "REWARD_METRICS_INFORMATIONAL_ONLY"
-                )
+                f"OPPORTUNITY_HEALTH_PASS | {ema_status} | "
+                "REWARD_METRICS_INFORMATIONAL_ONLY"
                 if eligible
                 else " | ".join(blockers)
             ),
