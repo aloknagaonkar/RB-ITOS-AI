@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from red_bar_lab.ui.full_trade_card import install as install_full_trade_card
+
 
 _NOT_AVAILABLE = "—"
 
@@ -23,12 +25,14 @@ def _telemetry_columns(telemetry: Mapping[str, object]) -> dict[str, object]:
 
 
 def install(active_trade_views_module: Any) -> None:
-    """Show only latest selected-strike PCR and Delta on active paper trades.
+    """Show latest PCR/Delta and install the selected active-trade Full Card.
 
-    The database is read once per order while attribution is prepared. The compact
-    table wrapper reuses that attached snapshot and performs no provider/API calls.
+    The compact table reuses the persisted latest snapshot and performs no
+    provider/API calls. The Full Card is also read-only and loads details only for
+    the selected active order.
     """
     if getattr(active_trade_views_module, "_option_telemetry_columns_installed", False):
+        install_full_trade_card(active_trade_views_module)
         return
 
     original_compact = active_trade_views_module._compact_trade_rows
@@ -79,6 +83,7 @@ def install(active_trade_views_module: Any) -> None:
     active_trade_views_module._attributed_orders = attributed_orders
     active_trade_views_module._compact_trade_rows = compact_trade_rows
     active_trade_views_module._option_telemetry_columns_installed = True
+    install_full_trade_card(active_trade_views_module)
 
 
 __all__ = ["install"]
