@@ -88,12 +88,29 @@ def resolve_red_bar_v2_live_state(
             diagnostic = _row(
                 conn,
                 """
-                SELECT * FROM paper_signal_diagnostics
-                WHERE trading_date=? AND signal_id LIKE 'RBV2-%'
-                ORDER BY timestamp DESC, id DESC LIMIT 1
+                SELECT d.*
+                FROM paper_signal_diagnostics AS d
+                WHERE d.trading_date=?
+                  AND d.signal_id LIKE 'RBV2-%'
+                  AND EXISTS (
+                      SELECT 1 FROM signal_pipeline_status AS p
+                      WHERE p.signal_id=d.signal_id
+                        AND p.trading_date=d.trading_date
+                  )
+                ORDER BY d.timestamp DESC, d.id DESC LIMIT 1
                 """,
                 (trading_date,),
             )
+            if not diagnostic:
+                diagnostic = _row(
+                    conn,
+                    """
+                    SELECT * FROM paper_signal_diagnostics
+                    WHERE trading_date=? AND signal_id LIKE 'RBV2-%'
+                    ORDER BY timestamp DESC, id DESC LIMIT 1
+                    """,
+                    (trading_date,),
+                )
             if not diagnostic:
                 return snapshot, RedBarV2RuntimeDiagnostics(
                     trading_date=trading_date,
