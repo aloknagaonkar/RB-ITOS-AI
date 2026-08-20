@@ -26,6 +26,9 @@ from red_bar_lab.ui.live_trade_card_validation import (
 from red_bar_lab.ui.open_trade_row_runtime import install as install_open_trade_row_runtime
 from red_bar_lab.ui.option_indicator_card import install as install_option_indicator_card
 from red_bar_lab.ui.paper_time_display import install as install_paper_time_display
+from red_bar_lab.ui.red_bar_v2_live_state_installer import (
+    install as install_red_bar_v2_live_state,
+)
 from red_bar_lab.ui.trade_outlook_card import install as install_trade_outlook_card
 from red_bar_lab.ui.workspace_page_runtime import (
     PAGE_MODULE_PATHS as _PAGE_MODULE_PATHS,
@@ -101,6 +104,7 @@ def render(settings: RedBarSettings) -> None:
 
     module = _load_page_module(page)
     install_open_trade_row_runtime(module)
+    install_red_bar_v2_live_state(module, database, instrument_key)
     module.render_page(
         settings,
         layout,
