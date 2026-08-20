@@ -54,12 +54,68 @@ def test_active_ce_card_uses_selected_call_oi():
     assert card["freshness"]["status"] == "UNAVAILABLE"
 
 
-def test_entry_lifecycle_values_are_not_invented_before_snapshot_support():
+def test_entry_and_active_lifecycle_values_are_shown_with_changes():
     card = build_active_trade_card(
         {"order_id": "O3", "status": "OPEN", "tradingsymbol": "NIFTY24900PE", "option_type": "PE"},
-        {"pcr_oi": 1.2, "delta": -0.41},
+        {"pcr_oi": 1.46, "delta": -0.57},
+        lifecycle={
+            "entry": {
+                "snapshot_type": "ENTRY",
+                "pcr_oi": 1.18,
+                "delta": -0.42,
+                "snapshot_source": "ACTIVE_CAPTURE",
+                "observed_timestamp": "2026-08-20T10:12:00+05:30",
+            },
+            "latest": {
+                "snapshot_type": "ACTIVE",
+                "pcr_oi": 1.46,
+                "delta": -0.57,
+                "put_oi_at_strike": 1197200,
+                "call_oi_at_strike": 820000,
+                "snapshot_source": "ACTIVE_CAPTURE",
+                "observed_timestamp": "2026-08-20T10:30:00+05:30",
+            },
+            "exit": None,
+        },
     )
 
-    assert card["entry_pcr"] is None
-    assert card["entry_delta"] is None
-    assert "explicit lifecycle snapshots" in card["lifecycle_note"]
+    assert card["entry_pcr"] == 1.18
+    assert card["current_pcr"] == 1.46
+    assert round(card["pcr_change"], 2) == 0.28
+    assert card["entry_delta"] == -0.42
+    assert card["current_delta"] == -0.57
+    assert round(card["delta_change"], 2) == -0.15
+    assert card["selected_oi"] == 1197200
+    assert "persisted" in card["lifecycle_note"]
+
+
+def test_closed_card_uses_exit_lifecycle_snapshot():
+    card = build_active_trade_card(
+        {
+            "order_id": "O4",
+            "status": "CLOSED",
+            "tradingsymbol": "NIFTY25000PE",
+            "option_type": "PE",
+            "entry_price": 142.5,
+            "exit_price": 157.8,
+            "realized_pnl": 1147.5,
+        },
+        None,
+        lifecycle={
+            "entry": {"pcr_oi": 1.18, "delta": -0.42, "snapshot_source": "ACTIVE_CAPTURE"},
+            "latest": {"pcr_oi": 1.46, "delta": -0.57},
+            "exit": {
+                "pcr_oi": 1.32,
+                "delta": -0.51,
+                "snapshot_source": "LAST_ACTIVE_FALLBACK",
+                "data_quality": "FALLBACK",
+            },
+        },
+    )
+
+    assert card["comparison_label"] == "Exit"
+    assert card["current_action"] == "CLOSED"
+    assert card["current_pcr"] == 1.32
+    assert card["current_delta"] == -0.51
+    assert card["exit_snapshot_source"] == "LAST_ACTIVE_FALLBACK"
+    assert card["exit_data_quality"] == "FALLBACK"
