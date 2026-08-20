@@ -24,6 +24,14 @@ def _telemetry_columns(telemetry: Mapping[str, object]) -> dict[str, object]:
     }
 
 
+def _install_full_card_when_supported(active_trade_views_module: Any) -> None:
+    if not hasattr(active_trade_views_module, "render_current_trades"):
+        return
+    if not hasattr(active_trade_views_module, "st"):
+        return
+    install_full_trade_card(active_trade_views_module)
+
+
 def install(active_trade_views_module: Any) -> None:
     """Show latest PCR/Delta and install the selected active-trade Full Card.
 
@@ -32,7 +40,7 @@ def install(active_trade_views_module: Any) -> None:
     the selected active order.
     """
     if getattr(active_trade_views_module, "_option_telemetry_columns_installed", False):
-        install_full_trade_card(active_trade_views_module)
+        _install_full_card_when_supported(active_trade_views_module)
         return
 
     original_compact = active_trade_views_module._compact_trade_rows
@@ -83,7 +91,7 @@ def install(active_trade_views_module: Any) -> None:
     active_trade_views_module._attributed_orders = attributed_orders
     active_trade_views_module._compact_trade_rows = compact_trade_rows
     active_trade_views_module._option_telemetry_columns_installed = True
-    install_full_trade_card(active_trade_views_module)
+    _install_full_card_when_supported(active_trade_views_module)
 
 
 __all__ = ["install"]
