@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from datetime import date
 from typing import Any, Iterable, Mapping
 
 from red_bar_lab.config import RedBarSettings
 from red_bar_lab.operations.red_bar_v2_ui_snapshot import RedBarV2UISnapshot
 from red_bar_lab.storage.database import RedBarDatabase
+from red_bar_lab.ui.strategy_option_context import build_option_behaviour_snapshot
 
 
 def _value(value: Any, fallback: str = "—") -> Any:
@@ -141,6 +143,23 @@ def _load_open_orders() -> list[dict[str, Any]]:
         return []
 
 
+def _load_option_context() -> dict[str, Any]:
+    try:
+        settings = RedBarSettings.from_env()
+        database = RedBarDatabase(settings.database_path)
+        database.initialize()
+        return dict(
+            build_option_behaviour_snapshot(
+                database,
+                "NSE_INDEX|Nifty 50",
+                date.today().isoformat(),
+            )
+            or {}
+        )
+    except Exception:
+        return {}
+
+
 def render_red_bar_v2_legacy_panel(
     st,
     snapshot: RedBarV2UISnapshot | None,
@@ -195,7 +214,7 @@ def render_red_bar_v2_legacy_panel(
     p3.metric("VWAP gap", gap_points)
     p4.metric("RSI + VWAP alignment", _rsi_vwap_alignment(snapshot))
 
-    option_context = dict(option_context or {})
+    option_context = dict(option_context or _load_option_context())
     o1, o2, o3, o4 = st.columns(4)
     o1.metric("PCR (OI)", _ratio(option_context.get("pcr")))
     o2.metric("OI positioning", _value(option_context.get("directional_bias"), "UNAVAILABLE"))
