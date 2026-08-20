@@ -1,6 +1,12 @@
 from red_bar_lab.ui._shared import *
+from red_bar_lab.services.nifty_futures_shadow_validation import (
+    validate_nifty_futures_shadow_session,
+)
 from red_bar_lab.services.nifty_futures_snapshot_store import (
     read_nifty_futures_snapshots,
+)
+from red_bar_lab.services.nifty_futures_threshold_replay import (
+    replay_nifty_futures_strength_thresholds,
 )
 
 
@@ -50,6 +56,45 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         "Authority": latest.get("authority"),
     }
     st.dataframe(_arrow_safe_rows([detail]), width="stretch", hide_index=True)
+
+    shadow = validate_nifty_futures_shadow_session(rows)
+    st.markdown("#### Market-hours shadow validation")
+    s1, s2, s3, s4 = st.columns(4)
+    s1.metric("Market observations", shadow.market_hours_observations)
+    s2.metric("Readiness rate", f"{shadow.readiness_rate_pct:.1f}%")
+    s3.metric("Directional rate", f"{shadow.directional_rate_pct:.1f}%")
+    s4.metric("Moderate/strong participation", f"{shadow.participation_rate_pct:.1f}%")
+    st.caption(f"{shadow.status}: {shadow.reason} · execution impact={shadow.execution_impact}")
+
+    st.markdown("#### Historical strength-threshold replay")
+    t1, t2, t3, t4 = st.columns(4)
+    price_threshold = t1.number_input("Price change threshold %", 0.0, 5.0, 0.02, 0.01)
+    oi_threshold = t2.number_input("OI change threshold %", 0.0, 20.0, 0.02, 0.01)
+    moderate_rvol = t3.number_input("Moderate relative volume", 0.0, 10.0, 0.8, 0.1)
+    strong_rvol = t4.number_input("Strong relative volume", 0.0, 10.0, 1.2, 0.1)
+    replay = replay_nifty_futures_strength_thresholds(
+        rows,
+        price_threshold_pct=price_threshold,
+        oi_threshold_pct=oi_threshold,
+        moderate_relative_volume=moderate_rvol,
+        strong_relative_volume=strong_rvol,
+    )
+    st.dataframe(
+        _arrow_safe_rows([{
+            "Status": replay.status,
+            "Samples": replay.samples,
+            "Directional": replay.directional_samples,
+            "Strong": replay.strong,
+            "Moderate": replay.moderate,
+            "Weak": replay.weak,
+            "Insufficient": replay.insufficient,
+            "Strong rate %": replay.strong_rate_pct,
+            "Moderate or strong rate %": replay.moderate_or_strong_rate_pct,
+            "Execution impact": replay.execution_impact,
+        }]),
+        width="stretch",
+        hide_index=True,
+    )
 
     st.markdown("#### Recent futures diagnostic history")
     display_columns = (
