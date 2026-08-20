@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from hashlib import sha1
-from typing import Any
+from time import perf_counter
+from typing import Any, Mapping, Sequence
 from zoneinfo import ZoneInfo
 
 IST = ZoneInfo('Asia/Kolkata')
 RSI_STRATEGY_SOURCE = 'RSI_EXTREME_REVERSAL_V1'
+RED_BAR_STRATEGY_SOURCES = frozenset({'RED_BAR', 'RED_BAR_V2'})
+SUPPORTED_TELEMETRY_SOURCES = frozenset({RSI_STRATEGY_SOURCE, *RED_BAR_STRATEGY_SOURCES})
+ACTIVE_ORDER_STATES = frozenset({'OPEN', 'ACTIVE', 'FILLED', 'PARTIALLY_FILLED'})
 OBSERVATIONAL_AUTHORITY = 'OBSERVATIONAL_ONLY'
 
 
@@ -27,6 +31,100 @@ def _first_level(depth: object, side: str) -> dict[str, object]:
     if not levels or not isinstance(levels[0], dict):
         return {}
     return levels[0]
+
+
+def _strategy_source(order: Mapping[str, object]) -> str:
+    return str(
+        order.get('execution_strategy_source')
+        or order.get('strategy_source')
+        or order.get('strategy_id')
+        or ''
+    ).strip().upper()
+
+
+def _is_active_order(order: Mapping[str, object]) -> bool:
+    state = str(order.get('status') or order.get('state') or '').strip().upper()
+    return not state or state in ACTIVE_ORDER_STATES
+
+
+def _underlying_key(order: Mapping[str, object]) -> str:
+    return str(
+        order.get('underlying_instrument_key')
+        or order.get('underlying_key')
+        or order.get('spot_instrument_key')
+        or ''
+    ).strip()
+
+
+def _chain_rows(payload: object) -> list[dict[str, object]]:
+    if isinstance(payload, list):
+        return [dict(row) for row in payload if isinstance(row, Mapping)]
+    if not isinstance(payload, Mapping):
+        return []
+    data = payload.get('data')
+    if isinstance(data, list):
+        return [dict(row) for row in data if isinstance(row, Mapping)]
+    rows = payload.get('rows') or payload.get('option_chain') or []
+    return [dict(row) for row in rows if isinstance(row, Mapping)]
+
+
+def _option_node(row: Mapping[str, object], side: str) -> dict[str, object]:
+    aliases = ('call_options', 'call', 'ce') if side == 'CE' else ('put_options', 'put', 'pe')
+    for name in aliases:
+        node = row.get(name)
+        if isinstance(node, Mapping):
+            return dict(node)
+    return {}
+
+
+def _market_data(node: Mapping[str, object]) -> dict[str, object]:
+    value = node.get('market_data') or node.get('marketData') or node
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _greeks(node: Mapping[str, object]) -> dict[str, object]:
+    value = node.get('option_greeks') or node.get('optionGreeks') or node.get('greeks') or {}
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _strike_context(rows: Sequence[Mapping[str, object]], strike: object, option_type: object) -> dict[str, object]:
+    target = _num(strike)
+    if target is None:
+        return {}
+    matched: Mapping[str, object] | None = None
+    for row in rows:
+        candidate = _num(row.get('strike_price') or row.get('strike'))
+        if candidate is not None and abs(candidate - target) < 0.001:
+            matched = row
+            break
+    if matched is None:
+        return {}
+
+    call_node = _option_node(matched, 'CE')
+    put_node = _option_node(matched, 'PE')
+    call_market = _market_data(call_node)
+    put_market = _market_data(put_node)
+    call_oi = _num(call_market.get('oi') or call_node.get('oi'))
+    put_oi = _num(put_market.get('oi') or put_node.get('oi'))
+    pcr = _num(matched.get('pcr'))
+    if pcr is None and call_oi not in (None, 0.0) and put_oi is not None:
+        pcr = put_oi / call_oi
+
+    side = str(option_type or '').upper()
+    selected = call_node if side in {'CE', 'CALL'} else put_node
+    selected_greeks = _greeks(selected)
+    selected_market = _market_data(selected)
+    return {
+        'call_oi': call_oi,
+        'put_oi': put_oi,
+        'pcr_oi': pcr,
+        'pcr_source': 'OPTION_CHAIN_ROW' if pcr is not None else 'NOT_AVAILABLE',
+        'delta': _num(selected_greeks.get('delta')),
+        'gamma': _num(selected_greeks.get('gamma')),
+        'theta': _num(selected_greeks.get('theta')),
+        'vega': _num(selected_greeks.get('vega')),
+        'iv': _num(selected_greeks.get('iv') or selected_market.get('iv')),
+    }
 
 
 def classify_option_support(*, premium_return_pct, oi_change, relative_volume, spread_pct):
@@ -76,29 +174,89 @@ class TelemetryCaptureResult:
     captured: int
     skipped: int
     errors: tuple[str, ...]
+    option_chain_calls: int = 0
+    option_chain_cache_hits: int = 0
+    cycle_duration_ms: float = 0.0
 
 
 class OptionExecutionTelemetryService:
-    def __init__(self, database, *, account_id: str):
+    """Capture observational option telemetry without affecting trade execution.
+
+    Quotes are fetched once for all active supported orders. Option-chain data is
+    grouped and cached by underlying+expiry, so multiple positions sharing an expiry
+    reuse one chain snapshot. Existing RSI telemetry remains compatible while active
+    Red Bar/Red Bar V2 orders gain selected-strike PCR and Greeks when available.
+    """
+
+    def __init__(self, database, *, account_id: str, chain_cache_seconds: int = 45):
         self.database = database
         self.account_id = str(account_id)
+        self.chain_cache_seconds = max(5, int(chain_cache_seconds))
+        self._chain_cache: dict[tuple[str, str], tuple[datetime, list[dict[str, object]]]] = {}
+
+    def _fetch_chain(self, market_data, *, underlying_key: str, expiry: str, observed: datetime):
+        cache_key = (underlying_key, expiry)
+        cached = self._chain_cache.get(cache_key)
+        if cached and observed - cached[0] <= timedelta(seconds=self.chain_cache_seconds):
+            return cached[1], False, True
+
+        method = getattr(market_data, 'option_chain', None) or getattr(market_data, 'get_option_chain', None)
+        if not callable(method) or not underlying_key or not expiry:
+            return [], False, False
+        try:
+            try:
+                payload = method(underlying_key, expiry)
+            except TypeError:
+                payload = method(instrument_key=underlying_key, expiry_date=expiry)
+            rows = _chain_rows(payload)
+            self._chain_cache[cache_key] = (observed, rows)
+            return rows, True, False
+        except Exception:
+            return [], True, False
 
     def capture(self, *, market_data, now: datetime | None = None) -> TelemetryCaptureResult:
+        started = perf_counter()
         observed = (now or datetime.now(IST)).astimezone(IST)
         captured = 0
         skipped = 0
-        errors = []
+        errors: list[str] = []
+        chain_calls = 0
+        chain_hits = 0
+
         orders = self.database.read_paper_execution_orders(self.account_id)
-        rsi_orders = [o for o in orders if str(o.get('execution_strategy_source') or '') == RSI_STRATEGY_SOURCE]
-        if not rsi_orders:
-            return TelemetryCaptureResult(0, 0, ())
-        keys = [f"{o.get('exchange')}:{o.get('tradingsymbol')}" for o in rsi_orders if o.get('exchange') and o.get('tradingsymbol')]
+        active_orders = [
+            dict(order) for order in orders
+            if _strategy_source(order) in SUPPORTED_TELEMETRY_SOURCES and _is_active_order(order)
+        ]
+        if not active_orders:
+            return TelemetryCaptureResult(0, 0, (), cycle_duration_ms=(perf_counter() - started) * 1000.0)
+
+        keys = list(dict.fromkeys(
+            f"{order.get('exchange')}:{order.get('tradingsymbol')}"
+            for order in active_orders
+            if order.get('exchange') and order.get('tradingsymbol')
+        ))
         try:
             quotes = market_data.quote(keys) if keys else {}
         except Exception as exc:
-            return TelemetryCaptureResult(0, len(rsi_orders), (f'QUOTE_BATCH:{type(exc).__name__}:{exc}',))
+            return TelemetryCaptureResult(
+                0, len(active_orders), (f'QUOTE_BATCH:{type(exc).__name__}:{exc}',),
+                cycle_duration_ms=(perf_counter() - started) * 1000.0,
+            )
 
-        for order in rsi_orders:
+        chain_by_group: dict[tuple[str, str], list[dict[str, object]]] = {}
+        for order in active_orders:
+            group = (_underlying_key(order), str(order.get('expiry') or ''))
+            if not all(group) or group in chain_by_group:
+                continue
+            rows, called, cache_hit = self._fetch_chain(
+                market_data, underlying_key=group[0], expiry=group[1], observed=observed
+            )
+            chain_by_group[group] = rows
+            chain_calls += int(called)
+            chain_hits += int(cache_hit)
+
+        for order in active_orders:
             try:
                 order_id = str(order.get('order_id') or '')
                 key = f"{order.get('exchange')}:{order.get('tradingsymbol')}"
@@ -132,13 +290,18 @@ class OptionExecutionTelemetryService:
                     relative_volume=relative_volume,
                     spread_pct=spread_pct,
                 )
+                group = (_underlying_key(order), str(order.get('expiry') or ''))
+                chain = _strike_context(
+                    chain_by_group.get(group, []), order.get('strike'), order.get('option_type')
+                )
+                strategy_source = _strategy_source(order)
                 raw_id = f"{order_id}|{observed.isoformat()}|{quote.get('last_price')}|{quote.get('oi')}|{quote.get('volume')}"
                 telemetry_id = 'OT-' + sha1(raw_id.encode('utf-8')).hexdigest()[:20].upper()
                 self.database.insert_option_execution_telemetry({
                     'telemetry_id': telemetry_id,
                     'order_id': order_id,
                     'signal_id': order.get('signal_id'),
-                    'execution_strategy_source': RSI_STRATEGY_SOURCE,
+                    'execution_strategy_source': strategy_source,
                     'observed_timestamp': observed.isoformat(),
                     'exchange': order.get('exchange'),
                     'tradingsymbol': order.get('tradingsymbol'),
@@ -161,13 +324,15 @@ class OptionExecutionTelemetryService:
                     'spread_pct': spread_pct,
                     'buy_quantity': _num(quote.get('buy_quantity')),
                     'sell_quantity': _num(quote.get('sell_quantity')),
-                    'iv': _num(quote.get('iv')),
-                    'delta': _num(quote.get('delta')),
-                    'gamma': _num(quote.get('gamma')),
-                    'theta': _num(quote.get('theta')),
-                    'vega': _num(quote.get('vega')),
-                    'pcr_oi': None,
-                    'pcr_source': 'NOT_AVAILABLE',
+                    'iv': chain.get('iv') if chain.get('iv') is not None else _num(quote.get('iv')),
+                    'delta': chain.get('delta') if chain.get('delta') is not None else _num(quote.get('delta')),
+                    'gamma': chain.get('gamma') if chain.get('gamma') is not None else _num(quote.get('gamma')),
+                    'theta': chain.get('theta') if chain.get('theta') is not None else _num(quote.get('theta')),
+                    'vega': chain.get('vega') if chain.get('vega') is not None else _num(quote.get('vega')),
+                    'pcr_oi': chain.get('pcr_oi'),
+                    'pcr_source': chain.get('pcr_source') or 'NOT_AVAILABLE',
+                    'call_oi_at_strike': chain.get('call_oi'),
+                    'put_oi_at_strike': chain.get('put_oi'),
                     'support_classification': classification,
                     'support_reason': reason,
                     'authority': OBSERVATIONAL_AUTHORITY,
@@ -176,4 +341,12 @@ class OptionExecutionTelemetryService:
                 captured += 1
             except Exception as exc:
                 errors.append(f"{order.get('order_id')}:{type(exc).__name__}:{exc}")
-        return TelemetryCaptureResult(captured, skipped, tuple(errors))
+
+        return TelemetryCaptureResult(
+            captured,
+            skipped,
+            tuple(errors),
+            option_chain_calls=chain_calls,
+            option_chain_cache_hits=chain_hits,
+            cycle_duration_ms=(perf_counter() - started) * 1000.0,
+        )
