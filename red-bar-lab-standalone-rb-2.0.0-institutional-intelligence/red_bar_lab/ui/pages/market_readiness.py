@@ -1,8 +1,13 @@
+import sqlite3
+
 from red_bar_lab.ui._shared import *
 from red_bar_lab.services.global_readiness_store import read_global_readiness_snapshots
 from red_bar_lab.services.global_readiness_validation import (
     build_global_readiness_shadow_report,
     replay_global_readiness,
+)
+from red_bar_lab.services.independent_market_recommendation import (
+    build_independent_market_recommendation,
 )
 from red_bar_lab.services.nifty_futures_snapshot_store import read_nifty_futures_snapshots
 from red_bar_lab.services.trade_evidence import build_trade_evidence_recommendation
@@ -12,11 +17,48 @@ def _display_score(value):
     return "—" if value is None else f"{value:.1f}"
 
 
+def _display_number(value, digits=3):
+    return "—" if value is None else f"{float(value):.{digits}f}"
+
+
+def _latest_option_context(database_path):
+    """Read persisted option evidence only; never call a market-data provider."""
+    try:
+        with sqlite3.connect(database_path) as connection:
+            connection.row_factory = sqlite3.Row
+            table = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='option_context_snapshots'"
+            ).fetchone()
+            if not table:
+                return {}
+            row = connection.execute(
+                """
+                SELECT entry_timestamp, option_expiry, option_spot_price, atm_strike,
+                       pcr_oi, atm_call_delta, atm_put_delta, atm_call_iv, atm_put_iv
+                FROM option_context_snapshots
+                ORDER BY julianday(entry_timestamp) DESC, entry_timestamp DESC
+                LIMIT 1
+                """
+            ).fetchone()
+            return dict(row) if row else {}
+    except sqlite3.Error:
+        return {}
+
+
+def _evidence_table(recommendation):
+    return [
+        {"Category": "Positive", "Evidence": ", ".join(recommendation.positive_evidence) or "NONE"},
+        {"Category": "Caution", "Evidence": ", ".join(recommendation.caution_evidence) or "NONE"},
+        {"Category": "Blocking", "Evidence": ", ".join(recommendation.blocking_evidence) or "NONE"},
+    ]
+
+
 def render_page(settings, layout, database, token, underlying_name, instrument_key, interval) -> None:
     st.subheader("Trade Evidence & Market Readiness")
     st.caption(
-        "Read-only Red Bar V2 trade suggestion, market-data quality, futures confirmation "
-        "and execution-policy evidence. This page never opens, blocks or modifies a trade."
+        "Two separate read-only views: an independent market recommendation driven by "
+        "futures/readiness evidence, and a Red Bar V2 recommendation for comparison. "
+        "Neither view has execution authority."
     )
 
     rows = read_global_readiness_snapshots(
@@ -37,50 +79,90 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         limit=1,
     )
     latest_futures = futures_rows[0] if futures_rows else {}
-    recommendation = build_trade_evidence_recommendation(
+    option_context = _latest_option_context(settings.database_path)
+
+    independent = build_independent_market_recommendation(
+        readiness=latest,
+        futures_snapshot=latest_futures,
+        option_context=option_context,
+    )
+    v2_recommendation = build_trade_evidence_recommendation(
         readiness=latest,
         signal_diagnostic=latest_signal,
         futures_snapshot=latest_futures,
     )
 
-    st.markdown("### Trade Evidence Recommendation")
-    r1, r2, r3, r4 = st.columns(4)
-    r1.metric("Red Bar direction", recommendation.direction)
-    r2.metric("Suggested option", recommendation.suggested_option)
-    r3.metric("Evidence grade", recommendation.grade)
-    r4.metric("Suggested action", recommendation.action)
+    st.markdown("### A. Independent Market Recommendation")
+    i1, i2, i3, i4 = st.columns(4)
+    i1.metric("Independent direction", independent.direction)
+    i2.metric("Suggested trade", f"BUY {independent.suggested_option}" if independent.suggested_option != "—" else "WAIT")
+    i3.metric("Evidence grade", independent.grade)
+    i4.metric("Suggested action", independent.action)
 
-    candidate_rows = [{
+    independent_rows = [{
+        "Futures state": independent.futures_state,
+        "Futures strength": independent.futures_strength,
+        "Suggested side": independent.suggested_option,
+        "ATM strike": option_context.get("atm_strike") or "—",
+        "Expiry": option_context.get("option_expiry") or "—",
+        "Option delta": _display_number(independent.option_delta),
+        "Delta source": independent.delta_source,
+        "PCR OI": _display_number(independent.pcr_oi),
+        "Call IV": _display_number(option_context.get("atm_call_iv"), 2),
+        "Put IV": _display_number(option_context.get("atm_put_iv"), 2),
+        "Global readiness": latest.get("overall_status") or "—",
+        "Authority": independent.authority,
+    }]
+    st.dataframe(_arrow_safe_rows(independent_rows), width="stretch", hide_index=True)
+    st.info(independent.summary)
+    st.dataframe(_arrow_safe_rows(_evidence_table(independent)), width="stretch", hide_index=True)
+    st.caption(
+        "Direction comes from NIFTY futures positioning, not Red Bar V2. Delta is the exact "
+        "candidate delta when persisted; otherwise it is the latest ATM delta for the suggested side."
+    )
+
+    st.markdown("### B. Red Bar V2 Recommendation")
+    r1, r2, r3, r4 = st.columns(4)
+    r1.metric("Red Bar direction", v2_recommendation.direction)
+    r2.metric("Suggested option", v2_recommendation.suggested_option)
+    r3.metric("Evidence grade", v2_recommendation.grade)
+    r4.metric("Suggested action", v2_recommendation.action)
+
+    v2_rows = [{
         "Signal time": latest_signal.get("confirmation_timestamp") or latest_signal.get("timestamp") or "—",
-        "Suggested contract": recommendation.suggested_contract,
-        "Candidate score": _display_score(recommendation.candidate_score),
+        "Suggested contract": v2_recommendation.suggested_contract,
+        "Candidate score": _display_score(v2_recommendation.candidate_score),
+        "Suggested-side ATM delta": _display_number(
+            option_context.get("atm_call_delta") if v2_recommendation.suggested_option == "CE"
+            else option_context.get("atm_put_delta") if v2_recommendation.suggested_option == "PE"
+            else None
+        ),
         "Futures state": latest_futures.get("positioning_state") or "—",
         "Futures strength": latest_futures.get("strength") or latest.get("futures_strength") or "—",
         "Global readiness": latest.get("overall_status") or "—",
-        "Authority": recommendation.authority,
+        "Authority": v2_recommendation.authority,
     }]
-    st.dataframe(_arrow_safe_rows(candidate_rows), width="stretch", hide_index=True)
-    st.info(recommendation.summary)
+    st.dataframe(_arrow_safe_rows(v2_rows), width="stretch", hide_index=True)
+    st.info(v2_recommendation.summary)
+    st.dataframe(_arrow_safe_rows(_evidence_table(v2_recommendation)), width="stretch", hide_index=True)
 
-    evidence_rows = [
-        {
-            "Category": "Positive",
-            "Evidence": ", ".join(recommendation.positive_evidence) or "NONE",
-        },
-        {
-            "Category": "Caution",
-            "Evidence": ", ".join(recommendation.caution_evidence) or "NONE",
-        },
-        {
-            "Category": "Blocking",
-            "Evidence": ", ".join(recommendation.blocking_evidence) or "NONE",
-        },
-    ]
-    st.dataframe(_arrow_safe_rows(evidence_rows), width="stretch", hide_index=True)
-    st.caption(
-        "Suggested CE/PE and evidence grade are observational only. Red Bar V2 remains "
-        "the paper signal authority, and the existing execution engine remains unchanged."
-    )
+    independent_side = independent.suggested_option
+    v2_side = v2_recommendation.suggested_option
+    if independent_side in {"CE", "PE"} and v2_side in {"CE", "PE"}:
+        alignment = "CONFIRMED" if independent_side == v2_side else "CONFLICTED"
+    else:
+        alignment = "NOT_COMPARABLE"
+    st.markdown("### C. Recommendation Alignment")
+    a1, a2, a3 = st.columns(3)
+    a1.metric("Independent view", independent_side)
+    a2.metric("Red Bar V2 view", v2_side)
+    a3.metric("Alignment", alignment)
+    if alignment == "CONFLICTED":
+        st.warning("Independent futures/readiness evidence and Red Bar V2 suggest opposite option sides. Wait for confirmation.")
+    elif alignment == "CONFIRMED":
+        st.success("Independent market evidence and Red Bar V2 suggest the same option side.")
+    else:
+        st.info("One of the two views has no actionable direction yet.")
 
     st.markdown("### Market Readiness Detail")
     c1, c2, c3, c4 = st.columns(4)
