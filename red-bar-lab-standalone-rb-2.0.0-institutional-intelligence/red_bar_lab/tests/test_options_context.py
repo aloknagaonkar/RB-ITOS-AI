@@ -112,3 +112,20 @@ def test_late_option_snapshot_is_not_entry_aligned():
     )
     assert row["entry_aligned"] == 0
     assert row["option_snapshot_delay_seconds"] == 600.0
+
+
+def test_option_context_uses_confirmation_date_when_signal_date_missing():
+    signal = _signal()
+    signal["trading_date"] = None
+
+    row = summarize_option_chain(
+        signal=signal,
+        instrument_key="NSE_INDEX|Nifty 50",
+        expiry="2026-08-13",
+        chain=_chain(),
+        snapshot_timestamp=datetime.fromisoformat(
+            "2026-08-07T10:01:00+05:30"
+        ),
+    )
+
+    assert row["trading_date"] == "2026-08-07"
