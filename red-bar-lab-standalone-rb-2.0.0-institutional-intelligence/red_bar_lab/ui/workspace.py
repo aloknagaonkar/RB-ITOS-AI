@@ -3,6 +3,10 @@ from __future__ import annotations
 import red_bar_lab.ui._shared as shared_ui
 import red_bar_lab.ui.active_trade_views as active_trade_views
 from red_bar_lab.execution.exit_engine import PaperExitEngine
+from red_bar_lab.execution.paper_engine import RedBarPaperExecutionEngine
+from red_bar_lab.execution.paper_close_telemetry_lifecycle import (
+    install as install_paper_close_telemetry_lifecycle,
+)
 from red_bar_lab.ui._shared import (
     ArtifactLayout,
     RedBarSettings,
@@ -40,6 +44,7 @@ install_arrow_dataframe_guard(st)
 install_paper_time_display()
 install_current_trade_exit_columns(active_trade_views)
 install_current_trade_option_telemetry(active_trade_views)
+install_paper_close_telemetry_lifecycle(RedBarPaperExecutionEngine)
 shared_ui.PaperExitEngine = PaperExitEngine
 install_import_compatibility()
 
