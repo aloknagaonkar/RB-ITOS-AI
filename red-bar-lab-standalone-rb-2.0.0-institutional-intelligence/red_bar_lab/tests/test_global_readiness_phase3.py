@@ -2,6 +2,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from red_bar_lab.services.global_readiness import assess_global_readiness
+from red_bar_lab.services.global_readiness_runtime import build_and_persist_global_readiness
 from red_bar_lab.services.global_readiness_store import (
     persist_global_readiness_snapshot,
     read_global_readiness_snapshots,
@@ -85,3 +86,37 @@ def test_runtime_adapter_introduces_no_market_calls():
 
     source = global_readiness_runtime.build_and_persist_global_readiness.__doc__
     assert "no market-data calls" in source
+
+
+def test_after_hours_missing_quotes_pcr_and_stale_bridge_are_advisory(tmp_path: Path):
+    result = build_and_persist_global_readiness(
+        database_path=tmp_path / "readiness.sqlite3",
+        observed_at="2026-08-20T22:48:53+05:30",
+        underlying_name="NIFTY 50",
+        instrument_key="NSE_INDEX|Nifty 50",
+        candle_diagnostic=SimpleNamespace(
+            readiness=SimpleNamespace(status="MARKET_CLOSED")
+        ),
+        futures_readiness=SimpleNamespace(status="READY"),
+        futures_strength=SimpleNamespace(strength="WEAK"),
+        bridge=SimpleNamespace(status="BLOCKED", reason="V2_SNAPSHOT_STALE"),
+        authority=SimpleNamespace(source_enabled=True),
+        latest_signal_diagnostic={
+            "market_hours_ok": False,
+            "option_chain_status": "READY",
+        },
+        report=SimpleNamespace(
+            signals_seen=55,
+            candidates_scored=0,
+            paper_orders_opened=0,
+            skipped=53,
+        ),
+    )
+
+    assert result.status == "DEGRADED"
+    assert result.blocking_reasons == ()
+    assert result.option_quote_status == "MARKET_CLOSED"
+    assert result.pcr_status == "MARKET_CLOSED"
+    assert result.v2_alignment_status == "AFTER_HOURS_EXPECTED"
+    assert "FUTURES_STRENGTH_WEAK" in result.advisory_reasons
+    assert result.execution_reasons == ("MARKET_HOURS_OUTSIDE_ENTRY_HOURS",)
