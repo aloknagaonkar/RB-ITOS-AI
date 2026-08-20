@@ -35,7 +35,7 @@ def _now(text):
     return datetime.fromisoformat(text)
 
 
-def test_collects_latest_futures_close_volume_and_oi():
+def test_collects_latest_completed_futures_close_volume_and_oi():
     provider = _Provider(
         [
             ["2026-08-20T10:29:00+05:30", 25000, 25010, 24990, 25005, 1100, 50100],
@@ -53,9 +53,10 @@ def test_collects_latest_futures_close_volume_and_oi():
     assert result.instrument_key == "NSE_FO|58072"
     assert result.candle_readiness.status == "READY"
     assert result.volume_authority.status == "APPLICABLE"
-    assert result.latest_close == 25015.0
-    assert result.latest_volume == 1250.0
-    assert result.latest_oi == 50450.0
+    assert result.latest_close == 25005.0
+    assert result.latest_volume == 1100.0
+    assert result.latest_oi == 50100.0
+    assert result.latest_timestamp == "2026-08-20T10:29:00+05:30"
     assert result.candle_count == 2
     assert provider.calls == [("NSE_FO|58072", 1)]
 
@@ -81,6 +82,23 @@ def test_mapping_candles_and_dataframe_like_records_are_supported():
     assert result.latest_close == 25005.0
     assert result.latest_volume == 1100.0
     assert result.latest_oi == 50100.0
+
+
+def test_only_current_incomplete_candle_does_not_publish_telemetry():
+    provider = _Provider(
+        [["2026-08-20T10:30:00+05:30", 1, 2, 1, 2, 100, 200]]
+    )
+
+    result = assess_nifty_futures_market_data(
+        provider,
+        contract=_contract(),
+        now=_now("2026-08-20T10:30:20+05:30"),
+    )
+
+    assert result.status == "MISSING"
+    assert result.candle_readiness.status == "CURRENT_CANDLE_INCOMPLETE"
+    assert result.latest_volume is None
+    assert result.latest_oi is None
 
 
 def test_unavailable_contract_does_not_call_provider():
@@ -119,7 +137,7 @@ def test_log_values_are_stable():
 
     assert futures_market_log_values(result) == (
         "READY",
-        "Active NIFTY futures candles, volume and OI were collected.",
+        "Latest completed NIFTY futures candle, volume and OI were collected.",
         "READY",
         "APPLICABLE",
         "2.00",
