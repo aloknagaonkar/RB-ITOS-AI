@@ -56,7 +56,9 @@ def _candle_diagnostic_log_values(diagnostic):
     """Return stable log values without giving diagnostics execution authority."""
 
     readiness = diagnostic.readiness
+    volume = diagnostic.volume_authority
     age = readiness.candle_age_seconds
+    volume_value = volume.volume
     return (
         readiness.status,
         readiness.reason,
@@ -65,6 +67,10 @@ def _candle_diagnostic_log_values(diagnostic):
         readiness.expected_completed_timestamp or "NA",
         diagnostic.bridge_alignment,
         diagnostic.fetch_error or "NONE",
+        volume.status,
+        volume.reason,
+        volume.source,
+        "NA" if volume_value is None else f"{volume_value:.1f}",
     )
 
 
@@ -298,9 +304,10 @@ def main() -> int:
                 "bridge_reason=%s underlying_candle=%s candle_reason=%s "
                 "candle_age_seconds=%s candle_latest=%s "
                 "candle_expected=%s candle_bridge_alignment=%s "
-                "candle_fetch_error=%s signals=%s scored=%s opened=%s "
-                "closed=%s skipped=%s errors=%s warnings=%s decision=%s "
-                "reason=%s",
+                "candle_fetch_error=%s underlying_volume=%s "
+                "volume_reason=%s volume_source=%s volume_value=%s "
+                "signals=%s scored=%s opened=%s closed=%s skipped=%s "
+                "errors=%s warnings=%s decision=%s reason=%s",
                 live_v2.status,
                 live_v2.reason,
                 reversal_exit.status,
