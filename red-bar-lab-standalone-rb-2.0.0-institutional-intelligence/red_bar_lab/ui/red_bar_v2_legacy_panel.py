@@ -21,6 +21,13 @@ def _flag(value: bool | None) -> str:
     return "YES" if value else "NO"
 
 
+def _ratio(value: Any) -> str:
+    try:
+        return "—" if value in (None, "") else f"{float(value):.3f}"
+    except (TypeError, ValueError):
+        return "—"
+
+
 def _rsi_position(value: float | None) -> str:
     if value is None:
         return "UNAVAILABLE"
@@ -138,6 +145,7 @@ def render_red_bar_v2_legacy_panel(
     st,
     snapshot: RedBarV2UISnapshot | None,
     open_orders: Iterable[Mapping[str, Any]] | None = None,
+    option_context: Mapping[str, Any] | None = None,
 ) -> None:
     st.markdown("### 4. Red Bar V2 Live State")
     st.caption(
@@ -173,7 +181,7 @@ def render_red_bar_v2_legacy_panel(
     i4.metric("Futures VWAP", _price(snapshot.futures_vwap))
     st.caption("RSI source: NIFTY INDEX · VWAP source: CURRENT-MONTH NIFTY FUTURES")
 
-    st.markdown("#### RSI and futures VWAP position")
+    st.markdown("#### RSI, futures VWAP and option positioning")
     gap_points, gap_percentage = _vwap_gap(
         snapshot.futures_close,
         snapshot.futures_vwap,
@@ -186,10 +194,17 @@ def render_red_bar_v2_legacy_panel(
     )
     p3.metric("VWAP gap", gap_points)
     p4.metric("RSI + VWAP alignment", _rsi_vwap_alignment(snapshot))
+
+    option_context = dict(option_context or {})
+    o1, o2, o3, o4 = st.columns(4)
+    o1.metric("PCR (OI)", _ratio(option_context.get("pcr")))
+    o2.metric("OI positioning", _value(option_context.get("directional_bias"), "UNAVAILABLE"))
+    o3.metric("Option snapshot", _value(option_context.get("status"), "NOT READY"))
+    o4.metric("Option freshness", _value(option_context.get("freshness"), "UNKNOWN"))
     st.caption(
         f"Futures-to-VWAP percentage gap: {gap_percentage}. "
-        "RSI is measured on NIFTY index candles; VWAP comparison uses the "
-        "current-month NIFTY futures close against futures VWAP."
+        "PCR is supporting option-chain evidence and does not independently own "
+        "entry or exit authority."
     )
 
     st.markdown("#### Direction, reversal and midpoint")
@@ -219,7 +234,8 @@ def render_red_bar_v2_legacy_panel(
         st.dataframe(progress, width="stretch", hide_index=True)
         st.caption(
             "Current level is descriptive only. The existing paper exit engine "
-            "remains the authority for stop, target, trailing, time and EOD exits."
+            "remains the authority for stop, target, trailing, confirmed reversal, "
+            "time and EOD exits."
         )
     else:
         st.caption("No open paper trade is currently being monitored.")
@@ -236,5 +252,8 @@ def render_red_bar_v2_legacy_panel(
             {"field": "Futures symbol", "value": _value(snapshot.futures_symbol)},
             {"field": "Futures expiry", "value": _value(snapshot.futures_expiry)},
             {"field": "Midpoint aligned", "value": _flag(snapshot.midpoint_aligned)},
+            {"field": "PCR (OI)", "value": _ratio(option_context.get("pcr"))},
+            {"field": "OI positioning", "value": _value(option_context.get("directional_bias"), "UNAVAILABLE")},
+            {"field": "Option snapshot timestamp", "value": _value(option_context.get("latest_timestamp"))},
         ]
         st.dataframe(rows, width="stretch", hide_index=True)
