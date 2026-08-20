@@ -12,6 +12,9 @@ from red_bar_lab.ui._shared import (
 )
 from red_bar_lab.ui.arrow_dataframe_guard import install as install_arrow_dataframe_guard
 from red_bar_lab.ui.current_trade_exit_columns import install as install_current_trade_exit_columns
+from red_bar_lab.ui.current_trade_option_telemetry import (
+    install as install_current_trade_option_telemetry,
+)
 from red_bar_lab.ui.open_trade_row_runtime import install as install_open_trade_row_runtime
 from red_bar_lab.ui.paper_time_display import install as install_paper_time_display
 from red_bar_lab.ui.workspace_page_runtime import (
@@ -36,6 +39,7 @@ from red_bar_lab.ui.workspace_page_runtime import (
 install_arrow_dataframe_guard(st)
 install_paper_time_display()
 install_current_trade_exit_columns(active_trade_views)
+install_current_trade_option_telemetry(active_trade_views)
 shared_ui.PaperExitEngine = PaperExitEngine
 install_import_compatibility()
 
