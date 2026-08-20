@@ -26,6 +26,19 @@ def test_confirmed_live_direction_uses_current_inputs_not_old_trade_direction():
     assert confirmed_live_direction(_snapshot()) == "BULLISH"
 
 
+def test_admitted_reversal_is_authoritative_when_raw_inputs_are_mixed():
+    snapshot = _snapshot(
+        direction="BULLISH",
+        option_side="CE",
+        reversal_status="REVERSAL_ADMITTED",
+        admission_allowed=True,
+        admission_code="REVERSAL_CONTEXT_ALIGNED_FLAT",
+        index_rsi=48.65,
+    )
+
+    assert confirmed_live_direction(snapshot) == "BULLISH"
+
+
 def test_confirmed_reversal_closes_only_conflicting_v2_orders():
     closed = []
     orders = [
@@ -59,6 +72,33 @@ def test_confirmed_reversal_closes_only_conflicting_v2_orders():
     assert result.confirmed_direction == "BULLISH"
     assert result.conflicting_orders == 1
     assert result.exited_orders == 1
+    assert closed == [("PE-1", REVERSAL_EXIT_REASON)]
+
+
+def test_admitted_bullish_reversal_closes_conflicting_pe_with_mixed_rsi():
+    closed = []
+    result = execute_confirmed_reversal_exits(
+        snapshot=_snapshot(
+            direction="BULLISH",
+            option_side="CE",
+            reversal_status="REVERSAL_ADMITTED",
+            admission_allowed=True,
+            admission_code="REVERSAL_CONTEXT_ALIGNED_FLAT",
+            index_rsi=48.65,
+        ),
+        open_orders=[
+            {
+                "order_id": "PE-1",
+                "execution_strategy_source": "RED_BAR_V2",
+                "status": "OPEN",
+                "option_type": "PE",
+            }
+        ],
+        close_position=lambda order_id, reason: closed.append((order_id, reason)),
+    )
+
+    assert result.status == "EXITED"
+    assert result.confirmed_direction == "BULLISH"
     assert closed == [("PE-1", REVERSAL_EXIT_REASON)]
 
 
