@@ -28,6 +28,27 @@ from red_bar_lab.services.upstox_service import RedBarUpstoxService
 from red_bar_lab.storage.database import RedBarDatabase
 
 
+_OPERATIONAL_WARNING_MESSAGES = frozenset(
+    {
+        "Automatic paper entry skipped outside entry market hours.",
+    }
+)
+
+
+def _partition_cycle_messages(report_errors, reversal_errors):
+    """Keep expected operational skips out of persisted monitor errors."""
+
+    warnings: list[str] = []
+    errors: list[str] = [str(message) for message in reversal_errors]
+    for message in report_errors:
+        text = str(message)
+        if text in _OPERATIONAL_WARNING_MESSAGES:
+            warnings.append(text)
+        else:
+            errors.append(text)
+    return errors, warnings
+
+
 def _parser():
     parser = argparse.ArgumentParser(
         description=(
@@ -220,7 +241,10 @@ def main() -> int:
                 if database.read_open_paper_execution_orders("PAPER-STD")
                 else "WAITING_FOR_V2_SIGNAL"
             )
-            cycle_errors = list(report.errors) + list(reversal_exit.errors)
+            cycle_errors, cycle_warnings = _partition_cycle_messages(
+                report.errors,
+                reversal_exit.errors,
+            )
             database.upsert_paper_monitor_status(
                 {
                     "monitor_id": "PAPER-MONITOR",
@@ -244,7 +268,7 @@ def main() -> int:
                 "v2_live=%s live_reason=%s reversal_exit=%s "
                 "reversal_direction=%s reversal_closed=%s v2_bridge=%s "
                 "bridge_reason=%s signals=%s scored=%s opened=%s closed=%s "
-                "skipped=%s errors=%s decision=%s reason=%s",
+                "skipped=%s errors=%s warnings=%s decision=%s reason=%s",
                 live_v2.status,
                 live_v2.reason,
                 reversal_exit.status,
@@ -258,9 +282,12 @@ def main() -> int:
                 report.paper_orders_closed + reversal_exit.exited_orders,
                 report.skipped,
                 len(cycle_errors),
+                len(cycle_warnings),
                 last_decision,
                 latest.get("reason") or bridge.reason,
             )
+            for warning in cycle_warnings:
+                logging.info("paper automation skip: %s", warning)
             for error in cycle_errors:
                 logging.warning("paper automation: %s", error)
         except Exception as exc:
