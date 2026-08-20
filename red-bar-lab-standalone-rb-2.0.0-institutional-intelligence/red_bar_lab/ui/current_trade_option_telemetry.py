@@ -15,33 +15,15 @@ def _number(value: object, digits: int = 2) -> str:
         return _NOT_AVAILABLE
 
 
-def _integer(value: object) -> str:
-    if value in (None, ""):
-        return _NOT_AVAILABLE
-    try:
-        return f"{int(float(value)):,}"
-    except (TypeError, ValueError):
-        return _NOT_AVAILABLE
-
-
 def _telemetry_columns(telemetry: Mapping[str, object]) -> dict[str, object]:
     return {
+        "PCR": _number(telemetry.get("pcr_oi"), 2),
         "Delta": _number(telemetry.get("delta"), 3),
-        "Strike PCR": _number(telemetry.get("pcr_oi"), 2),
-        "Call OI": _integer(telemetry.get("call_oi_at_strike")),
-        "Put OI": _integer(telemetry.get("put_oi_at_strike")),
-        "IV": _number(telemetry.get("iv"), 2),
-        "PCR Source": str(telemetry.get("pcr_source") or "NOT_AVAILABLE"),
-        "Telemetry Updated": str(
-            telemetry.get("observed_timestamp")
-            or telemetry.get("created_at")
-            or _NOT_AVAILABLE
-        ),
     }
 
 
 def install(active_trade_views_module: Any) -> None:
-    """Show latest selected-strike PCR and Delta on active paper trades.
+    """Show only latest selected-strike PCR and Delta on active paper trades.
 
     The database is read once per order while attribution is prepared. The compact
     table wrapper reuses that attached snapshot and performs no provider/API calls.
