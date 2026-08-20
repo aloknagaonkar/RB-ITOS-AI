@@ -45,14 +45,17 @@ def test_fresh_candles_are_consistent_with_ready_bridge():
     assert result.readiness.status == "READY"
     assert result.bridge_alignment == ALIGNMENT_CONSISTENT
     assert result.fetch_error is None
+    assert result.volume_authority.status == "NOT_APPLICABLE"
+    assert result.volume_authority.source == "INDEX_PRICE_ONLY"
+    assert result.volume_authority.volume is None
     assert provider.calls == [("NSE_INDEX|Nifty 50", 1)]
 
 
 def test_stale_snapshot_with_fresh_candles_is_explicitly_distinguished():
     provider = _Provider(
         [
-            {"timestamp": "2026-08-20T10:29:00+05:30"},
-            {"timestamp": "2026-08-20T10:30:00+05:30"},
+            {"timestamp": "2026-08-20T10:29:00+05:30", "volume": 0},
+            {"timestamp": "2026-08-20T10:30:00+05:30", "volume": 0},
         ]
     )
 
@@ -65,6 +68,7 @@ def test_stale_snapshot_with_fresh_candles_is_explicitly_distinguished():
 
     assert result.readiness.status == "READY"
     assert result.bridge_alignment == ALIGNMENT_SNAPSHOT_STALE_CANDLES_READY
+    assert result.volume_authority.status == "NOT_APPLICABLE"
 
 
 def test_after_hours_snapshot_staleness_is_marked_expected():
@@ -81,6 +85,7 @@ def test_after_hours_snapshot_staleness_is_marked_expected():
 
     assert result.readiness.status == "MARKET_CLOSED"
     assert result.bridge_alignment == ALIGNMENT_AFTER_HOURS_EXPECTED
+    assert result.volume_authority.status == "NOT_APPLICABLE"
 
 
 def test_provider_failure_is_degraded_but_non_throwing():
@@ -95,4 +100,49 @@ def test_provider_failure_is_degraded_but_non_throwing():
 
     assert result.readiness.status == "MISSING"
     assert result.bridge_alignment == ALIGNMENT_CANDLES_DEGRADED
+    assert result.volume_authority.status == "NOT_APPLICABLE"
     assert result.fetch_error == "RuntimeError:temporary outage"
+
+
+def test_traded_futures_volume_remains_applicable():
+    provider = _Provider(
+        [
+            ["2026-08-20T10:29:00+05:30", 1, 2, 1, 2, 125000, 500000],
+            ["2026-08-20T10:30:00+05:30", 1, 2, 1, 2, 130000, 510000],
+        ]
+    )
+
+    result = assess_monitor_underlying_candles(
+        provider,
+        instrument_key="NSE_FO|58072",
+        now=_now("2026-08-20T10:30:20+05:30"),
+    )
+
+    assert result.readiness.status == "READY"
+    assert result.volume_authority.status == "APPLICABLE"
+    assert result.volume_authority.source == "TRADED_INSTRUMENT"
+    assert result.volume_authority.volume == 130000.0
+
+
+def test_mapping_candle_volume_is_preserved_for_traded_instrument():
+    provider = _Provider(
+        [
+            {
+                "timestamp": "2026-08-20T10:29:00+05:30",
+                "volume": "87500",
+            },
+            {
+                "timestamp": "2026-08-20T10:30:00+05:30",
+                "volume": "90000",
+            },
+        ]
+    )
+
+    result = assess_monitor_underlying_candles(
+        provider,
+        instrument_key="NSE_FO|58072",
+        now=_now("2026-08-20T10:30:20+05:30"),
+    )
+
+    assert result.volume_authority.status == "APPLICABLE"
+    assert result.volume_authority.volume == 90000.0
