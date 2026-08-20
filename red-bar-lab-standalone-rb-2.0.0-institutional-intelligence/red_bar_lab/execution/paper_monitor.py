@@ -18,6 +18,10 @@ from red_bar_lab.execution.underlying_candle_monitoring import (
 from red_bar_lab.market.upstox_intelligence import UnifiedUpstoxMarketIntelligenceService
 from red_bar_lab.market.paper_adapter import UpstoxPaperMarketAdapter
 from red_bar_lab.operations.red_bar_v2_ui_snapshot import read_red_bar_v2_ui_snapshot
+from red_bar_lab.services.nifty_futures_market_data import (
+    assess_nifty_futures_market_data,
+    futures_market_log_values,
+)
 from red_bar_lab.services.nifty_futures_monitoring import (
     NiftyFuturesMonitor,
     NiftyFuturesMonitorResult,
@@ -259,6 +263,14 @@ def main() -> int:
                     reason="NIFTY futures discovery is only used for NIFTY 50.",
                 )
             futures_log_values = futures_monitor_log_values(futures_result)
+            futures_market_result = assess_nifty_futures_market_data(
+                upstox,
+                contract=futures_result,
+                now=cycle_started,
+            )
+            futures_market_values = futures_market_log_values(
+                futures_market_result
+            )
 
             report = automation.run_cycle(
                 trading_date=trading_date,
@@ -330,8 +342,14 @@ def main() -> int:
                 "volume_reason=%s volume_source=%s volume_value=%s "
                 "nifty_future=%s futures_reason=%s futures_key=%s "
                 "futures_symbol=%s futures_expiry=%s futures_records=%s "
-                "futures_error=%s signals=%s scored=%s opened=%s closed=%s "
-                "skipped=%s errors=%s warnings=%s decision=%s reason=%s",
+                "futures_error=%s futures_market=%s "
+                "futures_market_reason=%s futures_candle=%s "
+                "futures_volume=%s futures_close=%s "
+                "futures_volume_value=%s futures_oi=%s "
+                "futures_timestamp=%s futures_candle_count=%s "
+                "futures_market_error=%s signals=%s scored=%s opened=%s "
+                "closed=%s skipped=%s errors=%s warnings=%s decision=%s "
+                "reason=%s",
                 live_v2.status,
                 live_v2.reason,
                 reversal_exit.status,
@@ -341,6 +359,7 @@ def main() -> int:
                 bridge.reason,
                 *candle_log_values,
                 *futures_log_values,
+                *futures_market_values,
                 report.signals_seen,
                 report.candidates_scored,
                 report.paper_orders_opened,
