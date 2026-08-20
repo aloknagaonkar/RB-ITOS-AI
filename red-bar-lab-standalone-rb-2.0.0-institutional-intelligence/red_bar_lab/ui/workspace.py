@@ -43,6 +43,11 @@ _PAGE_MODULE_PATHS.setdefault(
     "NIFTY Futures Readiness",
     "red_bar_lab.ui.pages.nifty_futures_readiness",
 )
+# Phase 3 unified readiness remains a separate observational workspace.
+_PAGE_MODULE_PATHS.setdefault(
+    "Market Readiness",
+    "red_bar_lab.ui.pages.market_readiness",
+)
 
 # Compatibility contracts retained for architecture tests and audit searches:
 # operations_center,
