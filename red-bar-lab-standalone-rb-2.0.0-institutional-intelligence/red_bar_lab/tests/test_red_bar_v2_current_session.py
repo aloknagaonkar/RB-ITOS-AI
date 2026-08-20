@@ -77,11 +77,7 @@ def test_current_session_refreshes_snapshot_for_paper(tmp_path, monkeypatch):
         )
         return SimpleNamespace(
             health=SimpleNamespace(status="READY", reason="FULL_TIMESTAMP_ALIGNMENT"),
-            replay=SimpleNamespace(
-                admitted_candidates=1,
-                closed_trades=1,
-                events=(),
-            ),
+            replay=SimpleNamespace(admitted_candidates=1, closed_trades=1, events=()),
         )
 
     monkeypatch.setattr(module, "run_monitored_red_bar_v2_futures_replay", fake_run)
@@ -128,10 +124,11 @@ def test_live_session_restores_candidate_when_only_replay_trade_blocks():
         admission_allowed=False,
         admission_code="ACTIVE_TRADE_BLOCK",
         admission_reason="Synthetic replay trade remains active.",
+        last_evaluation_timestamp="2026-08-20T13:00:00+05:30",
+        index_timestamp="2026-08-20T12:59:00+05:30",
+        futures_timestamp="2026-08-20T12:59:00+05:30",
     )
-    monitored = SimpleNamespace(
-        replay=SimpleNamespace(events=(_allowed_event(),)),
-    )
+    monitored = SimpleNamespace(replay=SimpleNamespace(events=(_allowed_event(),)))
 
     restored = module._restore_live_candidate_when_replay_only_blocked(
         blocked,
@@ -145,7 +142,9 @@ def test_live_session_restores_candidate_when_only_replay_trade_blocks():
     assert restored.option_side == "CE"
     assert restored.trade_status == "FLAT"
     assert restored.trade_id is None
-    assert restored.last_evaluation_timestamp == "2026-08-20T12:41:00+05:30"
+    assert restored.last_evaluation_timestamp == "2026-08-20T13:00:00+05:30"
+    assert restored.index_timestamp == "2026-08-20T12:59:00+05:30"
+    assert restored.futures_timestamp == "2026-08-20T12:59:00+05:30"
 
 
 def test_live_session_preserves_block_when_real_v2_order_is_active():
@@ -153,11 +152,9 @@ def test_live_session_preserves_block_when_real_v2_order_is_active():
         admission_allowed=False,
         admission_code="ACTIVE_TRADE_BLOCK",
         trade_status="ACTIVE",
-        trade_id="PAPER-OPEN",
+        trade_id="PAPER-ACTIVE",
     )
-    monitored = SimpleNamespace(
-        replay=SimpleNamespace(events=(_allowed_event(),)),
-    )
+    monitored = SimpleNamespace(replay=SimpleNamespace(events=(_allowed_event(),)))
 
     result = module._restore_live_candidate_when_replay_only_blocked(
         blocked,
