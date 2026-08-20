@@ -18,6 +18,11 @@ from red_bar_lab.execution.underlying_candle_monitoring import (
 from red_bar_lab.market.upstox_intelligence import UnifiedUpstoxMarketIntelligenceService
 from red_bar_lab.market.paper_adapter import UpstoxPaperMarketAdapter
 from red_bar_lab.operations.red_bar_v2_ui_snapshot import read_red_bar_v2_ui_snapshot
+from red_bar_lab.services.nifty_futures_monitoring import (
+    NiftyFuturesMonitor,
+    NiftyFuturesMonitorResult,
+    futures_monitor_log_values,
+)
 from red_bar_lab.services.red_bar_v2_current_session import (
     evaluate_current_session_red_bar_v2,
 )
@@ -26,6 +31,9 @@ from red_bar_lab.services.red_bar_v2_paper_signal_bridge import (
 )
 from red_bar_lab.services.red_bar_v2_reversal_exit import (
     execute_confirmed_reversal_exits,
+)
+from red_bar_lab.services.upstox_instrument_search import (
+    UpstoxInstrumentSearchTransport,
 )
 from red_bar_lab.services.upstox_service import RedBarUpstoxService
 from red_bar_lab.storage.database import RedBarDatabase
@@ -123,6 +131,9 @@ def main() -> int:
     database.execution_source_enabled = authority.source_enabled
 
     upstox = RedBarUpstoxService(access_token)
+    futures_monitor = NiftyFuturesMonitor(
+        UpstoxInstrumentSearchTransport(access_token)
+    )
     intelligence = UnifiedUpstoxMarketIntelligenceService(
         upstox,
         cache_ttl_seconds=2.0,
@@ -238,6 +249,17 @@ def main() -> int:
             candle_log_values = _candle_diagnostic_log_values(
                 candle_diagnostic
             )
+            if args.underlying == "NIFTY 50":
+                futures_result = futures_monitor.resolve(
+                    as_of_date=cycle_started.date()
+                )
+            else:
+                futures_result = NiftyFuturesMonitorResult(
+                    status="NOT_APPLICABLE",
+                    reason="NIFTY futures discovery is only used for NIFTY 50.",
+                )
+            futures_log_values = futures_monitor_log_values(futures_result)
+
             report = automation.run_cycle(
                 trading_date=trading_date,
                 lots=max(1, int(args.lots)),
@@ -306,8 +328,10 @@ def main() -> int:
                 "candle_expected=%s candle_bridge_alignment=%s "
                 "candle_fetch_error=%s underlying_volume=%s "
                 "volume_reason=%s volume_source=%s volume_value=%s "
-                "signals=%s scored=%s opened=%s closed=%s skipped=%s "
-                "errors=%s warnings=%s decision=%s reason=%s",
+                "nifty_future=%s futures_reason=%s futures_key=%s "
+                "futures_symbol=%s futures_expiry=%s futures_records=%s "
+                "futures_error=%s signals=%s scored=%s opened=%s closed=%s "
+                "skipped=%s errors=%s warnings=%s decision=%s reason=%s",
                 live_v2.status,
                 live_v2.reason,
                 reversal_exit.status,
@@ -316,6 +340,7 @@ def main() -> int:
                 bridge.status,
                 bridge.reason,
                 *candle_log_values,
+                *futures_log_values,
                 report.signals_seen,
                 report.candidates_scored,
                 report.paper_orders_opened,
