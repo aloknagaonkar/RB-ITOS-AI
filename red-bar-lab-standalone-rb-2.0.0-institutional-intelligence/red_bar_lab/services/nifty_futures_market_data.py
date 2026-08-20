@@ -29,6 +29,7 @@ class NiftyFuturesMarketData:
     latest_oi: float | None = None
     latest_timestamp: str | None = None
     candle_count: int = 0
+    completed_candles: tuple[object, ...] = ()
     error: str | None = None
 
 
@@ -95,12 +96,12 @@ def _number(value: Any) -> float | None:
         return None
 
 
-def _latest_completed_candle(
+def _completed_candles(
     candles: list[object],
     *,
     now: datetime,
     interval_minutes: int,
-) -> object | None:
+) -> list[object]:
     interval = max(1, int(interval_minutes))
     current_bucket = now.replace(second=0, microsecond=0)
     current_bucket -= timedelta(minutes=current_bucket.minute % interval)
@@ -110,9 +111,7 @@ def _latest_completed_candle(
         stamp = _timestamp(candle, reference=now)
         if stamp is not None and stamp <= expected_completed:
             dated.append((stamp, candle))
-    if dated:
-        return max(dated, key=lambda item: item[0])[1]
-    return None
+    return [candle for _, candle in sorted(dated, key=lambda item: item[0])]
 
 
 def assess_nifty_futures_market_data(
@@ -158,11 +157,12 @@ def assess_nifty_futures_market_data(
         interval_minutes=interval_minutes,
         stale_after_seconds=stale_after_seconds,
     )
-    latest = _latest_completed_candle(
+    completed = _completed_candles(
         candles,
         now=now,
         interval_minutes=interval_minutes,
     )
+    latest = completed[-1] if completed else None
     latest_volume = _number(
         _value(latest, ("volume", "vol", "traded_volume"), 5)
     ) if latest is not None else None
@@ -199,6 +199,7 @@ def assess_nifty_futures_market_data(
         latest_oi=latest_oi,
         latest_timestamp=(str(latest_timestamp) if latest_timestamp is not None else None),
         candle_count=len(candles),
+        completed_candles=tuple(completed),
     )
 
 
