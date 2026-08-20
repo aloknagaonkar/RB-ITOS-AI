@@ -11,6 +11,10 @@ from red_bar_lab.execution.underlying_candle_readiness import (
     UnderlyingCandleReadiness,
     assess_underlying_candle_freshness,
 )
+from red_bar_lab.execution.underlying_volume_authority import (
+    UnderlyingVolumeAuthority,
+    assess_underlying_volume_authority,
+)
 
 ALIGNMENT_CONSISTENT = "CONSISTENT"
 ALIGNMENT_AFTER_HOURS_EXPECTED = "AFTER_HOURS_EXPECTED"
@@ -22,6 +26,7 @@ ALIGNMENT_CANDLES_DEGRADED = "CANDLES_DEGRADED"
 class UnderlyingCandleMonitorDiagnostic:
     readiness: UnderlyingCandleReadiness
     bridge_alignment: str
+    volume_authority: UnderlyingVolumeAuthority | None = None
     fetch_error: str | None = None
 
 
@@ -52,6 +57,25 @@ def _normalise_candles(payload: object) -> list[object]:
     return []
 
 
+def _candle_volume(candle: object) -> object:
+    if isinstance(candle, Mapping):
+        for key in ("volume", "vol", "traded_volume"):
+            if key in candle:
+                return candle.get(key)
+        return None
+    if isinstance(candle, Sequence) and not isinstance(candle, (str, bytes)):
+        return candle[5] if len(candle) > 5 else None
+    return None
+
+
+def _latest_reported_volume(candles: Sequence[object]) -> object:
+    for candle in reversed(candles):
+        volume = _candle_volume(candle)
+        if volume is not None and volume != "":
+            return volume
+    return None
+
+
 def _bridge_alignment(
     readiness: UnderlyingCandleReadiness,
     bridge_reason: str | None,
@@ -79,7 +103,8 @@ def assess_monitor_underlying_candles(
 
     This diagnostic deliberately does not alter Red Bar V2 publishing or paper
     execution. It explains whether a stale V2 snapshot is accompanied by fresh,
-    degraded, or after-hours underlying candles.
+    degraded, or after-hours underlying candles, and whether reported volume is
+    a valid traded-volume authority for the instrument type.
     """
 
     try:
@@ -95,11 +120,16 @@ def assess_monitor_underlying_candles(
         return UnderlyingCandleMonitorDiagnostic(
             readiness=readiness,
             bridge_alignment=ALIGNMENT_CANDLES_DEGRADED,
+            volume_authority=assess_underlying_volume_authority(
+                instrument_key=instrument_key,
+                volume=None,
+            ),
             fetch_error=f"{type(exc).__name__}:{exc}",
         )
 
+    candles = _normalise_candles(payload)
     readiness = assess_underlying_candle_freshness(
-        _normalise_candles(payload),
+        candles,
         now=now,
         interval_minutes=interval_minutes,
         stale_after_seconds=stale_after_seconds,
@@ -107,4 +137,8 @@ def assess_monitor_underlying_candles(
     return UnderlyingCandleMonitorDiagnostic(
         readiness=readiness,
         bridge_alignment=_bridge_alignment(readiness, bridge_reason),
+        volume_authority=assess_underlying_volume_authority(
+            instrument_key=instrument_key,
+            volume=_latest_reported_volume(candles),
+        ),
     )
