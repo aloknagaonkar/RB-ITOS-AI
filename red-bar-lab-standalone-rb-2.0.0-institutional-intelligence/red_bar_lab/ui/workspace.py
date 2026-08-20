@@ -38,6 +38,12 @@ from red_bar_lab.ui.workspace_page_runtime import (
 )
 
 
+# Phase 2 futures diagnostics are additive and remain observational only.
+_PAGE_MODULE_PATHS.setdefault(
+    "NIFTY Futures Readiness",
+    "red_bar_lab.ui.pages.nifty_futures_readiness",
+)
+
 # Compatibility contracts retained for architecture tests and audit searches:
 # operations_center,
 # paper_trading.RedBarPaperAutomationService = AttributionAwarePaperAutomationService
