@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import red_bar_lab.ui._shared as shared_ui
 import red_bar_lab.ui.active_trade_views as active_trade_views
+import red_bar_lab.ui.full_trade_card as full_trade_card
 from red_bar_lab.execution.exit_engine import PaperExitEngine
 from red_bar_lab.execution.paper_engine import RedBarPaperExecutionEngine
 from red_bar_lab.execution.paper_close_telemetry_lifecycle import (
@@ -21,6 +22,7 @@ from red_bar_lab.ui.current_trade_option_telemetry import (
 )
 from red_bar_lab.ui.open_trade_row_runtime import install as install_open_trade_row_runtime
 from red_bar_lab.ui.paper_time_display import install as install_paper_time_display
+from red_bar_lab.ui.trade_outlook_card import install as install_trade_outlook_card
 from red_bar_lab.ui.workspace_page_runtime import (
     PAGE_MODULE_PATHS as _PAGE_MODULE_PATHS,
     PAGE_MODULES as _PAGE_MODULES,
@@ -44,6 +46,7 @@ install_arrow_dataframe_guard(st)
 install_paper_time_display()
 install_current_trade_exit_columns(active_trade_views)
 install_current_trade_option_telemetry(active_trade_views)
+install_trade_outlook_card(full_trade_card)
 install_paper_close_telemetry_lifecycle(RedBarPaperExecutionEngine)
 shared_ui.PaperExitEngine = PaperExitEngine
 install_import_compatibility()
