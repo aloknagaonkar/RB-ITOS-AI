@@ -1,7 +1,10 @@
 from datetime import datetime
 
 from red_bar_lab.config import RedBarSettings
-from red_bar_lab.operations.service import RedBarOperationsCenterService
+from red_bar_lab.operations.service import (
+    RedBarOperationsCenterService,
+    _readiness_signal_scope,
+)
 from red_bar_lab.storage.database import RedBarDatabase
 
 
@@ -58,3 +61,24 @@ def test_operations_center_reports_data_quality(tmp_path):
     assert len(rows) == 1
     assert rows[0]["core_eligible"] == 1
     assert rows[0]["hybrid_eligible"] == 0
+
+
+def test_readiness_scope_prefers_red_bar_v2_when_present():
+    signals = [
+        {"signal_id": "RB-LEGACY", "state": "ACTIVE"},
+        {"signal_id": "RBV2-CURRENT", "state": "ACTIVE"},
+    ]
+
+    scoped, scope_name = _readiness_signal_scope(signals)
+
+    assert scope_name == "RED_BAR_V2"
+    assert [row["signal_id"] for row in scoped] == ["RBV2-CURRENT"]
+
+
+def test_readiness_scope_preserves_legacy_only_sessions():
+    signals = [{"signal_id": "RB-LEGACY", "state": "ACTIVE"}]
+
+    scoped, scope_name = _readiness_signal_scope(signals)
+
+    assert scope_name == "ALL_SIGNALS"
+    assert scoped == signals
