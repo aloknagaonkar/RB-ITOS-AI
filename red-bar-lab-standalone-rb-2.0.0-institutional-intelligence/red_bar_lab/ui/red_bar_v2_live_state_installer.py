@@ -3,6 +3,10 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
+from red_bar_lab.ui.pre_trade_full_card import (
+    build_pre_trade_full_card,
+    render_pre_trade_full_card,
+)
 from red_bar_lab.ui.red_bar_v2_live_runtime import resolve_red_bar_v2_live_state
 from red_bar_lab.ui.red_bar_v2_runtime_diagnostics import (
     render_red_bar_v2_runtime_diagnostics,
@@ -57,7 +61,9 @@ def install(page_module: Any, database: Any, instrument_key: str) -> None:
             diagnostics = runtime.to_dict()
 
         original_render(st, resolved, open_orders=open_orders)
-        if diagnostics is not None:
+        if diagnostics is not None and resolved is not None:
+            card = build_pre_trade_full_card(current_database, resolved, diagnostics)
+            render_pre_trade_full_card(st, card)
             render_red_bar_v2_runtime_diagnostics(st, diagnostics)
 
     page_module.render_red_bar_v2_legacy_panel = render_red_bar_v2_legacy_panel
