@@ -24,6 +24,53 @@ def _change(current: object, entry: object) -> float | None:
         return None
 
 
+def classify_entry_vwap_distance(
+    entry_price: object,
+    entry_vwap: object,
+) -> dict[str, object]:
+    """Classify how far the option entry fill was from entry-time VWAP.
+
+    Distance is absolute percentage deviation from VWAP. Direction is retained
+    separately so the UI can distinguish entries above and below VWAP.
+    """
+    try:
+        price = float(entry_price)
+        vwap = float(entry_vwap)
+    except (TypeError, ValueError):
+        price = vwap = 0.0
+    if price <= 0.0 or vwap <= 0.0:
+        return {
+            "classification": "UNAVAILABLE",
+            "distance_points": None,
+            "distance_pct": None,
+            "relation": "UNKNOWN",
+        }
+
+    signed_points = price - vwap
+    distance_points = abs(signed_points)
+    distance_pct = distance_points / vwap * 100.0
+    if distance_pct <= 0.25:
+        classification = "VERY CLOSE"
+    elif distance_pct <= 0.75:
+        classification = "CLOSE"
+    elif distance_pct <= 1.50:
+        classification = "FAR"
+    else:
+        classification = "VERY FAR"
+
+    relation = "AT VWAP"
+    if signed_points > 0:
+        relation = "ABOVE VWAP"
+    elif signed_points < 0:
+        relation = "BELOW VWAP"
+    return {
+        "classification": classification,
+        "distance_points": distance_points,
+        "distance_pct": distance_pct,
+        "relation": relation,
+    }
+
+
 def install(full_trade_card_module: Any) -> None:
     """Add persisted option VWAP and RSI-14 lifecycle details to the Full Card."""
     if getattr(full_trade_card_module, "_option_indicator_card_installed", False):
@@ -42,6 +89,10 @@ def install(full_trade_card_module: Any) -> None:
         current_vwap = current.get("option_vwap")
         entry_rsi = entry.get("option_rsi14")
         current_rsi = current.get("option_rsi14")
+        entry_distance = classify_entry_vwap_distance(
+            card.get("entry_price"),
+            entry_vwap,
+        )
         card.update(
             {
                 "entry_option_vwap": entry_vwap,
@@ -50,6 +101,10 @@ def install(full_trade_card_module: Any) -> None:
                 "entry_option_rsi14": entry_rsi,
                 "current_option_rsi14": current_rsi,
                 "option_rsi14_change": _change(current_rsi, entry_rsi),
+                "entry_vwap_distance_class": entry_distance["classification"],
+                "entry_vwap_distance_points": entry_distance["distance_points"],
+                "entry_vwap_distance_pct": entry_distance["distance_pct"],
+                "entry_vwap_relation": entry_distance["relation"],
                 "indicator_source": current.get("indicator_source") or "NOT_AVAILABLE",
             }
         )
@@ -80,6 +135,17 @@ def install(full_trade_card_module: Any) -> None:
             width="stretch",
             hide_index=True,
         )
+        st.write(
+            {
+                "Entry distance from VWAP": card.get("entry_vwap_distance_class") or "UNAVAILABLE",
+                "Entry relation": card.get("entry_vwap_relation") or "UNKNOWN",
+                "Distance points": _number(card.get("entry_vwap_distance_points"), 2),
+                "Distance %": _number(card.get("entry_vwap_distance_pct"), 2),
+            }
+        )
+        st.caption(
+            "Distance bands: VERY CLOSE ≤0.25%, CLOSE ≤0.75%, FAR ≤1.50%, VERY FAR >1.50%."
+        )
         st.caption(f"Indicator source: {card.get('indicator_source') or 'NOT_AVAILABLE'}")
 
     full_trade_card_module.build_active_trade_card = build_active_trade_card
@@ -87,4 +153,4 @@ def install(full_trade_card_module: Any) -> None:
     full_trade_card_module._option_indicator_card_installed = True
 
 
-__all__ = ["install"]
+__all__ = ["classify_entry_vwap_distance", "install"]
