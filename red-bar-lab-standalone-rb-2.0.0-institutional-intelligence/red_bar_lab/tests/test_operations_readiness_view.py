@@ -1,3 +1,4 @@
+from red_bar_lab.services.readiness_domains import build_readiness_domains
 from red_bar_lab.ui.operations_readiness_view import (
     build_operations_readiness_view_model,
 )
@@ -90,6 +91,30 @@ def test_view_model_keeps_readiness_domains_separate():
         == "RBV2-2:REFERENCE_NOT_FOUND"
     )
     assert view["domains"]["execution"]["status"] == "BLOCKED"
+
+
+def test_view_model_accepts_typed_readiness_domains():
+    gate = _gate()
+    gate["readiness_domains"] = build_readiness_domains(
+        red_bar_v2_reasons=("RBV2-2:REFERENCE_NOT_FOUND",),
+        red_bar_v2_advisories=("REFERENCE_COVERAGE_PARTIAL",),
+        execution_reasons=("EXECUTION_POLICY_NOT_APPROVED",),
+    )
+
+    view = build_operations_readiness_view_model(gate)
+
+    assert view["domains"]["market_data"]["status"] == "READY"
+    assert view["domains"]["red_bar_v2"]["status"] == "BLOCKED"
+    assert view["domains"]["red_bar_v2"]["blocking_reasons"] == (
+        "RBV2-2:REFERENCE_NOT_FOUND",
+    )
+    assert view["domains"]["red_bar_v2"]["advisory_reasons"] == (
+        "REFERENCE_COVERAGE_PARTIAL",
+    )
+    assert (
+        view["domains"]["execution"]["primary_reason"]
+        == "EXECUTION_POLICY_NOT_APPROVED"
+    )
 
 
 def test_view_model_formats_per_signal_drilldown():
