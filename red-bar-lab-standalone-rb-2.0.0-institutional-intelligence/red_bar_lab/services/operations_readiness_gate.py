@@ -23,6 +23,17 @@ def _ids(rows: Iterable[Mapping[str, Any]], *, ready_field: str = "status") -> s
     return result
 
 
+def _stage_diagnostics(prefix: str, row: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        f"{prefix}_source": row.get("input_source"),
+        f"{prefix}_cutoff_timestamp": row.get("input_cutoff_timestamp"),
+        f"{prefix}_latest_timestamp": row.get("latest_source_timestamp"),
+        f"{prefix}_row_count": int(row.get("row_count") or 0),
+        f"{prefix}_fallback_used": bool(row.get("fallback_used")),
+        f"{prefix}_no_lookahead_passed": row.get("no_lookahead_passed"),
+    }
+
+
 def build_operations_readiness_gate(
     *,
     confirmed_signals: Iterable[Mapping[str, Any]],
@@ -118,6 +129,8 @@ def build_operations_readiness_gate(
                 "market_status": str(market.get("status") or "MISSING").upper(),
                 "volume_status": str(volume.get("status") or "MISSING").upper(),
                 "option_status": str(option.get("status") or "MISSING").upper(),
+                **_stage_diagnostics("market", market),
+                **_stage_diagnostics("volume", volume),
                 "core_eligible": signal_id in core_ids,
                 "hybrid_eligible": signal_id in hybrid_ids,
                 "main_reason": reasons[0] if reasons else None,
