@@ -8,10 +8,10 @@ class CompleteDatabase:
         return [
             {
                 "signal_id": "RBV2-1",
-                "confirmation_timestamp": "2026-08-21T10:20:00+05:30",
+                "confirmation_timestamp": "2026-08-20T10:20:00+05:30",
                 "rsi_7": 31.0,
                 "rsi_candle_count": 20,
-                "rsi_timestamp": "2026-08-21T10:19:00+05:30",
+                "rsi_timestamp": "2026-08-20T10:19:00+05:30",
             }
         ]
 
@@ -19,7 +19,7 @@ class CompleteDatabase:
         return [
             {
                 "level_type": "NEXT_RED_CANDLE",
-                "timestamp": "2026-08-21T10:15:00+05:30",
+                "timestamp": "2026-08-20T10:15:00+05:30",
                 "high": 25010.0,
                 "low": 24980.0,
                 "midpoint": 24995.0,
@@ -33,7 +33,7 @@ class CompleteDatabase:
                 "signal_id": "RBV2-1",
                 "instrument_key": instrument_key,
                 "trading_date": start,
-                "entry_timestamp": "2026-08-21T10:20:00+05:30",
+                "entry_timestamp": "2026-08-20T10:20:00+05:30",
                 "session_open": 25000.0,
                 "minutes_from_open": 65,
                 "price_from_open_points": 10.0,
@@ -51,7 +51,7 @@ class CompleteDatabase:
                 "signal_id": "RBV2-1",
                 "instrument_key": instrument_key,
                 "trading_date": start,
-                "entry_timestamp": "2026-08-21T10:20:00+05:30",
+                "entry_timestamp": "2026-08-20T10:20:00+05:30",
                 "volume_current_1m": 1000,
                 "volume_avg_20m": 900,
                 "volume_trend_5m": "RISING",
@@ -66,9 +66,9 @@ class CompleteDatabase:
                 "signal_id": "RBV2-1",
                 "instrument_key": instrument_key,
                 "trading_date": start,
-                "entry_timestamp": "2026-08-21T10:20:00+05:30",
+                "entry_timestamp": "2026-08-20T10:20:00+05:30",
                 "option_expiry": "2026-08-27",
-                "option_snapshot_timestamp": "2026-08-21T10:20:30+05:30",
+                "option_snapshot_timestamp": "2026-08-20T10:20:30+05:30",
                 "option_snapshot_delay_seconds": 30,
                 "entry_aligned": 1,
                 "option_spot_price": 25010,
@@ -93,7 +93,7 @@ def test_completed_recommendations_are_exposed_in_live_view():
     view = build_live_operations_readiness_view(
         CompleteDatabase(),
         instrument_key="NSE_INDEX|Nifty 50",
-        trading_date="2026-08-21",
+        trading_date="2026-08-20",
         persist_outcomes=False,
     )
 
