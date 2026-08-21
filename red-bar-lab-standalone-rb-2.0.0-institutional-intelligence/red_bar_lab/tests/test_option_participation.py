@@ -63,14 +63,21 @@ def test_ce_fresh_buying_dominance_recommends_ce():
 
 
 def test_close_ce_pe_scores_produce_wait():
-    rows = [
+    ce_rows = [
         _row("CE", 24300, 3.0, 30000, 100000),
         {**_row("CE", 24350, 2.0, 20000, 90000), "distance_rank": 2},
         {**_row("CE", 24400, 1.0, 10000, 80000), "distance_rank": 3},
+    ]
+    pe_rows = [
         _row("PE", 24300, 3.0, 30000, 100000),
         {**_row("PE", 24250, 2.0, 20000, 90000), "distance_rank": 2},
         {**_row("PE", 24200, 1.0, 10000, 80000), "distance_rank": 3},
     ]
+    # Keep PE premiums realistic while making the score evidence symmetric:
+    # both CE and PE rows are above their own option VWAP, with matching
+    # participation state, volume, OI change, RSI and Delta quality bands.
+    pe_rows = [{**row, "vwap": 90.0} for row in pe_rows]
+
     summary = build_option_participation_summary(
         observed_at="2026-08-21T10:30:00+05:30",
         underlying_name="NIFTY 50",
@@ -78,9 +85,11 @@ def test_close_ce_pe_scores_produce_wait():
         expiry="2026-08-27",
         pcr_oi=1.0,
         underlying_rsi=50.0,
-        rows=rows,
+        rows=ce_rows + pe_rows,
     )
+    assert summary.ce_score == summary.pe_score
     assert summary.recommended_side == "WAIT"
+    assert summary.recommended_direction == "NEUTRAL"
     assert summary.grade == "CONFLICTED"
 
 
