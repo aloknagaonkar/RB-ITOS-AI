@@ -2,24 +2,25 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import time as time_module
 from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from red_bar_lab.collector.service import (
     RedBarDualMarketCollector,
-    market_clock_mode,
     market_session_phase,
 )
 from red_bar_lab.config import RedBarSettings, UNDERLYINGS
+from red_bar_lab.execution.live_reference_worker import run_cycle
 from red_bar_lab.pipeline.orchestrator import RedBarIntelligencePipelineOrchestrator
 from red_bar_lab.services.historical_service import RedBarHistoricalService
-from red_bar_lab.storage.artifacts import ArtifactLayout
+from red_bar_lab.services.live_service import RedBarLiveService
 from red_bar_lab.services.upstox_service import (
     RedBarUpstoxService,
     resolve_access_token,
 )
+from red_bar_lab.storage.artifacts import ArtifactLayout
 from red_bar_lab.storage.database import RedBarDatabase
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -29,7 +30,8 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Red Bar dual options collector. Online mode stores option-chain "
-            "snapshots every interval; offline mode stores one EOD snapshot."
+            "snapshots, refreshes current-session NIFTY candles/reference levels, "
+            "and synchronizes intelligence every interval."
         )
     )
     parser.add_argument(
@@ -56,7 +58,37 @@ def _parser() -> argparse.ArgumentParser:
         choices=("auto", "online", "offline"),
         default="auto",
     )
+    parser.add_argument(
+        "--skip-live-reference-refresh",
+        action="store_true",
+        help=(
+            "Do not refresh current-session NIFTY candles/reference levels from "
+            "the collector. Intended only when a separate live-reference worker "
+            "is deliberately managed."
+        ),
+    )
     return parser
+
+
+def _refresh_live_reference(
+    service: RedBarLiveService,
+    *,
+    settings: RedBarSettings,
+    instrument_key: str,
+    underlying_name: str,
+    now: datetime,
+):
+    """Refresh underlying candles/levels without interrupting option collection."""
+
+    status_path = Path(settings.database_path).parent / "live_reference_worker_status.json"
+    return run_cycle(
+        service,
+        instrument_key=instrument_key,
+        underlying_name=underlying_name,
+        status_path=status_path,
+        now=now,
+        force=True,
+    )
 
 
 def main() -> int:
@@ -82,6 +114,14 @@ def main() -> int:
     )
     layout = ArtifactLayout(settings)
     layout.ensure()
+
+    live_historical = RedBarHistoricalService(provider, layout)
+    live_reference_service = RedBarLiveService(
+        live_historical,
+        layout,
+        database,
+    )
+
     historical_cache = RedBarHistoricalService(
         RedBarUpstoxService("cache-only"),
         layout,
@@ -125,6 +165,15 @@ def main() -> int:
                     None,
                 )
             elif mode == "online":
+                if not args.skip_live_reference_refresh:
+                    _refresh_live_reference(
+                        live_reference_service,
+                        settings=settings,
+                        instrument_key=instrument_key,
+                        underlying_name=args.underlying,
+                        now=now,
+                    )
+
                 report = collector.online_tick(
                     instrument_key=instrument_key,
                     expiry=expiry,
@@ -163,9 +212,7 @@ def main() -> int:
                     row.get("collector_mode") == "ONLINE"
                     for row in online_history
                 )
-                auto_eod_allowed = (
-                    args.mode != "auto" or has_online_today
-                )
+                auto_eod_allowed = args.mode != "auto" or has_online_today
                 if not auto_eod_allowed:
                     logging.info(
                         "EOD capture skipped: no ONLINE snapshots exist "
@@ -235,3 +282,6 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+__all__ = ["_refresh_live_reference", "main"]
