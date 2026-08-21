@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sqlite3
 from typing import Any, Iterable, Mapping
 
 import pandas as pd
 
-_DISTANCE_WEIGHTS = {1: 1.00, 2: 0.90, 3: 0.75, 4: 0.55, 5: 0.35}
+_DISTANCE_WEIGHTS = {0: 1.00, 1: 0.90, 2: 0.75, 3: 0.55, 4: 0.35}
+_MAX_HISTORY_GAP_SECONDS = 180
 
 
 def _f(value: object) -> float | None:
@@ -19,11 +20,37 @@ def _f(value: object) -> float | None:
         return None
 
 
+def _dt(value: object) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text[:-1] + "+00:00" if text.endswith("Z") else text)
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
+
+
+def _strike_step(rows: list[Mapping[str, object]]) -> float | None:
+    strikes = sorted({_f(row.get("strike")) for row in rows if _f(row.get("strike")) is not None})
+    differences = [b - a for a, b in zip(strikes, strikes[1:]) if b > a]
+    return min(differences) if differences else None
+
+
+def _distance_steps(row: Mapping[str, object], *, step: float | None) -> int:
+    strike = _f(row.get("strike"))
+    atm = _f(row.get("atm_strike"))
+    if strike is not None and atm is not None and step not in (None, 0):
+        return max(0, int(round(abs(strike - atm) / float(step))))
+    # Legacy fallback. Paired collector ranks are ATM, -1, +1, -2, +2 ...
+    rank = int(_f(row.get("distance_rank")) or 1)
+    return max(0, (rank - 1 + 1) // 2)
+
+
 def _eligible(row: Mapping[str, object]) -> tuple[bool, str]:
     price = _f(row.get("current_price"))
     bid = _f(row.get("bid"))
     ask = _f(row.get("ask"))
-    spread = _f(row.get("spread"))
     iv = _f(row.get("iv"))
     volume = _f(row.get("volume"))
     oi = _f(row.get("oi"))
@@ -31,12 +58,15 @@ def _eligible(row: Mapping[str, object]) -> tuple[bool, str]:
         return False, "MISSING_PRICE"
     if volume is None or volume <= 0 or oi is None or oi <= 0:
         return False, "ILLIQUID"
-    if bid is not None and ask is not None and ask < bid:
+    if bid is None or ask is None or bid <= 0 or ask <= 0:
+        return False, "QUOTE_UNAVAILABLE"
+    if ask < bid:
         return False, "INVALID_QUOTE"
-    effective_spread = spread
-    if effective_spread is None and bid is not None and ask is not None:
-        effective_spread = ask - bid
-    if effective_spread is not None and effective_spread / price > 0.03:
+    midpoint = (bid + ask) / 2.0
+    if midpoint <= 0:
+        return False, "INVALID_QUOTE"
+    spread_pct = (ask - bid) / midpoint * 100.0
+    if spread_pct > 3.0:
         return False, "WIDE_SPREAD"
     if iv is not None and not 1.0 <= iv <= 150.0:
         return False, "IV_OUTLIER"
@@ -88,8 +118,7 @@ def _strike_score(row: Mapping[str, object]) -> float:
         elif 0.20 <= absolute < 0.30:
             score += 4.0
 
-    # Volume is deliberately not awarded here. It is reported as participation
-    # context, avoiding the previous score-plus-weight double counting.
+    # Volume is deliberately excluded to avoid score-plus-weight double counting.
     return round(min(100.0, score / 85.0 * 100.0), 2)
 
 
@@ -103,13 +132,14 @@ def corrected_option_summary(rows: Iterable[Mapping[str, object]]) -> dict[str, 
         "rejected": 0,
         "rows": materialized,
     }
+    step = _strike_step(materialized)
     for row in materialized:
         eligible, reason = _eligible(row)
         row["contract_eligibility"] = reason
-        row["calibrated_strike_score"] = _strike_score(row) if eligible else None
-        row["distance_weight"] = _DISTANCE_WEIGHTS.get(
-            int(_f(row.get("distance_rank")) or 5), 0.25
-        )
+        row["normalized_strike_score"] = _strike_score(row) if eligible else None
+        distance = min(4, _distance_steps(row, step=step))
+        row["strike_distance_steps"] = distance
+        row["distance_weight"] = _DISTANCE_WEIGHTS[distance]
         if not eligible:
             result["rejected"] += 1
 
@@ -117,13 +147,13 @@ def corrected_option_summary(rows: Iterable[Mapping[str, object]]) -> dict[str, 
         selected = [
             row for row in materialized
             if str(row.get("option_type") or "").upper() == side
-            and row.get("calibrated_strike_score") is not None
+            and row.get("normalized_strike_score") is not None
         ]
         result[f"eligible_{side.lower()}"] = len(selected)
         if selected:
             weights = [float(row["distance_weight"]) for row in selected]
             result[f"{side.lower()}_score"] = round(
-                sum(float(row["calibrated_strike_score"]) * weight for row, weight in zip(selected, weights))
+                sum(float(row["normalized_strike_score"]) * weight for row, weight in zip(selected, weights))
                 / sum(weights),
                 2,
             )
@@ -151,14 +181,34 @@ def read_option_score_history(
         return []
     with sqlite3.connect(path) as connection:
         connection.row_factory = sqlite3.Row
+        latest = connection.execute(
+            """SELECT observed_at, expiry FROM option_participation_snapshots
+               WHERE underlying_name=?
+               ORDER BY julianday(observed_at) DESC, observed_at DESC LIMIT 1""",
+            (underlying_name,),
+        ).fetchone()
+        if latest is None:
+            return []
+        latest_time = _dt(latest["observed_at"])
+        if latest_time is None:
+            return []
+        trading_date = latest_time.date().isoformat()
+        expiry = latest["expiry"]
         stamps = connection.execute(
             """SELECT DISTINCT observed_at FROM option_participation_snapshots
-               WHERE underlying_name=?
+               WHERE underlying_name=? AND substr(observed_at,1,10)=?
+                 AND (expiry=? OR (expiry IS NULL AND ? IS NULL))
                ORDER BY julianday(observed_at) DESC, observed_at DESC LIMIT ?""",
-            (underlying_name, max(1, int(limit))),
+            (underlying_name, trading_date, expiry, expiry, max(1, int(limit))),
         ).fetchall()
-        history = []
+        history: list[dict[str, Any]] = []
+        previous_time: datetime | None = None
         for stamp in reversed(stamps):
+            observed = _dt(stamp["observed_at"])
+            if observed is None:
+                continue
+            if previous_time is not None and (observed - previous_time).total_seconds() > _MAX_HISTORY_GAP_SECONDS:
+                history = []
             rows = connection.execute(
                 """SELECT * FROM option_participation_snapshots
                    WHERE underlying_name=? AND observed_at=?""",
@@ -167,15 +217,22 @@ def read_option_score_history(
             summary = corrected_option_summary(dict(row) for row in rows)
             summary["observed_at"] = stamp["observed_at"]
             history.append(summary)
+            previous_time = observed
     return history
 
 
 def score_slope(history: list[Mapping[str, object]], side: str) -> float | None:
-    values = [_f(item.get(f"{side.lower()}_score")) for item in history]
-    clean = [value for value in values if value is not None]
+    points = [
+        (_dt(item.get("observed_at")), _f(item.get(f"{side.lower()}_score")))
+        for item in history
+    ]
+    clean = [(stamp, value) for stamp, value in points if stamp is not None and value is not None]
     if len(clean) < 2:
         return None
-    return round((clean[-1] - clean[0]) / (len(clean) - 1), 2)
+    elapsed_minutes = (clean[-1][0] - clean[0][0]).total_seconds() / 60.0
+    if elapsed_minutes <= 0:
+        return None
+    return round((clean[-1][1] - clean[0][1]) / elapsed_minutes, 2)
 
 
 def _rsi_series(close: pd.Series, period: int = 14) -> pd.Series:
@@ -188,7 +245,20 @@ def _rsi_series(close: pd.Series, period: int = 14) -> pd.Series:
     return 100.0 - 100.0 / (1.0 + rs)
 
 
-def build_underlying_evidence(frame: pd.DataFrame | None) -> dict[str, Any]:
+def _completed_five_minute_bars(work: pd.DataFrame, *, as_of_timestamp: datetime) -> pd.DataFrame:
+    bars = work.resample("5min", origin="start_day", offset="15min").agg(
+        {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
+    ).dropna(subset=["open", "high", "low", "close"])
+    as_of = as_of_timestamp.astimezone(timezone.utc)
+    completed_cutoff = pd.Timestamp(as_of).floor("5min")
+    return bars[bars.index + pd.Timedelta(minutes=5) <= completed_cutoff]
+
+
+def build_underlying_evidence(
+    frame: pd.DataFrame | None,
+    *,
+    as_of_timestamp: datetime | None = None,
+) -> dict[str, Any]:
     unavailable = {
         "state": "UNAVAILABLE", "direction": "UNAVAILABLE",
         "momentum": "UNAVAILABLE", "rsi_view": "UNAVAILABLE",
@@ -205,12 +275,15 @@ def build_underlying_evidence(frame: pd.DataFrame | None) -> dict[str, Any]:
     for col in ("open", "high", "low", "close", "volume"):
         if col in work.columns:
             work[col] = pd.to_numeric(work[col], errors="coerce")
+    if "volume" not in work.columns:
+        work["volume"] = 0.0
     if not {"open", "high", "low", "close"}.issubset(work.columns):
         return unavailable
-    bars = work.resample("5min", origin="start_day", offset="15min").agg(
-        {"open": "first", "high": "max", "low": "min", "close": "last"}
-    ).dropna()
-    if len(bars) < 8:
+    as_of = as_of_timestamp or datetime.now(timezone.utc)
+    if as_of.tzinfo is None:
+        as_of = as_of.replace(tzinfo=timezone.utc)
+    bars = _completed_five_minute_bars(work, as_of_timestamp=as_of)
+    if len(bars) < 9:
         return unavailable
 
     previous_close = bars["close"].shift(1)
@@ -218,33 +291,63 @@ def build_underlying_evidence(frame: pd.DataFrame | None) -> dict[str, Any]:
         [bars["high"] - bars["low"], (bars["high"] - previous_close).abs(), (bars["low"] - previous_close).abs()],
         axis=1,
     ).max(axis=1)
-    atr = true_range.rolling(14, min_periods=5).mean().iloc[-1]
+    atr_series = true_range.rolling(14, min_periods=5).mean()
+    atr = _f(atr_series.iloc[-1])
+    if atr in (None, 0):
+        return unavailable
+
     latest = bars.iloc[-1]
-    prior = bars.iloc[-6:-1]
+    breakout = bars.iloc[-2]
+    prior = bars.iloc[-7:-2]
     prior_high = float(prior["high"].max())
     prior_low = float(prior["low"].min())
-    close = float(latest["close"])
-    body = abs(float(latest["close"]) - float(latest["open"]))
-    range_value = max(float(latest["high"]) - float(latest["low"]), 1e-9)
-    body_atr = body / atr if atr and atr > 0 else 0.0
-    net_atr = (close - float(bars["close"].iloc[-6])) / atr if atr and atr > 0 else 0.0
-    close_location = (close - float(latest["low"])) / range_value
+    breakout_close = float(breakout["close"])
+    latest_close = float(latest["close"])
+    breakout_range = max(float(breakout["high"]) - float(breakout["low"]), 1e-9)
+    breakout_body = abs(float(breakout["close"]) - float(breakout["open"]))
+    breakout_body_atr = breakout_body / atr
+    breakout_location = (breakout_close - float(breakout["low"])) / breakout_range
+    breakout_net_atr = (breakout_close - float(bars["close"].iloc[-7])) / atr
 
-    bullish_break = close > prior_high and close_location >= 0.70
-    bearish_break = close < prior_low and close_location <= 0.30
-    if bullish_break and (body_atr >= 0.60 or net_atr >= 0.80):
-        state, direction, momentum = "BULLISH_STRUCTURE", "BULLISH", "EXPANDING"
-    elif bearish_break and (body_atr >= 0.60 or net_atr <= -0.80):
-        state, direction, momentum = "BEARISH_STRUCTURE", "BEARISH", "EXPANDING"
-    elif close > prior_high:
-        state, direction, momentum = "TRANSITION_UP", "BULLISH", "EARLY"
-    elif close < prior_low:
-        state, direction, momentum = "TRANSITION_DOWN", "BEARISH", "EARLY"
-    elif abs(net_atr) < 0.45:
-        state, direction, momentum = "SIDEWAYS_COMPRESSION", "NEUTRAL", "COMPRESSED"
+    bullish_break = breakout_close > prior_high and breakout_location >= 0.70
+    bearish_break = breakout_close < prior_low and breakout_location <= 0.30
+    bullish_expansion = breakout_body_atr >= 0.60 or breakout_net_atr >= 0.80
+    bearish_expansion = breakout_body_atr >= 0.60 or breakout_net_atr <= -0.80
+    bullish_hold = latest_close > prior_high
+    bearish_hold = latest_close < prior_low
+
+    current_prior = bars.iloc[-6:-1]
+    current_high = float(current_prior["high"].max())
+    current_low = float(current_prior["low"].min())
+    current_range = max(float(latest["high"]) - float(latest["low"]), 1e-9)
+    current_location = (latest_close - float(latest["low"])) / current_range
+    current_body_atr = abs(float(latest["close"]) - float(latest["open"])) / atr
+    current_net_atr = (latest_close - float(bars["close"].iloc[-6])) / atr
+    live_bull_break = latest_close > current_high and current_location >= 0.70
+    live_bear_break = latest_close < current_low and current_location <= 0.30
+
+    if bullish_break and bullish_expansion and bullish_hold:
+        state, direction, momentum, acceptance = "BULLISH_STRUCTURE", "BULLISH", "EXPANDING", "HOLD_CONFIRMED"
+    elif bearish_break and bearish_expansion and bearish_hold:
+        state, direction, momentum, acceptance = "BEARISH_STRUCTURE", "BEARISH", "EXPANDING", "HOLD_CONFIRMED"
+    elif bullish_break and not bullish_hold:
+        state, direction, momentum, acceptance = "FAILED_RECLAIM", "NEUTRAL", "FAILED", "FAILED_RECLAIM"
+    elif bearish_break and not bearish_hold:
+        state, direction, momentum, acceptance = "FAILED_RECLAIM", "NEUTRAL", "FAILED", "FAILED_RECLAIM"
+    elif live_bull_break:
+        state, direction, momentum, acceptance = "BREAK_DETECTED_UP", "BULLISH", "EARLY", "HOLD_PENDING"
+    elif live_bear_break:
+        state, direction, momentum, acceptance = "BREAK_DETECTED_DOWN", "BEARISH", "EARLY", "HOLD_PENDING"
     else:
-        direction = "BULLISH" if net_atr > 0 else "BEARISH"
-        state, momentum = f"TRANSITION_{'UP' if net_atr > 0 else 'DOWN'}", "DEVELOPING"
+        recent_range_atr = (float(bars["high"].iloc[-5:].max()) - float(bars["low"].iloc[-5:].min())) / atr
+        direction_changes = int((bars["close"].diff().iloc[-5:].apply(lambda x: 1 if x > 0 else -1 if x < 0 else 0).diff().abs() > 0).sum())
+        if abs(current_net_atr) < 0.45 and recent_range_atr < 1.5 and direction_changes >= 2:
+            state, direction, momentum, acceptance = "SIDEWAYS_COMPRESSION", "NEUTRAL", "COMPRESSED", "NO_BREAK"
+        elif abs(current_net_atr) < 0.45:
+            state, direction, momentum, acceptance = "SIDEWAYS_VOLATILE", "NEUTRAL", "VOLATILE", "NO_BREAK"
+        else:
+            direction = "BULLISH" if current_net_atr > 0 else "BEARISH"
+            state, momentum, acceptance = f"TRANSITION_{'UP' if current_net_atr > 0 else 'DOWN'}", "DEVELOPING", "NO_BREAK"
 
     rsi = _rsi_series(bars["close"])
     latest_rsi = _f(rsi.iloc[-1])
@@ -265,21 +368,30 @@ def build_underlying_evidence(frame: pd.DataFrame | None) -> dict[str, Any]:
 
     observed = bars.index[-1].to_pydatetime().astimezone(timezone.utc).isoformat()
     return {
-        "state": state, "direction": direction, "momentum": momentum,
-        "observed_at": observed, "atr": round(float(atr), 4) if atr else None,
-        "body_atr": round(body_atr, 3), "net_move_atr": round(net_atr, 3),
+        "state": state,
+        "direction": direction,
+        "momentum": momentum,
+        "acceptance_state": acceptance,
+        "observed_at": observed,
+        "atr": round(float(atr), 4),
+        "body_atr": round(current_body_atr, 3),
+        "net_move_atr": round(current_net_atr, 3),
         "rsi": round(latest_rsi, 2) if latest_rsi is not None else None,
         "rsi_slope": round(rsi_slope, 2) if rsi_slope is not None else None,
         "rsi_view": rsi_view,
-        "reason": f"{state}; 5-bar move {net_atr:.2f} ATR; body {body_atr:.2f} ATR.",
+        "reason": f"{state}/{acceptance}; 5-bar move {current_net_atr:.2f} ATR; body {current_body_atr:.2f} ATR.",
     }
 
 
-def read_underlying_evidence(path: str | Path) -> dict[str, Any]:
+def read_underlying_evidence(
+    path: str | Path,
+    *,
+    as_of_timestamp: datetime | None = None,
+) -> dict[str, Any]:
     source = Path(path)
     if not source.exists():
-        return build_underlying_evidence(None)
+        return build_underlying_evidence(None, as_of_timestamp=as_of_timestamp)
     try:
-        return build_underlying_evidence(pd.read_csv(source))
+        return build_underlying_evidence(pd.read_csv(source), as_of_timestamp=as_of_timestamp)
     except Exception:
-        return build_underlying_evidence(None)
+        return build_underlying_evidence(None, as_of_timestamp=as_of_timestamp)
