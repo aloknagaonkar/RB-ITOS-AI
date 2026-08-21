@@ -22,7 +22,6 @@ def _number(value):
 
 
 def _display(value, *, digits: int = 3) -> str:
-    """Return one stable text type for the option-summary value column."""
     if value in (None, ""):
         return "Unavailable"
     if isinstance(value, float):
@@ -105,14 +104,7 @@ def _nearest_expiry(rows, trading_date: str):
 def _read_option_rows(database, instrument_key: str, trading_date: str):
     latest_reader = getattr(database, "read_latest_option_chain_snapshot", None)
     if callable(latest_reader):
-        return list(
-            latest_reader(
-                instrument_key,
-                trading_date,
-                limit=100,
-            )
-            or []
-        )
+        return list(latest_reader(instrument_key, trading_date, limit=100) or [])
     return list(
         database.read_option_chain_history(
             instrument_key,
@@ -125,7 +117,7 @@ def _read_option_rows(database, instrument_key: str, trading_date: str):
 
 
 def build_option_behaviour_snapshot(database, instrument_key: str, trading_date: str):
-    """Build read-only context from aggregate option-chain snapshot records."""
+    """Build read-only aggregate option positioning with transparent evidence."""
     try:
         rows = _read_option_rows(database, instrument_key, trading_date)
     except Exception as exc:
@@ -148,7 +140,8 @@ def build_option_behaviour_snapshot(database, instrument_key: str, trading_date:
     latest_ts = max(timestamps) if timestamps else None
     latest_rows = (
         [row for row in rows if _timestamp(row) == latest_ts]
-        if latest_ts is not None else rows
+        if latest_ts is not None
+        else rows
     )
     snapshot = dict(_nearest_expiry(latest_rows, trading_date))
     call_oi = _number(snapshot.get("total_call_oi"))
@@ -161,14 +154,20 @@ def build_option_behaviour_snapshot(database, instrument_key: str, trading_date:
 
     bullish = 0
     bearish = 0
+    evidence = []
     if put_change_oi is not None and put_change_oi > 0:
         bullish += 1
+        evidence.append("PUT_OI_ADDITION")
     if call_change_oi is not None and call_change_oi < 0:
         bullish += 1
+        evidence.append("CALL_OI_UNWINDING")
     if call_change_oi is not None and call_change_oi > 0:
         bearish += 1
+        evidence.append("CALL_OI_ADDITION")
     if put_change_oi is not None and put_change_oi < 0:
         bearish += 1
+        evidence.append("PUT_OI_UNWINDING")
+
     if bullish >= 2 and bearish == 0:
         bias = "BULLISH POSITIONING"
     elif bearish >= 2 and bullish == 0:
@@ -182,12 +181,7 @@ def build_option_behaviour_snapshot(database, instrument_key: str, trading_date:
     else:
         bias = "NEUTRAL"
 
-    behaviour_fields = (
-        call_oi,
-        put_oi,
-        call_change_oi,
-        put_change_oi,
-    )
+    behaviour_fields = (call_oi, put_oi, call_change_oi, put_change_oi)
     status = "READY" if any(value is not None for value in behaviour_fields) else "PARTIAL"
     execution_status = "NOT EVALUATED"
     expiry = _first(snapshot, ("option_expiry", "expiry", "expiry_date"))
@@ -204,6 +198,9 @@ def build_option_behaviour_snapshot(database, instrument_key: str, trading_date:
         {"input": "Total PE open interest", "value": _display(put_oi)},
         {"input": "Total CE change in OI", "value": _display(call_change_oi)},
         {"input": "Total PE change in OI", "value": _display(put_change_oi)},
+        {"input": "Bullish evidence count", "value": _display(bullish)},
+        {"input": "Bearish evidence count", "value": _display(bearish)},
+        {"input": "Evidence flags", "value": _display(", ".join(evidence) or "NONE")},
         {"input": "PCR (OI)", "value": _display(pcr)},
         {"input": "Call wall", "value": _display(snapshot.get("call_wall_strike"))},
         {"input": "Put wall", "value": _display(snapshot.get("put_wall_strike"))},
@@ -225,6 +222,17 @@ def build_option_behaviour_snapshot(database, instrument_key: str, trading_date:
         "pcr": pcr,
         "freshness": freshness,
         "age_seconds": age_seconds,
-        "detail": "Aggregate OI context is supporting evidence. Contract price, spread and liquidity are evaluated later during contract selection.",
+        "call_oi": call_oi,
+        "put_oi": put_oi,
+        "call_change_oi": call_change_oi,
+        "put_change_oi": put_change_oi,
+        "bullish_evidence_count": bullish,
+        "bearish_evidence_count": bearish,
+        "evidence_flags": tuple(evidence),
+        "detail": (
+            "Aggregate OI context is supporting evidence. The current bias uses "
+            "binary addition/unwinding evidence; magnitudes are displayed but not "
+            "yet normalized or used as execution authority."
+        ),
         "rows": display_rows,
     }
