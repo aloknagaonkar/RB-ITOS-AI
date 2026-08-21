@@ -24,9 +24,6 @@ def _field(value: object, name: str, default: object = None) -> object:
 
 def _domain_payload(value: object) -> dict[str, Any]:
     status = str(_field(value, "status", "UNKNOWN") or "UNKNOWN").upper()
-
-    # Typed readiness domains use blocking/advisory reasons. Older mapping
-    # fixtures used a single reasons tuple, so retain compatibility with both.
     blocking = _field(value, "blocking_reasons", None)
     if blocking is None:
         blocking = _field(value, "reasons", ())
@@ -45,15 +42,16 @@ def _domain_payload(value: object) -> dict[str, Any]:
     }
 
 
+def _yes_no_unknown(value: object) -> str:
+    if value is None:
+        return "—"
+    return "YES" if bool(value) else "NO"
+
+
 def build_operations_readiness_view_model(
     readiness_gate: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
-    """Convert the readiness gate into a stable presentation contract.
-
-    This adapter contains no database access and no execution authority. It
-    keeps the Operations Centre renderer independent from the gate's internal
-    dataclasses and set/tuple representation.
-    """
+    """Convert the readiness gate into a stable presentation contract."""
 
     gate = dict(readiness_gate or {})
     confirmed_ids = tuple(gate.get("confirmed_signal_ids") or ())
@@ -88,18 +86,12 @@ def build_operations_readiness_view_model(
 
     domains_raw = gate.get("readiness_domains") or {}
     domains = {
-        "market_data": _domain_payload(
-            _field(domains_raw, "market_data_readiness")
-        ),
+        "market_data": _domain_payload(_field(domains_raw, "market_data_readiness")),
         "independent_strategy": _domain_payload(
             _field(domains_raw, "independent_strategy_readiness")
         ),
-        "red_bar_v2": _domain_payload(
-            _field(domains_raw, "red_bar_v2_readiness")
-        ),
-        "execution": _domain_payload(
-            _field(domains_raw, "execution_readiness")
-        ),
+        "red_bar_v2": _domain_payload(_field(domains_raw, "red_bar_v2_readiness")),
+        "execution": _domain_payload(_field(domains_raw, "execution_readiness")),
     }
 
     drilldown = []
@@ -114,7 +106,21 @@ def build_operations_readiness_view_model(
                 "Reference": payload.get("reference_status"),
                 "Reference timestamp": payload.get("reference_timestamp"),
                 "Market": payload.get("market_status"),
+                "Market source": payload.get("market_source") or "—",
+                "Market latest candle": payload.get("market_latest_timestamp") or "—",
+                "Market rows": payload.get("market_row_count", 0),
+                "Market fallback": _yes_no_unknown(payload.get("market_fallback_used")),
+                "Market no-lookahead": _yes_no_unknown(
+                    payload.get("market_no_lookahead_passed")
+                ),
                 "Volume": payload.get("volume_status"),
+                "Volume source": payload.get("volume_source") or "—",
+                "Volume latest candle": payload.get("volume_latest_timestamp") or "—",
+                "Volume rows": payload.get("volume_row_count", 0),
+                "Volume fallback": _yes_no_unknown(payload.get("volume_fallback_used")),
+                "Volume no-lookahead": _yes_no_unknown(
+                    payload.get("volume_no_lookahead_passed")
+                ),
                 "Options": payload.get("option_status"),
                 "CORE": "YES" if payload.get("core_eligible") else "NO",
                 "HYBRID": "YES" if payload.get("hybrid_eligible") else "NO",
