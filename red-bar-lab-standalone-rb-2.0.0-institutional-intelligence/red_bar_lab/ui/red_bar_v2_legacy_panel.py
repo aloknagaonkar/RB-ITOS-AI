@@ -174,6 +174,8 @@ def _diagnostic_value(diagnostics: Any, field: str):
 
 def _alignment_rows(diagnostics: Any, snapshot: RedBarV2UISnapshot) -> list[dict[str, Any]]:
     reasons = _diagnostic_value(diagnostics, "alignment_blocking_reasons") or ()
+    conflicts = _diagnostic_value(diagnostics, "state_conflicts") or ()
+    suppressed = _diagnostic_value(diagnostics, "stale_fields_suppressed") or ()
     return [
         {"Alignment input": "Market context ready", "Result": _flag(_diagnostic_value(diagnostics, "market_context_ready"))},
         {"Alignment input": "Volume structure ready", "Result": _flag(_diagnostic_value(diagnostics, "volume_structure_ready"))},
@@ -182,6 +184,9 @@ def _alignment_rows(diagnostics: Any, snapshot: RedBarV2UISnapshot) -> list[dict
         {"Alignment input": "Reference data quality", "Result": _value(_diagnostic_value(diagnostics, "reference_data_quality"), "UNKNOWN")},
         {"Alignment input": "Final alignment", "Result": snapshot.alignment_status},
         {"Alignment input": "Blocking reason", "Result": ", ".join(reasons) or "NONE"},
+        {"Alignment input": "Snapshot state coherent", "Result": _flag(_diagnostic_value(diagnostics, "state_coherent"))},
+        {"Alignment input": "State conflict", "Result": ", ".join(conflicts) or "NONE"},
+        {"Alignment input": "Suppressed stale fields", "Result": ", ".join(suppressed) or "NONE"},
     ]
 
 
@@ -214,6 +219,13 @@ def render_red_bar_v2_legacy_panel(
 
     st.markdown("#### Alignment inputs and blockers")
     st.dataframe(_alignment_rows(runtime_diagnostics, snapshot), width="stretch", hide_index=True)
+    conflicts = _diagnostic_value(runtime_diagnostics, "state_conflicts") or ()
+    if conflicts:
+        st.warning(
+            "STATE MISALIGNED: the current reference, strategy lifecycle and trade state "
+            "do not form one coherent Red Bar V2 snapshot. Strategy-dependent stale "
+            f"fields were suppressed. Conflicts: {', '.join(conflicts)}"
+        )
     st.caption(
         "Option freshness is shown separately as an advisory observation. It does not "
         "silently change the persisted pipeline options_context_ready flag."
