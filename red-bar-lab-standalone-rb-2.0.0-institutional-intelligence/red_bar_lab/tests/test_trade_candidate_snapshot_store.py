@@ -4,7 +4,7 @@ from red_bar_lab.services.trade_candidate_snapshot_store import (
 )
 
 
-def test_persists_only_top_three_with_vwap_pcr_and_rsi(tmp_path):
+def test_persists_only_top_five_with_vwap_pcr_and_rsi(tmp_path):
     path = tmp_path / "lab.db"
     candidates = [
         {
@@ -25,7 +25,7 @@ def test_persists_only_top_three_with_vwap_pcr_and_rsi(tmp_path):
             "evidence_grade": "STRONG",
             "suggested_action": "PAPER OBSERVATION",
         }
-        for index in range(1, 5)
+        for index in range(1, 7)
     ]
 
     assert persist_trade_candidate_snapshots(
@@ -35,11 +35,17 @@ def test_persists_only_top_three_with_vwap_pcr_and_rsi(tmp_path):
         recommendation_source="INDEPENDENT_MARKET",
         direction="BULLISH",
         candidates=candidates,
-    ) == 3
+    ) == 5
 
     rows = read_latest_trade_candidates(path)
-    assert [row["rank"] for row in rows] == [1, 2, 3]
-    assert [row["role"] for row in rows] == ["PRIMARY", "SAFER", "AGGRESSIVE"]
+    assert [row["rank"] for row in rows] == [1, 2, 3, 4, 5]
+    assert [row["role"] for row in rows] == [
+        "PRIMARY",
+        "SAFER",
+        "AGGRESSIVE",
+        "ALTERNATE",
+        "WATCHLIST",
+    ]
     assert rows[0]["current_price"] == 101.0
     assert rows[0]["vwap"] == 99.0
     assert rows[0]["price_vs_vwap_pct"] > 0
