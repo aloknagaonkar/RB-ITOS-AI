@@ -17,10 +17,15 @@ Architectural authority: observational/read-only. No execution or legacy exit au
 - [x] Visible `NEXT_RED_CANDLE`, Market, Volume, Options, CORE and HYBRID stage metrics.
 - [x] Visible readiness-domain table and per-signal blocker drill-down.
 - [x] Focused tests for reference validation, readiness isolation, feature intersections, orchestration, view model and live database adaptation.
+- [x] View-model adapter accepts both mapping fixtures and typed `ReadinessDomains` / `ReadinessDomainResult` objects.
+- [x] Blocking and advisory domain reasons remain separately exposed to the renderer.
 
 ## Current validation state
 
-- [ ] Run the focused Windows test suite.
+- [x] Initial focused Windows suite executed: 78 passed, 3 failed.
+- [x] All three failures traced to one typed-domain adapter mismatch.
+- [x] Adapter fix and typed-domain regression test committed.
+- [ ] Re-run the focused Windows test suite after pulling the adapter fix.
 - [ ] Confirm the new `Authoritative Signal Readiness v2` section renders in Streamlit.
 - [ ] Compare exact CORE/HYBRID IDs against persisted pipeline status for the current session.
 
