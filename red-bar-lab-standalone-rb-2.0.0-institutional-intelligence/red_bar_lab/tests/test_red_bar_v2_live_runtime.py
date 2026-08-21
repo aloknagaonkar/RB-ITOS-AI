@@ -162,7 +162,7 @@ def test_missing_current_day_signal_returns_resolved_partial_state(tmp_path):
     assert resolved.reference_status == "REFERENCE_NOT_READY"
     assert resolved.alignment_status == "BLOCKED"
     assert resolved.session_completeness == "PARTIAL"
-    assert diagnostics.source_status == "NO_CURRENT_DAY_SIGNAL"
+    assert diagnostics.source_status == "NO_CURRENT_DAY_SIGNAL_OR_REFERENCE"
     assert diagnostics.alignment_blocking_reasons == (
         "PIPELINE_STATUS_MISSING",
         "NEXT_RED_CANDLE_REFERENCE_NOT_FOUND",
