@@ -31,21 +31,32 @@ Architectural authority: observational/read-only. No execution or legacy exit au
 - [x] Persistence failures remain diagnostic and do not block page rendering.
 - [x] Explicit `persist_outcomes=False` test path for isolated UI tests.
 - [x] Success-path, failure-isolation and disabled-persistence regression tests added.
+- [x] Expanded runtime persistence suite passed on Windows.
+- [x] Point-in-time completed-candle result contract.
+- [x] Current-session live persisted candle preference.
+- [x] Explicit historical fallback policy.
+- [x] Historical-session direct repository selection.
+- [x] Future candle exclusion and no-lookahead diagnostics.
+- [x] Explicit MISSING and FAILED candle-source outcomes.
+- [x] Candle selection to enrichment-outcome adapter.
+- [x] Persistable selected source, cutoff, latest candle timestamp, row count and fallback flag.
+- [x] Focused candle-source and outcome-adapter tests added.
 
 ## Current validation state
 
 - [x] Earlier Operations readiness suite passed on Windows.
-- [ ] Run the expanded suite with runtime persistence tests.
+- [x] Expanded runtime persistence suite passed on Windows.
+- [ ] Run point-in-time candle-source and candle-outcome tests.
 - [ ] Confirm `Outcome persistence: READY` appears in Streamlit.
-- [ ] Confirm eight persisted rows for two confirmed signals and four stages.
 - [ ] Compare exact CORE/HYBRID IDs against persisted pipeline status for the current session.
 
 ## Next P0 slice
 
-- [ ] Add current-day completed live-candle source before historical fallback.
-- [ ] Persist selected candle source, requested cutoff and latest completed timestamp.
-- [ ] Enforce and persist no-lookahead selection result.
-- [ ] Return explicit MISSING or FAILED outcome instead of silently skipping unavailable live candles.
+- [ ] Adapt the real persisted live-candle table to the common reader contract.
+- [ ] Adapt the historical candle repository to the same reader contract.
+- [ ] Wire point-in-time selection into market-context enrichment.
+- [ ] Wire point-in-time selection into volume-structure enrichment.
+- [ ] Persist source diagnostics during live enrichment attempts.
 
 ## Later P1 work
 
@@ -67,8 +78,10 @@ python -m pytest -q `
   red_bar_lab/tests/test_operations_readiness_wrapper.py `
   red_bar_lab/tests/test_signal_enrichment_outcome_store.py `
   red_bar_lab/tests/test_operations_readiness_outcomes.py `
+  red_bar_lab/tests/test_point_in_time_candle_source.py `
+  red_bar_lab/tests/test_candle_selection_outcome.py `
   red_bar_lab/tests/test_operations_center.py `
   red_bar_lab/tests/test_ui_compatibility.py
 ```
 
-Tests must be run in the local Windows project before runtime persistence is considered validated.
+Tests must be run in the local Windows project before real candle repositories are wired into live enrichment.
