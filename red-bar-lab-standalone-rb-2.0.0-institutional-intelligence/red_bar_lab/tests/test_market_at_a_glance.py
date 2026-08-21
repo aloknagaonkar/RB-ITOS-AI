@@ -114,13 +114,19 @@ def test_market_at_a_glance_uses_futures_market_candle_for_alignment():
     summary["observed_at"] = "2026-08-21T06:23:34+00:00"
     futures = _futures()
     futures["observed_at"] = "2026-08-21T06:23:40+00:00"
-    futures["latest_timestamp"] = "2026-08-21T06:20:00+00:00"
+    futures["latest_timestamp"] = "2026-08-21T06:15:00+00:00"
+    futures["bar_open_timestamp"] = "2026-08-21T06:15:00+00:00"
+    futures["bar_close_timestamp"] = "2026-08-21T06:20:00+00:00"
     underlying = _underlying()
-    underlying["observed_at"] = "2026-08-21T06:20:00+00:00"
+    underlying["observed_at"] = "2026-08-21T06:15:00+00:00"
+    underlying["bar_open_timestamp"] = "2026-08-21T06:15:00+00:00"
+    underlying["bar_close_timestamp"] = "2026-08-21T06:20:00+00:00"
 
     view = build_market_at_a_glance(summary, futures, underlying, now=now)
 
     assert view["evidence_readiness"] == "READY"
+    assert view["futures_market_timestamp"] == "2026-08-21T06:20:00+00:00"
+    assert view["underlying_timestamp"] == "2026-08-21T06:20:00+00:00"
     assert view["alignment_gap_seconds"] == 214.0
     assert view["market_state"] == "CONFIRMED BULLISH"
 
