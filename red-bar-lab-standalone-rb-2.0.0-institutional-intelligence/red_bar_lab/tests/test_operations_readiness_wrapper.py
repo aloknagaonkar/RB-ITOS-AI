@@ -1,9 +1,15 @@
+from red_bar_lab.services.signal_enrichment_outcome_store import (
+    read_signal_enrichment_outcomes,
+)
 from red_bar_lab.ui.operations_readiness_wrapper import (
     build_live_operations_readiness_view,
 )
 
 
 class FakeDatabase:
+    def __init__(self, path=None):
+        self.path = path
+
     def read_signal_attempts(self, instrument_key, trading_date):
         return [
             {
@@ -93,3 +99,64 @@ def test_live_view_keeps_execution_blocked_and_observational():
         view["domains"]["execution"]["primary_reason"]
         == "EXECUTION_POLICY_NOT_APPROVED"
     )
+
+
+def test_live_view_persists_four_stage_outcomes_per_confirmed_signal(tmp_path):
+    database_path = tmp_path / "operations.db"
+    view = build_live_operations_readiness_view(
+        FakeDatabase(database_path),
+        instrument_key="NSE_INDEX|Nifty 50",
+        trading_date="2026-08-21",
+    )
+
+    assert view["outcome_persistence"]["status"] == "READY"
+    assert view["outcome_persistence"]["persisted_count"] == 8
+
+    rows = read_signal_enrichment_outcomes(database_path)
+    assert len(rows) == 8
+    assert {row["signal_id"] for row in rows} == {"RBV2-1", "RBV2-2"}
+    assert {row["stage"] for row in rows} == {
+        "REFERENCE",
+        "MARKET",
+        "VOLUME",
+        "OPTIONS",
+    }
+    volume = next(
+        row
+        for row in rows
+        if row["signal_id"] == "RBV2-2" and row["stage"] == "VOLUME"
+    )
+    assert volume["status"] == "MISSING"
+    assert volume["reason_code"] == "VOLUME_STRUCTURE_MISSING"
+
+
+def test_live_view_persistence_failure_does_not_block_rendering(tmp_path):
+    database_directory = tmp_path / "database-directory"
+    database_directory.mkdir()
+
+    view = build_live_operations_readiness_view(
+        FakeDatabase(database_directory),
+        instrument_key="NSE_INDEX|Nifty 50",
+        trading_date="2026-08-21",
+    )
+
+    assert view["confirmed_count"] == 2
+    assert view["stages"]["core"]["ready_count"] == 1
+    assert view["outcome_persistence"]["status"] == "FAILED"
+    assert view["outcome_persistence"]["persisted_count"] == 0
+    assert view["outcome_persistence"]["reason"]
+
+
+def test_live_view_can_disable_persistence_explicitly(tmp_path):
+    view = build_live_operations_readiness_view(
+        FakeDatabase(tmp_path / "disabled.db"),
+        instrument_key="NSE_INDEX|Nifty 50",
+        trading_date="2026-08-21",
+        persist_outcomes=False,
+    )
+
+    assert view["outcome_persistence"] == {
+        "status": "SKIPPED",
+        "persisted_count": 0,
+        "reason": "PERSISTENCE_DISABLED",
+    }
