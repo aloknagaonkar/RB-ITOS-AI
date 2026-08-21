@@ -18,8 +18,9 @@ from red_bar_lab.ui._shared import _arrow_safe_rows, st
 _BULLISH_FUTURES = {"LONG_BUILDUP", "SHORT_COVERING"}
 _BEARISH_FUTURES = {"SHORT_BUILDUP", "LONG_UNWINDING"}
 _CONFIRMING_STRENGTH = {"STRONG", "MODERATE"}
-_MAX_SOURCE_AGE_SECONDS = 180.0
-_MAX_ALIGNMENT_GAP_SECONDS = 120.0
+_OPTION_MAX_AGE_SECONDS = 180.0
+_COMPLETED_5M_MAX_AGE_SECONDS = 420.0
+_MAX_COMPLETED_5M_ALIGNMENT_GAP_SECONDS = 420.0
 
 
 def _number(value: object) -> float | None:
@@ -104,15 +105,24 @@ def build_market_at_a_glance(
     option_time = _timestamp(summary.get("observed_at"))
     futures_time = _timestamp(futures.get("observed_at"))
     underlying_time = _timestamp(underlying.get("observed_at"))
-    ages = [_age(value, current_time) for value in (option_time, futures_time, underlying_time)]
+    option_age = _age(option_time, current_time)
+    futures_age = _age(futures_time, current_time)
+    underlying_age = _age(underlying_time, current_time)
     alignment_gap = None
     if option_time and futures_time and underlying_time:
         utc_values = [value.astimezone(timezone.utc) for value in (option_time, futures_time, underlying_time)]
         alignment_gap = (max(utc_values) - min(utc_values)).total_seconds()
+
+    option_fresh = option_age is not None and option_age <= _OPTION_MAX_AGE_SECONDS
+    futures_fresh = futures_age is not None and futures_age <= _COMPLETED_5M_MAX_AGE_SECONDS
+    underlying_fresh = underlying_age is not None and underlying_age <= _COMPLETED_5M_MAX_AGE_SECONDS
+    evidence_aligned = (
+        alignment_gap is not None
+        and alignment_gap <= _MAX_COMPLETED_5M_ALIGNMENT_GAP_SECONDS
+    )
     evidence_status = (
-        "ALIGNED"
-        if all(age is not None and age <= _MAX_SOURCE_AGE_SECONDS for age in ages)
-        and alignment_gap is not None and alignment_gap <= _MAX_ALIGNMENT_GAP_SECONDS
+        "ALIGNED_TO_COMPLETED_5M"
+        if option_fresh and futures_fresh and underlying_fresh and evidence_aligned
         else "STALE"
         if all(value is not None for value in (option_time, futures_time, underlying_time))
         else "UNAVAILABLE"
@@ -120,7 +130,8 @@ def build_market_at_a_glance(
 
     mandatory_scores = bullish is not None and bearish is not None
     contracts_eligible = int(summary.get("eligible_ce") or 0) > 0 and int(summary.get("eligible_pe") or 0) > 0
-    if not mandatory_scores or not contracts_eligible or evidence_status != "ALIGNED" or underlying_direction == "UNAVAILABLE":
+    evidence_ready = evidence_status == "ALIGNED_TO_COMPLETED_5M"
+    if not mandatory_scores or not contracts_eligible or not evidence_ready or underlying_direction == "UNAVAILABLE":
         market_state, trade_bias = "UNAVAILABLE", "WAIT"
         confirmation = "MANDATORY EVIDENCE MISSING, STALE, MISALIGNED OR ILLIQUID"
     elif underlying_direction == "NEUTRAL":
@@ -156,7 +167,12 @@ def build_market_at_a_glance(
         {"Check": "Option persistence", "Live value": f"CE {_score(ce_slope)} / PE {_score(pe_slope)} per snapshot", "Rule": "3–5 snapshot score slope", "Status": option_momentum},
         {"Check": "Contract quality", "Live value": f"CE {summary.get('eligible_ce', 0)} / PE {summary.get('eligible_pe', 0)} eligible; {summary.get('rejected', 0)} rejected", "Rule": "Price, volume, OI, spread and IV eligibility", "Status": "PASS" if contracts_eligible else "FAIL"},
         {"Check": "Futures", "Live value": f"{futures_state} / {futures_strength}", "Rule": "Supportive state plus STRONG or MODERATE", "Status": futures_quality},
-        {"Check": "Evidence alignment", "Live value": "—" if alignment_gap is None else f"{alignment_gap:.0f}s max gap", "Rule": "All sources <=180s old and maximum gap <=120s", "Status": evidence_status},
+        {
+            "Check": "Evidence alignment",
+            "Live value": "—" if alignment_gap is None else f"{alignment_gap:.0f}s max gap",
+            "Rule": "Options <=180s; completed 5m futures/underlying <=420s; max gap <=420s",
+            "Status": evidence_status,
+        },
     ]
     return {
         "market_state": market_state,
@@ -170,6 +186,10 @@ def build_market_at_a_glance(
         "option_direction": option_direction,
         "futures_direction": futures_direction,
         "evidence_status": evidence_status,
+        "option_age_seconds": option_age,
+        "futures_age_seconds": futures_age,
+        "underlying_age_seconds": underlying_age,
+        "alignment_gap_seconds": alignment_gap,
         "checklist": checklist,
         "explanation": (
             f"Underlying {underlying_state}; options CE {_score(bullish)} vs PE {_score(bearish)}; "
