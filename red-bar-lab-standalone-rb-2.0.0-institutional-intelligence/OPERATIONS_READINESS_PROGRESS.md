@@ -19,22 +19,28 @@ Architectural authority: observational/read-only. No execution or legacy exit au
 - [x] Focused tests for reference validation, readiness isolation, feature intersections, orchestration, view model and live database adaptation.
 - [x] View-model adapter accepts both mapping fixtures and typed `ReadinessDomains` / `ReadinessDomainResult` objects.
 - [x] Blocking and advisory domain reasons remain separately exposed to the renderer.
+- [x] Focused Windows suite passed after the typed-domain adapter correction.
+- [x] Additive `signal_enrichment_outcomes` SQLite store.
+- [x] Persistable READY, MISSING, FAILED, STALE and NOT_APPLICABLE states.
+- [x] Deterministic outcome IDs and idempotent attempt upserts.
+- [x] Explicit reason code, retry count and final retry status fields.
+- [x] Persist input source, cutoff timestamp, latest source timestamp and no-lookahead result.
+- [x] Gate-to-persistence adapter for REFERENCE, MARKET, VOLUME and OPTIONS stages.
+- [x] Focused persistence and adapter tests added.
 
 ## Current validation state
 
-- [x] Initial focused Windows suite executed: 78 passed, 3 failed.
-- [x] All three failures traced to one typed-domain adapter mismatch.
-- [x] Adapter fix and typed-domain regression test committed.
-- [ ] Re-run the focused Windows test suite after pulling the adapter fix.
+- [x] Operations readiness suite passed on Windows.
+- [ ] Run the new outcome-store and outcome-adapter tests.
 - [ ] Confirm the new `Authoritative Signal Readiness v2` section renders in Streamlit.
 - [ ] Compare exact CORE/HYBRID IDs against persisted pipeline status for the current session.
 
 ## Next P0 slice
 
-- [ ] Persist per-signal enrichment outcomes for READY, MISSING, FAILED, STALE and NOT_APPLICABLE.
-- [ ] Add explicit stage reason codes and retry metadata.
+- [ ] Add non-blocking runtime auto-write of Operations readiness outcomes.
+- [ ] Surface persistence success/failure diagnostics without blocking page rendering.
 - [ ] Add current-day completed live-candle source before historical fallback.
-- [ ] Persist selected source, cutoff timestamp, latest candle timestamp and no-lookahead result.
+- [ ] Persist selected candle source and no-lookahead selection result.
 
 ## Later P1 work
 
@@ -54,8 +60,10 @@ python -m pytest -q `
   red_bar_lab/tests/test_operations_readiness_gate.py `
   red_bar_lab/tests/test_operations_readiness_view.py `
   red_bar_lab/tests/test_operations_readiness_wrapper.py `
+  red_bar_lab/tests/test_signal_enrichment_outcome_store.py `
+  red_bar_lab/tests/test_operations_readiness_outcomes.py `
   red_bar_lab/tests/test_operations_center.py `
   red_bar_lab/tests/test_ui_compatibility.py
 ```
 
-Tests must be run in the local Windows project before the renderer integration is considered validated.
+Tests must be run in the local Windows project before runtime persistence wiring is considered validated.
