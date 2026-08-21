@@ -44,7 +44,7 @@ def build_and_persist_global_readiness(
     """Build one best-effort global observation from already calculated values.
 
     The monitor runtime owns persistence. UI pages only read these observations.
-    This function performs no execution action.
+    This adapter performs no market-data calls and no execution action.
     """
 
     latest = dict(latest_signal_diagnostic or {})
