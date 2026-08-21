@@ -40,6 +40,7 @@ def test_market_at_a_glance_confirms_only_when_underlying_and_derivatives_agree(
     view = build_market_at_a_glance(_summary(), _futures(), _underlying(), now=NOW)
     assert view["market_state"] == "CONFIRMED BULLISH"
     assert view["trade_bias"] == "BUY CE"
+    assert view["evidence_status"] == "ALIGNED_TO_COMPLETED_5M"
 
 
 def test_market_at_a_glance_underlying_direction_owns_conflict():
@@ -61,12 +62,43 @@ def test_market_at_a_glance_transition_never_approves_trade():
     assert view["trade_bias"] == "WAIT"
 
 
-def test_market_at_a_glance_rejects_stale_evidence():
+def test_market_at_a_glance_accepts_normal_completed_five_minute_lag():
+    now = datetime(2026, 8, 21, 6, 23, 58, tzinfo=timezone.utc)
+    summary = _summary()
+    summary["observed_at"] = "2026-08-21T06:23:34+00:00"
+    futures = _futures()
+    futures["observed_at"] = "2026-08-21T06:20:00+00:00"
+    underlying = _underlying()
+    underlying["observed_at"] = "2026-08-21T06:20:00+00:00"
+
+    view = build_market_at_a_glance(summary, futures, underlying, now=now)
+
+    assert view["evidence_status"] == "ALIGNED_TO_COMPLETED_5M"
+    assert view["alignment_gap_seconds"] == 214.0
+    assert view["market_state"] == "CONFIRMED BULLISH"
+
+
+def test_market_at_a_glance_rejects_stale_option_evidence():
     summary = _summary()
     summary["observed_at"] = "2026-08-21T05:00:00+00:00"
     view = build_market_at_a_glance(summary, _futures(), _underlying(), now=NOW)
     assert view["market_state"] == "UNAVAILABLE"
     assert view["trade_bias"] == "WAIT"
+
+
+def test_market_at_a_glance_rejects_completed_five_minute_evidence_beyond_grace():
+    now = datetime(2026, 8, 21, 6, 30, tzinfo=timezone.utc)
+    summary = _summary()
+    summary["observed_at"] = "2026-08-21T06:29:30+00:00"
+    futures = _futures()
+    futures["observed_at"] = "2026-08-21T06:20:00+00:00"
+    underlying = _underlying()
+    underlying["observed_at"] = "2026-08-21T06:20:00+00:00"
+
+    view = build_market_at_a_glance(summary, futures, underlying, now=now)
+
+    assert view["evidence_status"] == "STALE"
+    assert view["market_state"] == "UNAVAILABLE"
 
 
 def test_market_at_a_glance_rejects_illiquid_contract_set():
