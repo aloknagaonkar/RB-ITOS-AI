@@ -28,6 +28,8 @@ class NiftyFuturesMarketData:
     latest_volume: float | None = None
     latest_oi: float | None = None
     latest_timestamp: str | None = None
+    bar_open_timestamp: str | None = None
+    bar_close_timestamp: str | None = None
     futures_vwap: float | None = None
     futures_vwap_timestamp: str | None = None
     futures_close_vs_vwap_points: float | None = None
@@ -115,7 +117,7 @@ def _completed_candles(candles: list[object], *, now: datetime, interval_minutes
     return [candle for _, candle in sorted(dated, key=lambda item: item[0])]
 
 
-def _futures_vwap(completed: list[object], *, now: datetime) -> dict[str, Any]:
+def _futures_vwap(completed: list[object], *, now: datetime, interval_minutes: int) -> dict[str, Any]:
     rows: list[tuple[datetime, float, float, float, float, float]] = []
     for candle in completed:
         stamp = _timestamp(candle, reference=now)
@@ -156,9 +158,10 @@ def _futures_vwap(completed: list[object], *, now: datetime) -> dict[str, Any]:
         acceptance = "VWAP_REJECTION" if prior_close >= prior_vwap else "BELOW_FALLING_VWAP"
     else:
         acceptance = "NEAR_VWAP"
+    close_stamp = rows[-1][0] + timedelta(minutes=max(1, int(interval_minutes)))
     return {
         "vwap": round(vwap, 4),
-        "timestamp": rows[-1][0].isoformat(),
+        "timestamp": close_stamp.isoformat(),
         "points": round(points, 4),
         "atr_gap": round(atr_gap, 4) if atr_gap is not None else None,
         "slope": round(slope, 4),
@@ -181,12 +184,35 @@ def assess_nifty_futures_market_data(provider, *, contract: NiftyFuturesMonitorR
     latest_volume = _number(_value(latest, ("volume", "vol", "traded_volume"), 5)) if latest is not None else None
     latest_oi = _number(_value(latest, ("oi", "open_interest", "openInterest"), 6)) if latest is not None else None
     latest_close = _number(_value(latest, ("close", "closing_price"), 4)) if latest is not None else None
-    latest_timestamp = _value(latest, ("timestamp", "time", "datetime", "date"), 0) if latest is not None else None
+    opened = _timestamp(latest, reference=now) if latest is not None else None
+    closed = opened + timedelta(minutes=max(1, int(interval_minutes))) if opened is not None else None
     volume = assess_underlying_volume_authority(instrument_key=contract.instrument_key, volume=latest_volume)
-    vwap = _futures_vwap(completed, now=now)
+    vwap = _futures_vwap(completed, now=now, interval_minutes=interval_minutes)
     status = "READY" if latest is not None else "MISSING"
     reason = "Latest completed NIFTY futures candle, volume, OI and VWAP evidence were collected." if latest is not None else "No completed NIFTY futures candle is available."
-    return NiftyFuturesMarketData(status=status, reason=reason, instrument_key=contract.instrument_key, trading_symbol=contract.trading_symbol, expiry=contract.expiry, candle_readiness=readiness, volume_authority=volume, latest_close=latest_close, latest_volume=latest_volume, latest_oi=latest_oi, latest_timestamp=str(latest_timestamp) if latest_timestamp is not None else None, futures_vwap=vwap["vwap"], futures_vwap_timestamp=vwap["timestamp"], futures_close_vs_vwap_points=vwap["points"], futures_close_vs_vwap_atr=vwap["atr_gap"], futures_vwap_slope=vwap["slope"], futures_vwap_acceptance=vwap["acceptance"], candle_count=len(candles), completed_candles=tuple(completed))
+    return NiftyFuturesMarketData(
+        status=status,
+        reason=reason,
+        instrument_key=contract.instrument_key,
+        trading_symbol=contract.trading_symbol,
+        expiry=contract.expiry,
+        candle_readiness=readiness,
+        volume_authority=volume,
+        latest_close=latest_close,
+        latest_volume=latest_volume,
+        latest_oi=latest_oi,
+        latest_timestamp=closed.isoformat() if closed else None,
+        bar_open_timestamp=opened.isoformat() if opened else None,
+        bar_close_timestamp=closed.isoformat() if closed else None,
+        futures_vwap=vwap["vwap"],
+        futures_vwap_timestamp=vwap["timestamp"],
+        futures_close_vs_vwap_points=vwap["points"],
+        futures_close_vs_vwap_atr=vwap["atr_gap"],
+        futures_vwap_slope=vwap["slope"],
+        futures_vwap_acceptance=vwap["acceptance"],
+        candle_count=len(candles),
+        completed_candles=tuple(completed),
+    )
 
 
 def futures_market_log_values(result: NiftyFuturesMarketData) -> tuple[str, ...]:
