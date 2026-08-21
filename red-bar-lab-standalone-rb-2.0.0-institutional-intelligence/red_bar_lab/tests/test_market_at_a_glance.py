@@ -72,7 +72,7 @@ def test_market_at_a_glance_hold_pending_is_early_only():
 
 def test_stale_evidence_preserves_observed_direction_but_blocks_trade():
     now = datetime(2026, 8, 21, 6, 8, 56, tzinfo=timezone.utc)
-    summary = _summary()
+    summary = _summary(ce=55.0, pe=75.0, ce_slope=0.0, pe_slope=3.0)
     summary["observed_at"] = "2026-08-21T06:05:00+00:00"
     futures = _futures(state="LONG_BUILDUP", strength="WEAK")
     futures["observed_at"] = "2026-08-21T06:08:00+00:00"
@@ -125,7 +125,7 @@ def test_market_at_a_glance_uses_futures_market_candle_for_alignment():
     assert view["market_state"] == "CONFIRMED BULLISH"
 
 
-def test_all_sources_fresh_but_misaligned_are_reported_separately():
+def test_completed_candle_beyond_freshness_limit_is_stale_before_alignment():
     now = datetime(2026, 8, 21, 6, 30, tzinfo=timezone.utc)
     summary = _summary()
     summary["observed_at"] = "2026-08-21T06:29:30+00:00"
@@ -138,9 +138,9 @@ def test_all_sources_fresh_but_misaligned_are_reported_separately():
     view = build_market_at_a_glance(summary, futures, underlying, now=now)
 
     assert view["observed_direction"] == "BULLISH"
-    assert view["evidence_readiness"] == "MISALIGNED"
+    assert view["evidence_readiness"] == "STALE"
     assert view["trade_eligibility"] == "BLOCKED"
-    assert "MARKET_TIMESTAMPS_MISALIGNED" in view["blocking_reasons"]
+    assert "FUTURES_MARKET_CANDLE_STALE" in view["blocking_reasons"]
 
 
 def test_option_persistence_can_support_early_transition_but_not_confirm():
