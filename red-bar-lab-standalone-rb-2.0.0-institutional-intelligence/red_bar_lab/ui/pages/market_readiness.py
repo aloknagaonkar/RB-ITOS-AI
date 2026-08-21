@@ -34,22 +34,39 @@ def _display_pct(value):
     return "—" if value is None else f"{float(value):+.2f}%"
 
 
+def _display_time(value):
+    if value in (None, ""):
+        return "—"
+    try:
+        timestamp = pd.Timestamp(value)
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.tz_localize("Asia/Kolkata")
+        else:
+            timestamp = timestamp.tz_convert("Asia/Kolkata")
+        return timestamp.strftime("%H:%M:%S")
+    except Exception:
+        return str(value)
+
+
 def _latest_option_context(database_path):
     """Read persisted option evidence only; never call a market-data provider."""
     try:
         with sqlite3.connect(database_path) as connection:
             connection.row_factory = sqlite3.Row
             table = connection.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='option_context_snapshots'"
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='option_context_snapshots'"
             ).fetchone()
             if not table:
                 return {}
             row = connection.execute(
                 """
-                SELECT entry_timestamp, option_expiry, option_spot_price, atm_strike,
-                       pcr_oi, atm_call_delta, atm_put_delta, atm_call_iv, atm_put_iv
+                SELECT entry_timestamp, option_expiry, option_spot_price,
+                       atm_strike, pcr_oi, atm_call_delta, atm_put_delta,
+                       atm_call_iv, atm_put_iv
                 FROM option_context_snapshots
-                ORDER BY julianday(entry_timestamp) DESC, entry_timestamp DESC
+                ORDER BY julianday(entry_timestamp) DESC,
+                         entry_timestamp DESC
                 LIMIT 1
                 """
             ).fetchone()
@@ -97,9 +114,13 @@ def _participation_total_rows(summary):
         rows.append({
             "Side": f"{side} TOTAL / WEIGHTED AVG",
             "Volume": _display_number(summary.get(f"{prefix}_total_volume"), 0),
+            "Volume change": _display_pct(summary.get(f"{prefix}_volume_change_pct")),
             "Contracts": _display_number(summary.get(f"{prefix}_total_contracts"), 0),
+            "Contracts change": _display_pct(summary.get(f"{prefix}_contracts_change_pct")),
             "OI": _display_number(summary.get(f"{prefix}_total_oi"), 0),
+            "OI change vs prior": _display_pct(summary.get(f"{prefix}_oi_change_pct")),
             "Change in OI": _display_number(summary.get(f"{prefix}_total_oi_change"), 0),
+            "ΔOI total change": _display_pct(summary.get(f"{prefix}_oi_change_change_pct")),
             "Weighted Delta": _display_number(summary.get(f"{prefix}_weighted_delta")),
             "Weighted VWAP": _display_money(summary.get(f"{prefix}_weighted_vwap")),
             "Weighted RSI": _display_number(summary.get(f"{prefix}_weighted_rsi"), 1),
@@ -118,9 +139,16 @@ def _candidate_table_rows(candidates):
             "Contract": item.get("tradingsymbol") or "—",
             "Strike": _display_number(item.get("strike"), 0),
             "Expiry": item.get("expiry") or "—",
-            "Current entry": _display_money(item.get("current_price")),
+            "Given time": _display_time(item.get("recommendation_at") or item.get("observed_at")),
+            "Given price": _display_money(item.get("recommendation_price") if item.get("recommendation_price") is not None else item.get("current_price")),
+            "Current price": _display_money(item.get("current_price")),
+            "Move": _display_money(item.get("move_points")),
+            "Move %": _display_pct(item.get("move_pct")),
+            "Best price": _display_money(item.get("best_price")),
+            "Maximum move %": _display_pct(item.get("max_move_pct")),
+            "Latest update": _display_time(item.get("latest_update_at") or item.get("observed_at")),
             "Option VWAP": _display_money(item.get("vwap")),
-            "Entry vs VWAP": _display_pct(item.get("price_vs_vwap_pct")),
+            "Current vs VWAP": _display_pct(item.get("price_vs_vwap_pct")),
             "Delta": _display_number(item.get("delta")),
             "IV": _display_number(item.get("iv"), 2),
             "PCR OI": _display_number(item.get("pcr_oi")),
@@ -139,7 +167,6 @@ def _candidate_table_rows(candidates):
             "One-lot value": _display_money(item.get("estimated_value")),
             "Grade": item.get("evidence_grade") or "—",
             "Action": item.get("suggested_action") or "—",
-            "Observed at": item.get("observed_at") or "—",
             "Authority": item.get("authority") or "OBSERVATIONAL_ONLY",
         })
     return rows
@@ -148,9 +175,9 @@ def _candidate_table_rows(candidates):
 def render_page(settings, layout, database, token, underlying_name, instrument_key, interval) -> None:
     st.subheader("Trade Evidence & Market Readiness")
     st.caption(
-        "Read-only evidence workspace. The independent view now uses six strikes around today's spot "
-        "plus futures/readiness confirmation; Red Bar V2 remains separate for comparison. Neither view "
-        "has execution authority."
+        "Read-only evidence workspace. The independent view uses the point-in-time ATM ± 4 strike window "
+        "for both CE and PE, plus futures/readiness confirmation. Red Bar V2 remains separate and neither "
+        "view has execution authority."
     )
 
     rows = read_global_readiness_snapshots(
@@ -190,7 +217,7 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         futures_snapshot=latest_futures,
     )
 
-    st.markdown("### A. Today's Spot & Six-Strike Option Participation")
+    st.markdown("### A. Today's Spot & ATM ± 4 Option Participation")
     if participation_rows:
         p1, p2, p3, p4, p5 = st.columns(5)
         p1.metric("NIFTY spot", _display_number(participation.get("spot_price"), 2))
@@ -204,7 +231,7 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
             width="stretch",
             hide_index=True,
         )
-        st.markdown("#### CE / PE totals")
+        st.markdown("#### CE / PE totals and change from prior refresh")
         st.dataframe(
             _arrow_safe_rows(_participation_total_rows(participation)),
             width="stretch",
@@ -215,14 +242,15 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         q2.metric("PE pressure", _display_score(participation.get("pe_score")))
         q3.metric("PE/CE volume", _display_number(participation.get("pe_ce_volume_ratio"), 2))
         q4.metric("PE/CE OI", _display_number(participation.get("pe_ce_oi_ratio"), 2))
-        q5.metric("Six-strike view", participation.get("recommended_side") or "WAIT")
-        st.info(participation.get("reason") or "Six-strike participation evidence is available.")
+        q5.metric("ATM ± 4 view", participation.get("recommended_side") or "WAIT")
+        st.info(participation.get("reason") or "ATM ± 4 participation evidence is available.")
         st.caption(
-            "CE uses ATM + two higher strikes; PE uses ATM + two lower strikes. Volume, OI and Change in OI "
-            "are summed. Delta is OI-weighted; VWAP and RSI are volume-weighted in the totals."
+            "Nine strike levels are used for CE and the same nine for PE. Volume, contracts, OI and ΔOI "
+            "changes compare the latest snapshot with the immediately preceding refresh. Delta is OI-weighted; "
+            "VWAP and RSI are volume-weighted."
         )
     else:
-        st.warning("No six-strike option participation snapshot is available yet. Run the paper monitor once during a usable market-data session.")
+        st.warning("No ATM ± 4 option participation snapshot is available yet. Run the paper monitor during a usable market-data session.")
 
     st.markdown("### B. Independent Market Recommendation")
     i1, i2, i3, i4 = st.columns(4)
@@ -250,16 +278,16 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     st.info(independent.summary)
     st.dataframe(_arrow_safe_rows(_evidence_table(independent)), width="stretch", hide_index=True)
     st.caption(
-        "When six-strike evidence exists, it supplies the direct CE/PE option-market view. NIFTY futures "
-        "acts as independent confirmation or contradiction. Red Bar V2 is not used to choose this direction."
+        "ATM ± 4 evidence supplies the direct CE/PE option-market view. NIFTY futures acts as independent "
+        "confirmation or contradiction. Red Bar V2 is not used to choose this direction."
     )
 
-    st.markdown("#### Best three independent trade candidates")
+    st.markdown("#### Best five independent trade candidates")
     ranked_candidates = read_latest_trade_candidates(
         settings.database_path,
         underlying_name=underlying_name,
         recommendation_source="INDEPENDENT_MARKET",
-        limit=3,
+        limit=5,
     )
     if ranked_candidates:
         st.dataframe(
@@ -268,8 +296,8 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
             hide_index=True,
         )
         st.caption(
-            "Ranked from the recommended side using the six-strike evidence score. Current entry, "
-            "VWAP, Delta, PCR and RSI are persisted observations; unavailable values are never estimated."
+            "The first recommendation time and price are frozen per contract for the trading day. Current price, "
+            "best price, movement and maximum movement refresh with later snapshots."
         )
     elif independent.suggested_option in {"CE", "PE"}:
         st.warning("A directional view exists, but no ranked candidate snapshot has been persisted yet.")
