@@ -82,7 +82,7 @@ def _database(tmp_path):
             (
                 "NSE_INDEX|Nifty 50",
                 "2026-08-20",
-                "FIRST_CANDLE",
+                "NEXT_RED_CANDLE",
                 "2026-08-20T09:15:00+05:30",
                 24225.45,
                 24189.30,
@@ -147,7 +147,7 @@ def test_current_day_runtime_overlays_stale_file_snapshot(tmp_path):
     assert diagnostics.options_context_ready is True
 
 
-def test_missing_current_day_signal_preserves_original_snapshot(tmp_path):
+def test_missing_current_day_signal_returns_resolved_partial_state(tmp_path):
     database = _database(tmp_path)
     original = RedBarV2UISnapshot(reference_status="REFERENCE_NOT_READY")
 
@@ -158,5 +158,12 @@ def test_missing_current_day_signal_preserves_original_snapshot(tmp_path):
         trading_date="2026-08-21",
     )
 
-    assert resolved is original
+    assert resolved is not original
+    assert resolved.reference_status == "REFERENCE_NOT_READY"
+    assert resolved.alignment_status == "BLOCKED"
+    assert resolved.session_completeness == "PARTIAL"
     assert diagnostics.source_status == "NO_CURRENT_DAY_SIGNAL"
+    assert diagnostics.alignment_blocking_reasons == (
+        "PIPELINE_STATUS_MISSING",
+        "NEXT_RED_CANDLE_REFERENCE_NOT_FOUND",
+    )
