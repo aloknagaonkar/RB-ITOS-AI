@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 from functools import wraps
+import json
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -20,6 +21,7 @@ from red_bar_lab.services.red_bar_v2_reference_readiness import (
 )
 from red_bar_lab.services.signal_enrichment_outcome_store import (
     persist_signal_enrichment_outcomes,
+    read_signal_enrichment_outcomes,
 )
 from red_bar_lab.ui.operations_readiness_view import (
     build_operations_readiness_view_model,
@@ -47,9 +49,7 @@ def _timestamp(value: object) -> pd.Timestamp | None:
 def _reference_payload(row: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "reference_type": str(
-            row.get("reference_type")
-            or row.get("level_type")
-            or ""
+            row.get("reference_type") or row.get("level_type") or ""
         ).upper(),
         "reference_timestamp": (
             row.get("reference_timestamp")
@@ -105,34 +105,78 @@ def _references_by_signal(
     return resolved
 
 
-def _outcomes(
-    confirmed_ids: set[str],
-    rows: list[dict[str, Any]],
-    *,
-    ready_predicate,
-    missing_code: str,
-) -> list[dict[str, Any]]:
-    by_id = {_signal_id(row): row for row in rows if _signal_id(row)}
-    results = []
-    for signal_id in sorted(confirmed_ids):
-        row = by_id.get(signal_id)
-        ready = bool(row) and bool(ready_predicate(row))
-        results.append(
-            {
-                "signal_id": signal_id,
-                "status": "READY" if ready else "MISSING",
-                "reason_code": None if ready else missing_code,
-            }
-        )
-    return results
-
-
 def _database_path(database: object) -> Path | None:
     for attribute in ("path", "database_path", "_path"):
         value = getattr(database, attribute, None)
         if value not in (None, ""):
             return Path(value)
     return None
+
+
+def _latest_enrichment_diagnostics(
+    database: object,
+    confirmed_ids: set[str],
+) -> dict[tuple[str, str], dict[str, Any]]:
+    path = _database_path(database)
+    if path is None or not path.exists():
+        return {}
+    try:
+        rows = read_signal_enrichment_outcomes(path)
+    except Exception:
+        return {}
+
+    latest: dict[tuple[str, str], dict[str, Any]] = {}
+    for original in rows:
+        row = dict(original)
+        signal_id = _signal_id(row)
+        stage = str(row.get("stage") or "").upper()
+        if signal_id not in confirmed_ids or stage not in {"MARKET", "VOLUME"}:
+            continue
+        try:
+            payload = json.loads(row.get("payload_json") or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            payload = {}
+        merged = {**payload, **row}
+        key = (signal_id, stage)
+        previous = latest.get(key)
+        if previous is None or str(merged.get("attempt_timestamp") or "") >= str(
+            previous.get("attempt_timestamp") or ""
+        ):
+            latest[key] = merged
+    return latest
+
+
+def _outcomes(
+    confirmed_ids: set[str],
+    rows: list[dict[str, Any]],
+    *,
+    ready_predicate,
+    missing_code: str,
+    stage: str,
+    diagnostics: Mapping[tuple[str, str], Mapping[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    by_id = {_signal_id(row): row for row in rows if _signal_id(row)}
+    results = []
+    for signal_id in sorted(confirmed_ids):
+        row = by_id.get(signal_id)
+        diagnostic = dict((diagnostics or {}).get((signal_id, stage), {}))
+        ready = bool(row) and bool(ready_predicate(row))
+        status = "READY" if ready else str(diagnostic.get("status") or "MISSING").upper()
+        reason_code = None if ready else diagnostic.get("reason_code") or missing_code
+        results.append(
+            {
+                "signal_id": signal_id,
+                "status": status,
+                "reason_code": reason_code,
+                "input_source": diagnostic.get("input_source"),
+                "input_cutoff_timestamp": diagnostic.get("input_cutoff_timestamp"),
+                "latest_source_timestamp": diagnostic.get("latest_source_timestamp"),
+                "no_lookahead_passed": diagnostic.get("no_lookahead_passed"),
+                "fallback_used": bool(diagnostic.get("fallback_used")),
+                "row_count": int(diagnostic.get("row_count") or 0),
+            }
+        )
+    return results
 
 
 def _persistence_attempt_timestamp(trading_date: str) -> str:
@@ -164,7 +208,7 @@ def _persist_readiness_outcomes(
             "persisted_count": len(outcome_ids),
             "reason": None,
         }
-    except Exception as exc:  # UI persistence must never block diagnostics.
+    except Exception as exc:
         return {
             "status": "FAILED",
             "persisted_count": 0,
@@ -198,6 +242,7 @@ def build_live_operations_readiness_view(
     option_rows = database.read_option_context_snapshots(
         instrument_key, trading_date, trading_date
     )
+    source_diagnostics = _latest_enrichment_diagnostics(database, confirmed_ids)
 
     option_by_id = {
         _signal_id(row): row
@@ -214,18 +259,23 @@ def build_live_operations_readiness_view(
         [dict(row) for row in market_rows],
         ready_predicate=lambda row: True,
         missing_code="MARKET_CONTEXT_MISSING",
+        stage="MARKET",
+        diagnostics=source_diagnostics,
     )
     volume_outcomes = _outcomes(
         confirmed_ids,
         [dict(row) for row in volume_rows],
         ready_predicate=lambda row: True,
         missing_code="VOLUME_STRUCTURE_MISSING",
+        stage="VOLUME",
+        diagnostics=source_diagnostics,
     )
     option_outcomes = _outcomes(
         confirmed_ids,
         list(option_by_id.values()),
         ready_predicate=lambda row: bool(row.get("entry_aligned")),
         missing_code="OPTION_CONTEXT_NOT_ALIGNED",
+        stage="OPTIONS",
     )
 
     gate = build_operations_readiness_gate(
@@ -291,9 +341,8 @@ def render_operations_readiness_v2(
     _stage_metric(columns[4], "CORE", stages["core"])
     _stage_metric(columns[5], "HYBRID", stages["hybrid"])
 
-    domains = view["domains"]
     domain_rows = []
-    for name, payload in domains.items():
+    for name, payload in view["domains"].items():
         domain_rows.append(
             {
                 "Readiness domain": name.replace("_", " ").title(),
@@ -306,7 +355,7 @@ def render_operations_readiness_v2(
 
     drilldown = list(view.get("drilldown") or ())
     if drilldown:
-        st.markdown("#### Per-signal readiness and blockers")
+        st.markdown("#### Per-signal readiness, candle sources and blockers")
         st.dataframe(drilldown, width="stretch", hide_index=True)
     else:
         st.info("No confirmed signals are available for the selected session.")
