@@ -60,9 +60,12 @@ def build_operations_readiness_gate(
         if result.status == "READY":
             reference_ready_ids.add(signal_id)
 
-    market_ready_ids = _ids(market_outcomes)
-    volume_ready_ids = _ids(volume_outcomes)
-    option_ready_ids = _ids(option_outcomes)
+    market_rows = [dict(row) for row in market_outcomes]
+    volume_rows = [dict(row) for row in volume_outcomes]
+    option_rows = [dict(row) for row in option_outcomes]
+    market_ready_ids = _ids(market_rows)
+    volume_ready_ids = _ids(volume_rows)
+    option_ready_ids = _ids(option_rows)
 
     feature_readiness = calculate_feature_store_readiness(
         confirmed_signal_ids=confirmed_ids,
@@ -77,15 +80,17 @@ def build_operations_readiness_gate(
         if payload.get("status") != "READY"
     ]
     readiness_domains = build_readiness_domains(
-        market_data_blockers=tuple(market_data_blockers),
-        independent_strategy_blockers=tuple(independent_strategy_blockers),
-        red_bar_v2_blockers=tuple(rbv2_blockers),
-        execution_blockers=tuple(execution_blockers),
+        market_data_reasons=tuple(market_data_blockers),
+        independent_strategy_reasons=tuple(independent_strategy_blockers),
+        red_bar_v2_reasons=tuple(rbv2_blockers),
+        execution_reasons=tuple(execution_blockers),
     )
 
-    market_by_id = {str(row.get("signal_id") or "").strip(): dict(row) for row in market_outcomes}
-    volume_by_id = {str(row.get("signal_id") or "").strip(): dict(row) for row in volume_outcomes}
-    option_by_id = {str(row.get("signal_id") or "").strip(): dict(row) for row in option_outcomes}
+    market_by_id = {str(row.get("signal_id") or "").strip(): row for row in market_rows}
+    volume_by_id = {str(row.get("signal_id") or "").strip(): row for row in volume_rows}
+    option_by_id = {str(row.get("signal_id") or "").strip(): row for row in option_rows}
+    core_ids = set(feature_readiness.core_feature_ids)
+    hybrid_ids = set(feature_readiness.hybrid_feature_ids)
 
     drilldown: list[dict[str, Any]] = []
     for signal in signals:
@@ -113,8 +118,8 @@ def build_operations_readiness_gate(
                 "market_status": str(market.get("status") or "MISSING").upper(),
                 "volume_status": str(volume.get("status") or "MISSING").upper(),
                 "option_status": str(option.get("status") or "MISSING").upper(),
-                "core_eligible": signal_id in set(feature_readiness.core_signal_ids),
-                "hybrid_eligible": signal_id in set(feature_readiness.hybrid_signal_ids),
+                "core_eligible": signal_id in core_ids,
+                "hybrid_eligible": signal_id in hybrid_ids,
                 "main_reason": reasons[0] if reasons else None,
                 "all_reasons": tuple(reasons),
             }
@@ -125,11 +130,11 @@ def build_operations_readiness_gate(
         "authority": "OBSERVATIONAL_ONLY",
         "confirmed_signal_ids": tuple(sorted(confirmed_ids)),
         "reference_ready_ids": tuple(sorted(reference_ready_ids)),
-        "market_ready_ids": tuple(sorted(market_ready_ids & confirmed_ids)),
-        "volume_ready_ids": tuple(sorted(volume_ready_ids & confirmed_ids)),
-        "option_ready_ids": tuple(sorted(option_ready_ids & confirmed_ids)),
-        "core_signal_ids": tuple(feature_readiness.core_signal_ids),
-        "hybrid_signal_ids": tuple(feature_readiness.hybrid_signal_ids),
+        "market_ready_ids": feature_readiness.market_ready_ids,
+        "volume_ready_ids": feature_readiness.volume_ready_ids,
+        "option_ready_ids": feature_readiness.option_ready_ids,
+        "core_signal_ids": feature_readiness.core_feature_ids,
+        "hybrid_signal_ids": feature_readiness.hybrid_feature_ids,
         "reference_results": reference_results,
         "readiness_domains": readiness_domains,
         "drilldown": tuple(drilldown),
