@@ -23,6 +23,9 @@ from red_bar_lab.ui.current_trade_option_telemetry import (
 from red_bar_lab.ui.live_trade_card_validation import (
     install as install_live_trade_card_validation,
 )
+from red_bar_lab.ui.market_readiness_score_explanation import (
+    install as install_market_readiness_score_explanation,
+)
 from red_bar_lab.ui.open_trade_row_runtime import install as install_open_trade_row_runtime
 from red_bar_lab.ui.option_indicator_card import install as install_option_indicator_card
 from red_bar_lab.ui.paper_time_display import install as install_paper_time_display
@@ -119,6 +122,7 @@ def render(settings: RedBarSettings) -> None:
     module = _load_page_module(page)
     install_open_trade_row_runtime(module)
     install_red_bar_v2_live_state(module, database, instrument_key)
+    install_market_readiness_score_explanation(module)
     module.render_page(
         settings,
         layout,
