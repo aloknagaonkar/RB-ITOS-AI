@@ -21,64 +21,86 @@ def build_persistent_operations_outcomes(
         cutoff = drilldown.get("confirmation_timestamp")
         reference = reference_results.get(signal_id) or {}
         stages = (
-            (
-                "REFERENCE",
-                drilldown.get("reference_status"),
-                reference.get("reason_code"),
-                reference.get("reason"),
-                "reference_levels",
-                drilldown.get("reference_timestamp"),
-                reference.get("no_lookahead_passed"),
-            ),
-            (
-                "MARKET",
-                drilldown.get("market_status"),
-                _stage_reason(drilldown, "MARKET"),
-                None,
-                "market_context_snapshots",
-                None,
-                None,
-            ),
-            (
-                "VOLUME",
-                drilldown.get("volume_status"),
-                _stage_reason(drilldown, "VOLUME"),
-                None,
-                "volume_structure_snapshots",
-                None,
-                None,
-            ),
-            (
-                "OPTIONS",
-                drilldown.get("option_status"),
-                _stage_reason(drilldown, "OPTION"),
-                None,
-                "option_context_snapshots",
-                None,
-                None,
-            ),
+            ("REFERENCE", "reference", reference.get("reason_code"), reference.get("reason")),
+            ("MARKET", "market", _stage_reason(drilldown, "MARKET"), None),
+            ("VOLUME", "volume", _stage_reason(drilldown, "VOLUME"), None),
+            ("OPTIONS", "option", _stage_reason(drilldown, "OPTION"), None),
         )
-        for stage, status, reason_code, reason, source, latest_timestamp, no_lookahead in stages:
+
+        for stage, prefix, reason_code, reason in stages:
+            status = drilldown.get(f"{prefix}_status")
             normalized_status = str(status or "MISSING").upper()
-            rows.append(
-                {
-                    "signal_id": signal_id,
-                    "strategy_id": strategy_id,
-                    "stage": stage,
-                    "status": normalized_status,
-                    "reason_code": reason_code,
-                    "reason": reason,
-                    "input_source": source,
-                    "input_cutoff_timestamp": cutoff,
-                    "latest_source_timestamp": latest_timestamp,
-                    "no_lookahead_passed": no_lookahead,
-                    "attempt_timestamp": attempted_at,
-                    "retry_count": 0,
-                    "final_retry_status": "COMPLETE" if normalized_status == "READY" else "PENDING",
-                    "operations_policy_version": readiness_gate.get("policy_version"),
-                    "authority": readiness_gate.get("authority") or "OBSERVATIONAL_ONLY",
-                }
+            source = (
+                "reference_levels"
+                if stage == "REFERENCE"
+                else drilldown.get(f"{prefix}_source")
+                or f"{prefix}_context_snapshots"
             )
+            latest_timestamp = (
+                drilldown.get("reference_timestamp")
+                if stage == "REFERENCE"
+                else drilldown.get(f"{prefix}_latest_timestamp")
+            )
+            no_lookahead = (
+                reference.get("no_lookahead_passed")
+                if stage == "REFERENCE"
+                else drilldown.get(f"{prefix}_no_lookahead_passed")
+            )
+            row = {
+                "signal_id": signal_id,
+                "strategy_id": strategy_id,
+                "stage": stage,
+                "status": normalized_status,
+                "reason_code": reason_code,
+                "reason": reason,
+                "input_source": source,
+                "input_cutoff_timestamp": cutoff,
+                "latest_source_timestamp": latest_timestamp,
+                "no_lookahead_passed": no_lookahead,
+                "attempt_timestamp": attempted_at,
+                "retry_count": 0,
+                "final_retry_status": (
+                    "COMPLETE" if normalized_status == "READY" else "PENDING"
+                ),
+                "operations_policy_version": readiness_gate.get("policy_version"),
+                "authority": readiness_gate.get("authority") or "OBSERVATIONAL_ONLY",
+            }
+            if stage != "REFERENCE":
+                row.update(
+                    {
+                        "fallback_used": bool(
+                            drilldown.get(f"{prefix}_fallback_used")
+                        ),
+                        "row_count": int(
+                            drilldown.get(f"{prefix}_row_count") or 0
+                        ),
+                        "mandatory_present": int(
+                            drilldown.get(f"{prefix}_mandatory_present") or 0
+                        ),
+                        "mandatory_expected": int(
+                            drilldown.get(f"{prefix}_mandatory_expected") or 0
+                        ),
+                        "mandatory_coverage_pct": float(
+                            drilldown.get(f"{prefix}_mandatory_coverage_pct") or 0.0
+                        ),
+                        "optional_present": int(
+                            drilldown.get(f"{prefix}_optional_present") or 0
+                        ),
+                        "optional_expected": int(
+                            drilldown.get(f"{prefix}_optional_expected") or 0
+                        ),
+                        "optional_coverage_pct": float(
+                            drilldown.get(f"{prefix}_optional_coverage_pct") or 0.0
+                        ),
+                        "missing_mandatory_fields": tuple(
+                            drilldown.get(f"{prefix}_missing_mandatory_fields") or ()
+                        ),
+                        "missing_optional_fields": tuple(
+                            drilldown.get(f"{prefix}_missing_optional_fields") or ()
+                        ),
+                    }
+                )
+            rows.append(row)
     return tuple(rows)
 
 
