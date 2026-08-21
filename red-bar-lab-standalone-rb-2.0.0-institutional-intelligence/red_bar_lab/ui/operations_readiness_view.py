@@ -14,28 +14,34 @@ def _status_class(status: object) -> str:
     return "unknown"
 
 
-def _domain_payload(value: object) -> dict[str, Any]:
-    if isinstance(value, Mapping):
-        status = str(value.get("status") or "UNKNOWN").upper()
-        reasons = tuple(str(item) for item in value.get("reasons", ()) if str(item))
-        return {
-            "status": status,
-            "status_class": _status_class(status),
-            "reasons": reasons,
-            "primary_reason": reasons[0] if reasons else None,
-        }
+def _field(value: object, name: str, default: object = None) -> object:
+    """Read one field from either a mapping or a typed readiness object."""
 
-    status = str(getattr(value, "status", "UNKNOWN") or "UNKNOWN").upper()
-    reasons = tuple(
-        str(item)
-        for item in (getattr(value, "reasons", ()) or ())
-        if str(item)
-    )
+    if isinstance(value, Mapping):
+        return value.get(name, default)
+    return getattr(value, name, default)
+
+
+def _domain_payload(value: object) -> dict[str, Any]:
+    status = str(_field(value, "status", "UNKNOWN") or "UNKNOWN").upper()
+
+    # Typed readiness domains use blocking/advisory reasons. Older mapping
+    # fixtures used a single reasons tuple, so retain compatibility with both.
+    blocking = _field(value, "blocking_reasons", None)
+    if blocking is None:
+        blocking = _field(value, "reasons", ())
+    advisory = _field(value, "advisory_reasons", ())
+
+    blocking_reasons = tuple(str(item) for item in (blocking or ()) if str(item))
+    advisory_reasons = tuple(str(item) for item in (advisory or ()) if str(item))
+
     return {
         "status": status,
         "status_class": _status_class(status),
-        "reasons": reasons,
-        "primary_reason": reasons[0] if reasons else None,
+        "reasons": blocking_reasons,
+        "blocking_reasons": blocking_reasons,
+        "advisory_reasons": advisory_reasons,
+        "primary_reason": blocking_reasons[0] if blocking_reasons else None,
     }
 
 
@@ -82,12 +88,18 @@ def build_operations_readiness_view_model(
 
     domains_raw = gate.get("readiness_domains") or {}
     domains = {
-        "market_data": _domain_payload(domains_raw.get("market_data_readiness")),
-        "independent_strategy": _domain_payload(
-            domains_raw.get("independent_strategy_readiness")
+        "market_data": _domain_payload(
+            _field(domains_raw, "market_data_readiness")
         ),
-        "red_bar_v2": _domain_payload(domains_raw.get("red_bar_v2_readiness")),
-        "execution": _domain_payload(domains_raw.get("execution_readiness")),
+        "independent_strategy": _domain_payload(
+            _field(domains_raw, "independent_strategy_readiness")
+        ),
+        "red_bar_v2": _domain_payload(
+            _field(domains_raw, "red_bar_v2_readiness")
+        ),
+        "execution": _domain_payload(
+            _field(domains_raw, "execution_readiness")
+        ),
     }
 
     drilldown = []
