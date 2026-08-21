@@ -9,7 +9,9 @@ from red_bar_lab.execution.trend_automation import (
 from red_bar_lab.services.attribution_pipeline_reconciler import (
     AttributionPipelineReconciler,
 )
-from red_bar_lab.services.option_participation import capture_option_participation
+from red_bar_lab.services.option_participation_atm_window import (
+    capture_option_participation_atm_window,
+)
 from red_bar_lab.services.option_participation_store import persist_option_participation
 from red_bar_lab.services.trade_candidate_snapshot_store import persist_trade_candidate_snapshots
 
@@ -21,7 +23,7 @@ class AttributionAwarePaperAutomationService(
 ):
     """Run the existing paper workflow, then publish observational evidence.
 
-    The superclass remains the only execution authority. Six-strike option
+    The superclass remains the only execution authority. ATM ± 4 CE/PE option
     participation and attribution reconciliation are post-decision observation
     only and are never consulted by signal admission, order entry or exits.
     Standalone DRI signal refresh and database proxying are retired.
@@ -80,7 +82,7 @@ class AttributionAwarePaperAutomationService(
         return "CONTRADICTORY"
 
     def _publish_option_participation(self):
-        """Capture and persist six-strike evidence without execution authority."""
+        """Capture and persist ATM ± 4 CE/PE evidence without execution authority."""
         adapter = self.zerodha
         intelligence = getattr(adapter, "intelligence", None)
         underlying_key = getattr(adapter, "underlying_key", None)
@@ -88,12 +90,13 @@ class AttributionAwarePaperAutomationService(
             return {"status": "UNAVAILABLE", "reason": "MARKET_INTELLIGENCE_UNAVAILABLE", "rows": 0}
 
         observed_at = datetime.now(IST)
-        summary = capture_option_participation(
+        summary = capture_option_participation_atm_window(
             intelligence=intelligence,
             adapter=adapter,
             underlying_name=self.underlying_name,
             underlying_key=str(underlying_key),
             observed_at=observed_at,
+            steps_each_side=4,
         )
         persisted = persist_option_participation(self.settings.database_path, summary)
 
