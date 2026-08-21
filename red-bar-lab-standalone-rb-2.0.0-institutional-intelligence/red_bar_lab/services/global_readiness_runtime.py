@@ -3,6 +3,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Mapping
 
+from red_bar_lab.services.authoritative_market_evidence import (
+    build_and_persist_authoritative_market_evidence,
+)
 from red_bar_lab.services.global_readiness import assess_global_readiness
 from red_bar_lab.services.global_readiness_store import persist_global_readiness_snapshot
 
@@ -40,8 +43,8 @@ def build_and_persist_global_readiness(
 ):
     """Build one best-effort global observation from already calculated values.
 
-    This function performs no market-data calls and has no execution authority.
-    It is intended to be invoked after the stable paper cycle has completed.
+    The monitor runtime owns persistence. UI pages only read these observations.
+    This function performs no execution action.
     """
 
     latest = dict(latest_signal_diagnostic or {})
@@ -117,6 +120,17 @@ def build_and_persist_global_readiness(
             signals_scored=int(getattr(report, "candidates_scored", 0) or 0),
             orders_opened=int(getattr(report, "paper_orders_opened", 0) or 0),
             orders_skipped=int(getattr(report, "skipped", 0) or 0),
+        )
+    except Exception:
+        pass
+
+    # Additive observational persistence. A failure must not affect the stable
+    # paper cycle or global readiness result.
+    try:
+        build_and_persist_authoritative_market_evidence(
+            database_path=database_path,
+            underlying_name=underlying_name,
+            observed_at=observed_at,
         )
     except Exception:
         pass
