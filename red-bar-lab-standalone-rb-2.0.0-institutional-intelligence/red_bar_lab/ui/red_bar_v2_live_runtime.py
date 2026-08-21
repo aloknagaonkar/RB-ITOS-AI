@@ -29,6 +29,9 @@ class RedBarV2RuntimeDiagnostics:
     reference_data_quality: str | None = None
     alignment_status: str | None = None
     alignment_blocking_reasons: tuple[str, ...] = ()
+    state_coherent: bool | None = None
+    state_conflicts: tuple[str, ...] = ()
+    stale_fields_suppressed: tuple[str, ...] = ()
     core_eligible: bool | None = None
     hybrid_eligible: bool | None = None
     committee_decision: str | None = None
@@ -101,6 +104,32 @@ def _alignment_reasons(*, pipeline: dict[str, object], reference: dict[str, obje
     return tuple(reasons)
 
 
+def _state_conflicts(
+    snapshot: RedBarV2UISnapshot | None,
+    *,
+    signal_id: str,
+    direction: str | None,
+    reference_ready: bool,
+) -> tuple[str, ...]:
+    conflicts: list[str] = []
+    if not signal_id:
+        conflicts.append("CURRENT_SIGNAL_NOT_FOUND")
+    if not reference_ready:
+        conflicts.append("REFERENCE_REQUIRED_FOR_STRATEGY_STATE")
+
+    midpoint = str(getattr(snapshot, "midpoint_confirmation", "") or "").upper()
+    if direction == "BULLISH" and midpoint.startswith("BEARISH_"):
+        conflicts.append("DIRECTION_MIDPOINT_CONFLICT")
+    elif direction == "BEARISH" and midpoint.startswith("BULLISH_"):
+        conflicts.append("DIRECTION_MIDPOINT_CONFLICT")
+
+    trade_status = str(getattr(snapshot, "trade_status", "") or "").upper()
+    trade_id = getattr(snapshot, "trade_id", None)
+    if trade_status == "ACTIVE" and not trade_id:
+        conflicts.append("ACTIVE_TRADE_ID_MISSING")
+    return tuple(dict.fromkeys(conflicts))
+
+
 def resolve_red_bar_v2_live_state(
     database: Any,
     snapshot: RedBarV2UISnapshot | None,
@@ -110,8 +139,10 @@ def resolve_red_bar_v2_live_state(
 ) -> tuple[RedBarV2UISnapshot | None, RedBarV2RuntimeDiagnostics]:
     """Overlay the file snapshot with current-day persisted runtime facts.
 
-    Reference readiness is resolved independently from signal readiness. This
-    reader is UI-only and never creates signals or changes admission/execution.
+    Reference readiness is resolved independently from signal readiness. Strategy
+    lifecycle fields from an artifact are suppressed when they cannot be proven
+    coherent with the current signal and NEXT_RED_CANDLE reference. This reader
+    is UI-only and never creates signals or changes admission/execution.
     """
     path = _database_path(database)
     if not path:
@@ -150,8 +181,8 @@ def resolve_red_bar_v2_live_state(
             )
 
             signal_id = str(diagnostic.get("signal_id") or "")
-            pipeline = {}
-            committee = {}
+            pipeline: dict[str, object] = {}
+            committee: dict[str, object] = {}
             if signal_id:
                 pipeline = _row(
                     conn,
@@ -198,6 +229,27 @@ def resolve_red_bar_v2_live_state(
     reference_ready = bool(reference) and reference_quality == "VALID"
     alignment_status = "ALIGNED" if pipeline_ready and reference_ready else "BLOCKED"
 
+    conflicts = _state_conflicts(
+        snapshot,
+        signal_id=signal_id,
+        direction=direction,
+        reference_ready=reference_ready,
+    )
+    state_coherent = bool(signal_id and reference_ready and not conflicts)
+    suppressed_fields = (
+        ()
+        if state_coherent
+        else (
+            "trend_strength",
+            "reversal_status",
+            "provisional_confirmed_state",
+            "midpoint_confirmation",
+            "midpoint_aligned",
+            "trade_status",
+            "trade_id",
+        )
+    )
+
     source_status = (
         "CURRENT_DAY_RUNTIME"
         if signal_id
@@ -224,6 +276,9 @@ def resolve_red_bar_v2_live_state(
         reference_data_quality=reference_quality,
         alignment_status=alignment_status,
         alignment_blocking_reasons=blocking_reasons,
+        state_coherent=state_coherent,
+        state_conflicts=conflicts,
+        stale_fields_suppressed=suppressed_fields,
         core_eligible=_flag(pipeline.get("core_eligible")),
         hybrid_eligible=_flag(pipeline.get("hybrid_eligible")),
         committee_decision=decision,
@@ -264,12 +319,29 @@ def resolve_red_bar_v2_live_state(
             else reference.get("level_value")
         ),
         alignment_status=alignment_status,
-        directional_state="ACTIVE_SIGNAL" if signal_id else base.directional_state,
-        direction=direction if signal_id else base.direction,
-        option_side=_option_side(direction) if signal_id else base.option_side,
-        admission_allowed=admission_allowed if signal_id else base.admission_allowed,
-        admission_code=decision if signal_id else base.admission_code,
-        admission_reason=reason if signal_id else base.admission_reason,
+        directional_state=(
+            "ACTIVE_SIGNAL"
+            if signal_id and reference_ready
+            else "REFERENCE_NOT_READY"
+            if not reference_ready
+            else "WAITING_FOR_SIGNAL"
+        ),
+        direction=direction if signal_id else None,
+        option_side=_option_side(direction) if signal_id else None,
+        admission_allowed=admission_allowed if signal_id else None,
+        admission_code=decision if signal_id else None,
+        admission_reason=reason if signal_id else None,
+        trend_strength=base.trend_strength if state_coherent else None,
+        reversal_status=base.reversal_status if state_coherent else "NOT_EVALUATED",
+        provisional_confirmed_state=(
+            base.provisional_confirmed_state if state_coherent else "NOT_EVALUATED"
+        ),
+        midpoint_confirmation=(
+            base.midpoint_confirmation if state_coherent else "NOT_EVALUATED"
+        ),
+        midpoint_aligned=base.midpoint_aligned if state_coherent else None,
+        trade_status=base.trade_status if state_coherent else "NO_MATCHING_ACTIVE_TRADE",
+        trade_id=base.trade_id if state_coherent else None,
         last_evaluation_timestamp=(
             str(diagnostic.get("timestamp") or pipeline.get("updated_at") or "") or None
         ),
