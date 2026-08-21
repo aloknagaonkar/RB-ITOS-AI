@@ -32,9 +32,6 @@ PAGE_MODULE_PATHS = {
     "Intelligence": "red_bar_lab.ui.pages.intelligence",
 }
 
-# Kept as explicit compatibility metadata only. These modules remain available for
-# historical audit and old artifact interpretation, but are not navigable or loaded
-# by the active workspace.
 RETIRED_PAGE_MODULE_PATHS = {
     "RSI Extreme Reversal": "red_bar_lab.ui.pages.rsi_extreme_reversal_strategy",
     "Directional Regime Intelligence": "red_bar_lab.ui.pages.directional_regime_strategy",
@@ -97,12 +94,26 @@ def _configure_strategy_cache(page: str, module: ModuleType) -> None:
 
 
 def _configure_operations_center(operations_center: ModuleType) -> None:
-    from red_bar_lab.ui.operations_readiness_wrapper import (
-        build_operations_readiness_page_wrapper,
-    )
+    import red_bar_lab.ui.operations_readiness_wrapper as readiness_wrapper
 
-    operations_center.render_page = build_operations_readiness_page_wrapper(
-        operations_center.render_page
+    # Rendering is strictly read-only. Persistence is owned by the monitor and
+    # collector pipelines, never by a Streamlit refresh.
+    keyword_defaults = dict(
+        getattr(
+            readiness_wrapper.build_live_operations_readiness_view,
+            "__kwdefaults__",
+            {},
+        )
+        or {}
+    )
+    keyword_defaults["persist_outcomes"] = False
+    readiness_wrapper.build_live_operations_readiness_view.__kwdefaults__ = (
+        keyword_defaults
+    )
+    operations_center.render_page = (
+        readiness_wrapper.build_operations_readiness_page_wrapper(
+            operations_center.render_page
+        )
     )
 
 
