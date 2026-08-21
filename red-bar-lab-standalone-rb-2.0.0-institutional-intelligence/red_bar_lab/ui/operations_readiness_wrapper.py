@@ -166,7 +166,14 @@ def _outcomes(
         coverage = assess_observed_field_coverage(stage, row)
         predicate_ready = bool(row) and bool(ready_predicate(row))
         ready = predicate_ready and coverage.status == "READY"
-        status = "READY" if ready else str(diagnostic.get("status") or "MISSING").upper()
+        diagnostic_status = str(diagnostic.get("status") or "MISSING").upper()
+        status = (
+            "READY"
+            if ready
+            else diagnostic_status
+            if diagnostic_status in {"FAILED", "STALE", "NOT_APPLICABLE"}
+            else "MISSING"
+        )
         reason_code = None
         if not ready:
             reason_code = (
