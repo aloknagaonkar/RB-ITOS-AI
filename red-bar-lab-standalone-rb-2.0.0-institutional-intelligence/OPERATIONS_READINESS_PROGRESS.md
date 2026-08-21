@@ -26,21 +26,26 @@ Architectural authority: observational/read-only. No execution or legacy exit au
 - [x] Explicit reason code, retry count and final retry status fields.
 - [x] Persist input source, cutoff timestamp, latest source timestamp and no-lookahead result.
 - [x] Gate-to-persistence adapter for REFERENCE, MARKET, VOLUME and OPTIONS stages.
-- [x] Focused persistence and adapter tests added.
+- [x] Non-blocking runtime auto-write from the Operations readiness wrapper.
+- [x] Runtime persistence health exposed as READY, SKIPPED or FAILED.
+- [x] Persistence failures remain diagnostic and do not block page rendering.
+- [x] Explicit `persist_outcomes=False` test path for isolated UI tests.
+- [x] Success-path, failure-isolation and disabled-persistence regression tests added.
 
 ## Current validation state
 
-- [x] Operations readiness suite passed on Windows.
-- [ ] Run the new outcome-store and outcome-adapter tests.
-- [ ] Confirm the new `Authoritative Signal Readiness v2` section renders in Streamlit.
+- [x] Earlier Operations readiness suite passed on Windows.
+- [ ] Run the expanded suite with runtime persistence tests.
+- [ ] Confirm `Outcome persistence: READY` appears in Streamlit.
+- [ ] Confirm eight persisted rows for two confirmed signals and four stages.
 - [ ] Compare exact CORE/HYBRID IDs against persisted pipeline status for the current session.
 
 ## Next P0 slice
 
-- [ ] Add non-blocking runtime auto-write of Operations readiness outcomes.
-- [ ] Surface persistence success/failure diagnostics without blocking page rendering.
 - [ ] Add current-day completed live-candle source before historical fallback.
-- [ ] Persist selected candle source and no-lookahead selection result.
+- [ ] Persist selected candle source, requested cutoff and latest completed timestamp.
+- [ ] Enforce and persist no-lookahead selection result.
+- [ ] Return explicit MISSING or FAILED outcome instead of silently skipping unavailable live candles.
 
 ## Later P1 work
 
@@ -66,4 +71,4 @@ python -m pytest -q `
   red_bar_lab/tests/test_ui_compatibility.py
 ```
 
-Tests must be run in the local Windows project before runtime persistence wiring is considered validated.
+Tests must be run in the local Windows project before runtime persistence is considered validated.
