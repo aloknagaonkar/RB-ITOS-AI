@@ -31,6 +31,22 @@ def _stage_diagnostics(prefix: str, row: Mapping[str, Any]) -> dict[str, Any]:
         f"{prefix}_row_count": int(row.get("row_count") or 0),
         f"{prefix}_fallback_used": bool(row.get("fallback_used")),
         f"{prefix}_no_lookahead_passed": row.get("no_lookahead_passed"),
+        f"{prefix}_mandatory_present": int(row.get("mandatory_present") or 0),
+        f"{prefix}_mandatory_expected": int(row.get("mandatory_expected") or 0),
+        f"{prefix}_mandatory_coverage_pct": float(
+            row.get("mandatory_coverage_pct") or 0.0
+        ),
+        f"{prefix}_optional_present": int(row.get("optional_present") or 0),
+        f"{prefix}_optional_expected": int(row.get("optional_expected") or 0),
+        f"{prefix}_optional_coverage_pct": float(
+            row.get("optional_coverage_pct") or 0.0
+        ),
+        f"{prefix}_missing_mandatory_fields": tuple(
+            row.get("missing_mandatory_fields") or ()
+        ),
+        f"{prefix}_missing_optional_fields": tuple(
+            row.get("missing_optional_fields") or ()
+        ),
     }
 
 
@@ -45,11 +61,7 @@ def build_operations_readiness_gate(
     independent_strategy_blockers: Iterable[str] = (),
     execution_blockers: Iterable[str] = ("EXECUTION_POLICY_NOT_APPROVED",),
 ) -> dict[str, Any]:
-    """Build one observational readiness result for the Operations Centre.
-
-    The function keeps exact signal IDs throughout the calculation. It does not
-    grant execution authority and does not mutate strategy decisions.
-    """
+    """Build one observational readiness result for the Operations Centre."""
 
     signals = [dict(row) for row in confirmed_signals]
     confirmed_ids = {
@@ -131,6 +143,7 @@ def build_operations_readiness_gate(
                 "option_status": str(option.get("status") or "MISSING").upper(),
                 **_stage_diagnostics("market", market),
                 **_stage_diagnostics("volume", volume),
+                **_stage_diagnostics("option", option),
                 "core_eligible": signal_id in core_ids,
                 "hybrid_eligible": signal_id in hybrid_ids,
                 "main_reason": reasons[0] if reasons else None,
