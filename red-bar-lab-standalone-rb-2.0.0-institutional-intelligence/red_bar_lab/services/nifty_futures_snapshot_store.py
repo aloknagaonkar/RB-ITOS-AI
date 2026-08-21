@@ -55,48 +55,24 @@ def _payload(value: object) -> dict[str, Any]:
         return asdict(value)
     if isinstance(value, Mapping):
         return dict(value)
-    return {
-        key: getattr(value, key)
-        for key in dir(value)
-        if not key.startswith("_") and not callable(getattr(value, key, None))
-    }
+    return {key: getattr(value, key) for key in dir(value) if not key.startswith("_") and not callable(getattr(value, key, None))}
 
 
 def _normalize_timestamp(value: datetime | str) -> str:
-    """Return a canonical ISO-8601 timestamp without changing its offset."""
-
     if isinstance(value, datetime):
         return value.isoformat()
-
     text = str(value).strip()
     if not text:
         return text
-
     parseable = text[:-1] + "+00:00" if text.endswith("Z") else text
     try:
         return datetime.fromisoformat(parseable).isoformat()
     except ValueError:
-        # Persistence remains best-effort for unexpected provider formats.
         return text
 
 
-def persist_nifty_futures_snapshot(
-    database_path: str | Path,
-    *,
-    observed_at: datetime | str,
-    underlying_name: str,
-    contract,
-    market,
-    positioning,
-    strength,
-    readiness,
-) -> int:
-    """Persist one read-only futures diagnostic snapshot.
-
-    This table is independent of execution tables. No value written here is
-    consulted by Red Bar signal admission, option selection, entries or exits.
-    """
-
+def persist_nifty_futures_snapshot(database_path: str | Path, *, observed_at: datetime | str, underlying_name: str, contract, market, positioning, strength, readiness) -> int:
+    """Persist one read-only futures diagnostic snapshot."""
     path = Path(database_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     observed = _normalize_timestamp(observed_at)
@@ -105,52 +81,24 @@ def persist_nifty_futures_snapshot(
     positioning_data = _payload(positioning)
     strength_data = _payload(strength)
     readiness_data = _payload(readiness)
-    payload = {
-        "contract": contract_data,
-        "market": market_data,
-        "positioning": positioning_data,
-        "strength": strength_data,
-        "readiness": readiness_data,
-    }
-
+    payload = {"contract": contract_data, "market": market_data, "positioning": positioning_data, "strength": strength_data, "readiness": readiness_data}
     values = (
-        observed,
-        str(underlying_name),
-        contract_data.get("instrument_key"),
-        contract_data.get("trading_symbol"),
-        contract_data.get("expiry"),
-        str(contract_data.get("status") or "UNAVAILABLE"),
-        str(market_data.get("status") or "UNAVAILABLE"),
-        str(readiness_data.get("candle_status") or "UNAVAILABLE"),
-        str(readiness_data.get("volume_status") or "MISSING"),
-        str(readiness_data.get("oi_status") or "MISSING"),
-        str(positioning_data.get("status") or "INSUFFICIENT_DATA"),
-        str(positioning_data.get("state") or "NEUTRAL"),
-        str(strength_data.get("status") or "INSUFFICIENT_DATA"),
-        str(strength_data.get("strength") or "INSUFFICIENT"),
-        str(readiness_data.get("status") or "UNAVAILABLE"),
-        market_data.get("latest_close"),
-        market_data.get("latest_volume"),
-        market_data.get("latest_oi"),
-        market_data.get("latest_timestamp"),
-        positioning_data.get("price_change"),
-        positioning_data.get("price_change_pct"),
-        positioning_data.get("oi_change"),
-        positioning_data.get("oi_change_pct"),
-        positioning_data.get("relative_volume"),
-        positioning_data.get("baseline_volume"),
-        int(positioning_data.get("baseline_samples") or 0),
-        json.dumps(list(readiness_data.get("blocking_reasons") or ())),
-        json.dumps(list(readiness_data.get("advisory_reasons") or ())),
-        "OBSERVATIONAL_ONLY",
-        json.dumps(payload, default=str, sort_keys=True),
+        observed, str(underlying_name), contract_data.get("instrument_key"), contract_data.get("trading_symbol"), contract_data.get("expiry"),
+        str(contract_data.get("status") or "UNAVAILABLE"), str(market_data.get("status") or "UNAVAILABLE"),
+        str(readiness_data.get("candle_status") or "UNAVAILABLE"), str(readiness_data.get("volume_status") or "MISSING"),
+        str(readiness_data.get("oi_status") or "MISSING"), str(positioning_data.get("status") or "INSUFFICIENT_DATA"),
+        str(positioning_data.get("state") or "NEUTRAL"), str(strength_data.get("status") or "INSUFFICIENT_DATA"),
+        str(strength_data.get("strength") or "INSUFFICIENT"), str(readiness_data.get("status") or "UNAVAILABLE"),
+        market_data.get("latest_close"), market_data.get("latest_volume"), market_data.get("latest_oi"), market_data.get("latest_timestamp"),
+        positioning_data.get("price_change"), positioning_data.get("price_change_pct"), positioning_data.get("oi_change"), positioning_data.get("oi_change_pct"),
+        positioning_data.get("relative_volume"), positioning_data.get("baseline_volume"), int(positioning_data.get("baseline_samples") or 0),
+        json.dumps(list(readiness_data.get("blocking_reasons") or ())), json.dumps(list(readiness_data.get("advisory_reasons") or ())),
+        "OBSERVATIONAL_ONLY", json.dumps(payload, default=str, sort_keys=True),
     )
-
     with sqlite3.connect(path) as connection:
         connection.executescript(_SCHEMA)
         cursor = connection.execute(
-            """
-            INSERT INTO nifty_futures_diagnostic_snapshots (
+            """INSERT INTO nifty_futures_diagnostic_snapshots (
                 observed_at, underlying_name, instrument_key, trading_symbol, expiry,
                 contract_status, market_status, candle_status, volume_status, oi_status,
                 positioning_status, positioning_state, strength_status, strength,
@@ -162,20 +110,18 @@ def persist_nifty_futures_snapshot(
             ON CONFLICT(underlying_name, observed_at) DO UPDATE SET
                 payload_json=excluded.payload_json,
                 readiness_status=excluded.readiness_status,
-                authority=excluded.authority
-            """,
+                latest_close=excluded.latest_close,
+                latest_volume=excluded.latest_volume,
+                latest_oi=excluded.latest_oi,
+                latest_timestamp=excluded.latest_timestamp,
+                authority=excluded.authority""",
             values,
         )
         connection.commit()
         return int(cursor.lastrowid or 0)
 
 
-def read_nifty_futures_snapshots(
-    database_path: str | Path,
-    *,
-    underlying_name: str = "NIFTY 50",
-    limit: int = 200,
-) -> list[dict[str, Any]]:
+def read_nifty_futures_snapshots(database_path: str | Path, *, underlying_name: str = "NIFTY 50", limit: int = 200) -> list[dict[str, Any]]:
     path = Path(database_path)
     if not path.exists():
         return []
@@ -183,12 +129,9 @@ def read_nifty_futures_snapshots(
         connection.row_factory = sqlite3.Row
         connection.executescript(_SCHEMA)
         rows = connection.execute(
-            """
-            SELECT * FROM nifty_futures_diagnostic_snapshots
-            WHERE underlying_name = ?
-            ORDER BY julianday(observed_at) DESC, observed_at DESC
-            LIMIT ?
-            """,
+            """SELECT * FROM nifty_futures_diagnostic_snapshots
+               WHERE underlying_name = ?
+               ORDER BY julianday(observed_at) DESC, observed_at DESC LIMIT ?""",
             (underlying_name, max(1, int(limit))),
         ).fetchall()
     result = []
@@ -196,5 +139,20 @@ def read_nifty_futures_snapshots(
         item = dict(row)
         item["blocking_reasons"] = json.loads(item.pop("blocking_reasons_json") or "[]")
         item["advisory_reasons"] = json.loads(item.pop("advisory_reasons_json") or "[]")
+        try:
+            payload = json.loads(item.get("payload_json") or "{}")
+        except json.JSONDecodeError:
+            payload = {}
+        market = payload.get("market") if isinstance(payload.get("market"), dict) else {}
+        # Additive aliases preserve the existing UI contract while exposing the
+        # explicit futures VWAP fields requested by the observational model.
+        item["futures_vwap"] = market.get("futures_vwap")
+        item["futures_vwap_timestamp"] = market.get("futures_vwap_timestamp")
+        item["futures_close_vs_vwap_points"] = market.get("futures_close_vs_vwap_points")
+        item["futures_close_vs_vwap_atr"] = market.get("futures_close_vs_vwap_atr")
+        item["futures_vwap_slope"] = market.get("futures_vwap_slope")
+        item["futures_vwap_acceptance"] = market.get("futures_vwap_acceptance") or "UNAVAILABLE"
+        item["vwap"] = market.get("futures_vwap")
+        item["vwap_slope"] = market.get("futures_vwap_slope")
         result.append(item)
     return result
