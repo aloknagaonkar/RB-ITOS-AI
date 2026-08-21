@@ -47,23 +47,13 @@ def _database_path(database: Any) -> str | None:
     return str(value) if value else None
 
 
-def _row(
-    conn: sqlite3.Connection,
-    query: str,
-    params: tuple[object, ...],
-) -> dict[str, object]:
+def _row(conn: sqlite3.Connection, query: str, params: tuple[object, ...]) -> dict[str, object]:
     result = conn.execute(query, params).fetchone()
     return dict(result) if result is not None else {}
 
 
-def _diagnostic_date_expression(
-    conn: sqlite3.Connection,
-    alias: str = "",
-) -> str:
-    columns = {
-        str(row[1])
-        for row in conn.execute("PRAGMA table_info(paper_signal_diagnostics)")
-    }
+def _diagnostic_date_expression(conn: sqlite3.Connection, alias: str = "") -> str:
+    columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(paper_signal_diagnostics)")}
     prefix = f"{alias}." if alias else ""
     if "trading_date" in columns:
         return f"{prefix}trading_date"
@@ -90,11 +80,7 @@ def _terminal(detail: object) -> str | None:
     return match.group(1) if match else None
 
 
-def _alignment_reasons(
-    *,
-    pipeline: dict[str, object],
-    reference: dict[str, object],
-) -> tuple[str, ...]:
+def _alignment_reasons(*, pipeline: dict[str, object], reference: dict[str, object]) -> tuple[str, ...]:
     reasons: list[str] = []
     if not pipeline:
         reasons.append("PIPELINE_STATUS_MISSING")
@@ -124,9 +110,8 @@ def resolve_red_bar_v2_live_state(
 ) -> tuple[RedBarV2UISnapshot | None, RedBarV2RuntimeDiagnostics]:
     """Overlay the file snapshot with current-day persisted runtime facts.
 
-    This reader is UI-only. It does not recalculate RSI/VWAP, create signals,
-    alter committee decisions, or write to the database. Red Bar V2 reference
-    geometry is resolved from the strategy-owned NEXT_RED_CANDLE level.
+    Reference readiness is resolved independently from signal readiness. This
+    reader is UI-only and never creates signals or changes admission/execution.
     """
     path = _database_path(database)
     if not path:
@@ -138,80 +123,54 @@ def resolve_red_bar_v2_live_state(
     try:
         with sqlite3.connect(path) as conn:
             conn.row_factory = sqlite3.Row
-            diagnostic_date = _diagnostic_date_expression(conn, "d")
-            diagnostic = _row(
-                conn,
-                f"""
-                SELECT d.*
-                FROM paper_signal_diagnostics AS d
-                WHERE {diagnostic_date}=?
-                  AND d.signal_id LIKE 'RBV2-%'
-                  AND EXISTS (
-                      SELECT 1 FROM signal_pipeline_status AS p
-                      WHERE p.signal_id=d.signal_id
-                        AND p.trading_date=?
-                  )
-                ORDER BY d.timestamp DESC, d.id DESC LIMIT 1
-                """,
-                (trading_date, trading_date),
-            )
-            if not diagnostic:
-                diagnostic_date = _diagnostic_date_expression(conn)
-                diagnostic = _row(
-                    conn,
-                    f"""
-                    SELECT * FROM paper_signal_diagnostics
-                    WHERE {diagnostic_date}=?
-                      AND signal_id LIKE 'RBV2-%'
-                    ORDER BY timestamp DESC, id DESC LIMIT 1
-                    """,
-                    (trading_date,),
-                )
-            if not diagnostic:
-                return snapshot, RedBarV2RuntimeDiagnostics(
-                    trading_date=trading_date,
-                    source_status="NO_CURRENT_DAY_SIGNAL",
-                )
-
-            signal_id = str(diagnostic.get("signal_id") or "")
-            pipeline = _row(
-                conn,
-                """
-                SELECT * FROM signal_pipeline_status
-                WHERE signal_id=? AND trading_date=?
-                ORDER BY updated_at DESC LIMIT 1
-                """,
-                (signal_id, trading_date),
-            )
             reference = _row(
                 conn,
                 """
                 SELECT * FROM reference_levels
-                WHERE instrument_key=?
-                  AND trading_date=?
-                  AND level_type=?
+                WHERE instrument_key=? AND trading_date=? AND level_type=?
                 ORDER BY source_timestamp DESC, id DESC LIMIT 1
                 """,
                 (instrument_key, trading_date, REFERENCE_LEVEL_TYPE),
             )
             monitor = _row(
                 conn,
-                """
-                SELECT * FROM paper_monitor_status
-                ORDER BY updated_at DESC LIMIT 1
-                """,
+                "SELECT * FROM paper_monitor_status ORDER BY updated_at DESC LIMIT 1",
                 (),
             )
-            committee = _row(
+
+            diagnostic_date = _diagnostic_date_expression(conn, "d")
+            diagnostic = _row(
                 conn,
-                """
-                SELECT * FROM execution_state_events
-                WHERE signal_id=?
-                  AND state IN ('EXECUTION_COMMITTEE', 'DECISION_RECORDED')
-                ORDER BY timestamp DESC LIMIT 1
+                f"""
+                SELECT d.* FROM paper_signal_diagnostics AS d
+                WHERE {diagnostic_date}=? AND d.signal_id LIKE 'RBV2-%'
+                ORDER BY d.timestamp DESC, d.id DESC LIMIT 1
                 """,
-                (signal_id,),
+                (trading_date,),
             )
+
+            signal_id = str(diagnostic.get("signal_id") or "")
+            pipeline = {}
+            committee = {}
+            if signal_id:
+                pipeline = _row(
+                    conn,
+                    """
+                    SELECT * FROM signal_pipeline_status
+                    WHERE signal_id=? AND trading_date=?
+                    ORDER BY updated_at DESC LIMIT 1
+                    """,
+                    (signal_id, trading_date),
+                )
+                committee = _row(
+                    conn,
+                    """
+                    SELECT * FROM execution_state_events
+                    WHERE signal_id=? AND state IN ('EXECUTION_COMMITTEE', 'DECISION_RECORDED')
+                    ORDER BY timestamp DESC LIMIT 1
+                    """,
+                    (signal_id,),
+                )
     except (sqlite3.Error, OSError):
         return snapshot, RedBarV2RuntimeDiagnostics(
             trading_date=trading_date,
@@ -220,21 +179,13 @@ def resolve_red_bar_v2_live_state(
 
     direction = str(diagnostic.get("direction") or "").upper() or None
     decision = str(
-        diagnostic.get("final_decision")
-        or monitor.get("last_decision")
-        or ""
+        diagnostic.get("final_decision") or monitor.get("last_decision") or ""
     ).upper() or None
     reason = str(
-        diagnostic.get("reason")
-        or monitor.get("last_reason")
-        or ""
+        diagnostic.get("reason") or monitor.get("last_reason") or ""
     ) or None
-    detail = committee.get("detail")
 
-    blocking_reasons = _alignment_reasons(
-        pipeline=pipeline,
-        reference=reference,
-    )
+    blocking_reasons = _alignment_reasons(pipeline=pipeline, reference=reference)
     pipeline_ready = bool(pipeline) and all(
         _flag(pipeline.get(name)) is True
         for name in (
@@ -243,38 +194,31 @@ def resolve_red_bar_v2_live_state(
             "options_context_ready",
         )
     )
-    reference_quality = str(
-        reference.get("data_quality") or ""
-    ).upper() or None
+    reference_quality = str(reference.get("data_quality") or "").upper() or None
     reference_ready = bool(reference) and reference_quality == "VALID"
-    alignment_status = (
-        "ALIGNED" if pipeline_ready and reference_ready else "BLOCKED"
-    )
+    alignment_status = "ALIGNED" if pipeline_ready and reference_ready else "BLOCKED"
 
+    source_status = (
+        "CURRENT_DAY_RUNTIME"
+        if signal_id
+        else "REFERENCE_ONLY_NO_CURRENT_DAY_SIGNAL"
+        if reference
+        else "NO_CURRENT_DAY_SIGNAL_OR_REFERENCE"
+    )
     diagnostics = RedBarV2RuntimeDiagnostics(
         signal_id=signal_id or None,
         trading_date=trading_date,
-        confirmation_timestamp=(
-            str(diagnostic.get("confirmation_timestamp") or "") or None
-        ),
+        confirmation_timestamp=str(diagnostic.get("confirmation_timestamp") or "") or None,
         signal_age_seconds=(
             float(diagnostic["signal_age_seconds"])
             if diagnostic.get("signal_age_seconds") is not None
             else None
         ),
-        pipeline_updated_at=(
-            str(pipeline.get("updated_at") or "") or None
-        ),
-        monitor_heartbeat=(
-            str(monitor.get("heartbeat_at") or "") or None
-        ),
-        monitor_state=(
-            str(monitor.get("current_state") or "") or None
-        ),
+        pipeline_updated_at=str(pipeline.get("updated_at") or "") or None,
+        monitor_heartbeat=str(monitor.get("heartbeat_at") or "") or None,
+        monitor_state=str(monitor.get("current_state") or "") or None,
         market_context_ready=_flag(pipeline.get("market_context_ready")),
-        volume_structure_ready=_flag(
-            pipeline.get("volume_structure_ready")
-        ),
+        volume_structure_ready=_flag(pipeline.get("volume_structure_ready")),
         options_context_ready=_flag(pipeline.get("options_context_ready")),
         reference_found=bool(reference),
         reference_data_quality=reference_quality,
@@ -284,16 +228,14 @@ def resolve_red_bar_v2_live_state(
         hybrid_eligible=_flag(pipeline.get("hybrid_eligible")),
         committee_decision=decision,
         committee_reason=reason,
-        terminal_condition=_terminal(detail),
-        candidate_symbol=(
-            str(diagnostic.get("best_candidate") or "") or None
-        ),
+        terminal_condition=_terminal(committee.get("detail")),
+        candidate_symbol=str(diagnostic.get("best_candidate") or "") or None,
         candidate_score=(
             float(diagnostic["best_score"])
             if diagnostic.get("best_score") is not None
             else None
         ),
-        source_status="CURRENT_DAY_RUNTIME",
+        source_status=source_status,
     )
 
     base = snapshot or RedBarV2UISnapshot(
@@ -312,12 +254,8 @@ def resolve_red_bar_v2_live_state(
         base,
         mode="PAPER",
         execution_scope="PAPER_TRADING_ONLY",
-        reference_status=(
-            "REFERENCE_READY" if reference_ready else "REFERENCE_NOT_READY"
-        ),
-        reference_timestamp=(
-            str(reference.get("source_timestamp") or "") or None
-        ),
+        reference_status="REFERENCE_READY" if reference_ready else "REFERENCE_NOT_READY",
+        reference_timestamp=str(reference.get("source_timestamp") or "") or None,
         reference_high=reference.get("source_high"),
         reference_low=reference.get("source_low"),
         reference_midpoint=(
@@ -326,26 +264,17 @@ def resolve_red_bar_v2_live_state(
             else reference.get("level_value")
         ),
         alignment_status=alignment_status,
-        directional_state=(
-            "ACTIVE_SIGNAL" if signal_id else base.directional_state
-        ),
-        direction=direction,
-        option_side=_option_side(direction),
-        admission_allowed=admission_allowed,
-        admission_code=decision,
-        admission_reason=reason,
+        directional_state="ACTIVE_SIGNAL" if signal_id else base.directional_state,
+        direction=direction if signal_id else base.direction,
+        option_side=_option_side(direction) if signal_id else base.option_side,
+        admission_allowed=admission_allowed if signal_id else base.admission_allowed,
+        admission_code=decision if signal_id else base.admission_code,
+        admission_reason=reason if signal_id else base.admission_reason,
         last_evaluation_timestamp=(
-            str(
-                diagnostic.get("timestamp")
-                or pipeline.get("updated_at")
-                or ""
-            )
-            or None
+            str(diagnostic.get("timestamp") or pipeline.get("updated_at") or "") or None
         ),
         session_completeness=(
-            "CURRENT_DAY_ALIGNED"
-            if alignment_status == "ALIGNED"
-            else "PARTIAL"
+            "CURRENT_DAY_ALIGNED" if alignment_status == "ALIGNED" else "PARTIAL"
         ),
     )
     return resolved, diagnostics
