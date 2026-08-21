@@ -10,6 +10,9 @@ import pandas as pd
 import streamlit as st
 
 from red_bar_lab.operations.service import _readiness_signal_scope
+from red_bar_lab.services.observed_field_coverage import (
+    assess_observed_field_coverage,
+)
 from red_bar_lab.services.operations_readiness_gate import (
     build_operations_readiness_gate,
 )
@@ -160,9 +163,17 @@ def _outcomes(
     for signal_id in sorted(confirmed_ids):
         row = by_id.get(signal_id)
         diagnostic = dict((diagnostics or {}).get((signal_id, stage), {}))
-        ready = bool(row) and bool(ready_predicate(row))
+        coverage = assess_observed_field_coverage(stage, row)
+        predicate_ready = bool(row) and bool(ready_predicate(row))
+        ready = predicate_ready and coverage.status == "READY"
         status = "READY" if ready else str(diagnostic.get("status") or "MISSING").upper()
-        reason_code = None if ready else diagnostic.get("reason_code") or missing_code
+        reason_code = None
+        if not ready:
+            reason_code = (
+                coverage.reason_code
+                or diagnostic.get("reason_code")
+                or missing_code
+            )
         results.append(
             {
                 "signal_id": signal_id,
@@ -174,6 +185,15 @@ def _outcomes(
                 "no_lookahead_passed": diagnostic.get("no_lookahead_passed"),
                 "fallback_used": bool(diagnostic.get("fallback_used")),
                 "row_count": int(diagnostic.get("row_count") or 0),
+                "mandatory_present": coverage.mandatory_present,
+                "mandatory_expected": coverage.mandatory_expected,
+                "mandatory_coverage_pct": coverage.mandatory_coverage_pct,
+                "optional_present": coverage.optional_present,
+                "optional_expected": coverage.optional_expected,
+                "optional_coverage_pct": coverage.optional_coverage_pct,
+                "missing_mandatory_fields": coverage.missing_mandatory_fields,
+                "missing_optional_fields": coverage.missing_optional_fields,
+                "field_coverage_policy_version": coverage.policy_version,
             }
         )
     return results
@@ -329,8 +349,8 @@ def render_operations_readiness_v2(
     st.markdown("### Authoritative Signal Readiness v2")
     st.caption(
         "Exact signal-ID readiness using NEXT_RED_CANDLE validation. "
-        "This section supersedes aggregate count approximations above and "
-        "remains observational only."
+        "Mandatory evidence fields are observed from persisted rows; a stage "
+        "cannot be READY when mandatory fields are absent."
     )
 
     columns = st.columns(6)
@@ -355,7 +375,7 @@ def render_operations_readiness_v2(
 
     drilldown = list(view.get("drilldown") or ())
     if drilldown:
-        st.markdown("#### Per-signal readiness, candle sources and blockers")
+        st.markdown("#### Per-signal readiness, field coverage and candle sources")
         st.dataframe(drilldown, width="stretch", hide_index=True)
     else:
         st.info("No confirmed signals are available for the selected session.")
