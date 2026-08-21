@@ -7,7 +7,7 @@ from pathlib import Path
 import sqlite3
 from typing import Any, Mapping
 
-POLICY_VERSION = "market-evidence-v2"
+POLICY_VERSION = "market-evidence-v3"
 
 
 def _json(value: object) -> str:
@@ -15,14 +15,61 @@ def _json(value: object) -> str:
 
 
 def _bundle_id(underlying_name: str, view: Mapping[str, Any]) -> str:
-    anchor = str(
-        view.get("latest_complete_evidence_time")
-        or view.get("underlying_timestamp")
-        or view.get("option_timestamp")
-        or "missing"
+    """Identify one exact aligned evidence observation.
+
+    All required source timestamps participate in the identity so a later
+    option/futures snapshot cannot overwrite earlier evidence from the same
+    completed five-minute underlying bar.
+    """
+    anchors = (
+        view.get("underlying_bar_close_timestamp")
+        or view.get("underlying_timestamp"),
+        view.get("futures_bar_close_timestamp")
+        or view.get("futures_market_timestamp"),
+        view.get("futures_collection_timestamp"),
+        view.get("option_timestamp"),
     )
-    raw = f"{underlying_name}|{anchor}|{POLICY_VERSION}"
+    if not any(anchors):
+        anchors = (view.get("as_of_timestamp") or "missing",)
+    raw = "|".join(
+        [str(underlying_name), POLICY_VERSION]
+        + [str(value or "missing") for value in anchors]
+    )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+
+
+def _schema(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS market_evidence_bundles (
+            bundle_id TEXT PRIMARY KEY,
+            underlying_name TEXT NOT NULL,
+            as_of_timestamp TEXT NOT NULL,
+            underlying_timestamp TEXT,
+            futures_market_timestamp TEXT,
+            futures_collection_timestamp TEXT,
+            option_timestamp TEXT,
+            observed_direction TEXT,
+            structural_state TEXT,
+            direction_state TEXT,
+            evidence_readiness TEXT,
+            contract_quality TEXT,
+            trade_eligibility TEXT,
+            trade_bias TEXT,
+            blocking_reasons_json TEXT NOT NULL,
+            caution_reasons_json TEXT NOT NULL,
+            policy_version TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_market_evidence_latest
+        ON market_evidence_bundles(underlying_name, as_of_timestamp DESC)
+        """
+    )
 
 
 def persist_market_evidence_bundle(
@@ -36,34 +83,10 @@ def persist_market_evidence_bundle(
     bundle_id = _bundle_id(underlying_name, view)
     created_at = datetime.now(timezone.utc).isoformat()
     with sqlite3.connect(path) as connection:
+        _schema(connection)
         connection.execute(
             """
-            CREATE TABLE IF NOT EXISTS market_evidence_bundles (
-                bundle_id TEXT PRIMARY KEY,
-                underlying_name TEXT NOT NULL,
-                as_of_timestamp TEXT NOT NULL,
-                underlying_timestamp TEXT,
-                futures_market_timestamp TEXT,
-                futures_collection_timestamp TEXT,
-                option_timestamp TEXT,
-                observed_direction TEXT,
-                structural_state TEXT,
-                direction_state TEXT,
-                evidence_readiness TEXT,
-                contract_quality TEXT,
-                trade_eligibility TEXT,
-                trade_bias TEXT,
-                blocking_reasons_json TEXT NOT NULL,
-                caution_reasons_json TEXT NOT NULL,
-                policy_version TEXT NOT NULL,
-                payload_json TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            )
-            """
-        )
-        connection.execute(
-            """
-            INSERT OR REPLACE INTO market_evidence_bundles (
+            INSERT INTO market_evidence_bundles (
                 bundle_id, underlying_name, as_of_timestamp,
                 underlying_timestamp, futures_market_timestamp,
                 futures_collection_timestamp, option_timestamp,
@@ -72,6 +95,7 @@ def persist_market_evidence_bundle(
                 trade_bias, blocking_reasons_json, caution_reasons_json,
                 policy_version, payload_json, created_at
             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(bundle_id) DO NOTHING
             """,
             (
                 bundle_id,
@@ -98,4 +122,43 @@ def persist_market_evidence_bundle(
     return bundle_id
 
 
-__all__ = ["POLICY_VERSION", "persist_market_evidence_bundle"]
+def read_latest_market_evidence_bundle(
+    database_path: str | Path,
+    *,
+    underlying_name: str,
+) -> dict[str, Any] | None:
+    path = Path(database_path)
+    if not path.exists():
+        return None
+    with sqlite3.connect(path) as connection:
+        connection.row_factory = sqlite3.Row
+        _schema(connection)
+        row = connection.execute(
+            """
+            SELECT * FROM market_evidence_bundles
+            WHERE underlying_name=?
+            ORDER BY julianday(as_of_timestamp) DESC,
+                     as_of_timestamp DESC,
+                     created_at DESC
+            LIMIT 1
+            """,
+            (underlying_name,),
+        ).fetchone()
+    if row is None:
+        return None
+    stored = dict(row)
+    try:
+        payload = json.loads(stored.get("payload_json") or "{}")
+    except json.JSONDecodeError:
+        payload = {}
+    payload["bundle_id"] = stored["bundle_id"]
+    payload["policy_version"] = stored["policy_version"]
+    payload["persisted_at"] = stored["created_at"]
+    return payload
+
+
+__all__ = [
+    "POLICY_VERSION",
+    "persist_market_evidence_bundle",
+    "read_latest_market_evidence_bundle",
+]
