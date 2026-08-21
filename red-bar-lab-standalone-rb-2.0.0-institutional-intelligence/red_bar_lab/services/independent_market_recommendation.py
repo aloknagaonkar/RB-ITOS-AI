@@ -42,12 +42,20 @@ def build_independent_market_recommendation(
     readiness: Mapping[str, object] | None,
     futures_snapshot: Mapping[str, object] | None,
     option_context: Mapping[str, object] | None = None,
+    participation: Mapping[str, object] | None = None,
 ) -> IndependentMarketRecommendation:
-    """Create a read-only CE/PE market view without using Red Bar V2 direction."""
+    """Create a read-only CE/PE market view without using Red Bar V2 direction.
+
+    When the six-strike participation snapshot is available, it becomes the
+    direct option-market directional view. Futures remains independent
+    confirmation/contradiction evidence. Without that snapshot, the existing
+    futures-led behavior is preserved for compatibility.
+    """
 
     ready = dict(readiness or {})
     futures = dict(futures_snapshot or {})
     options = dict(option_context or {})
+    participation_view = dict(participation or {})
 
     state = _text(futures.get("positioning_state"), "NEUTRAL")
     strength = _text(futures.get("strength") or ready.get("futures_strength"), "UNAVAILABLE")
@@ -57,22 +65,60 @@ def build_independent_market_recommendation(
     market_hours = _text(ready.get("market_hours_status"), "UNAVAILABLE")
     overall = _text(ready.get("overall_status"), "UNAVAILABLE")
 
-    if state in _BULLISH_STATES:
+    participation_side = _text(participation_view.get("recommended_side"), "UNAVAILABLE")
+    participation_grade = _text(participation_view.get("grade"), "UNAVAILABLE")
+    ce_score = _number(participation_view.get("ce_score"))
+    pe_score = _number(participation_view.get("pe_score"))
+    has_participation = participation_side in {"CE", "PE", "WAIT"} and ce_score is not None and pe_score is not None
+
+    if has_participation and participation_side == "CE":
         direction, option = "BULLISH", "CE"
-        delta = _number(options.get("candidate_delta") or options.get("atm_call_delta"))
+    elif has_participation and participation_side == "PE":
+        direction, option = "BEARISH", "PE"
+    elif has_participation and participation_side == "WAIT":
+        direction, option = "NEUTRAL", "—"
+    elif state in _BULLISH_STATES:
+        direction, option = "BULLISH", "CE"
     elif state in _BEARISH_STATES:
         direction, option = "BEARISH", "PE"
+    else:
+        direction, option = "NEUTRAL", "—"
+
+    if option == "CE":
+        delta = _number(options.get("candidate_delta") or options.get("atm_call_delta"))
+    elif option == "PE":
         delta = _number(options.get("candidate_delta") or options.get("atm_put_delta"))
     else:
-        direction, option, delta = "NEUTRAL", "—", None
+        delta = None
 
-    delta_source = "EXACT_CANDIDATE" if options.get("candidate_delta") not in (None, "") else "LATEST_ATM_SIDE" if delta is not None else "UNAVAILABLE"
-    pcr = _number(options.get("pcr_oi"))
+    delta_source = (
+        "EXACT_CANDIDATE" if options.get("candidate_delta") not in (None, "")
+        else "LATEST_ATM_SIDE" if delta is not None
+        else "UNAVAILABLE"
+    )
+    pcr = _number(participation_view.get("pcr_oi"))
+    if pcr is None:
+        pcr = _number(options.get("pcr_oi"))
+
     positives: list[str] = []
     cautions: list[str] = list(advisory) + list(execution)
 
-    if direction != "NEUTRAL":
-        positives.append(f"FUTURES_{state}")
+    if has_participation:
+        positives.append(f"SIX_STRIKE_CE_SCORE_{ce_score:.1f}")
+        positives.append(f"SIX_STRIKE_PE_SCORE_{pe_score:.1f}")
+        if participation_side in {"CE", "PE"}:
+            positives.append(f"SIX_STRIKE_{participation_side}_LEAD")
+        else:
+            cautions.append("SIX_STRIKE_CONFLICTED")
+
+    futures_side = "CE" if state in _BULLISH_STATES else "PE" if state in _BEARISH_STATES else None
+    if futures_side:
+        if option in {"CE", "PE"} and futures_side == option:
+            positives.append(f"FUTURES_{state}_ALIGNS")
+        elif option in {"CE", "PE"} and futures_side != option:
+            cautions.append(f"FUTURES_{state}_CONTRADICTS_{option}")
+        else:
+            positives.append(f"FUTURES_{state}")
     if strength == "STRONG":
         positives.append("FUTURES_STRENGTH_STRONG")
     elif strength in {"WEAK", "INSUFFICIENT", "UNAVAILABLE"}:
@@ -91,10 +137,27 @@ def build_independent_market_recommendation(
         summary = "Critical market evidence is unavailable or unusable."
     elif direction == "NEUTRAL":
         grade, action = "NO_TRADE", "WAIT FOR DIRECTION"
-        summary = "Futures positioning does not provide a directional CE/PE view."
+        if has_participation:
+            summary = f"Six-strike evidence is not separated enough: CE {ce_score:.1f} vs PE {pe_score:.1f}."
+        else:
+            summary = "Futures positioning does not provide a directional CE/PE view."
     elif market_hours not in {"OPEN", "ENTRY_OPEN", "READY"}:
         grade, action = "CAUTIOUS", "WAIT FOR ENTRY HOURS"
         summary = f"Independent market view is {direction}, but entry hours are closed."
+    elif has_participation:
+        futures_conflict = futures_side in {"CE", "PE"} and futures_side != option
+        if participation_grade == "STRONG" and not futures_conflict and overall == "READY":
+            grade, action = "STRONG", f"BUY {option} — PAPER OBSERVATION"
+        elif participation_grade in {"STRONG", "MODERATE"} and not futures_conflict:
+            grade, action = "MODERATE", f"CONSIDER {option} WITH CAUTION"
+        elif futures_conflict:
+            grade, action = "CONFLICTED", "WAIT FOR FUTURES / OPTIONS ALIGNMENT"
+        else:
+            grade, action = "CAUTIOUS", "WAIT FOR CONFIRMATION"
+        summary = (
+            f"Six-strike option participation favours {option}: CE {ce_score:.1f} vs PE {pe_score:.1f}. "
+            f"Futures state is {state}/{strength}."
+        )
     elif overall == "READY" and strength == "STRONG" and _text(ready.get("option_quote_status")) == "READY":
         grade, action = "STRONG", f"BUY {option} — PAPER OBSERVATION"
         summary = f"Strong {direction.lower()} futures positioning supports {option}."
