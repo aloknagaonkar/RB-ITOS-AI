@@ -96,6 +96,16 @@ def _configure_strategy_cache(page: str, module: ModuleType) -> None:
     module.render_page = build_contract_ranking_page_wrapper(module, page)
 
 
+def _configure_operations_center(operations_center: ModuleType) -> None:
+    from red_bar_lab.ui.operations_readiness_wrapper import (
+        build_operations_readiness_page_wrapper,
+    )
+
+    operations_center.render_page = build_operations_readiness_page_wrapper(
+        operations_center.render_page
+    )
+
+
 def _configure_paper_trading(paper_trading: ModuleType) -> None:
     from red_bar_lab.execution.attribution_automation import (
         AttributionAwarePaperAutomationService,
@@ -167,7 +177,9 @@ def configure_page(page: str, module: ModuleType) -> ModuleType:
         return module
     if page in _CACHED_CANDLE_PAGES:
         _configure_strategy_cache(page, module)
-    if page == "Paper Trading":
+    if page == "Operations Center":
+        _configure_operations_center(module)
+    elif page == "Paper Trading":
         _configure_paper_trading(module)
     elif page == "Research Lab":
         _configure_research_lab(module)
