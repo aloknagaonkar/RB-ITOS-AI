@@ -158,3 +158,29 @@ def test_live_runtime_explains_missing_reference(tmp_path):
     assert diagnostics.alignment_blocking_reasons == (
         "NEXT_RED_CANDLE_REFERENCE_NOT_FOUND",
     )
+
+
+def test_live_runtime_resolves_reference_without_current_signal(tmp_path):
+    path = tmp_path / "lab.db"
+    _create_runtime_db(path)
+    with sqlite3.connect(path) as connection:
+        connection.execute("DELETE FROM paper_signal_diagnostics")
+        connection.execute("DELETE FROM signal_pipeline_status")
+        connection.commit()
+
+    snapshot, diagnostics = resolve_red_bar_v2_live_state(
+        _Database(path),
+        None,
+        instrument_key="NSE_INDEX|Nifty 50",
+        trading_date="2026-08-21",
+    )
+
+    assert snapshot is not None
+    assert snapshot.reference_status == "REFERENCE_READY"
+    assert snapshot.reference_high == 24300
+    assert snapshot.reference_low == 24240
+    assert snapshot.reference_midpoint == 24270
+    assert snapshot.alignment_status == "BLOCKED"
+    assert diagnostics.source_status == "REFERENCE_ONLY_NO_CURRENT_DAY_SIGNAL"
+    assert diagnostics.reference_found is True
+    assert diagnostics.alignment_blocking_reasons == ("PIPELINE_STATUS_MISSING",)
