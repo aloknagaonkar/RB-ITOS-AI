@@ -13,14 +13,16 @@ Architectural authority: observational/read-only. No execution or legacy exit au
 - [x] Per-signal Operations readiness orchestration.
 - [x] Per-signal reference, market, volume and option status drill-down contract.
 - [x] UI-facing readiness view model with stable presentation fields.
-- [x] Focused tests for reference validation, readiness isolation, feature intersections, orchestration and UI view model.
+- [x] Active workspace wrapper for the Operations Centre.
+- [x] Visible `NEXT_RED_CANDLE`, Market, Volume, Options, CORE and HYBRID stage metrics.
+- [x] Visible readiness-domain table and per-signal blocker drill-down.
+- [x] Focused tests for reference validation, readiness isolation, feature intersections, orchestration, view model and live database adaptation.
 
-## In progress
+## Current validation state
 
-- [ ] Wire the readiness view model into `ui/pages/operations_center.py`.
-- [ ] Replace aggregate `min(market_ready, volume_ready)` Feature Store display.
-- [ ] Add visible `NEXT_RED_CANDLE` readiness stage.
-- [ ] Render readiness-domain cards and per-signal drill-down table.
+- [ ] Run the focused Windows test suite.
+- [ ] Confirm the new `Authoritative Signal Readiness v2` section renders in Streamlit.
+- [ ] Compare exact CORE/HYBRID IDs against persisted pipeline status for the current session.
 
 ## Next P0 slice
 
@@ -45,7 +47,10 @@ python -m pytest -q `
   red_bar_lab/tests/test_readiness_domains.py `
   red_bar_lab/tests/test_feature_store_readiness.py `
   red_bar_lab/tests/test_operations_readiness_gate.py `
-  red_bar_lab/tests/test_operations_readiness_view.py
+  red_bar_lab/tests/test_operations_readiness_view.py `
+  red_bar_lab/tests/test_operations_readiness_wrapper.py `
+  red_bar_lab/tests/test_operations_center.py `
+  red_bar_lab/tests/test_ui_compatibility.py
 ```
 
 Tests must be run in the local Windows project before the renderer integration is considered validated.
