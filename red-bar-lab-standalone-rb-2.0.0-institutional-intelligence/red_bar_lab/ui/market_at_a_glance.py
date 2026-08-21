@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from red_bar_lab.services.nifty_futures_snapshot_store import (
@@ -13,6 +14,9 @@ from red_bar_lab.ui._shared import _arrow_safe_rows, st
 
 _BULLISH_FUTURES = {"LONG_BUILDUP", "SHORT_COVERING"}
 _BEARISH_FUTURES = {"SHORT_BUILDUP", "LONG_UNWINDING"}
+_CONFIRMING_STRENGTH = {"STRONG", "MODERATE"}
+_MAX_SOURCE_AGE_SECONDS = 180.0
+_MAX_ALIGNMENT_GAP_SECONDS = 120.0
 
 
 def _number(value: object) -> float | None:
@@ -27,50 +31,69 @@ def _score(value: object) -> str:
     return "—" if number is None else f"{number:.1f}"
 
 
+def _timestamp(value: object) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text[:-1] + "+00:00" if text.endswith("Z") else text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _age_seconds(value: datetime | None, now: datetime) -> float | None:
+    if value is None:
+        return None
+    return max(0.0, (now.astimezone(timezone.utc) - value.astimezone(timezone.utc)).total_seconds())
+
+
 def build_market_at_a_glance(
     summary: Mapping[str, Any],
     futures: Mapping[str, Any],
+    *,
+    now: datetime | None = None,
 ) -> dict[str, Any]:
-    bullish = _number(summary.get("ce_score")) or 0.0
-    bearish = _number(summary.get("pe_score")) or 0.0
-    gap = abs(bullish - bearish)
-    winning_score = max(bullish, bearish)
-    winning_side = "CE" if bullish > bearish else "PE" if bearish > bullish else "TIE"
+    current_time = now or datetime.now(timezone.utc)
+    if current_time.tzinfo is None:
+        current_time = current_time.replace(tzinfo=timezone.utc)
+
+    bullish = _number(summary.get("ce_score"))
+    bearish = _number(summary.get("pe_score"))
+    scores_available = bullish is not None and bearish is not None
+    gap = abs(bullish - bearish) if scores_available else None
+    winning_score = max(bullish, bearish) if scores_available else None
+    winning_side = (
+        "CE" if scores_available and bullish > bearish
+        else "PE" if scores_available and bearish > bullish
+        else "TIE" if scores_available
+        else "UNAVAILABLE"
+    )
 
     option_direction = (
         "BULLISH"
-        if winning_side == "CE" and winning_score >= 50.0 and gap >= 8.0
+        if winning_side == "CE" and winning_score is not None and winning_score >= 50.0 and gap is not None and gap >= 8.0
         else "BEARISH"
-        if winning_side == "PE" and winning_score >= 50.0 and gap >= 8.0
+        if winning_side == "PE" and winning_score is not None and winning_score >= 50.0 and gap is not None and gap >= 8.0
         else "WAIT"
+        if scores_available
+        else "UNAVAILABLE"
     )
 
     futures_state = str(futures.get("positioning_state") or "UNAVAILABLE").upper()
     futures_strength = str(futures.get("strength") or "UNAVAILABLE").upper()
     futures_direction = (
-        "BULLISH"
-        if futures_state in _BULLISH_FUTURES
-        else "BEARISH"
-        if futures_state in _BEARISH_FUTURES
+        "BULLISH" if futures_state in _BULLISH_FUTURES
+        else "BEARISH" if futures_state in _BEARISH_FUTURES
         else "NEUTRAL"
     )
-
-    if option_direction == "WAIT":
-        market_state = "WAIT / NO CLEAR EDGE"
-        trade_bias = "WAIT"
-        confirmation = "SCORE THRESHOLD OR SEPARATION NOT MET"
-    elif futures_direction == "NEUTRAL":
-        market_state = option_direction
-        trade_bias = "BUY CE" if option_direction == "BULLISH" else "BUY PE"
-        confirmation = "OPTIONS LEAD; FUTURES NEUTRAL OR UNAVAILABLE"
-    elif futures_direction == option_direction:
-        market_state = option_direction
-        trade_bias = "BUY CE" if option_direction == "BULLISH" else "BUY PE"
-        confirmation = "OPTIONS AND FUTURES CONFIRM"
-    else:
-        market_state = "CONFLICTED"
-        trade_bias = "WAIT"
-        confirmation = "OPTIONS AND FUTURES DISAGREE"
+    futures_quality = (
+        "CONFIRMING" if futures_strength in _CONFIRMING_STRENGTH
+        else "WEAK" if futures_direction in {"BULLISH", "BEARISH"}
+        else "UNAVAILABLE"
+    )
 
     rsi = _number(summary.get("underlying_rsi"))
     if rsi is None:
@@ -82,51 +105,80 @@ def build_market_at_a_glance(
     else:
         rsi_view = "NEUTRAL"
 
+    option_time = _timestamp(summary.get("observed_at"))
+    futures_time = _timestamp(futures.get("observed_at"))
+    underlying_time = _timestamp(futures.get("latest_timestamp"))
+    option_age = _age_seconds(option_time, current_time)
+    futures_age = _age_seconds(futures_time, current_time)
+    underlying_age = _age_seconds(underlying_time, current_time)
+    alignment_gap = (
+        abs((option_time.astimezone(timezone.utc) - futures_time.astimezone(timezone.utc)).total_seconds())
+        if option_time is not None and futures_time is not None
+        else None
+    )
+    evidence_fresh = all(
+        age is not None and age <= _MAX_SOURCE_AGE_SECONDS
+        for age in (option_age, futures_age, underlying_age)
+    )
+    evidence_aligned = alignment_gap is not None and alignment_gap <= _MAX_ALIGNMENT_GAP_SECONDS
+    evidence_status = (
+        "ALIGNED"
+        if evidence_fresh and evidence_aligned
+        else "STALE"
+        if all(value is not None for value in (option_time, futures_time, underlying_time))
+        else "UNAVAILABLE"
+    )
+
+    if not scores_available or evidence_status != "ALIGNED":
+        market_state = "UNAVAILABLE"
+        trade_bias = "WAIT"
+        confirmation = "MANDATORY EVIDENCE MISSING, STALE OR MISALIGNED"
+    elif option_direction == "WAIT":
+        if futures_direction in {"BULLISH", "BEARISH"} and rsi_view in {"BULLISH", "BEARISH"} and futures_direction != rsi_view:
+            market_state = "CONFLICTED / TRANSITIONAL"
+            confirmation = "OPTIONS WEAK; FUTURES AND RSI DISAGREE"
+        else:
+            market_state = "WAIT / NO CLEAR EDGE"
+            confirmation = "OPTION SCORE THRESHOLD OR SEPARATION NOT MET"
+        trade_bias = "WAIT"
+    elif futures_direction not in {"BULLISH", "BEARISH"}:
+        market_state = f"EARLY {option_direction} TRANSITION"
+        trade_bias = "WAIT"
+        confirmation = "OPTIONS LEAD; FUTURES UNAVAILABLE OR NEUTRAL"
+    elif futures_direction != option_direction:
+        market_state = "CONFLICTED"
+        trade_bias = "WAIT"
+        confirmation = "OPTIONS AND FUTURES DISAGREE"
+    elif rsi_view in {"BULLISH", "BEARISH"} and rsi_view != option_direction:
+        market_state = "CONFLICTED / TRANSITIONAL"
+        trade_bias = "WAIT"
+        confirmation = "DERIVATIVES AGREE; UNDERLYING RSI CONTRADICTS"
+    elif futures_quality != "CONFIRMING":
+        market_state = f"EARLY {option_direction} TRANSITION"
+        trade_bias = "WAIT"
+        confirmation = "FUTURES DIRECTION SUPPORTS BUT STRENGTH IS WEAK"
+    else:
+        market_state = f"CONFIRMED {option_direction}"
+        trade_bias = "BUY CE" if option_direction == "BULLISH" else "BUY PE"
+        confirmation = "OPTIONS, FUTURES QUALITY AND RSI CONFIRM"
+
     reason_parts = [
-        f"Bullish CE score {bullish:.1f}",
-        f"Bearish PE score {bearish:.1f}",
-        f"gap {gap:.1f}",
-        f"futures {futures_state}",
+        f"Bullish CE score {_score(bullish)}",
+        f"Bearish PE score {_score(bearish)}",
+        f"gap {_score(gap)}",
+        f"futures {futures_state}/{futures_strength}",
         f"RSI {rsi_view}",
+        f"evidence {evidence_status}",
     ]
     explanation = "; ".join(reason_parts) + "."
 
     checklist = [
-        {
-            "Check": "Bullish score (CE)",
-            "Live value": f"{bullish:.1f}",
-            "Bullish rule": "Higher than PE, at least 50, gap at least 8",
-            "Bearish rule": "Not used",
-            "Status": "LEADING" if winning_side == "CE" else "TRAILING",
-        },
-        {
-            "Check": "Bearish score (PE)",
-            "Live value": f"{bearish:.1f}",
-            "Bullish rule": "Not used",
-            "Bearish rule": "Higher than CE, at least 50, gap at least 8",
-            "Status": "LEADING" if winning_side == "PE" else "TRAILING",
-        },
-        {
-            "Check": "Score gap",
-            "Live value": f"{gap:.1f}",
-            "Bullish rule": "At least 8 points",
-            "Bearish rule": "At least 8 points",
-            "Status": "PASS" if gap >= 8.0 else "WAIT",
-        },
-        {
-            "Check": "Futures confirmation",
-            "Live value": futures_state,
-            "Bullish rule": "LONG_BUILDUP or SHORT_COVERING",
-            "Bearish rule": "SHORT_BUILDUP or LONG_UNWINDING",
-            "Status": confirmation,
-        },
-        {
-            "Check": "Underlying RSI",
-            "Live value": "—" if rsi is None else f"{rsi:.1f}",
-            "Bullish rule": "Above 55 supports bullishness",
-            "Bearish rule": "Below 45 supports bearishness",
-            "Status": rsi_view,
-        },
+        {"Check": "Bullish score (CE)", "Live value": _score(bullish), "Rule": "Higher than PE, at least 50, gap at least 8", "Status": "UNAVAILABLE" if bullish is None else "LEADING" if winning_side == "CE" else "TRAILING"},
+        {"Check": "Bearish score (PE)", "Live value": _score(bearish), "Rule": "Higher than CE, at least 50, gap at least 8", "Status": "UNAVAILABLE" if bearish is None else "LEADING" if winning_side == "PE" else "TRAILING"},
+        {"Check": "Score gap", "Live value": _score(gap), "Rule": "At least 8 points", "Status": "UNAVAILABLE" if gap is None else "PASS" if gap >= 8.0 else "WAIT"},
+        {"Check": "Futures confirmation", "Live value": f"{futures_state} / {futures_strength}", "Rule": "Supportive state plus STRONG or MODERATE strength", "Status": futures_quality},
+        {"Check": "Underlying RSI", "Live value": "—" if rsi is None else f"{rsi:.1f}", "Rule": "Above 55 bullish; below 45 bearish; contradiction forces WAIT", "Status": rsi_view},
+        {"Check": "Evidence alignment", "Live value": "—" if alignment_gap is None else f"{alignment_gap:.0f}s gap", "Rule": "All sources <=180s old and option/futures gap <=120s", "Status": evidence_status},
     ]
 
     return {
@@ -140,41 +192,38 @@ def build_market_at_a_glance(
         "futures_state": futures_state,
         "futures_strength": futures_strength,
         "futures_direction": futures_direction,
+        "futures_quality": futures_quality,
         "confirmation": confirmation,
         "rsi_view": rsi_view,
+        "evidence_status": evidence_status,
+        "option_observed_at": summary.get("observed_at"),
+        "futures_observed_at": futures.get("observed_at"),
+        "underlying_timestamp": futures.get("latest_timestamp"),
+        "option_age_seconds": option_age,
+        "futures_age_seconds": futures_age,
+        "underlying_age_seconds": underlying_age,
+        "alignment_gap_seconds": alignment_gap,
         "explanation": explanation,
         "checklist": checklist,
     }
 
 
 def render_market_at_a_glance(settings, underlying_name: str) -> None:
-    rows = list(
-        read_latest_option_participation(
-            settings.database_path,
-            underlying_name=underlying_name,
-        )
-        or []
-    )
+    rows = list(read_latest_option_participation(settings.database_path, underlying_name=underlying_name) or [])
+    st.markdown("## Market at a Glance")
     if not rows:
-        st.markdown("## Market at a Glance")
         st.warning("No current ATM ±4 option evidence is available. Run the paper monitor during market hours.")
         return
 
     summary = summarize_option_participation(rows)
-    futures_rows = read_nifty_futures_snapshots(
-        settings.database_path,
-        underlying_name=underlying_name,
-        limit=1,
-    )
+    futures_rows = read_nifty_futures_snapshots(settings.database_path, underlying_name=underlying_name, limit=1)
     futures = futures_rows[0] if futures_rows else {}
     view = build_market_at_a_glance(summary, futures)
 
-    st.markdown("## Market at a Glance")
     st.caption(
-        "Quick interpretation of the independent option and futures evidence. "
-        "Bullish score = CE pressure. Bearish score = PE pressure."
+        "Underlying momentum, futures quality and ATM ±4 option participation are evaluated separately. "
+        "Options confirm pressure; they do not independently own the NIFTY trend."
     )
-
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Current market", view["market_state"])
     c2.metric("Trade bias", view["trade_bias"])
@@ -182,36 +231,25 @@ def render_market_at_a_glance(settings, underlying_name: str) -> None:
     c4.metric("Bearish score", _score(view["bearish_score"]))
     c5.metric("Score gap", _score(view["score_gap"]))
 
-    if view["market_state"] == "BULLISH":
-        st.success(
-            f"BULLISH: CE evidence leads and {view['confirmation'].lower()}. "
-            "The independent observation favours CE."
-        )
-    elif view["market_state"] == "BEARISH":
-        st.error(
-            f"BEARISH: PE evidence leads and {view['confirmation'].lower()}. "
-            "The independent observation favours PE."
-        )
-    elif view["market_state"] == "CONFLICTED":
-        st.warning(
-            "CONFLICTED: options and futures point in opposite directions. "
-            "Do not treat either CE or PE as confirmed."
-        )
+    state = view["market_state"]
+    if state == "CONFIRMED BULLISH":
+        st.success("CONFIRMED BULLISH: CE pressure, futures quality and underlying RSI agree.")
+    elif state == "CONFIRMED BEARISH":
+        st.error("CONFIRMED BEARISH: PE pressure, futures quality and underlying RSI agree.")
+    elif state == "UNAVAILABLE":
+        st.warning("UNAVAILABLE: mandatory evidence is missing, stale or timestamp-misaligned. No direction is inferred from missing values.")
+    elif "CONFLICTED" in state:
+        st.warning(f"{state}: evidence groups disagree. Keep the trade bias at WAIT.")
+    elif state.startswith("EARLY"):
+        st.info(f"{state}: a directional lean exists, but confirmation quality is incomplete. Keep the trade bias at WAIT.")
     else:
-        st.info(
-            "WAIT: the winning score is below 50, the CE/PE gap is below 8, "
-            "or the evidence has no clear directional edge."
-        )
+        st.info("WAIT: option pressure has not reached the minimum score and separation requirements.")
 
     st.write(f"**What is happening:** {view['explanation']}")
-    st.dataframe(
-        _arrow_safe_rows(view["checklist"]),
-        width="stretch",
-        hide_index=True,
-    )
+    st.dataframe(_arrow_safe_rows(view["checklist"]), width="stretch", hide_index=True)
     st.caption(
-        "This panel is observational only. A bullish or bearish label is not execution approval; "
-        "conflicting, stale or incomplete evidence should remain WAIT."
+        f"Option observed: {view['option_observed_at'] or '—'} · Futures observed: {view['futures_observed_at'] or '—'} · "
+        f"Underlying candle: {view['underlying_timestamp'] or '—'}. This panel remains observational only."
     )
     st.markdown("---")
 
@@ -225,25 +263,9 @@ def install(page_module: Any) -> None:
     if not callable(original_render):
         return
 
-    def wrapped_render(
-        settings,
-        layout,
-        database,
-        token,
-        underlying_name,
-        instrument_key,
-        interval,
-    ):
+    def wrapped_render(settings, layout, database, token, underlying_name, instrument_key, interval):
         render_market_at_a_glance(settings, underlying_name)
-        return original_render(
-            settings,
-            layout,
-            database,
-            token,
-            underlying_name,
-            instrument_key,
-            interval,
-        )
+        return original_render(settings, layout, database, token, underlying_name, instrument_key, interval)
 
     page_module.render_page = wrapped_render
     page_module._market_at_a_glance_installed = True
