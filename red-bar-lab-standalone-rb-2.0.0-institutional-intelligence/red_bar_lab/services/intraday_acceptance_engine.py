@@ -33,6 +33,11 @@ def _prepare(frame: pd.DataFrame | None, *, as_of_timestamp: datetime) -> pd.Dat
         return pd.DataFrame()
     if "volume" not in work.columns:
         work["volume"] = 0.0
+
+    # Normalize inconsistent provider/test OHLC rows before any range logic.
+    work["high"] = work[["open", "high", "low", "close"]].max(axis=1)
+    work["low"] = work[["open", "high", "low", "close"]].min(axis=1)
+
     cutoff = pd.Timestamp(as_of_timestamp.astimezone(timezone.utc)).floor("min")
     # A row stamped 10:17 represents the 10:17–10:17:59 candle and is usable
     # only after 10:18 begins.
@@ -140,8 +145,13 @@ def build_one_minute_early_evidence(
     candle_range = max(float(latest["high"]) - float(latest["low"]), 1e-9)
     close_location = (close - float(latest["low"])) / candle_range
     body_atr = abs(float(latest["close"]) - float(latest["open"])) / float(atr)
-    bullish_break = close > prior_high and close_location >= 0.70 and body_atr >= 0.50
-    bearish_break = close < prior_low and close_location <= 0.30 and body_atr >= 0.50
+
+    # Early detection is intentionally less strict than 5m confirmation. A
+    # completed 1m close must clear the prior range, close in the directional
+    # half of its candle, and show a non-trivial body. It can only create an
+    # EARLY state; completed 5m hold remains the confirmation authority.
+    bullish_break = close > prior_high and close_location >= 0.50 and body_atr >= 0.25
+    bearish_break = close < prior_low and close_location <= 0.50 and body_atr >= 0.25
 
     vwap_direction = str((vwap_acceptance or {}).get("direction") or "UNAVAILABLE").upper()
     if bullish_break and vwap_direction != "BEARISH":
