@@ -106,7 +106,7 @@ class AttributionAwarePaperAutomationService(
                 [row for row in summary.rows if str(row.get("option_type")) == summary.recommended_side],
                 key=lambda row: float(row.get("strike_score") or 0.0),
                 reverse=True,
-            )[:3]
+            )[:5]
         if selected:
             action = (
                 f"BUY {summary.recommended_side} — PAPER OBSERVATION"
@@ -155,9 +155,6 @@ class AttributionAwarePaperAutomationService(
             self._refresh_directional_regime_background()
         )
         result = super().process_new_signals(*args, **kwargs)
-        # This runs only after the existing decision path has completed. Any
-        # failure is recorded as observational state and cannot fail or alter
-        # the stable execution workflow.
         try:
             self._last_option_participation = self._publish_option_participation()
         except Exception as exc:
@@ -166,8 +163,6 @@ class AttributionAwarePaperAutomationService(
                 "reason": f"OPTION_PARTICIPATION_CAPTURE_FAILED:{type(exc).__name__}",
                 "rows": 0,
             }
-        # Attribution reconciliation is historical/observational maintenance.
-        # Never execute it synchronously inside the live paper monitor cycle.
         self._last_attribution_reconciliation = {
             "status": "DEFERRED",
             "reason": "INLINE_RECONCILIATION_DISABLED_FOR_LIVE_MONITOR",
