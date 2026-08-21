@@ -13,6 +13,7 @@ from red_bar_lab.ui.strategy_section_summary import (
     timing_rows,
 )
 from red_bar_lab.operations.red_bar_v2_ui_snapshot import read_red_bar_v2_ui_snapshot
+from red_bar_lab.ui.red_bar_v2_live_runtime import resolve_red_bar_v2_live_state
 from red_bar_lab.ui.red_bar_v2_legacy_panel import render_red_bar_v2_legacy_panel
 
 
@@ -237,8 +238,19 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
             )), width="stretch", hide_index=True,
         )
 
-    snapshot = read_red_bar_v2_ui_snapshot(settings.artifacts_root)
-    render_red_bar_v2_legacy_panel(st, snapshot)
+    file_snapshot = read_red_bar_v2_ui_snapshot(settings.artifacts_root)
+    resolved_snapshot, runtime_diagnostics = resolve_red_bar_v2_live_state(
+        database,
+        file_snapshot,
+        instrument_key=instrument_key,
+        trading_date=trading_date,
+    )
+    render_red_bar_v2_legacy_panel(
+        st,
+        resolved_snapshot,
+        option_context=option_context,
+        runtime_diagnostics=runtime_diagnostics,
+    )
 
     st.info(
         "Sections 1-4 are read-only. The displayed Red Bar bundle is constructed in memory "
