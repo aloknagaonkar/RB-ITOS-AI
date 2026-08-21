@@ -10,6 +10,10 @@ from red_bar_lab.services.independent_market_recommendation import (
     build_independent_market_recommendation,
 )
 from red_bar_lab.services.nifty_futures_snapshot_store import read_nifty_futures_snapshots
+from red_bar_lab.services.option_participation_store import (
+    read_latest_option_participation,
+    summarize_option_participation,
+)
 from red_bar_lab.services.trade_candidate_snapshot_store import read_latest_trade_candidates
 from red_bar_lab.services.trade_evidence import build_trade_evidence_recommendation
 
@@ -24,6 +28,10 @@ def _display_number(value, digits=3):
 
 def _display_money(value):
     return "—" if value is None else f"₹{float(value):,.2f}"
+
+
+def _display_pct(value):
+    return "—" if value is None else f"{float(value):+.2f}%"
 
 
 def _latest_option_context(database_path):
@@ -58,6 +66,48 @@ def _evidence_table(recommendation):
     ]
 
 
+def _participation_table_rows(rows):
+    result = []
+    for item in rows:
+        result.append({
+            "Side": item.get("option_type") or "—",
+            "Strike": _display_number(item.get("strike"), 0),
+            "Current premium": _display_money(item.get("current_price")),
+            "VWAP": _display_money(item.get("vwap")),
+            "Vs VWAP": _display_pct(item.get("price_vs_vwap_pct")),
+            "Premium change": _display_pct(item.get("premium_change_pct")),
+            "Volume": _display_number(item.get("volume"), 0),
+            "Contracts": _display_number(item.get("contract_volume"), 0),
+            "OI": _display_number(item.get("oi"), 0),
+            "Change in OI": _display_number(item.get("oi_change"), 0),
+            "OI change %": _display_pct(item.get("oi_change_pct")),
+            "Delta": _display_number(item.get("delta")),
+            "RSI": _display_number(item.get("option_rsi"), 1),
+            "IV": _display_number(item.get("iv"), 2),
+            "State": item.get("participation_state") or "INSUFFICIENT",
+            "Score": _display_score(item.get("strike_score")),
+        })
+    return result
+
+
+def _participation_total_rows(summary):
+    rows = []
+    for side in ("CE", "PE"):
+        prefix = side.lower()
+        rows.append({
+            "Side": f"{side} TOTAL / WEIGHTED AVG",
+            "Volume": _display_number(summary.get(f"{prefix}_total_volume"), 0),
+            "Contracts": _display_number(summary.get(f"{prefix}_total_contracts"), 0),
+            "OI": _display_number(summary.get(f"{prefix}_total_oi"), 0),
+            "Change in OI": _display_number(summary.get(f"{prefix}_total_oi_change"), 0),
+            "Weighted Delta": _display_number(summary.get(f"{prefix}_weighted_delta")),
+            "Weighted VWAP": _display_money(summary.get(f"{prefix}_weighted_vwap")),
+            "Weighted RSI": _display_number(summary.get(f"{prefix}_weighted_rsi"), 1),
+            "Pressure score": _display_score(summary.get(f"{prefix}_score")),
+        })
+    return rows
+
+
 def _candidate_table_rows(candidates):
     rows = []
     for item in candidates:
@@ -70,10 +120,7 @@ def _candidate_table_rows(candidates):
             "Expiry": item.get("expiry") or "—",
             "Current entry": _display_money(item.get("current_price")),
             "Option VWAP": _display_money(item.get("vwap")),
-            "Entry vs VWAP": (
-                "—" if item.get("price_vs_vwap_pct") is None
-                else f"{float(item['price_vs_vwap_pct']):+.2f}%"
-            ),
+            "Entry vs VWAP": _display_pct(item.get("price_vs_vwap_pct")),
             "Delta": _display_number(item.get("delta")),
             "IV": _display_number(item.get("iv"), 2),
             "PCR OI": _display_number(item.get("pcr_oi")),
@@ -101,9 +148,9 @@ def _candidate_table_rows(candidates):
 def render_page(settings, layout, database, token, underlying_name, instrument_key, interval) -> None:
     st.subheader("Trade Evidence & Market Readiness")
     st.caption(
-        "Two separate read-only views: an independent market recommendation driven by "
-        "futures/readiness evidence, and a Red Bar V2 recommendation for comparison. "
-        "Neither view has execution authority."
+        "Read-only evidence workspace. The independent view now uses six strikes around today's spot "
+        "plus futures/readiness confirmation; Red Bar V2 remains separate for comparison. Neither view "
+        "has execution authority."
     )
 
     rows = read_global_readiness_snapshots(
@@ -125,11 +172,17 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     )
     latest_futures = futures_rows[0] if futures_rows else {}
     option_context = _latest_option_context(settings.database_path)
+    participation_rows = read_latest_option_participation(
+        settings.database_path,
+        underlying_name=underlying_name,
+    )
+    participation = summarize_option_participation(participation_rows)
 
     independent = build_independent_market_recommendation(
         readiness=latest,
         futures_snapshot=latest_futures,
         option_context=option_context,
+        participation=participation,
     )
     v2_recommendation = build_trade_evidence_recommendation(
         readiness=latest,
@@ -137,7 +190,41 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         futures_snapshot=latest_futures,
     )
 
-    st.markdown("### A. Independent Market Recommendation")
+    st.markdown("### A. Today's Spot & Six-Strike Option Participation")
+    if participation_rows:
+        p1, p2, p3, p4, p5 = st.columns(5)
+        p1.metric("NIFTY spot", _display_number(participation.get("spot_price"), 2))
+        p2.metric("ATM strike", _display_number(participation.get("atm_strike"), 0))
+        p3.metric("Expiry", participation.get("expiry") or "—")
+        p4.metric("PCR OI", _display_number(participation.get("pcr_oi")))
+        p5.metric("Underlying RSI 5m", _display_number(participation.get("underlying_rsi"), 1))
+
+        st.dataframe(
+            _arrow_safe_rows(_participation_table_rows(participation_rows)),
+            width="stretch",
+            hide_index=True,
+        )
+        st.markdown("#### CE / PE totals")
+        st.dataframe(
+            _arrow_safe_rows(_participation_total_rows(participation)),
+            width="stretch",
+            hide_index=True,
+        )
+        q1, q2, q3, q4, q5 = st.columns(5)
+        q1.metric("CE pressure", _display_score(participation.get("ce_score")))
+        q2.metric("PE pressure", _display_score(participation.get("pe_score")))
+        q3.metric("PE/CE volume", _display_number(participation.get("pe_ce_volume_ratio"), 2))
+        q4.metric("PE/CE OI", _display_number(participation.get("pe_ce_oi_ratio"), 2))
+        q5.metric("Six-strike view", participation.get("recommended_side") or "WAIT")
+        st.info(participation.get("reason") or "Six-strike participation evidence is available.")
+        st.caption(
+            "CE uses ATM + two higher strikes; PE uses ATM + two lower strikes. Volume, OI and Change in OI "
+            "are summed. Delta is OI-weighted; VWAP and RSI are volume-weighted in the totals."
+        )
+    else:
+        st.warning("No six-strike option participation snapshot is available yet. Run the paper monitor once during a usable market-data session.")
+
+    st.markdown("### B. Independent Market Recommendation")
     i1, i2, i3, i4 = st.columns(4)
     i1.metric("Independent direction", independent.direction)
     i2.metric("Suggested trade", f"BUY {independent.suggested_option}" if independent.suggested_option != "—" else "WAIT")
@@ -148,13 +235,14 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         "Futures state": independent.futures_state,
         "Futures strength": independent.futures_strength,
         "Suggested side": independent.suggested_option,
-        "ATM strike": option_context.get("atm_strike") or "—",
-        "Expiry": option_context.get("option_expiry") or "—",
+        "Spot": _display_number(participation.get("spot_price") or option_context.get("option_spot_price"), 2),
+        "ATM strike": participation.get("atm_strike") or option_context.get("atm_strike") or "—",
+        "CE pressure": _display_score(participation.get("ce_score")),
+        "PE pressure": _display_score(participation.get("pe_score")),
         "Option delta": _display_number(independent.option_delta),
         "Delta source": independent.delta_source,
         "PCR OI": _display_number(independent.pcr_oi),
-        "Call IV": _display_number(option_context.get("atm_call_iv"), 2),
-        "Put IV": _display_number(option_context.get("atm_put_iv"), 2),
+        "Underlying RSI": _display_number(participation.get("underlying_rsi"), 1),
         "Global readiness": latest.get("overall_status") or "—",
         "Authority": independent.authority,
     }]
@@ -162,8 +250,8 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     st.info(independent.summary)
     st.dataframe(_arrow_safe_rows(_evidence_table(independent)), width="stretch", hide_index=True)
     st.caption(
-        "Direction comes from NIFTY futures positioning, not Red Bar V2. Delta is the exact "
-        "candidate delta when persisted; otherwise it is the latest ATM delta for the suggested side."
+        "When six-strike evidence exists, it supplies the direct CE/PE option-market view. NIFTY futures "
+        "acts as independent confirmation or contradiction. Red Bar V2 is not used to choose this direction."
     )
 
     st.markdown("#### Best three independent trade candidates")
@@ -180,18 +268,15 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
             hide_index=True,
         )
         st.caption(
-            "Rank 1 is Primary, Rank 2 is Safer and Rank 3 is Aggressive. Current entry, "
-            "VWAP, Delta, PCR and RSI are persisted observations. Missing values remain unavailable."
+            "Ranked from the recommended side using the six-strike evidence score. Current entry, "
+            "VWAP, Delta, PCR and RSI are persisted observations; unavailable values are never estimated."
         )
     elif independent.suggested_option in {"CE", "PE"}:
-        st.warning(
-            "No ranked candidate snapshot is available yet. The independent direction exists, "
-            "but the candidate collector has not persisted three quote/VWAP/PCR/RSI records."
-        )
+        st.warning("A directional view exists, but no ranked candidate snapshot has been persisted yet.")
     else:
         st.info("No CE/PE candidates are shown while the independent recommendation is WAIT or NO TRADE.")
 
-    st.markdown("### B. Red Bar V2 Recommendation")
+    st.markdown("### C. Red Bar V2 Recommendation")
     r1, r2, r3, r4 = st.columns(4)
     r1.metric("Red Bar direction", v2_recommendation.direction)
     r2.metric("Suggested option", v2_recommendation.suggested_option)
@@ -222,13 +307,13 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         alignment = "CONFIRMED" if independent_side == v2_side else "CONFLICTED"
     else:
         alignment = "NOT_COMPARABLE"
-    st.markdown("### C. Recommendation Alignment")
+    st.markdown("### D. Recommendation Alignment")
     a1, a2, a3 = st.columns(3)
     a1.metric("Independent view", independent_side)
     a2.metric("Red Bar V2 view", v2_side)
     a3.metric("Alignment", alignment)
     if alignment == "CONFLICTED":
-        st.warning("Independent futures/readiness evidence and Red Bar V2 suggest opposite option sides. Wait for confirmation.")
+        st.warning("Independent options/futures evidence and Red Bar V2 suggest opposite option sides. Wait for confirmation.")
     elif alignment == "CONFIRMED":
         st.success("Independent market evidence and Red Bar V2 suggest the same option side.")
     else:
