@@ -101,10 +101,10 @@ def test_legacy_panel_displays_required_v2_fields():
         "Reference status",
         "Index RSI",
         "Futures VWAP",
-        "RSI position",
+        "RSI strategy position",
         "Futures vs VWAP",
         "VWAP gap",
-        "RSI + VWAP alignment",
+        "RSI + futures VWAP context",
         "Directional state",
         "Reversal status",
         "Trade status",
@@ -118,10 +118,10 @@ def test_legacy_panel_displays_required_v2_fields():
         for call in st.calls
         if call[0] == "metric"
     }
-    assert metrics["RSI position"] == "BELOW 50"
+    assert metrics["RSI strategy position"] == "BEARISH THRESHOLD PASSED (<45)"
     assert metrics["Futures vs VWAP"] == "BELOW VWAP"
     assert metrics["VWAP gap"] == "-15.00"
-    assert metrics["RSI + VWAP alignment"] == "BEARISH ALIGNED"
+    assert metrics["RSI + futures VWAP context"] == "BEARISH CONTEXT"
 
 
 def test_legacy_panel_fails_safe_without_snapshot():
