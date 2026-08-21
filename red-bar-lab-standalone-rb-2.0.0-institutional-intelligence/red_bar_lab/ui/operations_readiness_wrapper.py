@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 from functools import wraps
+from pathlib import Path
 from typing import Any, Mapping
 
 import pandas as pd
@@ -11,8 +12,14 @@ from red_bar_lab.operations.service import _readiness_signal_scope
 from red_bar_lab.services.operations_readiness_gate import (
     build_operations_readiness_gate,
 )
+from red_bar_lab.services.operations_readiness_outcomes import (
+    build_persistent_operations_outcomes,
+)
 from red_bar_lab.services.red_bar_v2_reference_readiness import (
     RED_BAR_V2_REFERENCE_TYPE,
+)
+from red_bar_lab.services.signal_enrichment_outcome_store import (
+    persist_signal_enrichment_outcomes,
 )
 from red_bar_lab.ui.operations_readiness_view import (
     build_operations_readiness_view_model,
@@ -120,11 +127,57 @@ def _outcomes(
     return results
 
 
+def _database_path(database: object) -> Path | None:
+    for attribute in ("path", "database_path", "_path"):
+        value = getattr(database, attribute, None)
+        if value not in (None, ""):
+            return Path(value)
+    return None
+
+
+def _persistence_attempt_timestamp(trading_date: str) -> str:
+    return f"{trading_date}T00:00:00+00:00"
+
+
+def _persist_readiness_outcomes(
+    database: object,
+    gate: Mapping[str, Any],
+    *,
+    trading_date: str,
+) -> dict[str, Any]:
+    path = _database_path(database)
+    if path is None:
+        return {
+            "status": "SKIPPED",
+            "persisted_count": 0,
+            "reason": "DATABASE_PATH_UNAVAILABLE",
+        }
+
+    try:
+        outcomes = build_persistent_operations_outcomes(
+            gate,
+            attempt_timestamp=_persistence_attempt_timestamp(trading_date),
+        )
+        outcome_ids = persist_signal_enrichment_outcomes(path, outcomes)
+        return {
+            "status": "READY",
+            "persisted_count": len(outcome_ids),
+            "reason": None,
+        }
+    except Exception as exc:  # UI persistence must never block diagnostics.
+        return {
+            "status": "FAILED",
+            "persisted_count": 0,
+            "reason": f"{type(exc).__name__}: {exc}",
+        }
+
+
 def build_live_operations_readiness_view(
     database,
     *,
     instrument_key: str,
     trading_date: str,
+    persist_outcomes: bool = True,
 ) -> dict[str, Any]:
     all_signals = database.read_signal_attempts(instrument_key, trading_date)
     scoped_signals, scope_name = _readiness_signal_scope(all_signals)
@@ -187,8 +240,18 @@ def build_live_operations_readiness_view(
         independent_strategy_blockers=(),
         execution_blockers=("EXECUTION_POLICY_NOT_APPROVED",),
     )
+    persistence = (
+        _persist_readiness_outcomes(database, gate, trading_date=trading_date)
+        if persist_outcomes
+        else {
+            "status": "SKIPPED",
+            "persisted_count": 0,
+            "reason": "PERSISTENCE_DISABLED",
+        }
+    )
     view = build_operations_readiness_view_model(gate)
     view["readiness_scope"] = scope_name
+    view["outcome_persistence"] = persistence
     return view
 
 
@@ -247,6 +310,19 @@ def render_operations_readiness_v2(
         st.dataframe(drilldown, width="stretch", hide_index=True)
     else:
         st.info("No confirmed signals are available for the selected session.")
+
+    persistence = view.get("outcome_persistence") or {}
+    persistence_status = persistence.get("status") or "UNKNOWN"
+    persistence_message = (
+        f"Outcome persistence: {persistence_status} · "
+        f"Rows: {persistence.get('persisted_count', 0)}"
+    )
+    if persistence.get("reason"):
+        persistence_message += f" · {persistence['reason']}"
+    if persistence_status == "FAILED":
+        st.warning(persistence_message)
+    else:
+        st.caption(persistence_message)
 
     st.caption(
         f"Scope: {view.get('readiness_scope')} · "
