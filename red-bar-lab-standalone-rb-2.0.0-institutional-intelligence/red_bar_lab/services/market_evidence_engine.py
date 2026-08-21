@@ -42,7 +42,6 @@ def _distance_steps(row: Mapping[str, object], *, step: float | None) -> int:
     atm = _f(row.get("atm_strike"))
     if strike is not None and atm is not None and step not in (None, 0):
         return max(0, int(round(abs(strike - atm) / float(step))))
-    # Legacy fallback. Paired collector ranks are ATM, -1, +1, -2, +2 ...
     rank = int(_f(row.get("distance_rank")) or 1)
     return max(0, (rank - 1 + 1) // 2)
 
@@ -51,6 +50,7 @@ def _eligible(row: Mapping[str, object]) -> tuple[bool, str]:
     price = _f(row.get("current_price"))
     bid = _f(row.get("bid"))
     ask = _f(row.get("ask"))
+    supplied_spread = _f(row.get("spread"))
     iv = _f(row.get("iv"))
     volume = _f(row.get("volume"))
     oi = _f(row.get("oi"))
@@ -65,7 +65,9 @@ def _eligible(row: Mapping[str, object]) -> tuple[bool, str]:
     midpoint = (bid + ask) / 2.0
     if midpoint <= 0:
         return False, "INVALID_QUOTE"
-    spread_pct = (ask - bid) / midpoint * 100.0
+    quote_spread = ask - bid
+    effective_spread = max(quote_spread, supplied_spread or 0.0)
+    spread_pct = effective_spread / midpoint * 100.0
     if spread_pct > 3.0:
         return False, "WIDE_SPREAD"
     if iv is not None and not 1.0 <= iv <= 150.0:
@@ -118,7 +120,6 @@ def _strike_score(row: Mapping[str, object]) -> float:
         elif 0.20 <= absolute < 0.30:
             score += 4.0
 
-    # Volume is deliberately excluded to avoid score-plus-weight double counting.
     return round(min(100.0, score / 85.0 * 100.0), 2)
 
 
@@ -260,9 +261,12 @@ def build_underlying_evidence(
     as_of_timestamp: datetime | None = None,
 ) -> dict[str, Any]:
     unavailable = {
-        "state": "UNAVAILABLE", "direction": "UNAVAILABLE",
-        "momentum": "UNAVAILABLE", "rsi_view": "UNAVAILABLE",
-        "observed_at": None, "reason": "Insufficient completed NIFTY candles.",
+        "state": "UNAVAILABLE",
+        "direction": "UNAVAILABLE",
+        "momentum": "UNAVAILABLE",
+        "rsi_view": "UNAVAILABLE",
+        "observed_at": None,
+        "reason": "Insufficient completed NIFTY candles.",
     }
     if frame is None or frame.empty:
         return unavailable
@@ -283,8 +287,15 @@ def build_underlying_evidence(
     if as_of.tzinfo is None:
         as_of = as_of.replace(tzinfo=timezone.utc)
     bars = _completed_five_minute_bars(work, as_of_timestamp=as_of)
-    if len(bars) < 9:
+    if bars.empty:
         return unavailable
+    observed = bars.index[-1].to_pydatetime().astimezone(timezone.utc).isoformat()
+    if len(bars) < 9:
+        return {
+            **unavailable,
+            "observed_at": observed,
+            "reason": "Latest completed NIFTY candle is available, but structure history is insufficient.",
+        }
 
     previous_close = bars["close"].shift(1)
     true_range = pd.concat(
@@ -294,7 +305,11 @@ def build_underlying_evidence(
     atr_series = true_range.rolling(14, min_periods=5).mean()
     atr = _f(atr_series.iloc[-1])
     if atr in (None, 0):
-        return unavailable
+        return {
+            **unavailable,
+            "observed_at": observed,
+            "reason": "Latest completed NIFTY candle is available, but ATR is unavailable.",
+        }
 
     latest = bars.iloc[-1]
     breakout = bars.iloc[-2]
@@ -366,7 +381,6 @@ def build_underlying_evidence(
     else:
         rsi_view = "NEUTRAL"
 
-    observed = bars.index[-1].to_pydatetime().astimezone(timezone.utc).isoformat()
     return {
         "state": state,
         "direction": direction,
