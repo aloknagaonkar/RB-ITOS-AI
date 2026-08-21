@@ -36,19 +36,11 @@ def _now(text):
 
 
 def test_collects_latest_completed_futures_close_volume_and_oi():
-    provider = _Provider(
-        [
-            ["2026-08-20T10:29:00+05:30", 25000, 25010, 24990, 25005, 1100, 50100],
-            ["2026-08-20T10:30:00+05:30", 25005, 25020, 25000, 25015, 1250, 50450],
-        ]
-    )
-
-    result = assess_nifty_futures_market_data(
-        provider,
-        contract=_contract(),
-        now=_now("2026-08-20T10:30:20+05:30"),
-    )
-
+    provider = _Provider([
+        ["2026-08-20T10:29:00+05:30", 25000, 25010, 24990, 25005, 1100, 50100],
+        ["2026-08-20T10:30:00+05:30", 25005, 25020, 25000, 25015, 1250, 50450],
+    ])
+    result = assess_nifty_futures_market_data(provider, contract=_contract(), now=_now("2026-08-20T10:30:20+05:30"))
     assert result.status == "READY"
     assert result.instrument_key == "NSE_FO|58072"
     assert result.candle_readiness.status == "READY"
@@ -61,89 +53,60 @@ def test_collects_latest_completed_futures_close_volume_and_oi():
     assert provider.calls == [("NSE_FO|58072", 1)]
 
 
+def test_completed_futures_candles_publish_genuine_volume_vwap():
+    provider = _Provider([
+        ["2026-08-20T10:27:00+05:30", 100, 101, 99, 100, 1000, 50000],
+        ["2026-08-20T10:28:00+05:30", 100, 102, 100, 101, 1200, 50100],
+        ["2026-08-20T10:29:00+05:30", 101, 104, 101, 103, 1500, 50300],
+    ])
+    result = assess_nifty_futures_market_data(provider, contract=_contract(), now=_now("2026-08-20T10:30:20+05:30"))
+    assert result.futures_vwap is not None
+    assert result.futures_vwap_timestamp == "2026-08-20T10:29:00+05:30"
+    assert result.futures_close_vs_vwap_points > 0
+    assert result.futures_close_vs_vwap_atr is not None
+    assert result.futures_vwap_slope > 0
+    assert result.futures_vwap_acceptance in {"ABOVE_RISING_VWAP", "VWAP_RECLAIM"}
+
+
 def test_mapping_candles_and_dataframe_like_records_are_supported():
-    provider = _Provider(
-        [
-            {
-                "timestamp": "2026-08-20T10:29:00+05:30",
-                "close": 25005,
-                "volume": 1100,
-                "oi": 50100,
-            }
-        ]
-    )
-
-    result = assess_nifty_futures_market_data(
-        provider,
-        contract=_contract(),
-        now=_now("2026-08-20T10:30:20+05:30"),
-    )
-
+    provider = _Provider([{"timestamp": "2026-08-20T10:29:00+05:30", "close": 25005, "volume": 1100, "oi": 50100}])
+    result = assess_nifty_futures_market_data(provider, contract=_contract(), now=_now("2026-08-20T10:30:20+05:30"))
     assert result.latest_close == 25005.0
     assert result.latest_volume == 1100.0
     assert result.latest_oi == 50100.0
+    assert result.futures_vwap is None
 
 
 def test_only_current_incomplete_candle_does_not_publish_telemetry():
-    provider = _Provider(
-        [["2026-08-20T10:30:00+05:30", 1, 2, 1, 2, 100, 200]]
-    )
-
-    result = assess_nifty_futures_market_data(
-        provider,
-        contract=_contract(),
-        now=_now("2026-08-20T10:30:20+05:30"),
-    )
-
+    provider = _Provider([["2026-08-20T10:30:00+05:30", 1, 2, 1, 2, 100, 200]])
+    result = assess_nifty_futures_market_data(provider, contract=_contract(), now=_now("2026-08-20T10:30:20+05:30"))
     assert result.status == "MISSING"
     assert result.candle_readiness.status == "CURRENT_CANDLE_INCOMPLETE"
     assert result.latest_volume is None
     assert result.latest_oi is None
+    assert result.futures_vwap_acceptance == "UNAVAILABLE"
 
 
 def test_unavailable_contract_does_not_call_provider():
     provider = _Provider([])
-    result = assess_nifty_futures_market_data(
-        provider,
-        contract=_contract("UNAVAILABLE"),
-        now=_now("2026-08-20T10:30:20+05:30"),
-    )
-
+    result = assess_nifty_futures_market_data(provider, contract=_contract("UNAVAILABLE"), now=_now("2026-08-20T10:30:20+05:30"))
     assert result.status == "UNAVAILABLE"
     assert provider.calls == []
     assert result.error == "not found"
 
 
 def test_provider_failure_is_non_throwing():
-    result = assess_nifty_futures_market_data(
-        _Provider(error=RuntimeError("temporary outage")),
-        contract=_contract(),
-        now=_now("2026-08-20T10:30:20+05:30"),
-    )
-
+    result = assess_nifty_futures_market_data(_Provider(error=RuntimeError("temporary outage")), contract=_contract(), now=_now("2026-08-20T10:30:20+05:30"))
     assert result.status == "ERROR"
     assert result.error == "RuntimeError:temporary outage"
 
 
 def test_log_values_are_stable():
-    provider = _Provider(
-        [["2026-08-20T10:29:00+05:30", 1, 2, 1, 2, 100, 200]]
-    )
-    result = assess_nifty_futures_market_data(
-        provider,
-        contract=_contract(),
-        now=_now("2026-08-20T10:30:20+05:30"),
-    )
-
+    provider = _Provider([["2026-08-20T10:29:00+05:30", 1, 2, 1, 2, 100, 200]])
+    result = assess_nifty_futures_market_data(provider, contract=_contract(), now=_now("2026-08-20T10:30:20+05:30"))
     assert futures_market_log_values(result) == (
         "READY",
-        "Latest completed NIFTY futures candle, volume and OI were collected.",
-        "READY",
-        "APPLICABLE",
-        "2.00",
-        "100.0",
-        "200.0",
-        "2026-08-20T10:29:00+05:30",
-        "1",
-        "NONE",
+        "Latest completed NIFTY futures candle, volume, OI and VWAP evidence were collected.",
+        "READY", "APPLICABLE", "2.00", "100.0", "200.0",
+        "2026-08-20T10:29:00+05:30", "1", "NONE",
     )
