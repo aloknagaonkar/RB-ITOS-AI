@@ -11,7 +11,9 @@ def test_trade_evidence_page_exposes_authoritative_and_legacy_tabs():
 
     assert '"Authoritative Evidence"' in source
     assert '"Legacy Full Trade Evidence"' in source
-    assert "render_legacy_page(" in source
+    assert "render_legacy_page(" not in source
+    assert "No persisted legacy diagnostics are available." in source
+    assert "read_global_readiness_snapshots(" in source
 
 
 def test_legacy_trade_evidence_sections_are_preserved():
