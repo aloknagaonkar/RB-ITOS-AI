@@ -22,17 +22,17 @@ def create_red_bar_v2_signal_bundle(
     created_at: datetime,
     schema_version: str = "1.0",
 ) -> RedBarV2SignalBundle | None:
-    """Create a deterministic bundle only for an allowed canonical decision."""
+    """Create a deterministic bundle using the underlying strategy instrument."""
     if decision.admission_outcome is not AdmissionOutcome.ALLOWED:
         return None
+    if not isinstance(instrument_key, str) or not instrument_key.strip():
+        raise CanonicalResolutionError("underlying instrument_key must be non-empty")
     if decision.reference is None:
         raise CanonicalResolutionError("allowed decision requires a reference")
     if decision.entry_type is None or decision.direction is None or decision.option_side is None:
         raise CanonicalResolutionError("allowed decision is missing bundle identity fields")
     if decision.futures_vwap is None:
         raise CanonicalResolutionError("allowed decision requires futures VWAP evidence")
-    if instrument_key != decision.futures_vwap.instrument_key:
-        raise CanonicalResolutionError("instrument_key must match decision futures evidence")
 
     trading_date = decision.reference.trading_date
     signal_id = build_red_bar_v2_signal_id(
@@ -44,10 +44,7 @@ def create_red_bar_v2_signal_bundle(
         entry_type=decision.entry_type,
         direction=decision.direction,
     )
-    bundle_id = build_red_bar_v2_bundle_id(
-        signal_id=signal_id,
-        schema_version=schema_version,
-    )
+    bundle_id = build_red_bar_v2_bundle_id(signal_id=signal_id, schema_version=schema_version)
     idempotency_key = build_red_bar_v2_idempotency_key(
         signal_id=signal_id,
         option_side=decision.option_side,
@@ -68,4 +65,5 @@ def create_red_bar_v2_signal_bundle(
         idempotency_key=idempotency_key,
         lifecycle_status=BundleLifecycleStatus.AVAILABLE,
         created_at=created_at,
+        instrument_key=instrument_key,
     )
