@@ -132,11 +132,11 @@ def _render_authoritative_page(settings, underlying_name, bundle, readiness_rows
         )
         p3.metric(
             "CE pressure",
-            _display_score(bundle.get("bullish_score")),
+            _display_score(participation.get("ce_score")),
         )
         p4.metric(
             "PE pressure",
-            _display_score(bundle.get("bearish_score")),
+            _display_score(participation.get("pe_score")),
         )
         st.dataframe(
             _arrow_safe_rows(_participation_table_rows(participation_rows)),
