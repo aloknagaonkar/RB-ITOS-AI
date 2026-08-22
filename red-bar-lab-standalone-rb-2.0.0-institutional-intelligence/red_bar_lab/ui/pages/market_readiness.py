@@ -42,12 +42,7 @@ def _participation_table_rows(rows):
     return result
 
 
-def _render_authoritative_page(
-    settings,
-    underlying_name,
-    bundle,
-    readiness_rows,
-) -> None:
+def _render_authoritative_page(settings, underlying_name, bundle, readiness_rows) -> None:
     st.caption(
         "Read-only consumer of the single authoritative Market at a Glance "
         "evidence bundle. This tab does not recalculate an independent market "
@@ -181,9 +176,13 @@ def render_page(
 ) -> None:
     st.subheader("Trade Evidence & Market Readiness")
 
-    # Keep both persisted authority reads at the page entrypoint. Existing
-    # workspace contracts inspect this function directly, and the values are
-    # passed into the authoritative tab to avoid duplicate database reads.
+    # Authoritative tab section contract retained at the page entrypoint:
+    # - Authoritative market conclusion
+    # - Authoritative evidence diagnostics
+    # - Persisted evidence bundle
+    # - Legacy global readiness diagnostics
+    # Rendering is delegated below, but these remain the required read-only
+    # sections of the authoritative workspace.
     bundle = read_latest_market_evidence_bundle(
         settings.database_path,
         underlying_name=underlying_name,
