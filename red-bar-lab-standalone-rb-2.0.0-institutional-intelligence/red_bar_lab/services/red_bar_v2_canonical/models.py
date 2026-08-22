@@ -30,6 +30,7 @@ class LegacyV2MarketMetadata:
     latest_index_5m: datetime | None
     latest_futures_1m: datetime | None
     latest_futures_5m: datetime | None
+    underlying_instrument_key: str
     futures_instrument_key: str | None
     futures_expiry: date | None
     futures_volume_available: bool
@@ -48,7 +49,8 @@ class LegacyV2MarketMetadata:
 class LegacyV2DecisionEvidence:
     """Complete numeric evidence used by one authoritative legacy decision."""
 
-    instrument_key: str
+    underlying_instrument_key: str
+    futures_instrument_key: str
     evaluation_timestamp: datetime
     evaluation_timeframe: str
     index_close: float
@@ -59,6 +61,8 @@ class LegacyV2DecisionEvidence:
     futures_vwap: float
     futures_volume: float
     futures_fresh: bool
+    index_context_timestamp: datetime
+    futures_source_timestamp: datetime
     reference_id: str
     reference_timestamp: datetime
     reference_high: float
