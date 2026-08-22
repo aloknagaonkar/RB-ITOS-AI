@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Callable
 
+from red_bar_lab.domain.red_bar_v2 import AdmissionOutcome
+
 from .models import RedBarV2CanonicalResolution, RedBarV2ParityResult
 from .persistence_identity import build_canonical_resolution_id
 from .persistence_models import (
@@ -54,6 +56,13 @@ class RedBarV2CanonicalPersistenceService:
                 raise CanonicalPersistenceError("parity option side disagrees with canonical decision")
             if parity.canonical_entry_type is not decision.entry_type:
                 raise CanonicalPersistenceError("parity entry type disagrees with canonical decision")
+            if parity.canonical_trend_strength is not decision.trend_strength:
+                raise CanonicalPersistenceError("parity trend strength disagrees with canonical decision")
+            if parity.canonical_timeframe != decision.evaluation_timeframe:
+                raise CanonicalPersistenceError("parity timeframe disagrees with canonical decision")
+            expected_allowed = decision.admission_outcome is AdmissionOutcome.ALLOWED
+            if parity.canonical_allowed is not expected_allowed:
+                raise CanonicalPersistenceError("parity admission outcome disagrees with canonical decision")
             if parity.canonical_admission_code != decision.admission_code:
                 raise CanonicalPersistenceError("parity admission code disagrees with canonical decision")
 
