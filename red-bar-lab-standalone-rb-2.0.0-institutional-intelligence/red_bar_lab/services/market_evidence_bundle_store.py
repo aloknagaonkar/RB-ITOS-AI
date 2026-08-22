@@ -7,26 +7,30 @@ from pathlib import Path
 import sqlite3
 from typing import Any, Mapping
 
-POLICY_VERSION = "market-evidence-v3"
+POLICY_VERSION = "market-evidence-v4"
 
 
 def _json(value: object) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
 
 
 def _bundle_id(underlying_name: str, view: Mapping[str, Any]) -> str:
-    """Identify one exact aligned evidence observation.
+    """Identify one aligned source observation, not one monitor cycle.
 
-    All required source timestamps participate in the identity so a later
-    option/futures snapshot cannot overwrite earlier evidence from the same
-    completed five-minute underlying bar.
+    Collection time is intentionally excluded. Re-reading the same underlying,
+    futures and option observations updates the same bundle instead of creating
+    an unbounded sequence of per-cycle duplicates.
     """
     anchors = (
         view.get("underlying_bar_close_timestamp")
         or view.get("underlying_timestamp"),
         view.get("futures_bar_close_timestamp")
         or view.get("futures_market_timestamp"),
-        view.get("futures_collection_timestamp"),
         view.get("option_timestamp"),
     )
     if not any(anchors):
@@ -95,7 +99,21 @@ def persist_market_evidence_bundle(
                 trade_bias, blocking_reasons_json, caution_reasons_json,
                 policy_version, payload_json, created_at
             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            ON CONFLICT(bundle_id) DO NOTHING
+            ON CONFLICT(bundle_id) DO UPDATE SET
+                as_of_timestamp=excluded.as_of_timestamp,
+                futures_collection_timestamp=excluded.futures_collection_timestamp,
+                observed_direction=excluded.observed_direction,
+                structural_state=excluded.structural_state,
+                direction_state=excluded.direction_state,
+                evidence_readiness=excluded.evidence_readiness,
+                contract_quality=excluded.contract_quality,
+                trade_eligibility=excluded.trade_eligibility,
+                trade_bias=excluded.trade_bias,
+                blocking_reasons_json=excluded.blocking_reasons_json,
+                caution_reasons_json=excluded.caution_reasons_json,
+                policy_version=excluded.policy_version,
+                payload_json=excluded.payload_json,
+                created_at=excluded.created_at
             """,
             (
                 bundle_id,
@@ -137,9 +155,7 @@ def read_latest_market_evidence_bundle(
             """
             SELECT * FROM market_evidence_bundles
             WHERE underlying_name=?
-            ORDER BY julianday(as_of_timestamp) DESC,
-                     as_of_timestamp DESC,
-                     created_at DESC
+            ORDER BY as_of_timestamp DESC, created_at DESC
             LIMIT 1
             """,
             (underlying_name,),
