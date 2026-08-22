@@ -8,6 +8,17 @@ import sqlite3
 from typing import Any, Mapping
 
 POLICY_VERSION = "market-evidence-v5"
+SCHEMA_VERSION = 1
+_REQUIRED_COLUMNS = frozenset(
+    {
+        "bundle_id",
+        "underlying_name",
+        "as_of_timestamp",
+        "policy_version",
+        "payload_json",
+        "created_at",
+    }
+)
 
 
 def _json(value: object) -> str:
@@ -20,11 +31,7 @@ def _json(value: object) -> str:
 
 
 def _bundle_id(underlying_name: str, view: Mapping[str, Any]) -> str:
-    """Identify one aligned source observation, not one monitor cycle.
-
-    Collection time is intentionally excluded. Re-reading the same underlying,
-    futures and option observations resolves to the same immutable bundle.
-    """
+    """Identify one aligned source observation, not one monitor cycle."""
     anchors = (
         view.get("underlying_bar_close_timestamp")
         or view.get("underlying_timestamp"),
@@ -75,17 +82,24 @@ def _schema(connection: sqlite3.Connection) -> None:
     )
 
 
+def _schema_is_compatible(connection: sqlite3.Connection) -> bool:
+    """Inspect compatibility without creating or altering database objects."""
+    rows = connection.execute(
+        "PRAGMA table_info(market_evidence_bundles)"
+    ).fetchall()
+    if not rows:
+        return False
+    columns = {str(row[1]) for row in rows}
+    return _REQUIRED_COLUMNS.issubset(columns)
+
+
 def persist_market_evidence_bundle(
     database_path: str | Path,
     *,
     underlying_name: str,
     view: Mapping[str, Any],
 ) -> str:
-    """Persist one immutable bundle for an aligned source observation.
-
-    Reprocessing an identical evidence identity is idempotent. The original
-    payload and creation timestamp are retained for auditability.
-    """
+    """Persist one immutable bundle for an aligned source observation."""
     path = Path(database_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     bundle_id = _bundle_id(underlying_name, view)
@@ -135,29 +149,23 @@ def read_latest_market_evidence_bundle(
     *,
     underlying_name: str,
 ) -> dict[str, Any] | None:
-    """Read the latest bundle without creating or altering database objects."""
+    """Read the latest compatible bundle without mutating the database."""
     path = Path(database_path)
     if not path.exists():
         return None
-    try:
-        with sqlite3.connect(path) as connection:
-            connection.row_factory = sqlite3.Row
-            row = connection.execute(
-                """
-                SELECT * FROM market_evidence_bundles
-                WHERE underlying_name=?
-                ORDER BY as_of_timestamp DESC, created_at DESC
-                LIMIT 1
-                """,
-                (underlying_name,),
-            ).fetchone()
-    except sqlite3.OperationalError as exc:
-        # A database can legitimately predate this additive evidence table.
-        # Reads remain side-effect free and report no bundle until an explicit
-        # persistence/setup path creates the schema.
-        if "no such table" in str(exc).lower():
+    with sqlite3.connect(path) as connection:
+        connection.row_factory = sqlite3.Row
+        if not _schema_is_compatible(connection):
             return None
-        raise
+        row = connection.execute(
+            """
+            SELECT * FROM market_evidence_bundles
+            WHERE underlying_name=?
+            ORDER BY as_of_timestamp DESC, created_at DESC
+            LIMIT 1
+            """,
+            (underlying_name,),
+        ).fetchone()
     if row is None:
         return None
     stored = dict(row)
@@ -167,12 +175,14 @@ def read_latest_market_evidence_bundle(
         payload = {}
     payload["bundle_id"] = stored["bundle_id"]
     payload["policy_version"] = stored["policy_version"]
+    payload["schema_version"] = SCHEMA_VERSION
     payload["persisted_at"] = stored["created_at"]
     return payload
 
 
 __all__ = [
     "POLICY_VERSION",
+    "SCHEMA_VERSION",
     "persist_market_evidence_bundle",
     "read_latest_market_evidence_bundle",
 ]
