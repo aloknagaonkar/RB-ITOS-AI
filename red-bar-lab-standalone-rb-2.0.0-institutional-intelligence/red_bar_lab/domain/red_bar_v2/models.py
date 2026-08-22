@@ -56,29 +56,19 @@ def _require_positive(name: str, value: float) -> None:
 def _require_entry_timeframe(entry_type: EntryType, evaluation_timeframe: str) -> None:
     expected = "1m" if entry_type is EntryType.INITIAL else "5m"
     if evaluation_timeframe != expected:
-        raise DomainValidationError(
-            f"{entry_type.value} entry requires {expected} evaluation_timeframe"
-        )
+        raise DomainValidationError(f"{entry_type.value} entry requires {expected} evaluation_timeframe")
 
 
 def _require_alignment_truth(
-    *,
-    evidence_name: str,
-    bullish_aligned: bool,
-    bearish_aligned: bool,
-    expected_bullish: bool,
-    expected_bearish: bool,
+    *, evidence_name: str, bullish_aligned: bool, bearish_aligned: bool,
+    expected_bullish: bool, expected_bearish: bool,
 ) -> None:
     if bullish_aligned is not expected_bullish or bearish_aligned is not expected_bearish:
-        raise DomainValidationError(
-            f"{evidence_name} alignment flags must match numeric evidence"
-        )
+        raise DomainValidationError(f"{evidence_name} alignment flags must match numeric evidence")
 
 
 @dataclass(frozen=True, slots=True)
 class RedBarV2Reference:
-    """Canonical Red Bar V2 reference range."""
-
     reference_id: str
     trading_date: date
     timestamp: datetime
@@ -103,8 +93,6 @@ class RedBarV2Reference:
 
 @dataclass(frozen=True, slots=True)
 class MarketTimestampEvidence:
-    """Freshness and alignment evidence for canonical market inputs."""
-
     latest_index_1m: datetime | None
     latest_index_5m: datetime | None
     latest_futures_1m: datetime | None
@@ -129,8 +117,6 @@ class MarketTimestampEvidence:
 
 @dataclass(frozen=True, slots=True)
 class RedBarV2InputReadiness:
-    """Section 1 canonical input-readiness resolution."""
-
     strategy_id: str
     strategy_version: str
     trading_date: date
@@ -169,8 +155,6 @@ class RedBarV2InputReadiness:
 
 @dataclass(frozen=True, slots=True)
 class RsiEvidence:
-    """RSI values and precomputed directional alignment."""
-
     value: float
     bullish_threshold: float
     bearish_threshold: float
@@ -187,8 +171,7 @@ class RsiEvidence:
         if not 0 <= self.bearish_threshold < self.bullish_threshold <= 100:
             raise DomainValidationError("RSI thresholds must satisfy 0 <= bearish < bullish <= 100")
         _require_alignment_truth(
-            evidence_name="RSI",
-            bullish_aligned=self.bullish_aligned,
+            evidence_name="RSI", bullish_aligned=self.bullish_aligned,
             bearish_aligned=self.bearish_aligned,
             expected_bullish=self.value > self.bullish_threshold,
             expected_bearish=self.value < self.bearish_threshold,
@@ -197,8 +180,6 @@ class RsiEvidence:
 
 @dataclass(frozen=True, slots=True)
 class FuturesVwapEvidence:
-    """Futures price, VWAP, volume and directional alignment."""
-
     instrument_key: str
     comparison_price: float
     vwap: float
@@ -218,8 +199,7 @@ class FuturesVwapEvidence:
         if self.volume < 0:
             raise DomainValidationError("volume must be non-negative")
         _require_alignment_truth(
-            evidence_name="futures VWAP",
-            bullish_aligned=self.bullish_aligned,
+            evidence_name="futures VWAP", bullish_aligned=self.bullish_aligned,
             bearish_aligned=self.bearish_aligned,
             expected_bullish=self.comparison_price > self.vwap,
             expected_bearish=self.comparison_price < self.vwap,
@@ -228,8 +208,6 @@ class FuturesVwapEvidence:
 
 @dataclass(frozen=True, slots=True)
 class MidpointEvidence:
-    """Index-close relation to the canonical reference midpoint."""
-
     index_close: float
     midpoint: float
     bullish_aligned: bool
@@ -241,8 +219,7 @@ class MidpointEvidence:
         _require_bool("bullish_aligned", self.bullish_aligned)
         _require_bool("bearish_aligned", self.bearish_aligned)
         _require_alignment_truth(
-            evidence_name="midpoint",
-            bullish_aligned=self.bullish_aligned,
+            evidence_name="midpoint", bullish_aligned=self.bullish_aligned,
             bearish_aligned=self.bearish_aligned,
             expected_bullish=self.index_close > self.midpoint,
             expected_bearish=self.index_close < self.midpoint,
@@ -251,8 +228,6 @@ class MidpointEvidence:
 
 @dataclass(frozen=True, slots=True)
 class RedBarV2Decision:
-    """Section 2 canonical decision contract without strategy calculations."""
-
     strategy_id: str
     strategy_version: str
     evaluation_timestamp: datetime
@@ -300,56 +275,40 @@ class RedBarV2Decision:
             raise DomainValidationError("trend_strength must match provisional/confirmed current_state")
         if self.admission_outcome is AdmissionOutcome.ALLOWED:
             required = {
-                "entry_type": self.entry_type,
-                "direction": self.direction,
-                "option_side": self.option_side,
-                "reference": self.reference,
-                "rsi": self.rsi,
-                "futures_vwap": self.futures_vwap,
+                "entry_type": self.entry_type, "direction": self.direction,
+                "option_side": self.option_side, "reference": self.reference,
+                "rsi": self.rsi, "futures_vwap": self.futures_vwap,
                 "midpoint": self.midpoint,
             }
             missing = [name for name, value in required.items() if value is None]
             if missing:
                 raise DomainValidationError(f"ALLOWED decision missing: {', '.join(missing)}")
-            assert self.entry_type is not None
-            assert self.direction is not None
-            assert self.reference is not None
-            assert self.rsi is not None
-            assert self.futures_vwap is not None
-            assert self.midpoint is not None
+            assert self.entry_type is not None and self.direction is not None
+            assert self.reference is not None and self.rsi is not None
+            assert self.futures_vwap is not None and self.midpoint is not None
             if self.context_status is not ContextStatus.FRESH:
                 raise DomainValidationError("ALLOWED decision requires fresh context")
             if not self.futures_vwap.fresh:
                 raise DomainValidationError("ALLOWED decision requires fresh futures VWAP evidence")
             _require_entry_timeframe(self.entry_type, self.evaluation_timeframe)
             rsi_vwap_aligned = (
-                self.rsi.bullish_aligned
-                and not self.rsi.bearish_aligned
-                and self.futures_vwap.bullish_aligned
-                and not self.futures_vwap.bearish_aligned
+                self.rsi.bullish_aligned and not self.rsi.bearish_aligned
+                and self.futures_vwap.bullish_aligned and not self.futures_vwap.bearish_aligned
             ) if self.direction is Direction.BULLISH else (
-                self.rsi.bearish_aligned
-                and not self.rsi.bullish_aligned
-                and self.futures_vwap.bearish_aligned
-                and not self.futures_vwap.bullish_aligned
+                self.rsi.bearish_aligned and not self.rsi.bullish_aligned
+                and self.futures_vwap.bearish_aligned and not self.futures_vwap.bullish_aligned
             )
             if not rsi_vwap_aligned:
                 raise DomainValidationError("ALLOWED decision RSI/VWAP evidence must align with direction")
             midpoint_aligned = (
-                self.midpoint.bullish_aligned
-                and not self.midpoint.bearish_aligned
+                self.midpoint.bullish_aligned and not self.midpoint.bearish_aligned
             ) if self.direction is Direction.BULLISH else (
-                self.midpoint.bearish_aligned
-                and not self.midpoint.bullish_aligned
+                self.midpoint.bearish_aligned and not self.midpoint.bullish_aligned
             )
             expected_state = (
-                RedBarV2State.CONFIRMED_BULLISH
-                if self.direction is Direction.BULLISH
-                else RedBarV2State.CONFIRMED_BEARISH
+                RedBarV2State.CONFIRMED_BULLISH if self.direction is Direction.BULLISH else RedBarV2State.CONFIRMED_BEARISH
             ) if midpoint_aligned else (
-                RedBarV2State.PROVISIONAL_BULLISH
-                if self.direction is Direction.BULLISH
-                else RedBarV2State.PROVISIONAL_BEARISH
+                RedBarV2State.PROVISIONAL_BULLISH if self.direction is Direction.BULLISH else RedBarV2State.PROVISIONAL_BEARISH
             )
             expected_strength = TrendStrength.CONFIRMED if midpoint_aligned else TrendStrength.PROVISIONAL
             if self.entry_type is EntryType.INITIAL:
@@ -357,17 +316,9 @@ class RedBarV2Decision:
                     raise DomainValidationError("INITIAL admission requires midpoint alignment")
                 if self.current_state is not expected_state or self.trend_strength is not TrendStrength.CONFIRMED:
                     raise DomainValidationError("INITIAL admission must be confirmed")
-            else:
-                if self.current_state is not expected_state or self.trend_strength is not expected_strength:
-                    raise DomainValidationError(
-                        "REVERSAL state and trend_strength must match midpoint confirmation"
-                    )
-            if not isclose(
-                float(self.midpoint.midpoint),
-                float(self.reference.midpoint),
-                rel_tol=0.0,
-                abs_tol=_MIDPOINT_ABS_TOLERANCE,
-            ):
+            elif self.current_state is not expected_state or self.trend_strength is not expected_strength:
+                raise DomainValidationError("REVERSAL state and trend_strength must match midpoint confirmation")
+            if not isclose(float(self.midpoint.midpoint), float(self.reference.midpoint), rel_tol=0.0, abs_tol=_MIDPOINT_ABS_TOLERANCE):
                 raise DomainValidationError("midpoint evidence must match reference midpoint")
             _require_text("admission_code", self.admission_code)
             _require_text("admission_reason", self.admission_reason)
@@ -375,8 +326,6 @@ class RedBarV2Decision:
 
 @dataclass(frozen=True, slots=True)
 class RedBarV2SignalBundle:
-    """Section 3 canonical immutable Red Bar V2 signal bundle."""
-
     schema_version: str
     bundle_id: str
     signal_id: str
@@ -392,10 +341,13 @@ class RedBarV2SignalBundle:
     idempotency_key: str
     lifecycle_status: BundleLifecycleStatus
     created_at: datetime
+    instrument_key: str | None = None
 
     def __post_init__(self) -> None:
         for name in ("schema_version", "bundle_id", "signal_id", "strategy_version", "idempotency_key"):
             _require_text(name, getattr(self, name))
+        if self.instrument_key is not None:
+            _require_text("instrument_key", self.instrument_key)
         _require_v2_strategy("strategy_id", self.strategy_id)
         _require_aware("evaluation_timestamp", self.evaluation_timestamp)
         _require_aware("created_at", self.created_at)
@@ -428,29 +380,20 @@ class RedBarV2SignalBundle:
         if decision.futures_vwap is None:
             raise DomainValidationError("signal bundle requires futures VWAP evidence")
 
-        from .identity import (
-            build_red_bar_v2_bundle_id,
-            build_red_bar_v2_idempotency_key,
-            build_red_bar_v2_signal_id,
-        )
+        from .identity import build_red_bar_v2_bundle_id, build_red_bar_v2_idempotency_key, build_red_bar_v2_signal_id
 
+        identity_instrument = self.instrument_key or decision.futures_vwap.instrument_key
         expected_signal = build_red_bar_v2_signal_id(
             strategy_version=self.strategy_version,
-            instrument_key=decision.futures_vwap.instrument_key,
+            instrument_key=identity_instrument,
             trading_date=self.trading_date,
             reference_id=decision.reference.reference_id,
             evaluation_timestamp=self.evaluation_timestamp,
             entry_type=self.entry_type,
             direction=self.direction,
         )
-        expected_bundle = build_red_bar_v2_bundle_id(
-            signal_id=expected_signal,
-            schema_version=self.schema_version,
-        )
-        expected_idempotency = build_red_bar_v2_idempotency_key(
-            signal_id=expected_signal,
-            option_side=self.option_side,
-        )
+        expected_bundle = build_red_bar_v2_bundle_id(signal_id=expected_signal, schema_version=self.schema_version)
+        expected_idempotency = build_red_bar_v2_idempotency_key(signal_id=expected_signal, option_side=self.option_side)
         if self.signal_id != expected_signal:
             raise BundleIdentityError("signal_id does not match canonical bundle fields")
         if self.bundle_id != expected_bundle:
