@@ -135,21 +135,29 @@ def read_latest_market_evidence_bundle(
     *,
     underlying_name: str,
 ) -> dict[str, Any] | None:
+    """Read the latest bundle without creating or altering database objects."""
     path = Path(database_path)
     if not path.exists():
         return None
-    with sqlite3.connect(path) as connection:
-        connection.row_factory = sqlite3.Row
-        _schema(connection)
-        row = connection.execute(
-            """
-            SELECT * FROM market_evidence_bundles
-            WHERE underlying_name=?
-            ORDER BY as_of_timestamp DESC, created_at DESC
-            LIMIT 1
-            """,
-            (underlying_name,),
-        ).fetchone()
+    try:
+        with sqlite3.connect(path) as connection:
+            connection.row_factory = sqlite3.Row
+            row = connection.execute(
+                """
+                SELECT * FROM market_evidence_bundles
+                WHERE underlying_name=?
+                ORDER BY as_of_timestamp DESC, created_at DESC
+                LIMIT 1
+                """,
+                (underlying_name,),
+            ).fetchone()
+    except sqlite3.OperationalError as exc:
+        # A database can legitimately predate this additive evidence table.
+        # Reads remain side-effect free and report no bundle until an explicit
+        # persistence/setup path creates the schema.
+        if "no such table" in str(exc).lower():
+            return None
+        raise
     if row is None:
         return None
     stored = dict(row)
