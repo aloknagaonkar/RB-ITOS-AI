@@ -30,30 +30,46 @@ _BULLISH_FUTURES = {"LONG_BUILDUP", "SHORT_COVERING"}
 _BEARISH_FUTURES = {"SHORT_BUILDUP", "LONG_UNWINDING"}
 
 
+def _timestamp(value: object) -> datetime | None:
+    if value in (None, ""):
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
+
+
 def completed_bar_timestamps(
     evidence: Mapping[str, Any] | None,
     *,
     interval_minutes: int = 5,
 ) -> dict[str, Any]:
-    """Normalize a completed bar to open/close timestamps.
+    """Normalize a completed bar to explicit open and close timestamps.
 
-    Existing resampled candles are labelled by bar open. Freshness and evidence
-    alignment must use the completion time instead.
+    Existing close timestamps are authoritative and are never shifted again.
+    Otherwise the persisted candle timestamp is treated as the bar-open label,
+    matching the resampled candle convention used by the evidence engines.
     """
     result = dict(evidence or {})
-    raw = result.get("bar_open_timestamp") or result.get("observed_at")
-    if raw in (None, ""):
-        result.setdefault("bar_open_timestamp", None)
+    explicit_close = _timestamp(result.get("bar_close_timestamp"))
+    if explicit_close is not None:
+        result["bar_close_timestamp"] = explicit_close.isoformat()
+        result["observed_at"] = explicit_close.isoformat()
+        opened = _timestamp(result.get("bar_open_timestamp"))
+        if opened is not None:
+            result["bar_open_timestamp"] = opened.isoformat()
+        else:
+            result.setdefault("bar_open_timestamp", None)
+        return result
+
+    raw_open = result.get("bar_open_timestamp") or result.get("observed_at")
+    opened = _timestamp(raw_open)
+    if opened is None:
+        result.setdefault("bar_open_timestamp", raw_open if raw_open not in (None, "") else None)
         result.setdefault("bar_close_timestamp", None)
         return result
-    try:
-        opened = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
-    except ValueError:
-        result.setdefault("bar_open_timestamp", raw)
-        result.setdefault("bar_close_timestamp", None)
-        return result
-    if opened.tzinfo is None:
-        opened = opened.replace(tzinfo=timezone.utc)
+
     closed = opened + timedelta(minutes=max(1, int(interval_minutes)))
     result["bar_open_timestamp"] = opened.isoformat()
     result["bar_close_timestamp"] = closed.isoformat()
@@ -133,19 +149,14 @@ def _safe_evidence_time(view: Mapping[str, Any]) -> str | None:
     values = []
     for key in (
         "option_timestamp",
+        "futures_bar_close_timestamp",
         "futures_market_timestamp",
+        "underlying_bar_close_timestamp",
         "underlying_timestamp",
     ):
-        value = view.get(key)
-        if value in (None, ""):
-            continue
-        try:
-            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-        except ValueError:
-            continue
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        values.append(parsed.astimezone(timezone.utc))
+        parsed = _timestamp(view.get(key))
+        if parsed is not None:
+            values.append(parsed.astimezone(timezone.utc))
     return min(values).isoformat() if values else None
 
 
@@ -186,7 +197,10 @@ def build_and_persist_authoritative_market_evidence(
         underlying_name=underlying_name,
         limit=1,
     )
-    futures = futures_rows[0] if futures_rows else {}
+    futures = dict(futures_rows[0]) if futures_rows else {}
+    if futures:
+        futures.setdefault("bar_open_timestamp", futures.get("latest_timestamp"))
+        futures = completed_bar_timestamps(futures)
     futures_vwap = build_futures_vwap_acceptance(futures)
 
     settings = RedBarSettings.from_env()
@@ -214,6 +228,8 @@ def build_and_persist_authoritative_market_evidence(
     )
     view["underlying_bar_open_timestamp"] = underlying.get("bar_open_timestamp")
     view["underlying_bar_close_timestamp"] = underlying.get("bar_close_timestamp")
+    view["futures_bar_open_timestamp"] = futures.get("bar_open_timestamp")
+    view["futures_bar_close_timestamp"] = futures.get("bar_close_timestamp")
     view["safe_evidence_time"] = _safe_evidence_time(view)
     view["latest_complete_evidence_time"] = view["safe_evidence_time"]
     view["authority"] = "OBSERVATIONAL_ONLY"
