@@ -18,6 +18,7 @@ def test_upstox_get_retry_policy_is_bounded_and_get_only():
     assert "GET" in policy["allowed_methods"]
     assert "POST" not in policy["allowed_methods"]
     assert policy["respect_retry_after_header"] is True
+    assert policy["observability"] == "broker_get_retry"
 
 
 def test_legacy_tab_no_longer_executes_independent_recommendation():
@@ -28,10 +29,10 @@ def test_legacy_tab_no_longer_executes_independent_recommendation():
     assert "render_legacy_page(" not in source
 
 
-def test_runtime_hardening_has_single_package_installer():
+def test_package_import_has_no_runtime_monkey_patch_side_effects():
     import red_bar_lab
 
     source = inspect.getsource(red_bar_lab)
-    assert "_install_runtime_hardening" in source
-    assert "_install_missing_data_option_chain" not in source
-    assert "_install_market_evidence_quality" not in source
+    assert "runtime_hardening" not in source
+    assert "install(" not in source
+    assert "monkey-patch" in source
