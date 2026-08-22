@@ -198,7 +198,9 @@ def read_nifty_futures_snapshots(
         rows = connection.execute(
             """SELECT * FROM nifty_futures_diagnostic_snapshots
                WHERE underlying_name = ?
-               ORDER BY observed_at DESC LIMIT ?""",
+               ORDER BY julianday(observed_at) DESC,
+                        observed_at DESC
+               LIMIT ?""",
             (underlying_name, max(1, int(limit))),
         ).fetchall()
     result = []
