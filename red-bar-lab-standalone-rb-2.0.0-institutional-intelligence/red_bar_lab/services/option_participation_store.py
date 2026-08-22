@@ -150,37 +150,41 @@ def read_latest_option_participation(
     *,
     underlying_name: str = "NIFTY 50",
 ) -> list[dict[str, Any]]:
-    """Read latest snapshot and attach total changes versus prior snapshot."""
+    """Read latest snapshot without creating tables or indexes."""
     path = Path(database_path)
     if not path.exists():
         return []
-    with sqlite3.connect(path) as connection:
-        connection.row_factory = sqlite3.Row
-        connection.executescript(_SCHEMA)
-        stamps = connection.execute(
-            """SELECT DISTINCT observed_at
-               FROM option_participation_snapshots
-               WHERE underlying_name=?
-               ORDER BY julianday(observed_at) DESC, observed_at DESC
-               LIMIT 2""",
-            (underlying_name,),
-        ).fetchall()
-        if not stamps:
-            return []
-        latest_rows = _snapshot_rows(
-            connection,
-            underlying_name=underlying_name,
-            observed_at=str(stamps[0]["observed_at"]),
-        )
-        previous_rows = (
-            _snapshot_rows(
+    try:
+        with sqlite3.connect(path) as connection:
+            connection.row_factory = sqlite3.Row
+            stamps = connection.execute(
+                """SELECT DISTINCT observed_at
+                   FROM option_participation_snapshots
+                   WHERE underlying_name=?
+                   ORDER BY julianday(observed_at) DESC, observed_at DESC
+                   LIMIT 2""",
+                (underlying_name,),
+            ).fetchall()
+            if not stamps:
+                return []
+            latest_rows = _snapshot_rows(
                 connection,
                 underlying_name=underlying_name,
-                observed_at=str(stamps[1]["observed_at"]),
+                observed_at=str(stamps[0]["observed_at"]),
             )
-            if len(stamps) > 1
-            else []
-        )
+            previous_rows = (
+                _snapshot_rows(
+                    connection,
+                    underlying_name=underlying_name,
+                    observed_at=str(stamps[1]["observed_at"]),
+                )
+                if len(stamps) > 1
+                else []
+            )
+    except sqlite3.OperationalError as exc:
+        if "no such table" in str(exc).lower():
+            return []
+        raise
 
     changes: dict[str, Any] = {
         "previous_observed_at": (
