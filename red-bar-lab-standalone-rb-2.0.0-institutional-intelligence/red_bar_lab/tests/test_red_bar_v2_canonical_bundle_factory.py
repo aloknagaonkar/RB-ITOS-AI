@@ -9,6 +9,7 @@ from red_bar_lab.domain.red_bar_v2 import (
     red_bar_v2_bundle_from_dict,
     red_bar_v2_bundle_to_dict,
 )
+from red_bar_lab.intelligence.red_bar_v2_futures_context import RedBarV2VwapSourceHealth
 from red_bar_lab.services.red_bar_v2_canonical import (
     LegacyV2DecisionEvidence,
     LegacyV2MarketMetadata,
@@ -52,6 +53,25 @@ def metadata():
         reference_low=24780.0,
         reference_midpoint=24800.0,
         reference_source="NEXT_RED_CANDLE",
+    )
+
+
+def health():
+    return RedBarV2VwapSourceHealth(
+        status="READY",
+        reason="FULL_TIMESTAMP_ALIGNMENT",
+        price_source_instrument=UNDERLYING,
+        rsi_source_instrument=UNDERLYING,
+        vwap_source_instrument=FUTURES,
+        timeframe="1M",
+        index_rows=50,
+        futures_rows=50,
+        aligned_rows=50,
+        alignment_coverage_pct=100.0,
+        positive_volume_rows=50,
+        index_timestamp=EVALUATED_AT,
+        futures_timestamp=EVALUATED_AT,
+        last_aligned_timestamp=EVALUATED_AT,
     )
 
 
@@ -112,7 +132,7 @@ def resolve(*, allowed=True, provisional=False):
             reference_timestamp=REFERENCE_AT,
             reference_midpoint=24800.0,
         ),
-        health=SimpleNamespace(status="READY", futures_instrument_key=FUTURES),
+        health=health(),
         replay_event=event(allowed=allowed, provisional=provisional),
         market_metadata=metadata(),
         evidence=evidence(provisional=provisional) if allowed else None,
@@ -125,6 +145,7 @@ def test_allowed_initial_resolution_creates_bundle_with_separate_instruments():
     result = resolve()
     assert result.section_2.admission_outcome is AdmissionOutcome.ALLOWED
     assert result.section_3 is not None
+    assert result.section_3.schema_version == "1.1"
     assert result.section_3.entry_type is EntryType.INITIAL
     assert result.section_3.instrument_key == UNDERLYING
     assert result.section_3.decision.futures_vwap.instrument_key == FUTURES
