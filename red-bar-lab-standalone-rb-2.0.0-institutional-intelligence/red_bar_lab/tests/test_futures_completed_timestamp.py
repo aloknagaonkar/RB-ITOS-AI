@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime
 
 from red_bar_lab.services.nifty_futures_market_data import (
     assess_nifty_futures_market_data,
@@ -10,7 +10,7 @@ class Provider:
     def intraday_candles(self, instrument_key, interval_minutes=1):
         return [
             {
-                "timestamp": "2026-08-21T10:18:00+00:00",
+                "timestamp": "2026-08-21T10:18:00+05:30",
                 "open": 25000,
                 "high": 25005,
                 "low": 24998,
@@ -19,7 +19,7 @@ class Provider:
                 "oi": 1000,
             },
             {
-                "timestamp": "2026-08-21T10:19:00+00:00",
+                "timestamp": "2026-08-21T10:19:00+05:30",
                 "open": 25003,
                 "high": 25010,
                 "low": 25001,
@@ -39,12 +39,12 @@ def test_futures_completed_candle_exposes_open_and_close_timestamp():
             instrument_key="NSE_FO|NIFTY",
             trading_symbol="NIFTY FUT",
         ),
-        now=datetime(2026, 8, 21, 10, 21, tzinfo=timezone.utc),
+        now=datetime.fromisoformat("2026-08-21T10:21:00+05:30"),
         interval_minutes=1,
     )
 
     assert result.status == "READY"
-    assert result.bar_open_timestamp == "2026-08-21T10:19:00+00:00"
-    assert result.bar_close_timestamp == "2026-08-21T10:20:00+00:00"
+    assert result.bar_open_timestamp == "2026-08-21T10:19:00+05:30"
+    assert result.bar_close_timestamp == "2026-08-21T10:20:00+05:30"
     assert result.latest_timestamp == result.bar_close_timestamp
     assert result.futures_vwap_timestamp == result.bar_close_timestamp
