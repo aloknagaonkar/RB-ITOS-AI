@@ -107,7 +107,7 @@ def test_log_values_are_stable():
     result = assess_nifty_futures_market_data(provider, contract=_contract(), now=_now("2026-08-20T10:30:20+05:30"))
     assert futures_market_log_values(result) == (
         "READY",
-        "Latest completed NIFTY futures candle, volume, OI and VWAP evidence were collected.",
+        "Latest completed NIFTY futures candle, volume, OI and VWAP evidence were collected and are fresh.",
         "READY", "APPLICABLE", "2.00", "100.0", "200.0",
         "2026-08-20T10:30:00+05:30", "1", "NONE",
     )
