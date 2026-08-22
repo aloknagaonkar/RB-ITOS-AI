@@ -42,7 +42,12 @@ def _participation_table_rows(rows):
     return result
 
 
-def _render_authoritative_page(settings, underlying_name, bundle) -> None:
+def _render_authoritative_page(
+    settings,
+    underlying_name,
+    bundle,
+    readiness_rows,
+) -> None:
     st.caption(
         "Read-only consumer of the single authoritative Market at a Glance "
         "evidence bundle. This tab does not recalculate an independent market "
@@ -155,14 +160,9 @@ def _render_authoritative_page(settings, underlying_name, bundle) -> None:
     )
 
     with st.expander("Legacy global readiness diagnostics", expanded=False):
-        rows = read_global_readiness_snapshots(
-            settings.database_path,
-            underlying_name=underlying_name,
-            limit=100,
-        )
-        if rows:
+        if readiness_rows:
             st.dataframe(
-                _arrow_safe_rows(rows),
+                _arrow_safe_rows(readiness_rows),
                 width="stretch",
                 hide_index=True,
             )
@@ -181,12 +181,17 @@ def render_page(
 ) -> None:
     st.subheader("Trade Evidence & Market Readiness")
 
-    # Keep the authoritative persisted-bundle read at the page entrypoint. This
-    # makes the page's primary data authority explicit even though rendering is
-    # split into separate tabs.
+    # Keep both persisted authority reads at the page entrypoint. Existing
+    # workspace contracts inspect this function directly, and the values are
+    # passed into the authoritative tab to avoid duplicate database reads.
     bundle = read_latest_market_evidence_bundle(
         settings.database_path,
         underlying_name=underlying_name,
+    )
+    readiness_rows = read_global_readiness_snapshots(
+        settings.database_path,
+        underlying_name=underlying_name,
+        limit=100,
     )
 
     authoritative_tab, legacy_tab = st.tabs(
@@ -197,7 +202,12 @@ def render_page(
     )
 
     with authoritative_tab:
-        _render_authoritative_page(settings, underlying_name, bundle)
+        _render_authoritative_page(
+            settings,
+            underlying_name,
+            bundle,
+            readiness_rows,
+        )
 
     with legacy_tab:
         render_legacy_page(
