@@ -40,18 +40,10 @@ from red_bar_lab.services.nifty_futures_readiness import (
     assess_nifty_futures_readiness,
     futures_readiness_log_values,
 )
-from red_bar_lab.services.red_bar_v2_current_session import (
-    evaluate_current_session_red_bar_v2,
-)
-from red_bar_lab.services.red_bar_v2_paper_signal_bridge import (
-    publish_v2_snapshot_to_paper_signals,
-)
-from red_bar_lab.services.red_bar_v2_reversal_exit import (
-    execute_confirmed_reversal_exits,
-)
-from red_bar_lab.services.upstox_instrument_search import (
-    UpstoxInstrumentSearchTransport,
-)
+from red_bar_lab.services.red_bar_v2_current_session import evaluate_current_session_red_bar_v2
+from red_bar_lab.services.red_bar_v2_paper_signal_bridge import publish_v2_snapshot_to_paper_signals
+from red_bar_lab.services.red_bar_v2_reversal_exit import execute_confirmed_reversal_exits
+from red_bar_lab.services.upstox_instrument_search import UpstoxInstrumentSearchTransport
 from red_bar_lab.services.upstox_service import RedBarUpstoxService
 from red_bar_lab.storage.database import RedBarDatabase
 
@@ -146,19 +138,12 @@ def main() -> int:
     authority = PaperStrategyAuthority.from_env()
     authority_ready, authority_reason = authority.validate()
     if not authority_ready:
-        raise SystemExit(
-            f"Paper strategy authority is blocked: {authority_reason}"
-        )
+        raise SystemExit(f"Paper strategy authority is blocked: {authority_reason}")
     database.execution_source_enabled = authority.source_enabled
 
     upstox = RedBarUpstoxService(access_token)
-    futures_monitor = NiftyFuturesMonitor(
-        UpstoxInstrumentSearchTransport(access_token)
-    )
-    intelligence = UnifiedUpstoxMarketIntelligenceService(
-        upstox,
-        cache_ttl_seconds=2.0,
-    )
+    futures_monitor = NiftyFuturesMonitor(UpstoxInstrumentSearchTransport(access_token))
+    intelligence = UnifiedUpstoxMarketIntelligenceService(upstox, cache_ttl_seconds=2.0)
     adapter = UpstoxPaperMarketAdapter(
         intelligence,
         args.underlying,
@@ -180,10 +165,7 @@ def main() -> int:
 
     health = upstox.connection_health()
     if not health.get("ok"):
-        logging.warning(
-            "Upstox connection health check: %s",
-            health.get("message"),
-        )
+        logging.warning("Upstox connection health check: %s", health.get("message"))
     status = authority.status_payload()
     logging.info(
         "Upstox market-data provider initialized. Execution mode=PAPER; "
@@ -243,7 +225,6 @@ def main() -> int:
                 instrument_key=UNDERLYINGS[args.underlying],
             )
 
-            # Position protection remains active even when entries are suspended.
             reversal_exit = execute_confirmed_reversal_exits(
                 snapshot=read_red_bar_v2_ui_snapshot(settings.artifacts_root),
                 open_orders=database.read_open_paper_execution_orders("PAPER-STD"),
@@ -279,15 +260,11 @@ def main() -> int:
 
             futures_applicable = args.underlying == "NIFTY 50"
             if futures_applicable:
-                futures_result = futures_monitor.resolve(
-                    as_of_date=cycle_started.date()
-                )
+                futures_result = futures_monitor.resolve(as_of_date=cycle_started.date())
             else:
                 futures_result = NiftyFuturesMonitorResult(
                     status="NOT_APPLICABLE",
-                    reason=(
-                        "NIFTY futures discovery is only used for NIFTY 50."
-                    ),
+                    reason="NIFTY futures discovery is only used for NIFTY 50.",
                 )
             futures_log_values = futures_monitor_log_values(futures_result)
             futures_market_result = assess_nifty_futures_market_data(
@@ -295,19 +272,13 @@ def main() -> int:
                 contract=futures_result,
                 now=cycle_started,
             )
-            futures_market_values = futures_market_log_values(
-                futures_market_result
-            )
-            futures_positioning_result = assess_futures_positioning(
-                futures_market_result
-            )
+            futures_market_values = futures_market_log_values(futures_market_result)
+            futures_positioning_result = assess_futures_positioning(futures_market_result)
             futures_positioning_values = futures_positioning_log_values(
                 futures_positioning_result
             )
-            futures_strength_result = (
-                assess_nifty_futures_positioning_strength(
-                    futures_positioning_result
-                )
+            futures_strength_result = assess_nifty_futures_positioning_strength(
+                futures_positioning_result
             )
             futures_strength_values = futures_positioning_strength_log_values(
                 futures_strength_result
@@ -316,7 +287,7 @@ def main() -> int:
                 contract=futures_result,
                 market=futures_market_result,
                 positioning=futures_positioning_result,
-                applicable=futures_applicable,
+                applicable=args.underlying == "NIFTY 50",
             )
             futures_readiness_values = futures_readiness_log_values(
                 futures_readiness_result
@@ -391,9 +362,7 @@ def main() -> int:
                     "MONITORING" if open_orders else bridge.status
                 )
                 current_state = (
-                    "MONITORING_POSITION"
-                    if open_orders
-                    else "WAITING_FOR_V2_SIGNAL"
+                    "MONITORING_POSITION" if open_orders else "WAITING_FOR_V2_SIGNAL"
                 )
                 last_reason = latest.get("reason") or bridge.reason
 
@@ -430,9 +399,7 @@ def main() -> int:
                     "last_decision": last_decision,
                     "last_reason": last_reason,
                     "last_error": (
-                        " | ".join(cycle_errors[:3])
-                        if cycle_errors
-                        else None
+                        " | ".join(cycle_errors[:3]) if cycle_errors else None
                     ),
                 }
             )
@@ -458,6 +425,26 @@ def main() -> int:
                 report.skipped,
                 last_decision,
                 last_reason,
+            )
+            logging.debug(
+                "futures_market=%s futures_market_reason=%s futures_candle=%s "
+                "futures_volume=%s futures_close=%s futures_volume_value=%s "
+                "futures_oi=%s futures_timestamp=%s futures_candle_count=%s "
+                "futures_market_error=%s futures_strength_status=%s "
+                "futures_strength_reason=%s futures_strength=%s "
+                "futures_strength_state=%s futures_strength_price_pct=%s "
+                "futures_strength_oi_pct=%s futures_strength_rvol=%s "
+                "global_readiness=%s global_readiness_reason=%s "
+                "global_underlying_status=%s global_option_chain_status=%s "
+                "global_option_quote_status=%s global_pcr_status=%s "
+                "global_futures_status=%s global_futures_strength=%s "
+                "global_v2_alignment_status=%s global_execution_source_status=%s "
+                "global_market_hours_status=%s global_blocking_reasons=%s "
+                "global_advisory_reasons=%s global_execution_reasons=%s "
+                "global_authority=%s",
+                *futures_market_values,
+                *futures_strength_values,
+                *global_readiness_values,
             )
             logging.debug(
                 "paper_monitor futures_monitor=%s futures_positioning=%s "
