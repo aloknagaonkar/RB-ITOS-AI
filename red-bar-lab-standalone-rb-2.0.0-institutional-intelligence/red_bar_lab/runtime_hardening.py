@@ -2,10 +2,12 @@ from __future__ import annotations
 
 """Centralized additive runtime hardening installation.
 
-The installer keeps compatibility hooks in one place and adds a bounded retry
-policy only for idempotent broker GET requests. POST/order operations are not
-retried here.
+Compatibility hooks remain isolated here. Broker retries are bounded and apply
+only to idempotent methods; POST/order operations are never retried.
 """
+
+import logging
+from typing import Any
 
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -17,7 +19,33 @@ from red_bar_lab.services.market_evidence_quality_patch import (
     install as _install_market_evidence_quality,
 )
 
+logger = logging.getLogger(__name__)
 _INSTALLED = False
+
+
+class ObservableRetry(Retry):
+    """Retry policy that emits safe endpoint/status telemetry."""
+
+    def increment(self, method=None, url=None, response=None, error=None, *args, **kwargs):
+        next_retry = super().increment(
+            method=method,
+            url=url,
+            response=response,
+            error=error,
+            *args,
+            **kwargs,
+        )
+        status = getattr(response, "status", None)
+        endpoint = str(url or "").split("?", 1)[0]
+        logger.warning(
+            "broker_get_retry method=%s endpoint=%s status=%s remaining=%s error=%s",
+            str(method or "UNKNOWN").upper(),
+            endpoint,
+            status if status is not None else "NONE",
+            getattr(next_retry, "total", "UNKNOWN"),
+            type(error).__name__ if error is not None else "NONE",
+        )
+        return next_retry
 
 
 def _install_upstox_get_retry_policy() -> None:
@@ -33,7 +61,7 @@ def _install_upstox_get_retry_policy() -> None:
         mount = getattr(self.session, "mount", None)
         if not callable(mount):
             return
-        retry = Retry(
+        retry = ObservableRetry(
             total=3,
             connect=3,
             read=3,
@@ -53,6 +81,7 @@ def _install_upstox_get_retry_policy() -> None:
             "status_forcelist": (429, 502, 503, 504),
             "allowed_methods": ("GET", "HEAD", "OPTIONS"),
             "respect_retry_after_header": True,
+            "observability": "broker_get_retry",
         }
 
     UpstoxClient.__init__ = hardened_init
@@ -69,4 +98,4 @@ def install() -> None:
     _INSTALLED = True
 
 
-__all__ = ["install"]
+__all__ = ["ObservableRetry", "install"]
