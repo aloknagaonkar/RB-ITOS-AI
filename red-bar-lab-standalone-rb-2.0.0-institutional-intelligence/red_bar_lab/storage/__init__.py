@@ -2,12 +2,13 @@ from __future__ import annotations
 
 """Storage package hardening hooks.
 
-The project historically defined ``RedBarDatabase.replace_signal_attempts`` in a
-large compatibility module. P0-1 installs the run-scoped implementation at the
-package boundary so every existing caller receives the corrected behavior while
-the stable database API remains unchanged.
+P0-1 installs run-scoped signal replacement. P0-2 protects the final paper-order
+persistence boundary so every execution path shares the same per-signal limits.
 """
 
+from red_bar_lab.execution.signal_execution_limits import (
+    evaluate_signal_execution_limits,
+)
 from red_bar_lab.services.run_scoped_signal_persistence import (
     replace_run_scoped_signal_rows,
 )
@@ -71,6 +72,39 @@ def _replace_signal_attempts_run_scoped(
     return result.inserted_count
 
 
+_original_insert_paper_execution_order = RedBarDatabase.insert_paper_execution_order
+
+
+def _insert_paper_execution_order_with_signal_limits(
+    self: RedBarDatabase,
+    row: dict[str, object],
+) -> None:
+    self.initialize()
+    decision = evaluate_signal_execution_limits(
+        self.path,
+        account_id=str(row.get("account_id") or "PAPER-STD"),
+        signal_id=(str(row.get("signal_id")) if row.get("signal_id") else None),
+        instrument_token=int(row.get("instrument_token") or 0),
+        max_contracts_per_signal=int(row.get("max_contracts_per_signal") or 2),
+        max_entries_per_signal=int(row.get("max_entries_per_signal") or 2),
+        reentry_cooldown_seconds=int(row.get("reentry_cooldown_seconds") or 300),
+        max_signal_age_seconds=int(row.get("max_signal_age_seconds") or 180),
+        allow_stale_signal_override=bool(row.get("allow_stale_signal_override")),
+    )
+    if not decision.allowed:
+        raise ValueError(
+            "SIGNAL_EXECUTION_BLOCKED:"
+            f"{decision.reason};entries={decision.existing_entries};"
+            f"contracts={decision.existing_contracts};"
+            f"age={decision.signal_age_seconds};"
+            f"cooldown_age={decision.seconds_since_last_entry}"
+        )
+    _original_insert_paper_execution_order(self, row)
+
+
 RedBarDatabase.replace_signal_attempts = _replace_signal_attempts_run_scoped
+RedBarDatabase.insert_paper_execution_order = (
+    _insert_paper_execution_order_with_signal_limits
+)
 
 __all__ = ["RedBarDatabase"]
