@@ -4,6 +4,9 @@ import red_bar_lab.ui._shared as shared_ui
 import red_bar_lab.ui.active_trade_views as active_trade_views
 import red_bar_lab.ui.full_trade_card as full_trade_card
 from red_bar_lab.execution.exit_engine import PaperExitEngine
+from red_bar_lab.execution.live_admission_automation import (
+    LiveAdmissionRedBarPaperAutomationService,
+)
 from red_bar_lab.execution.paper_engine import RedBarPaperExecutionEngine
 from red_bar_lab.execution.paper_close_telemetry_lifecycle import (
     install as install_paper_close_telemetry_lifecycle,
@@ -74,6 +77,11 @@ install_option_indicator_card(full_trade_card)
 install_live_trade_card_validation(full_trade_card)
 install_paper_close_telemetry_lifecycle(RedBarPaperExecutionEngine)
 shared_ui.PaperExitEngine = PaperExitEngine
+# Additive runtime guard: page modules importing the shared automation symbol receive
+# the dedicated live-admission boundary while the stable base engine remains intact.
+shared_ui.RedBarPaperAutomationService = (
+    LiveAdmissionRedBarPaperAutomationService
+)
 install_import_compatibility()
 
 
