@@ -82,7 +82,7 @@ def build_canonical_input_readiness(
     health: object,
     market_metadata: LegacyV2MarketMetadata,
 ) -> RedBarV2InputReadiness:
-    """Assemble canonical readiness from replay, health and event-time metadata."""
+    """Assemble canonical readiness from the real replay and health contracts."""
     if replay is None or health is None:
         raise LegacyMappingError("authoritative replay and health objects are required")
 
@@ -93,18 +93,22 @@ def build_canonical_input_readiness(
     if replay_trading_date != market_metadata.trading_date.isoformat():
         raise LegacyMappingError("trading date metadata disagrees with replay")
 
-    replay_reference_timestamp = _attribute(replay, "reference_timestamp")
-    replay_reference_midpoint = _attribute(replay, "reference_midpoint")
     reference = _build_reference(
         market_metadata,
-        replay_reference_timestamp=replay_reference_timestamp,
-        replay_reference_midpoint=replay_reference_midpoint,
+        replay_reference_timestamp=_attribute(replay, "reference_timestamp"),
+        replay_reference_midpoint=_attribute(replay, "reference_midpoint"),
     )
 
     health_status = _normalised_text(_attribute(health, "status")) or "UNAVAILABLE"
-    health_futures_key = _normalised_text(_attribute(health, "futures_instrument_key"))
-    if health_futures_key is not None and health_futures_key != market_metadata.futures_instrument_key:
-        raise LegacyMappingError("futures instrument metadata disagrees with health")
+    health_price_key = _normalised_text(_attribute(health, "price_source_instrument"))
+    health_rsi_key = _normalised_text(_attribute(health, "rsi_source_instrument"))
+    health_vwap_key = _normalised_text(_attribute(health, "vwap_source_instrument"))
+    if health_price_key != market_metadata.underlying_instrument_key:
+        raise LegacyMappingError("price source instrument metadata disagrees with health")
+    if health_rsi_key != market_metadata.underlying_instrument_key:
+        raise LegacyMappingError("RSI source instrument metadata disagrees with health")
+    if health_vwap_key != market_metadata.futures_instrument_key:
+        raise LegacyMappingError("VWAP source instrument metadata disagrees with health")
 
     context_status = market_metadata.context_status
     if health_status != "READY" and context_status is ContextStatus.FRESH:
