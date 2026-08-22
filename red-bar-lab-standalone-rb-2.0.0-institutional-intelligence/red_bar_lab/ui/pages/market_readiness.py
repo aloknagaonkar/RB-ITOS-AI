@@ -184,6 +184,7 @@ def render_page(
     # - Authoritative market conclusion
     # - Authoritative evidence diagnostics
     # - Persisted evidence bundle
+    # - Legacy global readiness diagnostics
     # The legacy tab remains available only as non-authoritative diagnostics.
     bundle = read_latest_market_evidence_bundle(
         settings.database_path,
