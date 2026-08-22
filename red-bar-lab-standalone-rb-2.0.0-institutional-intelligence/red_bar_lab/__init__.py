@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from red_bar_lab.runtime_hardening import install as _install_runtime_hardening
+"""Red Bar Lab package.
 
-_install_runtime_hardening()
+Runtime safety behavior now lives in the owning modules. Importing the package
+has no monkey-patch or network-client configuration side effects.
+"""
 
 __all__: list[str] = []
