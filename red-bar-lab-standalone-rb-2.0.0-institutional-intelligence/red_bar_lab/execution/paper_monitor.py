@@ -41,7 +41,10 @@ from red_bar_lab.services.nifty_futures_readiness import (
     futures_readiness_log_values,
 )
 from red_bar_lab.services.red_bar_v2_current_session import evaluate_current_session_red_bar_v2
-from red_bar_lab.services.red_bar_v2_paper_signal_bridge import publish_v2_snapshot_to_paper_signals
+from red_bar_lab.services.red_bar_v2_paper_signal_bridge import (
+    RedBarV2PaperSignalPublishResult,
+    publish_v2_snapshot_to_paper_signals,
+)
 from red_bar_lab.services.red_bar_v2_reversal_exit import execute_confirmed_reversal_exits
 from red_bar_lab.services.upstox_instrument_search import UpstoxInstrumentSearchTransport
 from red_bar_lab.services.upstox_service import RedBarUpstoxService
@@ -161,6 +164,7 @@ def main() -> int:
         failure_threshold=args.failure_threshold,
         base_delay_seconds=max(2, args.interval_seconds),
         maximum_delay_seconds=args.maximum_backoff_seconds,
+        state_path=settings.artifacts_root / "paper_monitor_circuit.json",
     )
 
     health = upstox.connection_health()
@@ -243,13 +247,19 @@ def main() -> int:
                     instrument_key=UNDERLYINGS[args.underlying],
                 )
 
-            bridge = publish_v2_snapshot_to_paper_signals(
-                database_path=settings.database_path,
-                artifacts_root=settings.artifacts_root,
-                instrument_key=UNDERLYINGS[args.underlying],
-                authority=authority,
-                now=cycle_started,
-            )
+            if cycle_gate.entry_suspended:
+                bridge = RedBarV2PaperSignalPublishResult(
+                    "SUSPENDED",
+                    "ENTRY_CIRCUIT_OPEN_SIGNAL_PUBLICATION_SKIPPED",
+                )
+            else:
+                bridge = publish_v2_snapshot_to_paper_signals(
+                    database_path=settings.database_path,
+                    artifacts_root=settings.artifacts_root,
+                    instrument_key=UNDERLYINGS[args.underlying],
+                    authority=authority,
+                    now=cycle_started,
+                )
             candle_diagnostic = assess_monitor_underlying_candles(
                 upstox,
                 instrument_key=UNDERLYINGS[args.underlying],
