@@ -111,17 +111,25 @@ _original_read_institutional = (
 _original_read_execution_queue = RedBarDatabase.read_execution_queue
 
 
-def _read_institutional_with_truthful_scores(self: RedBarDatabase, **kwargs):
+def _read_institutional_with_truthful_scores(
+    self: RedBarDatabase,
+    *args,
+    **kwargs,
+):
     return [
         with_truthful_execution_scores(row)
-        for row in _original_read_institutional(self, **kwargs)
+        for row in _original_read_institutional(self, *args, **kwargs)
     ]
 
 
-def _read_execution_queue_with_truthful_scores(self: RedBarDatabase, **kwargs):
+def _read_execution_queue_with_truthful_scores(
+    self: RedBarDatabase,
+    *args,
+    **kwargs,
+):
     return [
         with_truthful_execution_scores(row)
-        for row in _original_read_execution_queue(self, **kwargs)
+        for row in _original_read_execution_queue(self, *args, **kwargs)
     ]
 
 
