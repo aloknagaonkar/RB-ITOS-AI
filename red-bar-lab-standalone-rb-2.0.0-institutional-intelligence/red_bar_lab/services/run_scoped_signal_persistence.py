@@ -24,14 +24,12 @@ def replace_run_scoped_signal_rows(
     trading_date: str,
     rows: Iterable[Mapping[str, object]],
 ) -> RunScopedSignalPersistenceResult:
-    """Replace signal rows owned by one producer without touching other runs.
+    """Replace only rows owned by one signal producer.
 
-    This is the P0-1 persistence primitive. It deliberately scopes deletion to
-    ``(run_id, instrument_key, trading_date)`` so LIVE_MONITOR refreshes cannot
-    erase RBV2-PAPER-RUNTIME or historical-replay rows for the same session.
-
-    The caller supplies canonical signal IDs and normalized row values. Legacy
-    signal-ID migration is intentionally excluded from this hot-path function.
+    Deletion is scoped to ``(run_id, instrument_key, trading_date)``. A live
+    reference refresh therefore cannot erase Red Bar V2 paper-runtime or replay
+    rows from the same session. Legacy signal-ID migration is intentionally not
+    performed in this hot path.
     """
 
     owner = str(run_id or "").strip()
@@ -46,8 +44,7 @@ def replace_run_scoped_signal_rows(
 
     payload = [dict(row) for row in rows]
     created_at = datetime.now().astimezone().isoformat()
-
-    values = []
+    values: list[tuple[object, ...]] = []
     for row in payload:
         signal_id = str(row.get("signal_id") or "").strip()
         if not signal_id:
@@ -79,11 +76,16 @@ def replace_run_scoped_signal_rows(
         )
 
     with sqlite3.connect(Path(database_path)) as connection:
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_signal_attempts_run_session
+            ON signal_attempts(run_id, instrument_key, trading_date)
+            """
+        )
         deleted_count = int(
             connection.execute(
                 """
-                SELECT COUNT(*)
-                FROM signal_attempts
+                SELECT COUNT(*) FROM signal_attempts
                 WHERE run_id=? AND instrument_key=? AND trading_date=?
                 """,
                 (owner, instrument, session),
@@ -120,7 +122,35 @@ def replace_run_scoped_signal_rows(
     )
 
 
+def count_orphaned_paper_orders(database_path: str | Path) -> int:
+    """Return paper orders whose non-null signal ID has no signal row."""
+
+    with sqlite3.connect(Path(database_path)) as connection:
+        tables = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        if not {"paper_execution_orders", "signal_attempts"}.issubset(tables):
+            return 0
+        return int(
+            connection.execute(
+                """
+                SELECT COUNT(*)
+                FROM paper_execution_orders AS orders
+                LEFT JOIN signal_attempts AS signals
+                  ON signals.signal_id=orders.signal_id
+                WHERE orders.signal_id IS NOT NULL
+                  AND orders.signal_id<>''
+                  AND signals.signal_id IS NULL
+                """
+            ).fetchone()[0]
+        )
+
+
 __all__ = [
     "RunScopedSignalPersistenceResult",
     "replace_run_scoped_signal_rows",
+    "count_orphaned_paper_orders",
 ]
