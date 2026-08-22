@@ -5,6 +5,13 @@ from pathlib import Path
 import os
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 @dataclass(frozen=True)
 class RedBarSettings:
     app_name: str = "Red Bar Strategy Lab"
@@ -14,6 +21,7 @@ class RedBarSettings:
     database_name: str = "red_bar_strategy.db"
     default_underlying: str = "NIFTY 50"
     default_interval_minutes: int = 1
+    red_bar_v2_canonical_shadow_enabled: bool = False
 
     @property
     def database_path(self) -> Path:
@@ -44,6 +52,10 @@ class RedBarSettings:
         return cls(
             port=int(os.getenv("RED_BAR_PORT", "8502")),
             artifacts_root=Path(os.getenv("RED_BAR_ARTIFACTS_ROOT", "artifacts/red_bar")),
+            red_bar_v2_canonical_shadow_enabled=_env_bool(
+                "RED_BAR_V2_CANONICAL_SHADOW_ENABLED",
+                False,
+            ),
         )
 
 
