@@ -199,8 +199,7 @@ class SQLiteRedBarV2CanonicalRepository:
                 if bundle is not None and bundle_json is not None and bundle_digest is not None:
                     bundle_row = conn.execute(
                         """
-                        SELECT bundle_id,signal_id,idempotency_key,
-                               payload_json,payload_sha256
+                        SELECT bundle_id,signal_id,idempotency_key,payload_json,payload_sha256
                         FROM canonical_red_bar_v2_bundles
                         WHERE bundle_id=? OR signal_id=? OR idempotency_key=?
                         """,
@@ -222,10 +221,8 @@ class SQLiteRedBarV2CanonicalRepository:
                 if event is not None and event_json is not None and event_digest is not None:
                     event_row = conn.execute(
                         """
-                        SELECT metadata_json AS payload_json,
-                               metadata_sha256 AS payload_sha256
-                        FROM canonical_red_bar_v2_bundle_events
-                        WHERE event_id=?
+                        SELECT metadata_json AS payload_json,metadata_sha256 AS payload_sha256
+                        FROM canonical_red_bar_v2_bundle_events WHERE event_id=?
                         """,
                         (event.event_id,),
                     ).fetchone()
@@ -239,11 +236,10 @@ class SQLiteRedBarV2CanonicalRepository:
                     conn.execute(
                         """
                         INSERT INTO canonical_red_bar_v2_bundles(
-                            bundle_id,signal_id,idempotency_key,strategy_id,
-                            strategy_version,instrument_key,trading_date,
-                            evaluation_timestamp,entry_type,direction,option_side,
-                            bundle_schema_version,payload_json,payload_sha256,
-                            first_persisted_at
+                            bundle_id,signal_id,idempotency_key,strategy_id,strategy_version,
+                            instrument_key,trading_date,evaluation_timestamp,entry_type,
+                            direction,option_side,bundle_schema_version,payload_json,
+                            payload_sha256,first_persisted_at
                         ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                         """,
                         (
@@ -270,8 +266,8 @@ class SQLiteRedBarV2CanonicalRepository:
                     conn.execute(
                         """
                         INSERT INTO canonical_red_bar_v2_bundle_events(
-                            event_id,bundle_id,event_type,event_timestamp,
-                            source,reason_code,metadata_json,metadata_sha256
+                            event_id,bundle_id,event_type,event_timestamp,source,
+                            reason_code,metadata_json,metadata_sha256
                         ) VALUES(?,?,?,?,?,?,?,?)
                         """,
                         (
@@ -292,12 +288,10 @@ class SQLiteRedBarV2CanonicalRepository:
                     conn.execute(
                         """
                         INSERT INTO canonical_red_bar_v2_resolutions(
-                            resolution_id,strategy_id,strategy_version,
-                            instrument_key,trading_date,evaluation_timestamp,
-                            source_replay_id,admission_outcome,direction,
-                            option_side,entry_type,bundle_id,
-                            resolution_schema_version,payload_json,
-                            payload_sha256,persisted_at
+                            resolution_id,strategy_id,strategy_version,instrument_key,
+                            trading_date,evaluation_timestamp,source_replay_id,
+                            admission_outcome,direction,option_side,entry_type,bundle_id,
+                            resolution_schema_version,payload_json,payload_sha256,persisted_at
                         ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                         """,
                         (
@@ -323,7 +317,8 @@ class SQLiteRedBarV2CanonicalRepository:
 
                 conn.execute("COMMIT")
             except Exception:
-                conn.execute("ROLLBACK")
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
                 raise
             finally:
                 conn.close()
@@ -351,7 +346,14 @@ class SQLiteRedBarV2CanonicalRepository:
     def _resolution(self, row: sqlite3.Row) -> PersistedRedBarV2Resolution:
         payload_json = str(row["payload_json"])
         self._verify(payload_json, str(row["payload_sha256"]), "resolution")
-        envelope = resolution_envelope_from_json(payload_json)
+        try:
+            envelope = resolution_envelope_from_json(payload_json)
+        except CanonicalPersistenceCorruptionError:
+            raise
+        except Exception as exc:
+            raise CanonicalPersistenceCorruptionError(
+                "resolution payload violates canonical schema"
+            ) from exc
         projections = {
             "resolution_id": envelope.resolution_id,
             "instrument_key": envelope.instrument_key,
@@ -364,6 +366,12 @@ class SQLiteRedBarV2CanonicalRepository:
             if row[name] != expected:
                 raise CanonicalPersistenceCorruptionError(
                     f"resolution projection mismatch: {name}"
+                )
+        if envelope.section_3 is not None:
+            stored_bundle = self.get_bundle(envelope.section_3.bundle_id)
+            if stored_bundle is None or stored_bundle != envelope.section_3:
+                raise CanonicalPersistenceCorruptionError(
+                    "resolution references missing or inconsistent bundle"
                 )
         return envelope
 
@@ -383,9 +391,11 @@ class SQLiteRedBarV2CanonicalRepository:
         self._verify(payload_json, str(row["payload_sha256"]), "bundle")
         try:
             payload = json.loads(payload_json)
-        except json.JSONDecodeError as exc:
-            raise CanonicalPersistenceCorruptionError("bundle payload is not valid JSON") from exc
-        bundle = red_bar_v2_bundle_from_dict(payload)
+            bundle = red_bar_v2_bundle_from_dict(payload)
+        except Exception as exc:
+            raise CanonicalPersistenceCorruptionError(
+                "bundle payload violates canonical schema or identity"
+            ) from exc
         projections = {
             "bundle_id": bundle.bundle_id,
             "signal_id": bundle.signal_id,
@@ -401,19 +411,25 @@ class SQLiteRedBarV2CanonicalRepository:
         return bundle
 
     def get_bundle(self, bundle_id: str) -> RedBarV2SignalBundle | None:
-        with self._connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM canonical_red_bar_v2_bundles WHERE bundle_id=?",
-                (bundle_id,),
-            ).fetchone()
+        try:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT * FROM canonical_red_bar_v2_bundles WHERE bundle_id=?",
+                    (bundle_id,),
+                ).fetchone()
+        except sqlite3.Error as exc:
+            raise CanonicalPersistenceUnavailableError(str(exc)) from exc
         return None if row is None else self._bundle(row)
 
     def get_bundle_by_signal_id(self, signal_id: str) -> RedBarV2SignalBundle | None:
-        with self._connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM canonical_red_bar_v2_bundles WHERE signal_id=?",
-                (signal_id,),
-            ).fetchone()
+        try:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT * FROM canonical_red_bar_v2_bundles WHERE signal_id=?",
+                    (signal_id,),
+                ).fetchone()
+        except sqlite3.Error as exc:
+            raise CanonicalPersistenceUnavailableError(str(exc)) from exc
         return None if row is None else self._bundle(row)
 
     def list_session_resolutions(
@@ -422,36 +438,44 @@ class SQLiteRedBarV2CanonicalRepository:
         instrument_key: str,
         trading_date: date,
     ) -> tuple[PersistedRedBarV2Resolution, ...]:
-        with self._connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT * FROM canonical_red_bar_v2_resolutions
-                WHERE instrument_key=? AND trading_date=?
-                ORDER BY evaluation_timestamp ASC,resolution_id ASC
-                """,
-                (instrument_key, trading_date.isoformat()),
-            ).fetchall()
+        try:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM canonical_red_bar_v2_resolutions
+                    WHERE instrument_key=? AND trading_date=?
+                    ORDER BY evaluation_timestamp ASC,resolution_id ASC
+                    """,
+                    (instrument_key, trading_date.isoformat()),
+                ).fetchall()
+        except sqlite3.Error as exc:
+            raise CanonicalPersistenceUnavailableError(str(exc)) from exc
         return tuple(self._resolution(row) for row in rows)
 
     def list_bundle_events(self, bundle_id: str) -> tuple[CanonicalBundleLifecycleEvent, ...]:
-        with self._connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT * FROM canonical_red_bar_v2_bundle_events
-                WHERE bundle_id=?
-                ORDER BY event_timestamp ASC,event_id ASC
-                """,
-                (bundle_id,),
-            ).fetchall()
+        try:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM canonical_red_bar_v2_bundle_events
+                    WHERE bundle_id=? ORDER BY event_timestamp ASC,event_id ASC
+                    """,
+                    (bundle_id,),
+                ).fetchall()
+        except sqlite3.Error as exc:
+            raise CanonicalPersistenceUnavailableError(str(exc)) from exc
         events: list[CanonicalBundleLifecycleEvent] = []
         for row in rows:
             payload_json = str(row["metadata_json"])
-            self._verify(
-                payload_json,
-                str(row["metadata_sha256"]),
-                "lifecycle event",
-            )
-            event = lifecycle_event_from_json(payload_json)
+            self._verify(payload_json, str(row["metadata_sha256"]), "lifecycle event")
+            try:
+                event = lifecycle_event_from_json(payload_json)
+            except CanonicalPersistenceCorruptionError:
+                raise
+            except Exception as exc:
+                raise CanonicalPersistenceCorruptionError(
+                    "lifecycle event payload violates canonical schema"
+                ) from exc
             if (
                 event.event_id != row["event_id"]
                 or event.bundle_id != row["bundle_id"]
