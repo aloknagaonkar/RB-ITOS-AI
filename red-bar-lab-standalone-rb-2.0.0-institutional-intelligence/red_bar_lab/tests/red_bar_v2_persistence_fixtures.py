@@ -32,7 +32,12 @@ UNDERLYING = "NSE_INDEX|Nifty 50"
 FUTURES = "NSE_FO|NIFTY-FUT"
 
 
-def make_resolution(*, allowed: bool = True, provisional: bool = False):
+def make_resolution(
+    *,
+    allowed: bool | None = True,
+    provisional: bool = False,
+    confirmed_reversal: bool = False,
+):
     reference = RedBarV2Reference(
         reference_id="RBV2-REF-2026-08-24-0920",
         trading_date=TRADING_DATE,
@@ -68,36 +73,78 @@ def make_resolution(*, allowed: bool = True, provisional: bool = False):
         reason_code="READY",
         reason="Ready",
     )
-    entry_type = EntryType.REVERSAL if provisional else EntryType.INITIAL
-    direction = Direction.BULLISH if allowed else None
-    option_side = OptionSide.CE if allowed else None
-    strength = TrendStrength.PROVISIONAL if provisional else TrendStrength.CONFIRMED if allowed else None
-    state = RedBarV2State.PROVISIONAL_BULLISH if provisional else RedBarV2State.CONFIRMED_BULLISH if allowed else RedBarV2State.SIGNAL_WAITING
+    is_allowed = allowed is True
+    is_reversal = provisional or confirmed_reversal
+    entry_type = EntryType.REVERSAL if is_reversal else EntryType.INITIAL
+    direction = Direction.BULLISH if is_allowed else None
+    option_side = OptionSide.CE if is_allowed else None
+    strength = (
+        TrendStrength.PROVISIONAL
+        if provisional
+        else TrendStrength.CONFIRMED
+        if is_allowed
+        else None
+    )
+    state = (
+        RedBarV2State.PROVISIONAL_BULLISH
+        if provisional
+        else RedBarV2State.CONFIRMED_BULLISH
+        if is_allowed
+        else RedBarV2State.SIGNAL_WAITING
+    )
+    admission_outcome = (
+        AdmissionOutcome.ALLOWED
+        if allowed is True
+        else AdmissionOutcome.REJECTED
+        if allowed is False
+        else AdmissionOutcome.WAITING
+    )
     decision = RedBarV2Decision(
         strategy_id="RED_BAR_V2",
         strategy_version="2.0.0",
         evaluation_timestamp=EVALUATED_AT,
-        evaluation_timeframe="5m" if provisional else "1m",
-        entry_type=entry_type if allowed else None,
+        evaluation_timeframe="5m" if is_reversal else "1m",
+        entry_type=entry_type if is_allowed else None,
         previous_state=RedBarV2State.REFERENCE_READY,
         current_state=state,
         direction=direction,
         option_side=option_side,
         trend_strength=strength,
         reference=reference,
-        rsi=RsiEvidence(62.0, 55.0, 45.0, True, False) if allowed else None,
-        futures_vwap=FuturesVwapEvidence(FUTURES, 24815.0, 24800.0, 150000.0, True, False, True) if allowed else None,
-        midpoint=MidpointEvidence(24790.0 if provisional else 24810.0, 24800.0, not provisional, provisional) if allowed else None,
+        rsi=RsiEvidence(62.0, 55.0, 45.0, True, False) if is_allowed else None,
+        futures_vwap=FuturesVwapEvidence(
+            FUTURES,
+            24815.0,
+            24800.0,
+            150000.0,
+            True,
+            False,
+            True,
+        ) if is_allowed else None,
+        midpoint=MidpointEvidence(
+            24790.0 if provisional else 24810.0,
+            24800.0,
+            not provisional,
+            provisional,
+        ) if is_allowed else None,
         context_status=ContextStatus.FRESH,
-        admission_outcome=AdmissionOutcome.ALLOWED if allowed else AdmissionOutcome.REJECTED,
-        admission_code="REVERSAL_CONTEXT_ALIGNED_FLAT" if provisional else "INITIAL_BULLISH_ALIGNMENT" if allowed else "ACTIVE_TRADE_BLOCK",
+        admission_outcome=admission_outcome,
+        admission_code=(
+            "REVERSAL_CONTEXT_ALIGNED_FLAT"
+            if is_reversal
+            else "INITIAL_BULLISH_ALIGNMENT"
+            if is_allowed
+            else "ACTIVE_TRADE_BLOCK"
+            if allowed is False
+            else "WAITING"
+        ),
         admission_reason="Fixture canonical decision",
     )
     bundle = create_red_bar_v2_signal_bundle(
         instrument_key=UNDERLYING,
         decision=decision,
         created_at=RESOLVED_AT,
-    ) if allowed else None
+    ) if is_allowed else None
     resolution = RedBarV2CanonicalResolution(
         section_1=readiness,
         section_2=decision,
@@ -113,9 +160,9 @@ def make_resolution(*, allowed: bool = True, provisional: bool = False):
         legacy_option_side=option_side.value if option_side else None,
         canonical_option_side=option_side,
         legacy_allowed=allowed,
-        canonical_allowed=allowed,
-        legacy_entry_type=entry_type.value if allowed else None,
-        canonical_entry_type=entry_type if allowed else None,
+        canonical_allowed=is_allowed,
+        legacy_entry_type=entry_type.value if is_allowed else None,
+        canonical_entry_type=entry_type if is_allowed else None,
         legacy_timeframe=decision.evaluation_timeframe,
         canonical_timeframe=decision.evaluation_timeframe,
         legacy_trend_strength=strength.value if strength else None,
