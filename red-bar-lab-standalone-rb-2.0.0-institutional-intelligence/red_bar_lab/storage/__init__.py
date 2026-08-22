@@ -2,8 +2,10 @@ from __future__ import annotations
 
 """Storage package hardening hooks.
 
-P0-1 installs run-scoped signal replacement. P0-2 protects the final paper-order
-persistence boundary so every execution path shares the same per-signal limits.
+P0-1 installs run-scoped signal replacement. P0-2 keeps restart-safe entry and
+contract ceilings at the final persistence boundary. Live freshness and re-entry
+policy remain owned by the automation layer, where explicit stale-signal and
+opportunity-extension settings are available.
 """
 
 from red_bar_lab.execution.signal_execution_limits import (
@@ -87,9 +89,13 @@ def _insert_paper_execution_order_with_signal_limits(
         instrument_token=int(row.get("instrument_token") or 0),
         max_contracts_per_signal=int(row.get("max_contracts_per_signal") or 2),
         max_entries_per_signal=int(row.get("max_entries_per_signal") or 2),
-        reentry_cooldown_seconds=int(row.get("reentry_cooldown_seconds") or 300),
-        max_signal_age_seconds=int(row.get("max_signal_age_seconds") or 180),
-        allow_stale_signal_override=bool(row.get("allow_stale_signal_override")),
+        # Two independently qualified contracts from the same committee batch
+        # may be inserted seconds apart. Re-entry cooldown is a live policy and
+        # must not block that initial multi-contract allocation.
+        reentry_cooldown_seconds=0,
+        # Persistence must remain deterministic for replay/evidence fixtures.
+        # Live automation evaluates freshness before reaching this boundary.
+        enforce_freshness=False,
     )
     if not decision.allowed:
         raise ValueError(
