@@ -8,6 +8,10 @@ from red_bar_lab.intelligence.red_bar_v2_futures_context import (
 )
 from red_bar_lab.services.red_bar_v2_canonical import (
     LegacyV2MarketMetadata,
+    PersistenceOutcome,
+    RedBarV2CanonicalPersistenceService,
+    SQLiteRedBarV2CanonicalRepository,
+    compare_legacy_to_canonical,
     resolve_red_bar_v2_canonical,
 )
 from red_bar_lab.services.red_bar_v2_futures_historical_replay import (
@@ -60,7 +64,7 @@ def _parse_timestamp(value: object) -> datetime:
     return parsed
 
 
-def test_real_futures_replay_emits_exact_canonical_event_time_evidence():
+def test_real_futures_replay_emits_and_persists_exact_canonical_event_time_evidence(tmp_path):
     index_candles, futures_candles = _market_frames()
     replay, health = replay_red_bar_v2_day_with_futures_vwap(
         index_candles,
@@ -146,3 +150,27 @@ def test_real_futures_replay_emits_exact_canonical_event_time_evidence():
     assert resolution.section_3.decision.futures_vwap.instrument_key == FUTURES
     assert resolution.section_3.decision.futures_vwap.comparison_price == snapshot.vwap_comparison_price
     assert resolution.section_3.decision.futures_vwap.volume == snapshot.vwap_source_volume
+
+    parity = compare_legacy_to_canonical(
+        legacy_event=event,
+        canonical_decision=resolution.section_2,
+        legacy_timeframe=timeframe,
+    )
+    assert parity.matches is True
+
+    path = tmp_path / "red_bar.db"
+    repository = SQLiteRedBarV2CanonicalRepository(path)
+    persisted = RedBarV2CanonicalPersistenceService(repository).persist(
+        resolution=resolution,
+        parity=parity,
+        instrument_key=UNDERLYING,
+    )
+    assert persisted.outcome is PersistenceOutcome.INSERTED
+
+    restarted = SQLiteRedBarV2CanonicalRepository(path)
+    stored = restarted.get_resolution(persisted.resolution_id)
+    assert stored is not None
+    assert stored.section_1 == resolution.section_1
+    assert stored.section_2 == resolution.section_2
+    assert stored.section_3 == resolution.section_3
+    assert stored.parity == parity
