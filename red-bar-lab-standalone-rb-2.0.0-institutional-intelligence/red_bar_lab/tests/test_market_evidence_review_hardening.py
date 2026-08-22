@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+import sqlite3
 
 from red_bar_lab.services.authoritative_market_evidence import (
     completed_bar_timestamps,
@@ -82,6 +83,7 @@ def test_bundle_identity_is_source_observation_not_collection_cycle(tmp_path: Pa
             **base,
             "as_of_timestamp": "2026-08-22T09:22:00+00:00",
             "futures_collection_timestamp": "2026-08-22T09:22:00+00:00",
+            "observed_direction": "BEARISH",
         },
     )
 
@@ -92,5 +94,11 @@ def test_bundle_identity_is_source_observation_not_collection_cycle(tmp_path: Pa
 
     assert first_id == second_id
     assert latest is not None
-    assert latest["as_of_timestamp"] == "2026-08-22T09:22:00+00:00"
-    assert latest["futures_collection_timestamp"] == "2026-08-22T09:22:00+00:00"
+    assert latest["as_of_timestamp"] == "2026-08-22T09:21:00+00:00"
+    assert latest["futures_collection_timestamp"] == "2026-08-22T09:21:00+00:00"
+    assert latest["observed_direction"] == "BULLISH"
+    with sqlite3.connect(database_path) as connection:
+        count = connection.execute(
+            "SELECT COUNT(*) FROM market_evidence_bundles"
+        ).fetchone()[0]
+    assert count == 1
