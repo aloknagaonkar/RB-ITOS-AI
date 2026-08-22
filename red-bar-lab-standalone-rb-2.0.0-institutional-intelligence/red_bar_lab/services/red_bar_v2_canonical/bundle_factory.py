@@ -20,7 +20,7 @@ def create_red_bar_v2_signal_bundle(
     instrument_key: str,
     decision: RedBarV2Decision,
     created_at: datetime,
-    schema_version: str = "1.0",
+    schema_version: str = "1.1",
 ) -> RedBarV2SignalBundle | None:
     """Create a deterministic bundle using the underlying strategy instrument."""
     if decision.admission_outcome is not AdmissionOutcome.ALLOWED:
