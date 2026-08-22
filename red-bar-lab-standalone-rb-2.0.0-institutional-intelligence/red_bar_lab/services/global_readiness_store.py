@@ -49,7 +49,11 @@ def _payload(value: object) -> dict[str, Any]:
         return asdict(value)
     if isinstance(value, Mapping):
         return dict(value)
-    return {key: getattr(value, key) for key in dir(value) if not key.startswith('_') and not callable(getattr(value, key, None))}
+    return {
+        key: getattr(value, key)
+        for key in dir(value)
+        if not key.startswith("_") and not callable(getattr(value, key, None))
+    }
 
 
 def _normalize_timestamp(value: datetime | str) -> str:
@@ -88,8 +92,11 @@ def persist_global_readiness_snapshot(
         "trade_outcome": trade_outcome,
     }
     values = (
-        observed, str(underlying_name), str(instrument_key),
-        str(data.get("status") or "UNAVAILABLE"), str(data.get("reason") or ""),
+        observed,
+        str(underlying_name),
+        str(instrument_key),
+        str(data.get("status") or "UNAVAILABLE"),
+        str(data.get("reason") or ""),
         str(data.get("underlying_status") or "UNAVAILABLE"),
         str(data.get("option_chain_status") or "UNAVAILABLE"),
         str(data.get("option_quote_status") or "UNAVAILABLE"),
@@ -102,8 +109,13 @@ def persist_global_readiness_snapshot(
         json.dumps(list(data.get("blocking_reasons") or ())),
         json.dumps(list(data.get("advisory_reasons") or ())),
         json.dumps(list(data.get("execution_reasons") or ())),
-        int(signals_seen), int(signals_scored), int(orders_opened), int(orders_skipped),
-        trade_outcome, "OBSERVATIONAL_ONLY", json.dumps(payload, default=str, sort_keys=True),
+        int(signals_seen),
+        int(signals_scored),
+        int(orders_opened),
+        int(orders_skipped),
+        trade_outcome,
+        "OBSERVATIONAL_ONLY",
+        json.dumps(payload, default=str, sort_keys=True),
     )
     with sqlite3.connect(path) as connection:
         connection.executescript(_SCHEMA)
@@ -143,27 +155,41 @@ def read_global_readiness_snapshots(
     underlying_name: str | None = None,
     limit: int = 500,
 ) -> list[dict[str, Any]]:
+    """Read readiness history without creating tables or indexes."""
     path = Path(database_path)
     if not path.exists():
         return []
-    with sqlite3.connect(path) as connection:
-        connection.row_factory = sqlite3.Row
-        connection.executescript(_SCHEMA)
-        if underlying_name:
-            rows = connection.execute(
-                "SELECT * FROM global_market_readiness_snapshots WHERE underlying_name=? ORDER BY julianday(observed_at) DESC, observed_at DESC LIMIT ?",
-                (underlying_name, max(1, int(limit))),
-            ).fetchall()
-        else:
-            rows = connection.execute(
-                "SELECT * FROM global_market_readiness_snapshots ORDER BY julianday(observed_at) DESC, observed_at DESC LIMIT ?",
-                (max(1, int(limit)),),
-            ).fetchall()
+    try:
+        with sqlite3.connect(path) as connection:
+            connection.row_factory = sqlite3.Row
+            if underlying_name:
+                rows = connection.execute(
+                    "SELECT * FROM global_market_readiness_snapshots "
+                    "WHERE underlying_name=? "
+                    "ORDER BY julianday(observed_at) DESC, observed_at DESC LIMIT ?",
+                    (underlying_name, max(1, int(limit))),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT * FROM global_market_readiness_snapshots "
+                    "ORDER BY julianday(observed_at) DESC, observed_at DESC LIMIT ?",
+                    (max(1, int(limit)),),
+                ).fetchall()
+    except sqlite3.OperationalError as exc:
+        if "no such table" in str(exc).lower():
+            return []
+        raise
     result = []
     for row in rows:
         item = dict(row)
-        item["blocking_reasons"] = json.loads(item.pop("blocking_reasons_json") or "[]")
-        item["advisory_reasons"] = json.loads(item.pop("advisory_reasons_json") or "[]")
-        item["execution_reasons"] = json.loads(item.pop("execution_reasons_json") or "[]")
+        item["blocking_reasons"] = json.loads(
+            item.pop("blocking_reasons_json") or "[]"
+        )
+        item["advisory_reasons"] = json.loads(
+            item.pop("advisory_reasons_json") or "[]"
+        )
+        item["execution_reasons"] = json.loads(
+            item.pop("execution_reasons_json") or "[]"
+        )
         result.append(item)
     return result
