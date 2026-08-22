@@ -34,7 +34,7 @@ def _participation_table_rows(rows):
                 "Change in OI": _display_number(item.get("oi_change"), 0),
                 "Delta": _display_number(item.get("delta")),
                 "RSI": _display_number(item.get("option_rsi"), 1),
-                "IV": _display_number(item.get("iv"), 2),
+                "IV (required; 1–150)": _display_number(item.get("iv"), 2),
                 "State": item.get("participation_state") or "INSUFFICIENT",
                 "Eligibility": item.get("contract_eligibility") or "—",
             }
@@ -120,6 +120,10 @@ def _render_authoritative_page(settings, underlying_name, bundle, readiness_rows
     )
     participation = summarize_option_participation(participation_rows)
     st.markdown("### ATM ±4 option participation")
+    st.caption(
+        "Contract-quality rule: premium, volume, OI, bid, ask and IV must be "
+        "available; bid/ask spread must be at most 3%; IV must be between 1 and 150."
+    )
     if participation_rows:
         p1, p2, p3, p4 = st.columns(4)
         p1.metric(
@@ -176,13 +180,6 @@ def render_page(
 ) -> None:
     st.subheader("Trade Evidence & Market Readiness")
 
-    # Authoritative tab section contract retained at the page entrypoint:
-    # - Authoritative market conclusion
-    # - Authoritative evidence diagnostics
-    # - Persisted evidence bundle
-    # - Legacy global readiness diagnostics
-    # Rendering is delegated below, but these remain the required read-only
-    # sections of the authoritative workspace.
     bundle = read_latest_market_evidence_bundle(
         settings.database_path,
         underlying_name=underlying_name,
@@ -196,7 +193,7 @@ def render_page(
     authoritative_tab, legacy_tab = st.tabs(
         [
             "Authoritative Evidence",
-            "Legacy Full Trade Evidence",
+            "Legacy Diagnostics — Non-authoritative",
         ]
     )
 
@@ -209,6 +206,12 @@ def render_page(
         )
 
     with legacy_tab:
+        st.error(
+            "This legacy workspace may calculate a different historical or "
+            "independent bias. It is retained only for diagnostics and must not "
+            "be used as a competing recommendation. The Authoritative Evidence "
+            "tab is the sole market conclusion."
+        )
         render_legacy_page(
             settings,
             layout,
