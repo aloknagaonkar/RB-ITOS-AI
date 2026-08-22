@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from red_bar_lab.execution.automation import RedBarPaperAutomationService
@@ -105,7 +106,7 @@ class _AdmissionDatabaseProxy:
         if callable(insert_state) and signal_id:
             insert_state(
                 {
-                    "event_id": f"LIVE-ADMISSION-{signal_id}",
+                    "event_id": f"EVT-{uuid4().hex[:14].upper()}",
                     "signal_id": signal_id,
                     "order_id": None,
                     "state": "LIVE_ADMISSION_BLOCKED",
