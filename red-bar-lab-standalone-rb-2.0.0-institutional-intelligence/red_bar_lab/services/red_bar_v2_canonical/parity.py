@@ -1,27 +1,13 @@
 from __future__ import annotations
 
-from typing import Mapping
+from red_bar_lab.domain.red_bar_v2 import AdmissionOutcome, Direction, RedBarV2Decision
 
-from red_bar_lab.domain.red_bar_v2 import AdmissionOutcome, Direction, OptionSide, RedBarV2Decision
-
+from .event_access import event_bool, event_conditions, event_datetime, event_text
 from .models import RedBarV2ParityResult
 
 
 def _value(value: object) -> object:
     return getattr(value, "value", value)
-
-
-def _field(source: object | None, name: str, default: object = None) -> object:
-    if source is None:
-        return default
-    if isinstance(source, Mapping):
-        return source.get(name, default)
-    return getattr(source, name, default)
-
-
-def _text(source: object | None, name: str) -> str | None:
-    value = _value(_field(source, name))
-    return value if isinstance(value, str) else None
 
 
 def compare_legacy_to_canonical(
@@ -30,20 +16,18 @@ def compare_legacy_to_canonical(
     canonical_decision: RedBarV2Decision,
     legacy_timeframe: str | None = None,
 ) -> RedBarV2ParityResult:
-    """Compare outcomes without changing either execution path."""
-    legacy_direction = _text(legacy_event, "direction")
-    legacy_option_side = _text(legacy_event, "option_side")
-    legacy_entry_type = _text(legacy_event, "entry_type")
-    legacy_strength = _text(legacy_event, "trend_strength")
-    legacy_code = _text(legacy_event, "admission_code")
-    raw_allowed = _field(legacy_event, "candidate_allowed")
-    legacy_allowed = raw_allowed if isinstance(raw_allowed, bool) else None
+    """Compare the real nested ReplayEvent contract without affecting execution."""
+    legacy_direction = event_text(legacy_event, "direction")
+    legacy_option_side = event_text(legacy_event, "option_side")
+    legacy_entry_type = event_text(legacy_event, "entry_type")
+    legacy_strength = event_text(legacy_event, "trend_strength")
+    legacy_code = event_text(legacy_event, "admission_code")
+    legacy_allowed = event_bool(legacy_event, "candidate_allowed")
 
     mismatches: list[str] = []
 
     def compare(name: str, legacy: object, canonical: object) -> None:
-        canonical_value = _value(canonical)
-        if legacy != canonical_value:
+        if legacy != _value(canonical):
             mismatches.append(name)
 
     compare("direction", legacy_direction, canonical_decision.direction)
@@ -60,53 +44,38 @@ def compare_legacy_to_canonical(
     if legacy_timeframe is not None:
         compare("timeframe", legacy_timeframe, canonical_decision.evaluation_timeframe)
 
-    legacy_reference_timestamp = _text(legacy_event, "reference_timestamp")
-    if legacy_reference_timestamp is not None and canonical_decision.reference is not None:
-        if legacy_reference_timestamp != canonical_decision.reference.timestamp.isoformat():
-            mismatches.append("reference_timestamp")
+    legacy_reference_timestamp = event_datetime(legacy_event, "reference_timestamp")
+    canonical_reference_timestamp = (
+        canonical_decision.reference.timestamp if canonical_decision.reference is not None else None
+    )
+    if legacy_reference_timestamp != canonical_reference_timestamp:
+        mismatches.append("reference_timestamp")
 
-    legacy_context_timestamp = _text(legacy_event, "context_timestamp")
-    if legacy_context_timestamp is not None:
-        if legacy_context_timestamp != canonical_decision.evaluation_timestamp.isoformat():
-            mismatches.append("evaluation_timestamp")
+    legacy_context_timestamp = event_datetime(legacy_event, "context_timestamp")
+    if legacy_context_timestamp != canonical_decision.evaluation_timestamp:
+        mismatches.append("evaluation_timestamp")
 
-    conditions = _field(legacy_event, "conditions")
-    if isinstance(conditions, Mapping):
-        direction = canonical_decision.direction
-        expected_rsi = None
-        expected_vwap = None
-        expected_midpoint = None
-        if direction is Direction.BULLISH:
-            expected_rsi = canonical_decision.rsi.bullish_aligned if canonical_decision.rsi else None
-            expected_vwap = (
-                canonical_decision.futures_vwap.bullish_aligned
-                if canonical_decision.futures_vwap
-                else None
-            )
-            expected_midpoint = (
-                canonical_decision.midpoint.bullish_aligned
-                if canonical_decision.midpoint
-                else None
-            )
-        elif direction is Direction.BEARISH:
-            expected_rsi = canonical_decision.rsi.bearish_aligned if canonical_decision.rsi else None
-            expected_vwap = (
-                canonical_decision.futures_vwap.bearish_aligned
-                if canonical_decision.futures_vwap
-                else None
-            )
-            expected_midpoint = (
-                canonical_decision.midpoint.bearish_aligned
-                if canonical_decision.midpoint
-                else None
-            )
-        for name, expected in (
-            ("rsi_aligned", expected_rsi),
-            ("vwap_aligned", expected_vwap),
-            ("midpoint_aligned", expected_midpoint),
-        ):
-            legacy_value = conditions.get(name)
-            if isinstance(legacy_value, bool) and expected is not None and legacy_value != expected:
+    conditions = event_conditions(legacy_event)
+    direction = canonical_decision.direction
+    if direction is Direction.BULLISH:
+        expected = {
+            "rsi_aligned": canonical_decision.rsi.bullish_aligned if canonical_decision.rsi else None,
+            "vwap_aligned": canonical_decision.futures_vwap.bullish_aligned if canonical_decision.futures_vwap else None,
+            "midpoint_aligned": canonical_decision.midpoint.bullish_aligned if canonical_decision.midpoint else None,
+        }
+    elif direction is Direction.BEARISH:
+        expected = {
+            "rsi_aligned": canonical_decision.rsi.bearish_aligned if canonical_decision.rsi else None,
+            "vwap_aligned": canonical_decision.futures_vwap.bearish_aligned if canonical_decision.futures_vwap else None,
+            "midpoint_aligned": canonical_decision.midpoint.bearish_aligned if canonical_decision.midpoint else None,
+        }
+    else:
+        expected = {"rsi_aligned": None, "vwap_aligned": None, "midpoint_aligned": None}
+
+    for name, canonical_value in expected.items():
+        legacy_value = conditions.get(name)
+        if canonical_value is not None:
+            if not isinstance(legacy_value, bool) or legacy_value != canonical_value:
                 mismatches.append(name)
 
     return RedBarV2ParityResult(
