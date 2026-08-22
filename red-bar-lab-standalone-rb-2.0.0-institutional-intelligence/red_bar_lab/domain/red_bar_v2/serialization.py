@@ -47,6 +47,15 @@ def _text(payload: Mapping[str, object], name: str) -> str:
     return value
 
 
+def _optional_text(payload: Mapping[str, object], name: str) -> str | None:
+    value = payload.get(name)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise DomainValidationError(f"{name} must be a non-empty string when present")
+    return value
+
+
 def _bool(payload: Mapping[str, object], name: str) -> bool:
     value = _required(payload, name)
     if not isinstance(value, bool):
@@ -115,10 +124,7 @@ def _reference_from_dict(payload: Mapping[str, object]) -> RedBarV2Reference:
     )
 
 
-def red_bar_v2_resolution_to_dict(
-    resolution: RedBarV2InputReadiness | RedBarV2Decision,
-) -> dict[str, object]:
-    """Serialize a canonical Section 1 or Section 2 resolution."""
+def red_bar_v2_resolution_to_dict(resolution: RedBarV2InputReadiness | RedBarV2Decision) -> dict[str, object]:
     if isinstance(resolution, RedBarV2InputReadiness):
         timestamps = resolution.timestamps
         return {
@@ -254,13 +260,13 @@ def _decision_from_dict(payload: Mapping[str, object]) -> RedBarV2Decision:
 
 
 def red_bar_v2_bundle_to_dict(bundle: RedBarV2SignalBundle) -> dict[str, object]:
-    """Serialize a canonical signal bundle to JSON-compatible primitives."""
     return {
         "schema_version": bundle.schema_version,
         "bundle_id": bundle.bundle_id,
         "signal_id": bundle.signal_id,
         "strategy_id": bundle.strategy_id,
         "strategy_version": bundle.strategy_version,
+        "instrument_key": bundle.instrument_key,
         "trading_date": bundle.trading_date.isoformat(),
         "evaluation_timestamp": bundle.evaluation_timestamp.isoformat(),
         "evaluation_timeframe": bundle.evaluation_timeframe,
@@ -275,7 +281,6 @@ def red_bar_v2_bundle_to_dict(bundle: RedBarV2SignalBundle) -> dict[str, object]
 
 
 def red_bar_v2_bundle_from_dict(payload: Mapping[str, object]) -> RedBarV2SignalBundle:
-    """Deserialize and validate a canonical signal bundle."""
     schema_version = _text(payload, "schema_version")
     if schema_version not in SUPPORTED_SCHEMA_VERSIONS:
         raise UnsupportedSchemaVersionError(f"unsupported Red Bar V2 schema version: {schema_version}")
@@ -296,4 +301,5 @@ def red_bar_v2_bundle_from_dict(payload: Mapping[str, object]) -> RedBarV2Signal
         idempotency_key=_text(payload, "idempotency_key"),
         lifecycle_status=_enum(BundleLifecycleStatus, _required(payload, "lifecycle_status"), "lifecycle_status"),
         created_at=_datetime(_required(payload, "created_at"), "created_at"),
+        instrument_key=_optional_text(payload, "instrument_key"),
     )
