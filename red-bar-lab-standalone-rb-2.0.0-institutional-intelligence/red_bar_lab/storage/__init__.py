@@ -3,11 +3,13 @@ from __future__ import annotations
 """Storage package hardening hooks.
 
 P0-1 installs run-scoped signal replacement. P0-2 keeps restart-safe entry and
-contract ceilings at the final persistence boundary. Live freshness and re-entry
-policy remain owned by the automation layer, where explicit stale-signal and
-opportunity-extension settings are available.
+contract ceilings at the final persistence boundary. P0-3 exposes truthful score
+names to all readers while retaining legacy database columns for compatibility.
 """
 
+from red_bar_lab.execution.execution_score_contract import (
+    with_truthful_execution_scores,
+)
 from red_bar_lab.execution.signal_execution_limits import (
     evaluate_signal_execution_limits,
 )
@@ -89,12 +91,7 @@ def _insert_paper_execution_order_with_signal_limits(
         instrument_token=int(row.get("instrument_token") or 0),
         max_contracts_per_signal=int(row.get("max_contracts_per_signal") or 2),
         max_entries_per_signal=int(row.get("max_entries_per_signal") or 2),
-        # Two independently qualified contracts from the same committee batch
-        # may be inserted seconds apart. Re-entry cooldown is a live policy and
-        # must not block that initial multi-contract allocation.
         reentry_cooldown_seconds=0,
-        # Persistence must remain deterministic for replay/evidence fixtures.
-        # Live automation evaluates freshness before reaching this boundary.
         enforce_freshness=False,
     )
     if not decision.allowed:
@@ -108,9 +105,33 @@ def _insert_paper_execution_order_with_signal_limits(
     _original_insert_paper_execution_order(self, row)
 
 
+_original_read_institutional = (
+    RedBarDatabase.read_institutional_execution_evaluations
+)
+_original_read_execution_queue = RedBarDatabase.read_execution_queue
+
+
+def _read_institutional_with_truthful_scores(self: RedBarDatabase, **kwargs):
+    return [
+        with_truthful_execution_scores(row)
+        for row in _original_read_institutional(self, **kwargs)
+    ]
+
+
+def _read_execution_queue_with_truthful_scores(self: RedBarDatabase, **kwargs):
+    return [
+        with_truthful_execution_scores(row)
+        for row in _original_read_execution_queue(self, **kwargs)
+    ]
+
+
 RedBarDatabase.replace_signal_attempts = _replace_signal_attempts_run_scoped
 RedBarDatabase.insert_paper_execution_order = (
     _insert_paper_execution_order_with_signal_limits
 )
+RedBarDatabase.read_institutional_execution_evaluations = (
+    _read_institutional_with_truthful_scores
+)
+RedBarDatabase.read_execution_queue = _read_execution_queue_with_truthful_scores
 
 __all__ = ["RedBarDatabase"]
