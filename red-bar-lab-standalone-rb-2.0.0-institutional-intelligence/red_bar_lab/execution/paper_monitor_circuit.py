@@ -18,9 +18,10 @@ class CircuitDecision:
 class PaperMonitorCircuitBreaker:
     """Fail closed for new entries while preserving position-management cycles.
 
-    State is persisted when explicitly configured. In the real monitor process,
-    the required Upstox token is present, so a default artifact path is used to
-    survive restarts without adding file writes to ordinary library imports.
+    Persistence is opt-in through ``state_path`` or the dedicated
+    ``RED_BAR_PAPER_MONITOR_CIRCUIT_STATE`` environment variable. Ambient broker
+    credentials must never cause ordinary constructors or tests to inherit stale
+    runtime state from a shared artifact file.
     """
 
     def __init__(
@@ -38,9 +39,6 @@ class PaperMonitorCircuitBreaker:
             int(maximum_delay_seconds),
         )
         configured = state_path or os.getenv("RED_BAR_PAPER_MONITOR_CIRCUIT_STATE")
-        if not configured and os.getenv("UPSTOX_ACCESS_TOKEN"):
-            artifacts_root = Path(os.getenv("RED_BAR_ARTIFACTS_ROOT", "artifacts"))
-            configured = artifacts_root / "paper_monitor_circuit.json"
         self.state_path = Path(configured) if configured else None
         self.consecutive_failures = 0
         self._open = False
