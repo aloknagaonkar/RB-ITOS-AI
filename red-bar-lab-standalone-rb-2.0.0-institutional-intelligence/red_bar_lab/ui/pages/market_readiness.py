@@ -41,6 +41,37 @@ def _participation_table_rows(rows):
     return result
 
 
+def _render_monitor_status(database) -> None:
+    st.markdown("### Paper monitor safety state")
+    try:
+        status = database.read_paper_monitor_status("PAPER-MONITOR") or {}
+    except TypeError:
+        status = database.read_paper_monitor_status() or {}
+    except Exception:
+        status = {}
+    if not status:
+        st.info("No persisted paper-monitor status is available.")
+        return
+    columns = st.columns(4)
+    columns[0].metric("Monitor", status.get("status") or "UNKNOWN")
+    columns[1].metric("Runtime state", status.get("current_state") or "UNKNOWN")
+    columns[2].metric("Decision", status.get("last_decision") or "UNKNOWN")
+    columns[3].metric("Heartbeat", status.get("heartbeat_at") or "—")
+    if status.get("current_state") == "POSITION_MANAGEMENT_ONLY":
+        st.error(
+            "New paper entries are suspended. Existing-position management and "
+            "confirmed reversal exits remain active."
+        )
+    elif status.get("status") == "DEGRADED":
+        st.warning("The paper monitor is degraded and entry safety controls are active.")
+    else:
+        st.success("The paper monitor is running without an active entry suspension.")
+    if status.get("last_reason"):
+        st.caption(f"Reason: {status['last_reason']}")
+    if status.get("last_error"):
+        st.caption(f"Last error: {status['last_error']}")
+
+
 def _render_authoritative_page(settings, underlying_name, bundle, readiness_rows) -> None:
     st.caption(
         "Read-only consumer of the single authoritative Market at a Glance "
@@ -146,12 +177,8 @@ def render_page(
     interval,
 ) -> None:
     st.subheader("Trade Evidence & Market Readiness")
+    _render_monitor_status(database)
 
-    # Protected authoritative workspace sections:
-    # - Authoritative market conclusion
-    # - Authoritative evidence diagnostics
-    # - Persisted evidence bundle
-    # - Legacy global readiness diagnostics
     bundle = read_latest_market_evidence_bundle(
         settings.database_path,
         underlying_name=underlying_name,
