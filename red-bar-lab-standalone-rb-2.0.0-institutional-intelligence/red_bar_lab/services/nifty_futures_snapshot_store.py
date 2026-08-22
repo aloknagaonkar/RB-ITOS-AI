@@ -102,7 +102,6 @@ def persist_nifty_futures_snapshot(
     strength,
     readiness,
 ) -> int:
-    """Persist one read-only futures diagnostic snapshot."""
     path = Path(database_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     observed = _normalize_timestamp(observed_at)
@@ -188,29 +187,41 @@ def read_nifty_futures_snapshots(
     underlying_name: str = "NIFTY 50",
     limit: int = 200,
 ) -> list[dict[str, Any]]:
+    """Read futures diagnostics without creating or altering schema."""
     path = Path(database_path)
     if not path.exists():
         return []
-    with sqlite3.connect(path) as connection:
-        connection.row_factory = sqlite3.Row
-        connection.executescript(_SCHEMA)
-        _ensure_columns(connection)
-        rows = connection.execute(
-            """SELECT * FROM nifty_futures_diagnostic_snapshots
-               WHERE underlying_name = ?
-               ORDER BY julianday(observed_at) DESC,
-                        observed_at DESC
-               LIMIT ?""",
-            (underlying_name, max(1, int(limit))),
-        ).fetchall()
+    try:
+        with sqlite3.connect(path) as connection:
+            connection.row_factory = sqlite3.Row
+            columns = {
+                row[1]
+                for row in connection.execute(
+                    "PRAGMA table_info(nifty_futures_diagnostic_snapshots)"
+                ).fetchall()
+            }
+            if not columns:
+                return []
+            rows = connection.execute(
+                """SELECT * FROM nifty_futures_diagnostic_snapshots
+                   WHERE underlying_name = ?
+                   ORDER BY julianday(observed_at) DESC,
+                            observed_at DESC
+                   LIMIT ?""",
+                (underlying_name, max(1, int(limit))),
+            ).fetchall()
+    except sqlite3.OperationalError as exc:
+        if "no such table" in str(exc).lower():
+            return []
+        raise
     result = []
     for row in rows:
         item = dict(row)
         item["blocking_reasons"] = json.loads(
-            item.pop("blocking_reasons_json") or "[]"
+            item.pop("blocking_reasons_json", "[]") or "[]"
         )
         item["advisory_reasons"] = json.loads(
-            item.pop("advisory_reasons_json") or "[]"
+            item.pop("advisory_reasons_json", "[]") or "[]"
         )
         try:
             payload = json.loads(item.get("payload_json") or "{}")
