@@ -42,17 +42,13 @@ def _participation_table_rows(rows):
     return result
 
 
-def _render_authoritative_page(settings, underlying_name) -> None:
+def _render_authoritative_page(settings, underlying_name, bundle) -> None:
     st.caption(
         "Read-only consumer of the single authoritative Market at a Glance "
         "evidence bundle. This tab does not recalculate an independent market "
         "direction."
     )
 
-    bundle = read_latest_market_evidence_bundle(
-        settings.database_path,
-        underlying_name=underlying_name,
-    )
     if not bundle:
         st.warning(
             "No authoritative market evidence bundle is available yet. "
@@ -184,6 +180,15 @@ def render_page(
     interval,
 ) -> None:
     st.subheader("Trade Evidence & Market Readiness")
+
+    # Keep the authoritative persisted-bundle read at the page entrypoint. This
+    # makes the page's primary data authority explicit even though rendering is
+    # split into separate tabs.
+    bundle = read_latest_market_evidence_bundle(
+        settings.database_path,
+        underlying_name=underlying_name,
+    )
+
     authoritative_tab, legacy_tab = st.tabs(
         [
             "Authoritative Evidence",
@@ -192,7 +197,7 @@ def render_page(
     )
 
     with authoritative_tab:
-        _render_authoritative_page(settings, underlying_name)
+        _render_authoritative_page(settings, underlying_name, bundle)
 
     with legacy_tab:
         render_legacy_page(
