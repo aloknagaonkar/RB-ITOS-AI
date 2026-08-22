@@ -12,6 +12,7 @@ from red_bar_lab.domain.red_bar_v2 import (
     RedBarV2State,
     TrendStrength,
 )
+from red_bar_lab.intelligence.red_bar_v2_futures_context import RedBarV2VwapSourceHealth
 from red_bar_lab.services.red_bar_v2_canonical import (
     LegacyMappingError,
     LegacyV2DecisionEvidence,
@@ -38,8 +39,29 @@ def replay(*, with_reference=True, instrument_key=UNDERLYING):
     )
 
 
-def health(*, status="READY", futures_key=FUTURES):
-    return SimpleNamespace(status=status, futures_instrument_key=futures_key)
+def health(
+    *,
+    status="READY",
+    price_key=UNDERLYING,
+    rsi_key=UNDERLYING,
+    futures_key=FUTURES,
+):
+    return RedBarV2VwapSourceHealth(
+        status=status,
+        reason="FULL_TIMESTAMP_ALIGNMENT" if status == "READY" else "BLOCKED",
+        price_source_instrument=price_key,
+        rsi_source_instrument=rsi_key,
+        vwap_source_instrument=futures_key,
+        timeframe="1M",
+        index_rows=50,
+        futures_rows=50,
+        aligned_rows=50,
+        alignment_coverage_pct=100.0,
+        positive_volume_rows=50,
+        index_timestamp=EVALUATED_AT,
+        futures_timestamp=EVALUATED_AT,
+        last_aligned_timestamp=EVALUATED_AT,
+    )
 
 
 def metadata(*, status=ContextStatus.FRESH, with_reference=True):
@@ -139,7 +161,7 @@ def test_section_one_uses_replay_and_health_authority():
     assert readiness(status=ContextStatus.MISALIGNED).outcome is RedBarV2Section1Outcome.SESSION_MISALIGNED
 
     unavailable = build_canonical_input_readiness(
-        replay=replay(), health=health(status="NOT_READY"), market_metadata=metadata()
+        replay=replay(), health=health(status="BLOCKED"), market_metadata=metadata()
     )
     assert unavailable.outcome is RedBarV2Section1Outcome.VWAP_SOURCE_NOT_READY
 
@@ -149,7 +171,15 @@ def test_section_one_rejects_authoritative_disagreement():
         build_canonical_input_readiness(
             replay=replay(instrument_key="OTHER"), health=health(), market_metadata=metadata()
         )
-    with pytest.raises(LegacyMappingError, match="futures instrument"):
+    with pytest.raises(LegacyMappingError, match="price source instrument"):
+        build_canonical_input_readiness(
+            replay=replay(), health=health(price_key="OTHER"), market_metadata=metadata()
+        )
+    with pytest.raises(LegacyMappingError, match="RSI source instrument"):
+        build_canonical_input_readiness(
+            replay=replay(), health=health(rsi_key="OTHER"), market_metadata=metadata()
+        )
+    with pytest.raises(LegacyMappingError, match="VWAP source instrument"):
         build_canonical_input_readiness(
             replay=replay(), health=health(futures_key="OTHER"), market_metadata=metadata()
         )
