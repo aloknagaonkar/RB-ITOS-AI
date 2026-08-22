@@ -12,7 +12,7 @@ from red_bar_lab.execution.red_bar_v2_admission_policy import (
     evaluate_candidate_admission,
 )
 from red_bar_lab.execution.trade_state_observer import observe_trade_state
-from red_bar_lab.intelligence.market_context import MarketIndicatorSnapshot, build_latest_snapshot
+from red_bar_lab.intelligence.market_context import build_latest_snapshot
 from red_bar_lab.strategy.red_bar_v2 import (
     RedBarV2DirectionDecision,
     RedBarV2State,
@@ -72,7 +72,11 @@ def _normalise(frame: pd.DataFrame) -> pd.DataFrame:
     return data.sort_index()[required].copy()
 
 
-def _trade_row(trade_id: str, decision: CandidateAdmissionDecision, timestamp: datetime) -> dict[str, object]:
+def _trade_row(
+    trade_id: str,
+    decision: CandidateAdmissionDecision,
+    timestamp: datetime,
+) -> dict[str, object]:
     return {
         "trade_id": trade_id,
         "instrument_key": decision.conditions.get("instrument_key"),
@@ -83,7 +87,11 @@ def _trade_row(trade_id: str, decision: CandidateAdmissionDecision, timestamp: d
     }
 
 
-def _event_is_due(decision: RedBarV2DirectionDecision, evaluation_time: pd.Timestamp) -> bool:
+def _event_is_due(
+    decision: RedBarV2DirectionDecision,
+    evaluation_time: pd.Timestamp,
+) -> bool:
+    """Return True only when the historical event is observable by this tick."""
     if decision.context_timestamp is None:
         return False
     event_time = pd.Timestamp(decision.context_timestamp)
@@ -94,50 +102,20 @@ def _event_is_due(decision: RedBarV2DirectionDecision, evaluation_time: pd.Times
     return event_time <= evaluation_time
 
 
-def _decision_evidence_details(
-    *,
-    decision: RedBarV2DirectionDecision,
-    reference: object,
-    context: MarketIndicatorSnapshot,
-    underlying_instrument_key: str,
-    futures_instrument_key: str,
-) -> dict[str, object]:
-    """Expose values already used by the frozen calculation; do not recalculate."""
-    return {
-        "underlying_instrument_key": underlying_instrument_key,
-        "futures_instrument_key": futures_instrument_key,
-        "evaluation_timeframe": "1m" if context.timeframe == "1M" else "5m",
-        "index_close": float(decision.close_price),
-        "rsi_value": float(decision.rsi_value),
-        "bullish_rsi_threshold": 55.0,
-        "bearish_rsi_threshold": 45.0,
-        "futures_comparison_price": float(context.candle_close),
-        "futures_vwap": float(decision.vwap_value),
-        "futures_volume": float(context.candle_volume),
-        "futures_fresh": bool(decision.context_fresh),
-        "index_context_timestamp": context.candle_timestamp.isoformat(),
-        "futures_source_timestamp": context.candle_timestamp.isoformat(),
-        "reference_id": (
-            f"RBV2-REF-{reference.trading_date}-"
-            f"{reference.reference_timestamp.isoformat()}"
-        ),
-        "reference_high": float(reference.reference_high),
-        "reference_low": float(reference.reference_low),
-        "reference_midpoint": float(reference.midpoint),
-        "reference_source": str(reference.level_type),
-    }
-
-
 def replay_red_bar_v2_day(
     candles: pd.DataFrame,
     *,
     instrument_key: str,
     exit_timestamps: Iterable[datetime | pd.Timestamp] = (),
-    futures_instrument_key: str | None = None,
 ) -> RedBarV2ReplayResult:
-    """Replay one session through validated V2 components without changing authority."""
+    """Replay one session through the validated Red Bar V2 components.
+
+    Candidates are treated as immediately active paper trades. Supplied exit
+    timestamps are deterministic lifecycle fixtures; they do not replace or
+    reinterpret the production exit policy. A reversal detected while a trade
+    is active remains pending and is re-evaluated after the trade closes.
+    """
     frame = _normalise(candles)
-    evidence_futures_key = futures_instrument_key or instrument_key
     exits = sorted(pd.Timestamp(value) for value in exit_timestamps)
     events: list[ReplayEvent] = []
     trade_rows: list[dict[str, object]] = []
@@ -146,7 +124,6 @@ def replay_red_bar_v2_day(
     processed_5m_contexts: set[str] = set()
     initial_processed = False
     pending_reversal: RedBarV2DirectionDecision | None = None
-    pending_reversal_context: MarketIndicatorSnapshot | None = None
     current_direction: str | None = None
     provisional_state: RedBarV2State | None = None
     reference = None
@@ -165,42 +142,51 @@ def replay_red_bar_v2_day(
                 active["exit_timestamp"] = exits[exit_index].to_pydatetime()
                 active["updated_at"] = exits[exit_index].to_pydatetime()
                 closed += 1
-                events.append(ReplayEvent(
-                    timestamp=exits[exit_index].to_pydatetime(),
-                    event_type="TRADE_CLOSED",
-                    direction=current_direction,
-                    option_side=str(active.get("option_side") or "") or None,
-                    admission_code=None,
-                    candidate_allowed=None,
-                    trade_id=str(active["trade_id"]),
-                    details={"source": "REPLAY_EXIT_FIXTURE"},
-                ))
+                events.append(
+                    ReplayEvent(
+                        timestamp=exits[exit_index].to_pydatetime(),
+                        event_type="TRADE_CLOSED",
+                        direction=current_direction,
+                        option_side=str(active.get("option_side") or "") or None,
+                        admission_code=None,
+                        candidate_allowed=None,
+                        trade_id=str(active["trade_id"]),
+                        details={"source": "REPLAY_EXIT_FIXTURE"},
+                    )
+                )
             exit_index += 1
 
-        reference = build_red_bar_v2_reference(frame, instrument_key=instrument_key, evaluation_time=evaluation_time)
+        reference = build_red_bar_v2_reference(
+            frame,
+            instrument_key=instrument_key,
+            evaluation_time=evaluation_time,
+        )
         if reference is None:
             continue
+
         trade_state = observe_trade_state(trade_rows, instrument_key=instrument_key)
 
         decision: RedBarV2DirectionDecision | None = None
-        decision_context: MarketIndicatorSnapshot | None = None
         if pending_reversal is not None:
             decision = pending_reversal
-            decision_context = pending_reversal_context
         elif current_direction is None and not initial_processed:
             snapshot_1m = build_latest_snapshot(
-                frame, instrument_key=instrument_key, timeframe="1M",
-                evaluation_time=evaluation_time, expected_timestamp=candle_timestamp,
+                frame,
+                instrument_key=instrument_key,
+                timeframe="1M",
+                evaluation_time=evaluation_time,
+                expected_timestamp=candle_timestamp,
             )
             initial = evaluate_initial_direction(reference, snapshot_1m)
             if _event_is_due(initial, evaluation_time):
                 decision = initial
-                decision_context = snapshot_1m
                 if initial.direction is not None:
                     initial_processed = True
         elif current_direction is not None and evaluation_time.minute % 5 == 0:
             snapshot_5m = build_latest_snapshot(
-                frame, instrument_key=instrument_key, timeframe="5M",
+                frame,
+                instrument_key=instrument_key,
+                timeframe="5M",
                 evaluation_time=evaluation_time,
                 expected_timestamp=evaluation_time - pd.Timedelta(minutes=5),
             )
@@ -209,20 +195,34 @@ def replay_red_bar_v2_day(
                 if key not in processed_5m_contexts:
                     processed_5m_contexts.add(key)
                     reversal = evaluate_reversal_direction(
-                        reference, snapshot_5m, previous_direction=current_direction,
+                        reference,
+                        snapshot_5m,
+                        previous_direction=current_direction,
                     )
-                    if reversal.direction is not None and reversal.direction != current_direction and _event_is_due(reversal, evaluation_time):
+                    if (
+                        reversal.direction is not None
+                        and reversal.direction != current_direction
+                        and _event_is_due(reversal, evaluation_time)
+                    ):
                         decision = reversal
-                        decision_context = snapshot_5m
                         pending_reversal = reversal
-                        pending_reversal_context = snapshot_5m
 
         if decision is not None:
-            admission = evaluate_candidate_admission(decision, trade_state, duplicate_signal=False, reversal_already_consumed=False)
-            duplicate = admission.decision_id in processed_candidates
-            consumed = bool(admission.reversal_event_id and admission.reversal_event_id in consumed_reversals)
             admission = evaluate_candidate_admission(
-                decision, trade_state, duplicate_signal=duplicate,
+                decision,
+                trade_state,
+                duplicate_signal=False,
+                reversal_already_consumed=False,
+            )
+            duplicate = admission.decision_id in processed_candidates
+            consumed = bool(
+                admission.reversal_event_id
+                and admission.reversal_event_id in consumed_reversals
+            )
+            admission = evaluate_candidate_admission(
+                decision,
+                trade_state,
+                duplicate_signal=duplicate,
                 reversal_already_consumed=consumed,
             )
 
@@ -244,64 +244,70 @@ def replay_red_bar_v2_day(
                     else None
                 )
                 pending_reversal = None
-                pending_reversal_context = None
             else:
                 blocked += 1
                 trade_id = None
-                if admission.admission_code not in {AdmissionCode.ACTIVE_TRADE_BLOCK, AdmissionCode.PREVIOUS_TRADE_NOT_CLOSED}:
+                if admission.admission_code not in {
+                    AdmissionCode.ACTIVE_TRADE_BLOCK,
+                    AdmissionCode.PREVIOUS_TRADE_NOT_CLOSED,
+                }:
                     pending_reversal = None
-                    pending_reversal_context = None
 
-            details: dict[str, object] = {
-                "entry_type": admission.entry_type,
-                "trend_strength": admission.trend_strength,
-                "decision_id": admission.decision_id,
-                "reversal_event_id": admission.reversal_event_id,
-                "admission_reason": admission.admission_reason,
-                "reference_timestamp": admission.reference_timestamp,
-                "context_timestamp": admission.context_timestamp,
-                "active_trade_count": admission.active_trade_count,
-                "previous_trade_status": admission.previous_trade_status,
-                "conditions": dict(admission.conditions),
-            }
-            if decision_context is not None and decision.close_price is not None and decision.rsi_value is not None and decision.vwap_value is not None:
-                details.update(_decision_evidence_details(
-                    decision=decision,
-                    reference=reference,
-                    context=decision_context,
-                    underlying_instrument_key=instrument_key,
-                    futures_instrument_key=evidence_futures_key,
-                ))
-            events.append(ReplayEvent(
-                timestamp=evaluation_time.to_pydatetime(),
-                event_type="CANDIDATE_ADMISSION",
-                direction=admission.direction,
-                option_side=admission.option_side,
-                admission_code=admission.admission_code.value,
-                candidate_allowed=admission.candidate_allowed,
-                trade_id=trade_id,
-                details=details,
-            ))
+            events.append(
+                ReplayEvent(
+                    timestamp=evaluation_time.to_pydatetime(),
+                    event_type="CANDIDATE_ADMISSION",
+                    direction=admission.direction,
+                    option_side=admission.option_side,
+                    admission_code=admission.admission_code.value,
+                    candidate_allowed=admission.candidate_allowed,
+                    trade_id=trade_id,
+                    details={
+                        "entry_type": admission.entry_type,
+                        "trend_strength": admission.trend_strength,
+                        "decision_id": admission.decision_id,
+                        "reversal_event_id": admission.reversal_event_id,
+                        "admission_reason": admission.admission_reason,
+                        "reference_timestamp": admission.reference_timestamp,
+                        "context_timestamp": admission.context_timestamp,
+                        "active_trade_count": admission.active_trade_count,
+                        "previous_trade_status": admission.previous_trade_status,
+                        "conditions": dict(admission.conditions),
+                    },
+                )
+            )
 
         if provisional_state is not None:
             active_state = observe_trade_state(trade_rows, instrument_key=instrument_key)
             if active_state.active_trade is not None:
                 snapshot_1m = build_latest_snapshot(
-                    frame, instrument_key=instrument_key, timeframe="1M",
-                    evaluation_time=evaluation_time, expected_timestamp=candle_timestamp,
+                    frame,
+                    instrument_key=instrument_key,
+                    timeframe="1M",
+                    evaluation_time=evaluation_time,
+                    expected_timestamp=candle_timestamp,
                 )
-                upgrade = evaluate_midpoint_upgrade(reference, snapshot_1m, current_state=provisional_state)
-                if upgrade.event_type.value == "FULL_DIRECTIONAL_ALIGNMENT" and _event_is_due(upgrade, evaluation_time):
-                    events.append(ReplayEvent(
-                        timestamp=evaluation_time.to_pydatetime(),
-                        event_type="STATE_UPGRADE",
-                        direction=upgrade.direction,
-                        option_side=upgrade.option_side,
-                        admission_code=AdmissionCode.FULL_DIRECTIONAL_ALIGNMENT.value,
-                        candidate_allowed=False,
-                        trade_id=active_state.active_trade.trade_id,
-                        details={"from": provisional_state.value, "to": upgrade.state.value},
-                    ))
+                upgrade = evaluate_midpoint_upgrade(
+                    reference,
+                    snapshot_1m,
+                    current_state=provisional_state,
+                )
+                if (
+                    upgrade.event_type.value == "FULL_DIRECTIONAL_ALIGNMENT"
+                    and _event_is_due(upgrade, evaluation_time)
+                ):
+                    events.append(
+                        ReplayEvent(
+                            timestamp=evaluation_time.to_pydatetime(),
+                            event_type="STATE_UPGRADE",
+                            direction=upgrade.direction,
+                            option_side=upgrade.option_side,
+                            admission_code=AdmissionCode.FULL_DIRECTIONAL_ALIGNMENT.value,
+                            candidate_allowed=False,
+                            trade_id=active_state.active_trade.trade_id,
+                            details={"from": provisional_state.value, "to": upgrade.state.value},
+                        )
+                    )
                     provisional_state = None
 
     final_state = observe_trade_state(trade_rows, instrument_key=instrument_key)
