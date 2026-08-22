@@ -24,11 +24,19 @@ def build_legacy_v2_decision_evidence(
     bullish_rsi_threshold: float = 55.0,
     bearish_rsi_threshold: float = 45.0,
 ) -> LegacyV2DecisionEvidence:
-    """Expose values already used by legacy V2 without recalculating strategy rules."""
+    """Expose the exact values already used by the futures-aware V2 decision."""
     timeframe = str(_required(futures_context, "timeframe")).upper()
     evaluation_timeframe = "1m" if timeframe == "1M" else "5m" if timeframe == "5M" else None
     if evaluation_timeframe is None:
         raise LegacyMappingError(f"unsupported legacy evidence timeframe: {timeframe!r}")
+
+    snapshot_underlying = str(_required(futures_context, "instrument_key"))
+    snapshot_futures = str(_required(futures_context, "vwap_source_instrument_key"))
+    if snapshot_underlying != underlying_instrument_key:
+        raise LegacyMappingError("futures snapshot underlying instrument disagrees with requested underlying")
+    if snapshot_futures != futures_instrument_key:
+        raise LegacyMappingError("futures snapshot VWAP source disagrees with requested futures instrument")
+
     return LegacyV2DecisionEvidence(
         underlying_instrument_key=underlying_instrument_key,
         futures_instrument_key=futures_instrument_key,
@@ -38,12 +46,12 @@ def build_legacy_v2_decision_evidence(
         rsi_value=float(_required(direction_decision, "rsi_value")),
         bullish_rsi_threshold=bullish_rsi_threshold,
         bearish_rsi_threshold=bearish_rsi_threshold,
-        futures_comparison_price=float(_required(futures_context, "candle_close")),
+        futures_comparison_price=float(_required(futures_context, "vwap_comparison_price")),
         futures_vwap=float(_required(direction_decision, "vwap_value")),
-        futures_volume=float(_required(futures_context, "candle_volume")),
+        futures_volume=float(_required(futures_context, "vwap_source_volume")),
         futures_fresh=bool(_required(direction_decision, "context_fresh")),
         index_context_timestamp=_required(index_context, "candle_timestamp"),
-        futures_source_timestamp=_required(futures_context, "candle_timestamp"),
+        futures_source_timestamp=_required(futures_context, "vwap_source_timestamp"),
         reference_id=(
             f"RBV2-REF-{_required(reference, 'trading_date')}-"
             f"{_required(reference, 'reference_timestamp').isoformat()}"
