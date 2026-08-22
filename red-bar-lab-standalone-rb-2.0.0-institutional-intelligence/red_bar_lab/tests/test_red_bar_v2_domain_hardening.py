@@ -133,7 +133,10 @@ def test_allowed_bullish_rejects_bearish_rsi_alignment():
 
 def test_allowed_bearish_rejects_bullish_futures_alignment():
     bearish = _decision(direction=Direction.BEARISH)
-    with pytest.raises(DomainValidationError, match="evidence must align"):
+    with pytest.raises(
+        DomainValidationError,
+        match="futures VWAP alignment flags must match numeric evidence",
+    ):
         replace(
             bearish,
             futures_vwap=replace(
