@@ -38,6 +38,15 @@ def _timestamp(value: object) -> datetime | None:
     return stamp.astimezone(IST)
 
 
+def _admission_mode(value: AdmissionMode | str) -> AdmissionMode:
+    if isinstance(value, AdmissionMode):
+        return value
+    normalized = str(value).strip().upper()
+    if normalized.startswith("ADMISSIONMODE."):
+        normalized = normalized.split(".", 1)[1]
+    return AdmissionMode(normalized)
+
+
 def evaluate_live_signal_admission(
     *,
     confirmation_timestamp: object,
@@ -57,7 +66,7 @@ def evaluate_live_signal_admission(
     override its terminal decisions.
     """
 
-    resolved_mode = AdmissionMode(str(mode).upper())
+    resolved_mode = _admission_mode(mode)
     current = now or datetime.now(IST)
     if current.tzinfo is None:
         current = current.replace(tzinfo=IST)
