@@ -1,5 +1,17 @@
 from red_bar_lab.ui._shared import *
 from red_bar_lab.services.committee_diagnostics import build_committee_gate_trace
+from red_bar_lab.execution.execution_score_contract import public_execution_scores
+
+
+def _display_number(value, *, suffix="", signed=False):
+    if value in (None, ""):
+        return "N/A"
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "N/A"
+    pattern = "+.3f" if signed else ".1f"
+    return f"{number:{pattern}}{suffix}"
 
 
 def render_page(settings, layout, database, token, underlying_name, instrument_key, interval) -> None:
@@ -37,35 +49,39 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         key="committee_gate_trace_candidate",
     )
     evaluation = options[selected_label]
+    public_scores = public_execution_scores(evaluation)
     trace = build_committee_gate_trace(evaluation)
 
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Decision", str(trace.get("decision") or "—"))
     c2.metric(
         "Primary Confidence",
-        f"{float(trace.get('primary_confidence_pct') or 0.0):.1f}%",
+        _display_number(trace.get("primary_confidence_pct"), suffix="%"),
     )
     c3.metric(
-        "Final Probability",
-        f"{float(trace.get('execution_probability_pct') or 0.0):.1f}%",
+        "Selection Heuristic Score",
+        _display_number(public_scores.get("selection_heuristic_score")),
     )
     c4.metric(
-        "Expectancy (Info)",
-        f"{float(trace.get('expectancy_pct') or 0.0):+.3f}%",
+        "Research Expectancy",
+        _display_number(
+            public_scores.get("research_expectancy_pct"),
+            suffix="%",
+            signed=True,
+        ),
     )
     c5.metric("Gate Parity", "PASS" if trace.get("parity") else "MISMATCH")
 
     blockers = trace.get("authoritative_blockers") or []
     if blockers:
         st.error("Committee WAIT / BLOCK caused by: " + ", ".join(str(x) for x in blockers))
+    elif trace.get("persisted_eligible"):
+        st.success("All authoritative Committee gates passed. The candidate is Committee-qualified.")
     else:
-        if trace.get("persisted_eligible"):
-            st.success("All authoritative Committee gates passed. The candidate is Committee-qualified.")
-        else:
-            st.warning(
-                "No blocker was reconstructed from the persisted evaluation, but the stored result is not eligible. "
-                "Gate parity is MISMATCH and should be investigated."
-            )
+        st.warning(
+            "No blocker was reconstructed from the persisted evaluation, but the stored result is not eligible. "
+            "Gate parity is MISMATCH and should be investigated."
+        )
 
     st.markdown("#### Authoritative Committee Gates")
     st.dataframe(
@@ -86,6 +102,9 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         "opportunity_score": evaluation.get("opportunity_score"),
         "historical_score": evaluation.get("historical_score"),
         "selection_score": evaluation.get("selection_score"),
+        "selection_heuristic_score": public_scores.get("selection_heuristic_score"),
+        "research_expectancy_pct": public_scores.get("research_expectancy_pct"),
+        "calibration_status": public_scores.get("calibration_status"),
         "expectancy_confidence_pct": evaluation.get("expectancy_confidence_pct"),
         "kelly_fraction_pct": evaluation.get("kelly_fraction_pct"),
         "shadow_decision": evaluation.get("shadow_decision"),
@@ -101,7 +120,8 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
 
     st.caption(
         "Authoritative blockers mirror the current Committee implementation: Performance hard-block, "
-        "terminal opportunity invalidity, and execution probability below the configured minimum. "
-        "Expected Value / Expectancy / Expected Win / Expected Loss, Shadow Intelligence, expectancy confidence, "
-        "historical score, and Half-Kelly are informational/evidence only."
+        "terminal opportunity invalidity, and the configured selection heuristic threshold. "
+        "Research expectancy, Shadow Intelligence, expectancy confidence, historical score, and Half-Kelly "
+        "remain informational/evidence only. Probability language is withheld until decile calibration has "
+        "at least 200 labelled outcomes in every bucket."
     )
