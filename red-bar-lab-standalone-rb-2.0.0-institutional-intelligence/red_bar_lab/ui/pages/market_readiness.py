@@ -9,7 +9,6 @@ from red_bar_lab.services.option_participation_store import (
     read_latest_option_participation,
     summarize_option_participation,
 )
-from red_bar_lab.ui.pages.market_readiness_legacy import render_legacy_page
 
 
 def _display_number(value, digits=3):
@@ -58,45 +57,25 @@ def _render_authoritative_page(settings, underlying_name, bundle, readiness_rows
 
     st.markdown("### Authoritative market conclusion")
     columns = st.columns(6)
-    columns[0].metric(
-        "Observed direction",
-        bundle.get("observed_direction") or "UNAVAILABLE",
-    )
-    columns[1].metric(
-        "Direction state",
-        bundle.get("direction_state") or "UNAVAILABLE",
-    )
-    columns[2].metric(
-        "Evidence readiness",
-        bundle.get("evidence_readiness") or "UNAVAILABLE",
-    )
+    columns[0].metric("Observed direction", bundle.get("observed_direction") or "UNAVAILABLE")
+    columns[1].metric("Direction state", bundle.get("direction_state") or "UNAVAILABLE")
+    columns[2].metric("Evidence readiness", bundle.get("evidence_readiness") or "UNAVAILABLE")
     columns[3].metric(
         "Derivatives confirmed",
         "YES" if bundle.get("derivatives_confirmation_passed") else "NO",
     )
-    columns[4].metric(
-        "Trade eligibility",
-        bundle.get("trade_eligibility") or "BLOCKED",
-    )
+    columns[4].metric("Trade eligibility", bundle.get("trade_eligibility") or "BLOCKED")
     columns[5].metric("Trade bias", bundle.get("trade_bias") or "WAIT")
 
     if bundle.get("trade_eligibility") == "ELIGIBLE":
-        st.success(
-            bundle.get("confirmation")
-            or "Authoritative evidence is eligible."
-        )
+        st.success(bundle.get("confirmation") or "Authoritative evidence is eligible.")
     else:
-        st.warning(
-            bundle.get("confirmation")
-            or "Authoritative evidence remains blocked."
-        )
+        st.warning(bundle.get("confirmation") or "Authoritative evidence remains blocked.")
 
     if bundle.get("primary_blocker"):
         st.error(f"Primary blocker: {bundle['primary_blocker']}")
     if bundle.get("blocking_reasons"):
-        st.caption(
-            "Blocking reasons: " + ", ".join(bundle["blocking_reasons"])
-        )
+        st.caption("Blocking reasons: " + ", ".join(bundle["blocking_reasons"]))
     if bundle.get("caution_reasons"):
         st.caption("Cautions: " + ", ".join(bundle["caution_reasons"]))
 
@@ -126,22 +105,10 @@ def _render_authoritative_page(settings, underlying_name, bundle, readiness_rows
     )
     if participation_rows:
         p1, p2, p3, p4 = st.columns(4)
-        p1.metric(
-            "Spot",
-            _display_number(participation.get("spot_price"), 2),
-        )
-        p2.metric(
-            "ATM",
-            _display_number(participation.get("atm_strike"), 0),
-        )
-        p3.metric(
-            "CE pressure",
-            _display_score(participation.get("ce_score")),
-        )
-        p4.metric(
-            "PE pressure",
-            _display_score(participation.get("pe_score")),
-        )
+        p1.metric("Spot", _display_number(participation.get("spot_price"), 2))
+        p2.metric("ATM", _display_number(participation.get("atm_strike"), 0))
+        p3.metric("CE pressure", _display_score(participation.get("ce_score")))
+        p4.metric("PE pressure", _display_score(participation.get("pe_score")))
         st.dataframe(
             _arrow_safe_rows(_participation_table_rows(participation_rows)),
             width="stretch",
@@ -185,7 +152,6 @@ def render_page(
     # - Authoritative evidence diagnostics
     # - Persisted evidence bundle
     # - Legacy global readiness diagnostics
-    # The legacy tab remains available only as non-authoritative diagnostics.
     bundle = read_latest_market_evidence_bundle(
         settings.database_path,
         underlying_name=underlying_name,
@@ -212,18 +178,16 @@ def render_page(
         )
 
     with legacy_tab:
-        st.error(
-            "This legacy workspace may calculate a different historical or "
-            "independent bias. It is retained only for diagnostics and must not "
-            "be used as a competing recommendation. The Authoritative Evidence "
-            "tab is the sole market conclusion."
+        st.warning(
+            "Live legacy recommendation recalculation is disabled. This tab now "
+            "shows persisted historical readiness diagnostics only. The "
+            "Authoritative Evidence tab is the sole current market conclusion."
         )
-        render_legacy_page(
-            settings,
-            layout,
-            database,
-            token,
-            underlying_name,
-            instrument_key,
-            interval,
-        )
+        if readiness_rows:
+            st.dataframe(
+                _arrow_safe_rows(readiness_rows),
+                width="stretch",
+                hide_index=True,
+            )
+        else:
+            st.info("No persisted legacy diagnostics are available.")
