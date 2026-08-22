@@ -7,6 +7,7 @@ from red_bar_lab.domain.red_bar_v2 import (
     AdmissionOutcome,
     ContextStatus,
     Direction,
+    DomainValidationError,
     EntryType,
     RedBarV2Section1Outcome,
     RedBarV2State,
@@ -185,7 +186,7 @@ def test_allowed_event_requires_complete_event_time_evidence():
 
 
 def test_adapter_rejects_direction_evidence_disagreement():
-    with pytest.raises(Exception):
+    with pytest.raises(DomainValidationError, match="evidence must align"):
         build_canonical_decision(
             replay_event=event(direction="BULLISH"),
             readiness=readiness(),
