@@ -102,3 +102,38 @@ def test_bundle_identity_is_source_observation_not_collection_cycle(tmp_path: Pa
             "SELECT COUNT(*) FROM market_evidence_bundles"
         ).fetchone()[0]
     assert count == 1
+
+
+def test_market_evidence_read_does_not_create_schema(tmp_path: Path):
+    database_path = tmp_path / "existing.sqlite"
+    with sqlite3.connect(database_path) as connection:
+        connection.execute("CREATE TABLE unrelated (id INTEGER PRIMARY KEY)")
+        before = connection.execute(
+            "SELECT type, name, sql FROM sqlite_master ORDER BY type, name"
+        ).fetchall()
+
+    result = read_latest_market_evidence_bundle(
+        database_path,
+        underlying_name="NIFTY 50",
+    )
+
+    with sqlite3.connect(database_path) as connection:
+        after = connection.execute(
+            "SELECT type, name, sql FROM sqlite_master ORDER BY type, name"
+        ).fetchall()
+
+    assert result is None
+    assert after == before
+    assert all(name != "market_evidence_bundles" for _, name, _ in after)
+
+
+def test_market_evidence_read_does_not_create_missing_database(tmp_path: Path):
+    database_path = tmp_path / "missing.sqlite"
+
+    result = read_latest_market_evidence_bundle(
+        database_path,
+        underlying_name="NIFTY 50",
+    )
+
+    assert result is None
+    assert not database_path.exists()
