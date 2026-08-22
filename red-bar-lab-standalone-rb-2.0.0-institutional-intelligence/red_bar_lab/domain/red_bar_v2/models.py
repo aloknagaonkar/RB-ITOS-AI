@@ -61,6 +61,20 @@ def _require_entry_timeframe(entry_type: EntryType, evaluation_timeframe: str) -
         )
 
 
+def _require_alignment_truth(
+    *,
+    evidence_name: str,
+    bullish_aligned: bool,
+    bearish_aligned: bool,
+    expected_bullish: bool,
+    expected_bearish: bool,
+) -> None:
+    if bullish_aligned is not expected_bullish or bearish_aligned is not expected_bearish:
+        raise DomainValidationError(
+            f"{evidence_name} alignment flags must match numeric evidence"
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class RedBarV2Reference:
     """Canonical Red Bar V2 reference range."""
@@ -172,8 +186,13 @@ class RsiEvidence:
             raise DomainValidationError("RSI value must be within [0, 100]")
         if not 0 <= self.bearish_threshold < self.bullish_threshold <= 100:
             raise DomainValidationError("RSI thresholds must satisfy 0 <= bearish < bullish <= 100")
-        if self.bullish_aligned and self.bearish_aligned:
-            raise DomainValidationError("RSI cannot be bullish and bearish aligned simultaneously")
+        _require_alignment_truth(
+            evidence_name="RSI",
+            bullish_aligned=self.bullish_aligned,
+            bearish_aligned=self.bearish_aligned,
+            expected_bullish=self.value > self.bullish_threshold,
+            expected_bearish=self.value < self.bearish_threshold,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,8 +217,13 @@ class FuturesVwapEvidence:
         _require_bool("fresh", self.fresh)
         if self.volume < 0:
             raise DomainValidationError("volume must be non-negative")
-        if self.bullish_aligned and self.bearish_aligned:
-            raise DomainValidationError("futures VWAP cannot be bullish and bearish aligned simultaneously")
+        _require_alignment_truth(
+            evidence_name="futures VWAP",
+            bullish_aligned=self.bullish_aligned,
+            bearish_aligned=self.bearish_aligned,
+            expected_bullish=self.comparison_price > self.vwap,
+            expected_bearish=self.comparison_price < self.vwap,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,8 +240,13 @@ class MidpointEvidence:
         _require_positive("midpoint", self.midpoint)
         _require_bool("bullish_aligned", self.bullish_aligned)
         _require_bool("bearish_aligned", self.bearish_aligned)
-        if self.bullish_aligned and self.bearish_aligned:
-            raise DomainValidationError("midpoint cannot be bullish and bearish aligned simultaneously")
+        _require_alignment_truth(
+            evidence_name="midpoint",
+            bullish_aligned=self.bullish_aligned,
+            bearish_aligned=self.bearish_aligned,
+            expected_bullish=self.index_close > self.midpoint,
+            expected_bearish=self.index_close < self.midpoint,
+        )
 
 
 @dataclass(frozen=True, slots=True)
