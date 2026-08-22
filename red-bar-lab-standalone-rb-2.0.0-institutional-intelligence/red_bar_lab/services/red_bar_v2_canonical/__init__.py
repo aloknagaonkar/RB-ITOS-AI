@@ -39,6 +39,17 @@ from .persistence_service import RedBarV2CanonicalPersistenceService
 from .persistence_telemetry import PersistenceBenchmark, benchmark_persistence_call
 from .repository_protocol import RedBarV2CanonicalRepository
 from .resolver import benchmark_resolver_mapping, resolve_red_bar_v2_canonical
+from .shadow_coordinator import (
+    RedBarV2CanonicalShadowCoordinator,
+    RedBarV2ShadowObservation,
+)
+from .shadow_runtime import (
+    RedBarV2CanonicalShadowRuntime,
+    RedBarV2ShadowTask,
+    build_runtime_market_metadata,
+    build_runtime_source_replay_id,
+    get_red_bar_v2_shadow_runtime,
+)
 from .sqlite_repository import SQLiteRedBarV2CanonicalRepository
 
 __all__ = [
@@ -60,7 +71,11 @@ __all__ = [
     "RedBarV2CanonicalPersistenceService",
     "RedBarV2CanonicalRepository",
     "RedBarV2CanonicalResolution",
+    "RedBarV2CanonicalShadowCoordinator",
+    "RedBarV2CanonicalShadowRuntime",
     "RedBarV2ParityResult",
+    "RedBarV2ShadowObservation",
+    "RedBarV2ShadowTask",
     "SQLiteRedBarV2CanonicalRepository",
     "benchmark_persistence_call",
     "benchmark_resolver_mapping",
@@ -69,6 +84,8 @@ __all__ = [
     "build_canonical_input_readiness",
     "build_canonical_resolution_id",
     "build_legacy_v2_decision_evidence",
+    "build_runtime_market_metadata",
+    "build_runtime_source_replay_id",
     "canonical_json",
     "compare_legacy_to_canonical",
     "create_red_bar_v2_signal_bundle",
@@ -77,6 +94,7 @@ __all__ = [
     "event_value",
     "evidence_from_event_details",
     "evidence_to_event_details",
+    "get_red_bar_v2_shadow_runtime",
     "payload_sha256",
     "resolve_red_bar_v2_canonical",
 ]
