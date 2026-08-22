@@ -15,15 +15,24 @@ def test_monitor_wires_entry_circuit_without_disabling_exits():
     assert "ENTRY_SUSPENDED" in source
 
 
-def test_open_circuit_skips_new_entry_automation():
+def test_real_monitor_persists_circuit_state_under_artifacts_root():
     source = MONITOR.read_text(encoding="utf-8")
 
-    assert "elif cycle_gate.entry_suspended:" in source
+    assert 'state_path=settings.artifacts_root / "paper_monitor_circuit.json"' in source
+
+
+def test_open_circuit_skips_signal_publication_and_new_entry_automation():
+    source = MONITOR.read_text(encoding="utf-8")
+
+    suspended_branch = source.index("if cycle_gate.entry_suspended:")
+    publication = source.index("bridge = publish_v2_snapshot_to_paper_signals(")
+    recovery_gate = source.index("elif cycle_gate.entry_suspended:")
+    automation = source.index("report = automation.run_cycle(")
+
+    assert "ENTRY_CIRCUIT_OPEN_SIGNAL_PUBLICATION_SKIPPED" in source
+    assert suspended_branch < publication
+    assert recovery_gate < automation
     assert "ENTRY_RECOVERY_CONFIRMED_RESUME_NEXT_CYCLE" in source
-    assert "report = automation.run_cycle(" in source
-    assert source.index("elif cycle_gate.entry_suspended:") < source.index(
-        "report = automation.run_cycle("
-    )
 
 
 def test_monitor_uses_circuit_backoff_and_recovery_event():
