@@ -71,6 +71,7 @@ def build_and_persist_global_readiness(
 ):
     """Build one best-effort global observation from calculated values.
 
+    This adapter performs no market-data calls and no execution action.
     Persistence failures are non-fatal to the paper cycle, but are logged with
     stable reason codes so a stale UI bundle is distinguishable from success.
     """
