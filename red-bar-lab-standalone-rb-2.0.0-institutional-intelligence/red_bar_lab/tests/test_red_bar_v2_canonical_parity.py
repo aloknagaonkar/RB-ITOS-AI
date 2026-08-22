@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from red_bar_lab.domain.red_bar_v2 import ContextStatus
+from red_bar_lab.intelligence.red_bar_v2_futures_context import RedBarV2VwapSourceHealth
 from red_bar_lab.services.red_bar_v2_canonical import (
     LegacyV2DecisionEvidence,
     LegacyV2MarketMetadata,
@@ -42,6 +43,25 @@ def _event() -> ReplayEvent:
                 "midpoint_aligned": False,
             },
         },
+    )
+
+
+def _health() -> RedBarV2VwapSourceHealth:
+    return RedBarV2VwapSourceHealth(
+        status="READY",
+        reason="FULL_TIMESTAMP_ALIGNMENT",
+        price_source_instrument=UNDERLYING,
+        rsi_source_instrument=UNDERLYING,
+        vwap_source_instrument=FUTURES,
+        timeframe="5M",
+        index_rows=50,
+        futures_rows=50,
+        aligned_rows=50,
+        alignment_coverage_pct=100.0,
+        positive_volume_rows=50,
+        index_timestamp=EVALUATED_AT,
+        futures_timestamp=EVALUATED_AT,
+        last_aligned_timestamp=EVALUATED_AT,
     )
 
 
@@ -102,7 +122,7 @@ def _resolution():
             reference_timestamp=REFERENCE_AT,
             reference_midpoint=24800.0,
         ),
-        health=SimpleNamespace(status="READY", futures_instrument_key=FUTURES),
+        health=_health(),
         replay_event=event,
         market_metadata=metadata,
         evidence=evidence,
