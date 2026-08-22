@@ -17,6 +17,7 @@ def _row(side, rank, score_state="FRESH_BUYING", spread=1.0):
         "spread": spread,
         "volume": 1000.0,
         "oi": 5000.0,
+        "iv": 18.0,
         "oi_change_pct": 10.0,
         "participation_state": score_state,
         "vwap": 95.0,
