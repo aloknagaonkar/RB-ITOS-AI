@@ -4,12 +4,16 @@ from __future__ import annotations
 
 The historical schema used ``execution_probability_pct`` for an uncalibrated
 rule/selection score and ``expected_value_pct`` for a value that currently has
-no execution authority.  Those names remain readable as compatibility aliases,
-but new services and UI code must consume the explicit fields produced here.
+no execution authority. Those names remain readable only as storage
+compatibility aliases. Public consumers receive selection/evidence terminology
+until calibration evidence is sufficient.
 """
 
 from dataclasses import dataclass
-from typing import Mapping
+from typing import Mapping, Sequence
+
+
+MINIMUM_CALIBRATION_BUCKET_SAMPLES = 200
 
 
 @dataclass(frozen=True)
@@ -43,20 +47,35 @@ def _number(value: object, default: float = 0.0) -> float:
         return float(default)
 
 
+def calibration_is_ready(
+    decile_buckets: Sequence[Mapping[str, object]] | None,
+) -> bool:
+    """Require predicted-vs-realized deciles with enough labelled outcomes."""
+    if not decile_buckets or len(decile_buckets) != 10:
+        return False
+    for bucket in decile_buckets:
+        labelled = int(bucket.get("labelled_outcomes") or 0)
+        predicted = bucket.get("predicted_probability_pct")
+        realized = bucket.get("realized_success_pct")
+        if labelled < MINIMUM_CALIBRATION_BUCKET_SAMPLES:
+            return False
+        if predicted in (None, "") or realized in (None, ""):
+            return False
+    return True
+
+
 def truthful_execution_scores(
     row: Mapping[str, object],
 ) -> ExecutionScoreContract:
-    """Translate legacy committee fields into a truthful public contract.
-
-    No probability is emitted until an explicitly calibrated field exists.
-    ``execution_probability_pct`` is interpreted only as the current selection
-    heuristic score.  ``expectancy_pct`` remains research evidence and is not
-    renamed to expected value.
-    """
-
+    """Translate legacy committee fields into a truthful public contract."""
+    calibration_ready = calibration_is_ready(
+        row.get("calibration_deciles")  # type: ignore[arg-type]
+    )
     calibrated = row.get("calibrated_probability_pct")
     calibrated_probability = (
-        _number(calibrated) if calibrated not in (None, "") else None
+        _number(calibrated)
+        if calibration_ready and calibrated not in (None, "")
+        else None
     )
     calibration_status = (
         "CALIBRATED"
@@ -92,13 +111,27 @@ def truthful_execution_scores(
 def with_truthful_execution_scores(
     row: Mapping[str, object],
 ) -> dict[str, object]:
+    """Compatibility reader retaining legacy stored columns."""
     result = dict(row)
     result.update(truthful_execution_scores(row).as_dict())
     return result
 
 
+def public_execution_scores(
+    row: Mapping[str, object],
+) -> dict[str, object]:
+    """Return user-visible fields without uncalibrated probability language."""
+    result = with_truthful_execution_scores(row)
+    result.pop("execution_probability_pct", None)
+    result.pop("expected_value_pct", None)
+    return result
+
+
 __all__ = [
     "ExecutionScoreContract",
+    "MINIMUM_CALIBRATION_BUCKET_SAMPLES",
+    "calibration_is_ready",
     "truthful_execution_scores",
     "with_truthful_execution_scores",
+    "public_execution_scores",
 ]
