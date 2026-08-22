@@ -137,16 +137,21 @@ class RedBarV2CanonicalShadowCoordinator:
                 "reason_code": reason_code,
             })
             return observation
-        except (CanonicalResolutionError, LegacyMappingError) as exc:
+        except (CanonicalResolutionError, LegacyMappingError) as error:
             category = "RESOLUTION_FAILED"
-        except CanonicalPersistenceConflictError as exc:
+            error_type = type(error).__name__
+        except CanonicalPersistenceConflictError as error:
             category = "PERSISTENCE_CONFLICT"
-        except CanonicalPersistenceCorruptionError as exc:
+            error_type = type(error).__name__
+        except CanonicalPersistenceCorruptionError as error:
             category = "PERSISTENCE_CORRUPTION"
-        except CanonicalPersistenceUnavailableError as exc:
+            error_type = type(error).__name__
+        except CanonicalPersistenceUnavailableError as error:
             category = "PERSISTENCE_UNAVAILABLE"
-        except Exception as exc:  # shadow boundary: never interrupt legacy authority
+            error_type = type(error).__name__
+        except Exception as error:  # shadow boundary: never interrupt legacy authority
             category = "UNEXPECTED_SHADOW_FAILURE"
+            error_type = type(error).__name__
 
         duration_ms = (perf_counter_ns() - started) / 1_000_000.0
         self._emit({
@@ -158,7 +163,7 @@ class RedBarV2CanonicalShadowCoordinator:
             "duration_ms": duration_ms,
             "error_category": category,
             "reason_code": category,
-            "error_type": type(exc).__name__,
+            "error_type": error_type,
         })
         return RedBarV2ShadowObservation(
             attempted=True, persisted=False, outcome=None,
