@@ -71,6 +71,7 @@ def test_signal_age_gate_fails_closed(tmp_path):
         instrument_token=101,
         now=datetime.now(IST),
         max_signal_age_seconds=180,
+        enforce_freshness=True,
     )
 
     assert decision.allowed is False
@@ -90,23 +91,20 @@ def test_persistence_boundary_caps_entries_and_contracts(tmp_path):
         ]
     )
 
-    first = _order(signal_id, 101, datetime.now(IST) - timedelta(minutes=10))
-    first["reentry_cooldown_seconds"] = 0
-    database.insert_paper_execution_order(first)
-
+    database.insert_paper_execution_order(
+        _order(signal_id, 101, datetime.now(IST) - timedelta(minutes=10))
+    )
     second = _order(signal_id, 102, datetime.now(IST) - timedelta(minutes=5))
     second["order_id"] = "ORDER-102"
-    second["reentry_cooldown_seconds"] = 0
     database.insert_paper_execution_order(second)
 
     third = _order(signal_id, 103, datetime.now(IST))
     third["order_id"] = "ORDER-103"
-    third["reentry_cooldown_seconds"] = 0
     with pytest.raises(ValueError, match="MAX_ENTRIES_PER_SIGNAL_REACHED"):
         database.insert_paper_execution_order(third)
 
 
-def test_reentry_cooldown_blocks_second_contract(tmp_path):
+def test_live_policy_can_apply_reentry_cooldown(tmp_path):
     settings = RedBarSettings(artifacts_root=tmp_path / "red_bar")
     database = RedBarDatabase(settings.database_path)
     confirmation = datetime.now(IST) - timedelta(seconds=30)
@@ -122,7 +120,15 @@ def test_reentry_cooldown_blocks_second_contract(tmp_path):
     first = _order(signal_id, 201, datetime.now(IST))
     database.insert_paper_execution_order(first)
 
-    second = _order(signal_id, 202, datetime.now(IST))
-    second["order_id"] = "ORDER-202"
-    with pytest.raises(ValueError, match="SIGNAL_REENTRY_COOLDOWN_ACTIVE"):
-        database.insert_paper_execution_order(second)
+    decision = evaluate_signal_execution_limits(
+        settings.database_path,
+        account_id="PAPER-STD",
+        signal_id=signal_id,
+        instrument_token=202,
+        now=datetime.now(IST),
+        reentry_cooldown_seconds=300,
+        enforce_freshness=True,
+    )
+
+    assert decision.allowed is False
+    assert decision.reason == "SIGNAL_REENTRY_COOLDOWN_ACTIVE"
