@@ -2,21 +2,18 @@ from __future__ import annotations
 
 """Centralized additive runtime hardening installation.
 
-Compatibility hooks remain isolated here. Broker retries are bounded and apply
-only to idempotent methods; POST/order operations are never retried.
+Only compatibility boundaries that cannot yet live natively remain here.
+Market-evidence IV and strike-distance rules now live directly in the engine.
+Broker retries are bounded and apply only to idempotent methods.
 """
 
 import logging
-from typing import Any
 
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from red_bar_lab.brokers.missing_data_option_chain import (
     install as _install_missing_data_option_chain,
-)
-from red_bar_lab.services.market_evidence_quality_patch import (
-    install as _install_market_evidence_quality,
 )
 
 logger = logging.getLogger(__name__)
@@ -93,7 +90,6 @@ def install() -> None:
     if _INSTALLED:
         return
     _install_missing_data_option_chain()
-    _install_market_evidence_quality()
     _install_upstox_get_retry_policy()
     _INSTALLED = True
 
