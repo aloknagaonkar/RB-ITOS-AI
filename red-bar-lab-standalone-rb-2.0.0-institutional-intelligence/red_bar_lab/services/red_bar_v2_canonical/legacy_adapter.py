@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Any, Mapping
+from typing import Mapping
 
 from red_bar_lab.domain.red_bar_v2 import (
     AdmissionOutcome,
@@ -21,12 +21,9 @@ from red_bar_lab.domain.red_bar_v2 import (
     TrendStrength,
 )
 
+from .event_access import event_bool, event_text
 from .exceptions import LegacyMappingError
 from .models import LegacyV2DecisionEvidence, LegacyV2MarketMetadata
-
-
-def _legacy_value(value: object) -> object:
-    return getattr(value, "value", value)
 
 
 def _attribute(source: object | None, name: str, default: object = None) -> object:
@@ -37,26 +34,27 @@ def _attribute(source: object | None, name: str, default: object = None) -> obje
     return getattr(source, name, default)
 
 
-def _text_attribute(source: object | None, name: str) -> str | None:
-    value = _attribute(source, name)
-    value = _legacy_value(value)
+def _normalised_text(value: object) -> str | None:
+    value = getattr(value, "value", value)
     if value is None:
         return None
     if not isinstance(value, str) or not value.strip():
-        raise LegacyMappingError(f"legacy {name} must be a non-empty string when present")
+        raise LegacyMappingError("authoritative source text values must be non-empty strings")
     return value
 
 
-def _bool_attribute(source: object | None, name: str) -> bool | None:
-    value = _attribute(source, name)
-    if value is None:
+def _build_reference(
+    metadata: LegacyV2MarketMetadata,
+    *,
+    replay_reference_timestamp: object,
+    replay_reference_midpoint: object,
+) -> RedBarV2Reference | None:
+    if replay_reference_timestamp is None:
         return None
-    if not isinstance(value, bool):
-        raise LegacyMappingError(f"legacy {name} must be a bool when present")
-    return value
-
-
-def _build_reference_from_metadata(metadata: LegacyV2MarketMetadata) -> RedBarV2Reference | None:
+    if metadata.reference_timestamp != replay_reference_timestamp:
+        raise LegacyMappingError("market metadata reference timestamp disagrees with replay")
+    if replay_reference_midpoint is not None and metadata.reference_midpoint != replay_reference_midpoint:
+        raise LegacyMappingError("market metadata reference midpoint disagrees with replay")
     values = (
         metadata.reference_id,
         metadata.reference_timestamp,
@@ -65,61 +63,72 @@ def _build_reference_from_metadata(metadata: LegacyV2MarketMetadata) -> RedBarV2
         metadata.reference_midpoint,
         metadata.reference_source,
     )
-    if all(value is None for value in values):
-        return None
     if any(value is None for value in values):
-        raise LegacyMappingError("legacy reference metadata is incomplete")
-    assert metadata.reference_id is not None
-    assert metadata.reference_timestamp is not None
-    assert metadata.reference_high is not None
-    assert metadata.reference_low is not None
-    assert metadata.reference_midpoint is not None
-    assert metadata.reference_source is not None
+        raise LegacyMappingError("authoritative reference metadata is incomplete")
     return RedBarV2Reference(
-        reference_id=metadata.reference_id,
+        reference_id=metadata.reference_id,  # type: ignore[arg-type]
         trading_date=metadata.trading_date,
-        timestamp=metadata.reference_timestamp,
-        high=metadata.reference_high,
-        low=metadata.reference_low,
-        midpoint=metadata.reference_midpoint,
-        source=metadata.reference_source,
+        timestamp=metadata.reference_timestamp,  # type: ignore[arg-type]
+        high=metadata.reference_high,  # type: ignore[arg-type]
+        low=metadata.reference_low,  # type: ignore[arg-type]
+        midpoint=metadata.reference_midpoint,  # type: ignore[arg-type]
+        source=metadata.reference_source,  # type: ignore[arg-type]
     )
 
 
 def build_canonical_input_readiness(
     *,
-    replay: object | None,
-    health: object | None,
+    replay: object,
+    health: object,
     market_metadata: LegacyV2MarketMetadata,
 ) -> RedBarV2InputReadiness:
-    """Map existing replay and health metadata to canonical Section 1.
+    """Assemble canonical readiness from replay, health and event-time metadata."""
+    if replay is None or health is None:
+        raise LegacyMappingError("authoritative replay and health objects are required")
 
-    The function performs no market-data queries and does not recalculate the
-    strategy. ``replay`` and ``health`` are accepted as the authoritative source
-    objects for the integration boundary; event-time values are supplied through
-    ``market_metadata`` so mapping remains deterministic and testable.
-    """
-    del replay, health
-    reference = _build_reference_from_metadata(market_metadata)
+    replay_instrument = _normalised_text(_attribute(replay, "instrument_key"))
+    replay_trading_date = _normalised_text(_attribute(replay, "trading_date"))
+    if replay_instrument != market_metadata.underlying_instrument_key:
+        raise LegacyMappingError("underlying instrument metadata disagrees with replay")
+    if replay_trading_date != market_metadata.trading_date.isoformat():
+        raise LegacyMappingError("trading date metadata disagrees with replay")
+
+    replay_reference_timestamp = _attribute(replay, "reference_timestamp")
+    replay_reference_midpoint = _attribute(replay, "reference_midpoint")
+    reference = _build_reference(
+        market_metadata,
+        replay_reference_timestamp=replay_reference_timestamp,
+        replay_reference_midpoint=replay_reference_midpoint,
+    )
+
+    health_status = _normalised_text(_attribute(health, "status")) or "UNAVAILABLE"
+    health_futures_key = _normalised_text(_attribute(health, "futures_instrument_key"))
+    if health_futures_key is not None and health_futures_key != market_metadata.futures_instrument_key:
+        raise LegacyMappingError("futures instrument metadata disagrees with health")
+
+    context_status = market_metadata.context_status
+    if health_status != "READY" and context_status is ContextStatus.FRESH:
+        context_status = ContextStatus.UNAVAILABLE
+
     timestamps = MarketTimestampEvidence(
         latest_index_1m=market_metadata.latest_index_1m,
         latest_index_5m=market_metadata.latest_index_5m,
         latest_futures_1m=market_metadata.latest_futures_1m,
         latest_futures_5m=market_metadata.latest_futures_5m,
         evaluated_at=market_metadata.evaluated_at,
-        context_status=market_metadata.context_status,
+        context_status=context_status,
         maximum_age_seconds=market_metadata.maximum_age_seconds,
         reason=market_metadata.reason,
     )
 
     if reference is None:
         outcome = RedBarV2Section1Outcome.REFERENCE_WAITING
-    elif market_metadata.context_status is ContextStatus.STALE:
+    elif context_status is ContextStatus.STALE:
         outcome = RedBarV2Section1Outcome.CANDLES_STALE
-    elif market_metadata.context_status is ContextStatus.MISALIGNED:
+    elif context_status is ContextStatus.MISALIGNED:
         outcome = RedBarV2Section1Outcome.SESSION_MISALIGNED
-    elif market_metadata.context_status is ContextStatus.UNAVAILABLE:
-        outcome = RedBarV2Section1Outcome.INPUTS_NOT_READY
+    elif context_status is ContextStatus.UNAVAILABLE:
+        outcome = RedBarV2Section1Outcome.VWAP_SOURCE_NOT_READY if health_status != "READY" else RedBarV2Section1Outcome.INPUTS_NOT_READY
     elif not market_metadata.futures_instrument_key or not market_metadata.futures_volume_available:
         outcome = RedBarV2Section1Outcome.FUTURES_NOT_READY
     elif not market_metadata.futures_vwap_available:
@@ -137,7 +146,7 @@ def build_canonical_input_readiness(
         futures_instrument_key=market_metadata.futures_instrument_key,
         futures_expiry=market_metadata.futures_expiry,
         futures_volume_available=market_metadata.futures_volume_available,
-        futures_vwap_available=market_metadata.futures_vwap_available,
+        futures_vwap_available=market_metadata.futures_vwap_available and health_status == "READY",
         source_name=market_metadata.source_name,
         source_version=market_metadata.source_version,
         reason_code=market_metadata.reason_code,
@@ -157,61 +166,21 @@ def _canonical_reference(evidence: LegacyV2DecisionEvidence, trading_date: date)
     )
 
 
-def _map_entry_type(value: str | None) -> EntryType | None:
+def _enum(enum_type, value: str | None, field: str):
     if value is None:
         return None
     try:
-        return EntryType(value)
+        return enum_type(value)
     except ValueError as exc:
-        raise LegacyMappingError(f"unsupported legacy entry_type: {value!r}") from exc
+        raise LegacyMappingError(f"unsupported legacy {field}: {value!r}") from exc
 
 
-def _map_direction(value: str | None) -> Direction | None:
-    if value is None:
-        return None
-    try:
-        return Direction(value)
-    except ValueError as exc:
-        raise LegacyMappingError(f"unsupported legacy direction: {value!r}") from exc
-
-
-def _map_option_side(value: str | None) -> OptionSide | None:
-    if value is None:
-        return None
-    try:
-        return OptionSide(value)
-    except ValueError as exc:
-        raise LegacyMappingError(f"unsupported legacy option_side: {value!r}") from exc
-
-
-def _map_strength(value: str | None) -> TrendStrength | None:
-    if value is None:
-        return None
-    try:
-        return TrendStrength(value)
-    except ValueError as exc:
-        raise LegacyMappingError(f"unsupported legacy trend_strength: {value!r}") from exc
-
-
-def _state_for(
-    *,
-    admitted: bool,
-    direction: Direction | None,
-    strength: TrendStrength | None,
-) -> RedBarV2State:
+def _state_for(admitted: bool, direction: Direction | None, strength: TrendStrength | None) -> RedBarV2State:
     if not admitted or direction is None or strength is None:
         return RedBarV2State.SIGNAL_WAITING
     if direction is Direction.BULLISH:
-        return (
-            RedBarV2State.CONFIRMED_BULLISH
-            if strength is TrendStrength.CONFIRMED
-            else RedBarV2State.PROVISIONAL_BULLISH
-        )
-    return (
-        RedBarV2State.CONFIRMED_BEARISH
-        if strength is TrendStrength.CONFIRMED
-        else RedBarV2State.PROVISIONAL_BEARISH
-    )
+        return RedBarV2State.CONFIRMED_BULLISH if strength is TrendStrength.CONFIRMED else RedBarV2State.PROVISIONAL_BULLISH
+    return RedBarV2State.CONFIRMED_BEARISH if strength is TrendStrength.CONFIRMED else RedBarV2State.PROVISIONAL_BEARISH
 
 
 def build_canonical_decision(
@@ -220,22 +189,16 @@ def build_canonical_decision(
     readiness: RedBarV2InputReadiness,
     evidence: LegacyV2DecisionEvidence | None,
 ) -> RedBarV2Decision:
-    """Map one authoritative legacy admission event to canonical Section 2."""
-    allowed = _bool_attribute(replay_event, "candidate_allowed")
-    direction = _map_direction(_text_attribute(replay_event, "direction"))
-    option_side = _map_option_side(_text_attribute(replay_event, "option_side"))
-    entry_type = _map_entry_type(_text_attribute(replay_event, "entry_type"))
-    strength = _map_strength(_text_attribute(replay_event, "trend_strength"))
-    admission_code = _text_attribute(replay_event, "admission_code") or "WAITING"
-    admission_reason = _text_attribute(replay_event, "admission_reason") or "No legacy admission event"
+    """Map the real nested ReplayEvent contract to canonical Section 2."""
+    allowed = event_bool(replay_event, "candidate_allowed")
+    direction = _enum(Direction, event_text(replay_event, "direction"), "direction")
+    option_side = _enum(OptionSide, event_text(replay_event, "option_side"), "option_side")
+    entry_type = _enum(EntryType, event_text(replay_event, "entry_type"), "entry_type")
+    strength = _enum(TrendStrength, event_text(replay_event, "trend_strength"), "trend_strength")
+    admission_code = event_text(replay_event, "admission_code") or "WAITING"
+    admission_reason = event_text(replay_event, "admission_reason") or "No legacy admission event"
 
-    if allowed is True:
-        admission_outcome = AdmissionOutcome.ALLOWED
-    elif allowed is False:
-        admission_outcome = AdmissionOutcome.REJECTED
-    else:
-        admission_outcome = AdmissionOutcome.WAITING
-
+    admission_outcome = AdmissionOutcome.ALLOWED if allowed is True else AdmissionOutcome.REJECTED if allowed is False else AdmissionOutcome.WAITING
     if admission_outcome is AdmissionOutcome.ALLOWED and evidence is None:
         raise LegacyMappingError("allowed legacy decision requires complete event-time evidence")
 
@@ -243,10 +206,10 @@ def build_canonical_decision(
         evaluation_timestamp = readiness.timestamps.evaluated_at
         evaluation_timeframe = "1m"
         reference = readiness.reference
-        rsi = None
-        futures_vwap = None
-        midpoint = None
+        rsi = futures_vwap = midpoint = None
     else:
+        if evidence.futures_instrument_key != readiness.futures_instrument_key:
+            raise LegacyMappingError("decision futures instrument disagrees with readiness")
         evaluation_timestamp = evidence.evaluation_timestamp
         evaluation_timeframe = evidence.evaluation_timeframe
         reference = _canonical_reference(evidence, readiness.trading_date)
@@ -258,7 +221,7 @@ def build_canonical_decision(
             bearish_aligned=evidence.rsi_value < evidence.bearish_rsi_threshold,
         )
         futures_vwap = FuturesVwapEvidence(
-            instrument_key=evidence.instrument_key,
+            instrument_key=evidence.futures_instrument_key,
             comparison_price=evidence.futures_comparison_price,
             vwap=evidence.futures_vwap,
             volume=evidence.futures_volume,
@@ -274,13 +237,7 @@ def build_canonical_decision(
         )
 
     admitted = admission_outcome is AdmissionOutcome.ALLOWED
-    current_state = _state_for(admitted=admitted, direction=direction, strength=strength)
-    previous_state = (
-        RedBarV2State.REFERENCE_READY
-        if readiness.outcome is RedBarV2Section1Outcome.REFERENCE_READY
-        else RedBarV2State.REFERENCE_NOT_READY
-    )
-
+    previous_state = RedBarV2State.REFERENCE_READY if readiness.outcome is RedBarV2Section1Outcome.REFERENCE_READY else RedBarV2State.REFERENCE_NOT_READY
     return RedBarV2Decision(
         strategy_id="RED_BAR_V2",
         strategy_version=readiness.strategy_version,
@@ -288,7 +245,7 @@ def build_canonical_decision(
         evaluation_timeframe=evaluation_timeframe,
         entry_type=entry_type,
         previous_state=previous_state,
-        current_state=current_state,
+        current_state=_state_for(admitted, direction, strength),
         direction=direction,
         option_side=option_side,
         trend_strength=strength,
