@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from red_bar_lab.domain.red_bar_v2 import ContextStatus, RedBarV2State
+from red_bar_lab.intelligence.red_bar_v2_futures_context import RedBarV2VwapSourceHealth
 from red_bar_lab.services.red_bar_v2_canonical import (
     CanonicalResolutionError,
     LegacyV2DecisionEvidence,
@@ -77,6 +78,25 @@ def metadata() -> LegacyV2MarketMetadata:
     )
 
 
+def health() -> RedBarV2VwapSourceHealth:
+    return RedBarV2VwapSourceHealth(
+        status="READY",
+        reason="FULL_TIMESTAMP_ALIGNMENT",
+        price_source_instrument=UNDERLYING,
+        rsi_source_instrument=UNDERLYING,
+        vwap_source_instrument=FUTURES,
+        timeframe="5M",
+        index_rows=50,
+        futures_rows=50,
+        aligned_rows=50,
+        alignment_coverage_pct=100.0,
+        positive_volume_rows=50,
+        index_timestamp=EVALUATED_AT,
+        futures_timestamp=EVALUATED_AT,
+        last_aligned_timestamp=EVALUATED_AT,
+    )
+
+
 def event_from_evidence(value: LegacyV2DecisionEvidence) -> ReplayEvent:
     details = evidence_to_event_details(value)
     details.update(
@@ -112,7 +132,7 @@ def resolve(event: ReplayEvent):
             reference_timestamp=REFERENCE_AT,
             reference_midpoint=24800.0,
         ),
-        health=SimpleNamespace(status="READY", futures_instrument_key=FUTURES),
+        health=health(),
         replay_event=event,
         market_metadata=metadata(),
         evidence=None,
