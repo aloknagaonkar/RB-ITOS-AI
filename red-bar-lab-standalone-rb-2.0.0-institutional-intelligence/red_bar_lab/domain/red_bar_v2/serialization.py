@@ -24,7 +24,7 @@ from .models import (
     RsiEvidence,
 )
 
-SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0"})
+SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0", "1.1"})
 _EnumT = TypeVar("_EnumT")
 
 
@@ -284,6 +284,9 @@ def red_bar_v2_bundle_from_dict(payload: Mapping[str, object]) -> RedBarV2Signal
     schema_version = _text(payload, "schema_version")
     if schema_version not in SUPPORTED_SCHEMA_VERSIONS:
         raise UnsupportedSchemaVersionError(f"unsupported Red Bar V2 schema version: {schema_version}")
+    instrument_key = _optional_text(payload, "instrument_key")
+    if schema_version == "1.1" and instrument_key is None:
+        raise DomainValidationError("schema 1.1 requires underlying instrument_key")
     decision = _decision_from_dict(_mapping(_required(payload, "decision"), "decision"))
     return RedBarV2SignalBundle(
         schema_version=schema_version,
@@ -301,5 +304,5 @@ def red_bar_v2_bundle_from_dict(payload: Mapping[str, object]) -> RedBarV2Signal
         idempotency_key=_text(payload, "idempotency_key"),
         lifecycle_status=_enum(BundleLifecycleStatus, _required(payload, "lifecycle_status"), "lifecycle_status"),
         created_at=_datetime(_required(payload, "created_at"), "created_at"),
-        instrument_key=_optional_text(payload, "instrument_key"),
+        instrument_key=instrument_key,
     )
