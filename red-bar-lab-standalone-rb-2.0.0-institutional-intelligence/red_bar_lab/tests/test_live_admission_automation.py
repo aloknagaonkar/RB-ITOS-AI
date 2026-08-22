@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from red_bar_lab.execution.live_admission_automation import (
+    LiveAdmissionRedBarPaperAutomationService,
     _AdmissionDatabaseProxy,
 )
 
@@ -10,13 +11,25 @@ IST = ZoneInfo("Asia/Kolkata")
 
 
 class _Database:
-    def __init__(self, rows):
+    def __init__(self, rows, queue=None):
         self.rows = list(rows)
+        self.queue = list(queue or [])
         self.diagnostics = []
         self.events = []
+        self.expired = []
 
     def read_signal_attempts(self, instrument_key, trading_date):
         return list(self.rows)
+
+    def read_execution_queue(self):
+        return list(self.queue)
+
+    def expire_execution_queue_for_signal(self, *, signal_id, reason):
+        self.expired.append((signal_id, reason))
+        for row in self.queue:
+            if row.get("signal_id") == signal_id and row.get("status") == "APPROVED":
+                row["status"] = "EXPIRED"
+                row["reason"] = reason
 
     def insert_paper_signal_diagnostic(self, row):
         self.diagnostics.append(dict(row))
@@ -34,6 +47,17 @@ def _proxy(database, now):
         allow_stale_signals=False,
         enable_opportunity_extension=True,
     )
+
+
+def _service(database, *, enable_opportunity_extension=False):
+    service = object.__new__(LiveAdmissionRedBarPaperAutomationService)
+    service.database = database
+    service.underlying_name = "NIFTY 50"
+    service.max_signal_age_seconds = 180
+    service.allow_outside_market_hours = False
+    service.allow_stale_signals = False
+    service.enable_opportunity_extension = enable_opportunity_extension
+    return service
 
 
 def test_terminal_live_block_is_filtered_before_legacy_engine():
@@ -87,12 +111,91 @@ def test_stale_signal_reaches_existing_opportunity_extension_path():
     assert database.events == []
 
 
+def test_queue_consumer_expires_terminally_blocked_approved_signal():
+    now = datetime(2026, 8, 21, 10, 0, tzinfo=IST)
+    database = _Database(
+        [
+            {
+                "signal_id": "SIG-BLOCKED",
+                "confirmation_timestamp": None,
+                "direction": "BULLISH",
+                "state": "CONFIRMED",
+            }
+        ],
+        queue=[
+            {
+                "queue_id": "Q-1",
+                "signal_id": "SIG-BLOCKED",
+                "status": "APPROVED",
+            },
+            {
+                "queue_id": "Q-2",
+                "signal_id": "SIG-BLOCKED",
+                "status": "APPROVED",
+            },
+        ],
+    )
+    service = _service(database)
+
+    blocked = service._enforce_queue_admission(
+        trading_date="2026-08-21",
+        now=now,
+    )
+
+    assert blocked == 1
+    assert database.expired == [
+        (
+            "SIG-BLOCKED",
+            "LIVE_ADMISSION:SIGNAL_CONFIRMATION_TIMESTAMP_MISSING",
+        )
+    ]
+    assert all(row["status"] == "EXPIRED" for row in database.queue)
+    assert database.diagnostics[0]["scan_id"] == "LIVE-ADMISSION-QUEUE"
+    assert database.events[0]["state"] == "LIVE_ADMISSION_QUEUE_BLOCKED"
+    assert "historical_override=PROHIBITED" in database.events[0]["detail"]
+
+
+def test_queue_consumer_preserves_fresh_and_unresolved_approved_rows():
+    now = datetime(2026, 8, 21, 10, 0, tzinfo=IST)
+    database = _Database(
+        [
+            {
+                "signal_id": "SIG-FRESH",
+                "confirmation_timestamp": now - timedelta(seconds=30),
+                "direction": "BEARISH",
+                "state": "CONFIRMED",
+            }
+        ],
+        queue=[
+            {
+                "queue_id": "Q-FRESH",
+                "signal_id": "SIG-FRESH",
+                "status": "APPROVED",
+            },
+            {
+                "queue_id": "Q-OTHER-SOURCE",
+                "signal_id": "SIG-NOT-IN-RED-BAR-SIGNALS",
+                "status": "APPROVED",
+            },
+        ],
+    )
+    service = _service(database)
+
+    blocked = service._enforce_queue_admission(
+        trading_date="2026-08-21",
+        now=now,
+    )
+
+    assert blocked == 0
+    assert database.expired == []
+    assert all(row["status"] == "APPROVED" for row in database.queue)
+    assert database.diagnostics == []
+    assert database.events == []
+
+
 def test_workspace_installs_additive_live_admission_service():
     from red_bar_lab.ui import workspace
     from red_bar_lab.ui import _shared
-    from red_bar_lab.execution.live_admission_automation import (
-        LiveAdmissionRedBarPaperAutomationService,
-    )
 
     assert workspace.shared_ui.RedBarPaperAutomationService is (
         LiveAdmissionRedBarPaperAutomationService
