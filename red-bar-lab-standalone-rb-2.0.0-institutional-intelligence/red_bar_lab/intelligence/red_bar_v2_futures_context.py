@@ -61,6 +61,7 @@ class RedBarV2FuturesSnapshot(MarketIndicatorSnapshot):
     vwap_comparison_price: float
     vwap_source_instrument_key: str
     vwap_source_timestamp: datetime
+    vwap_source_volume: float
     vwap_source_type: str = "NIFTY_FUTURES"
 
 
@@ -192,6 +193,7 @@ def build_red_bar_v2_futures_snapshot(
     vwap_value = float(vwap_raw)
     index_close = float(index_latest_row["close"])
     futures_close = float(futures_latest_row["close"])
+    futures_volume = float(futures_latest_row["volume"])
     if futures_close > vwap_value:
         price_vs_vwap = "ABOVE"
     elif futures_close < vwap_value:
@@ -224,5 +226,6 @@ def build_red_bar_v2_futures_snapshot(
         vwap_comparison_price=futures_close,
         vwap_source_instrument_key=vwap_instrument_key,
         vwap_source_timestamp=futures_latest.to_pydatetime(),
+        vwap_source_volume=futures_volume,
     )
     return snapshot, health("READY", "FULL_TIMESTAMP_ALIGNMENT")
