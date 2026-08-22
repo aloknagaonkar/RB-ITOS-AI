@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime
 from time import perf_counter_ns
+from typing import Mapping
 
 from red_bar_lab.domain.red_bar_v2 import AdmissionOutcome
+from red_bar_lab.intelligence.red_bar_v2_futures_context import RedBarV2VwapSourceHealth
 
 from .bundle_factory import create_red_bar_v2_signal_bundle
 from .event_access import event_bool, event_details
@@ -11,6 +13,75 @@ from .evidence_producer import evidence_from_event_details
 from .exceptions import CanonicalResolutionError, LegacyMappingError
 from .legacy_adapter import build_canonical_decision, build_canonical_input_readiness
 from .models import LegacyV2DecisionEvidence, LegacyV2MarketMetadata, RedBarV2CanonicalResolution
+
+
+def _optional_timestamp(value: object, field: str) -> datetime | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise CanonicalResolutionError(f"event-time health {field} must be an ISO datetime string")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise CanonicalResolutionError(f"event-time health {field} is invalid") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise CanonicalResolutionError(f"event-time health {field} must be timezone-aware")
+    return parsed
+
+
+def _event_time_health(replay_event: object | None, fallback: object) -> object:
+    """Prefer the health snapshot captured with the replay event.
+
+    The health returned by a full-day replay represents the latest/final replay
+    state and may differ from the earlier health that admitted a candidate.
+    Canonical event resolution must therefore use the health serialized beside
+    that event when available.
+    """
+    payload = event_details(replay_event).get("vwap_source_health")
+    if payload is None:
+        return fallback
+    if not isinstance(payload, Mapping):
+        raise CanonicalResolutionError("event-time vwap_source_health must be a mapping")
+
+    def text(name: str) -> str:
+        value = payload.get(name)
+        if not isinstance(value, str) or not value.strip():
+            raise CanonicalResolutionError(
+                f"event-time health {name} must be a non-empty string"
+            )
+        return value
+
+    def integer(name: str) -> int:
+        value = payload.get(name)
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise CanonicalResolutionError(f"event-time health {name} must be an int")
+        return value
+
+    coverage = payload.get("alignment_coverage_pct")
+    if isinstance(coverage, bool) or not isinstance(coverage, (int, float)):
+        raise CanonicalResolutionError(
+            "event-time health alignment_coverage_pct must be numeric"
+        )
+
+    return RedBarV2VwapSourceHealth(
+        status=text("status"),
+        reason=text("reason"),
+        price_source_instrument=text("price_source_instrument"),
+        rsi_source_instrument=text("rsi_source_instrument"),
+        vwap_source_instrument=text("vwap_source_instrument"),
+        timeframe=text("timeframe"),
+        index_rows=integer("index_rows"),
+        futures_rows=integer("futures_rows"),
+        aligned_rows=integer("aligned_rows"),
+        alignment_coverage_pct=float(coverage),
+        positive_volume_rows=integer("positive_volume_rows"),
+        index_timestamp=_optional_timestamp(payload.get("index_timestamp"), "index_timestamp"),
+        futures_timestamp=_optional_timestamp(payload.get("futures_timestamp"), "futures_timestamp"),
+        last_aligned_timestamp=_optional_timestamp(
+            payload.get("last_aligned_timestamp"), "last_aligned_timestamp"
+        ),
+        execution_scope=text("execution_scope"),
+    )
 
 
 def resolve_red_bar_v2_canonical(
@@ -30,9 +101,10 @@ def resolve_red_bar_v2_canonical(
     if resolved_at.tzinfo is None or resolved_at.utcoffset() is None:
         raise CanonicalResolutionError("resolved_at must be timezone-aware")
 
+    effective_health = _event_time_health(replay_event, health)
     section_1 = build_canonical_input_readiness(
         replay=replay,
-        health=health,
+        health=effective_health,
         market_metadata=market_metadata,
     )
 
@@ -47,9 +119,13 @@ def resolve_red_bar_v2_canonical(
 
     if resolved_evidence is not None:
         if resolved_evidence.underlying_instrument_key != market_metadata.underlying_instrument_key:
-            raise CanonicalResolutionError("event evidence underlying instrument disagrees with replay metadata")
+            raise CanonicalResolutionError(
+                "event evidence underlying instrument disagrees with replay metadata"
+            )
         if resolved_evidence.futures_instrument_key != market_metadata.futures_instrument_key:
-            raise CanonicalResolutionError("event evidence futures instrument disagrees with health metadata")
+            raise CanonicalResolutionError(
+                "event evidence futures instrument disagrees with health metadata"
+            )
 
     section_2 = build_canonical_decision(
         replay_event=replay_event,
