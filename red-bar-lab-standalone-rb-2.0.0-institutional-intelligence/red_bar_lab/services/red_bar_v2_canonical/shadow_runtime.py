@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 import hashlib
 import json
 import logging
@@ -47,6 +47,16 @@ def _details(event: object) -> Mapping[str, object]:
     return value if isinstance(value, Mapping) else {}
 
 
+def _event_health(details: Mapping[str, object], fallback: object) -> Mapping[str, object]:
+    value = details.get("vwap_source_health")
+    if isinstance(value, Mapping):
+        return value
+    return {
+        "status": getattr(fallback, "status", "UNAVAILABLE"),
+        "reason": getattr(fallback, "reason", "UNAVAILABLE"),
+    }
+
+
 def build_runtime_source_replay_id(
     *,
     instrument_key: str,
@@ -54,13 +64,13 @@ def build_runtime_source_replay_id(
     event: object,
 ) -> str:
     timestamp = getattr(event, "timestamp", None)
-    if not isinstance(timestamp, datetime) or timestamp.tzinfo is None:
+    if not isinstance(timestamp, datetime) or timestamp.tzinfo is None or timestamp.utcoffset() is None:
         raise ValueError("event timestamp must be timezone-aware")
     details = _details(event)
     payload = {
         "instrument_key": instrument_key,
         "trading_date": trading_date,
-        "timestamp_utc": timestamp.astimezone().isoformat(),
+        "timestamp_utc": timestamp.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
         "event_type": getattr(event, "event_type", None),
         "admission_code": getattr(event, "admission_code", None),
         "decision_id": details.get("decision_id"),
@@ -82,12 +92,16 @@ def build_runtime_market_metadata(
     event_timestamp = getattr(event, "timestamp", None)
     if not isinstance(event_timestamp, datetime):
         raise ValueError("event timestamp is required")
+    if event_timestamp.tzinfo is None or event_timestamp.utcoffset() is None:
+        raise ValueError("event timestamp must be timezone-aware")
     details = _details(event)
+    event_health = _event_health(details, health)
     index_timestamp = _parse_timestamp(details.get("index_context_timestamp"), event_timestamp)
     futures_timestamp = _parse_timestamp(details.get("futures_source_timestamp"), event_timestamp)
     reference_timestamp = _parse_timestamp(details.get("reference_timestamp"), event_timestamp)
     expiry = date.fromisoformat(futures_expiry) if futures_expiry else None
-    health_status = str(getattr(health, "status", "UNAVAILABLE"))
+    health_status = str(event_health.get("status", "UNAVAILABLE"))
+    health_reason = str(event_health.get("reason", health_status))
     status = ContextStatus.FRESH if health_status == "READY" else ContextStatus.UNAVAILABLE
     trading_date_text = str(getattr(replay, "trading_date"))
     return LegacyV2MarketMetadata(
@@ -108,7 +122,7 @@ def build_runtime_market_metadata(
         futures_volume_available=float(details.get("futures_volume", 0.0) or 0.0) > 0,
         futures_vwap_available=details.get("futures_vwap") is not None,
         reason_code=health_status,
-        reason=str(getattr(health, "reason", health_status)),
+        reason=health_reason,
         reference_id=str(details.get("reference_id")) if details.get("reference_id") is not None else None,
         reference_timestamp=reference_timestamp,
         reference_high=float(details["reference_high"]) if details.get("reference_high") is not None else None,
