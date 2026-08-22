@@ -55,23 +55,23 @@ def test_corrupt_state_is_ignored(tmp_path: Path):
     assert circuit.begin_cycle().consecutive_failures == 0
 
 
-def test_real_monitor_runtime_uses_default_artifact_state(monkeypatch, tmp_path: Path):
-    monkeypatch.setenv("UPSTOX_ACCESS_TOKEN", "test-token")
-    monkeypatch.setenv("RED_BAR_ARTIFACTS_ROOT", str(tmp_path))
-    monkeypatch.delenv("RED_BAR_PAPER_MONITOR_CIRCUIT_STATE", raising=False)
+def test_runtime_uses_dedicated_state_environment_variable(monkeypatch, tmp_path: Path):
+    expected = tmp_path / "paper_monitor_circuit.json"
+    monkeypatch.setenv("RED_BAR_PAPER_MONITOR_CIRCUIT_STATE", str(expected))
 
     circuit = PaperMonitorCircuitBreaker(failure_threshold=1)
     circuit.record_failure("UNDERLYING_FEED_STALE")
 
-    expected = tmp_path / "paper_monitor_circuit.json"
     assert circuit.state_path == expected
     assert expected.exists()
 
 
-def test_library_use_without_monitor_token_has_no_file_side_effect(monkeypatch):
-    monkeypatch.delenv("UPSTOX_ACCESS_TOKEN", raising=False)
+def test_ambient_broker_token_does_not_enable_persistence(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("UPSTOX_ACCESS_TOKEN", "test-token")
+    monkeypatch.setenv("RED_BAR_ARTIFACTS_ROOT", str(tmp_path))
     monkeypatch.delenv("RED_BAR_PAPER_MONITOR_CIRCUIT_STATE", raising=False)
 
     circuit = PaperMonitorCircuitBreaker()
 
     assert circuit.state_path is None
+    assert not (tmp_path / "paper_monitor_circuit.json").exists()
