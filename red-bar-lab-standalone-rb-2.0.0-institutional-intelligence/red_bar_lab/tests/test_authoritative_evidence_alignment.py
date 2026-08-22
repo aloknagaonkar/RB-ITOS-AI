@@ -6,7 +6,7 @@ from red_bar_lab.services.authoritative_market_evidence import (
 )
 
 
-def test_completed_bar_derives_close_from_open_label():
+def test_completed_bar_derives_close_without_relabeling_observation():
     result = completed_bar_timestamps(
         {"observed_at": "2026-08-21T09:15:00+00:00"},
         interval_minutes=5,
@@ -14,7 +14,7 @@ def test_completed_bar_derives_close_from_open_label():
 
     assert result["bar_open_timestamp"] == "2026-08-21T09:15:00+00:00"
     assert result["bar_close_timestamp"] == "2026-08-21T09:20:00+00:00"
-    assert result["observed_at"] == "2026-08-21T09:20:00+00:00"
+    assert result["observed_at"] == "2026-08-21T09:15:00+00:00"
 
 
 def test_completed_bar_preserves_explicit_close_without_double_shift():
