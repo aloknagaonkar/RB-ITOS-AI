@@ -24,12 +24,13 @@ def replace_run_scoped_signal_rows(
     trading_date: str,
     rows: Iterable[Mapping[str, object]],
 ) -> RunScopedSignalPersistenceResult:
-    """Replace only rows owned by one signal producer.
+    """Replace one producer's rows without deleting another producer's signals.
 
-    Deletion is scoped to ``(run_id, instrument_key, trading_date)``. A live
-    reference refresh therefore cannot erase Red Bar V2 paper-runtime or replay
-    rows from the same session. Legacy signal-ID migration is intentionally not
-    performed in this hot path.
+    Deletion is scoped to ``(run_id, instrument_key, trading_date)``. Canonical
+    ``signal_id`` remains globally unique: when a deterministic replay emits the
+    same signal under a newer run ID, the existing row is reassigned and updated
+    idempotently instead of creating a duplicate. Legacy signal-ID migration is
+    intentionally excluded from this hot path.
     """
 
     owner = str(run_id or "").strip()
@@ -108,6 +109,27 @@ def replace_run_scoped_signal_rows(
                 confirmation_high,confirmation_low,confirmation_close,
                 confirmation_delay_minutes,created_at
             ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(signal_id) DO UPDATE SET
+                run_id=excluded.run_id,
+                instrument_key=excluded.instrument_key,
+                trading_date=excluded.trading_date,
+                level_type=excluded.level_type,
+                level_value=excluded.level_value,
+                direction=excluded.direction,
+                state=excluded.state,
+                cross_timestamp=excluded.cross_timestamp,
+                confirmation_timestamp=excluded.confirmation_timestamp,
+                underlying_entry=excluded.underlying_entry,
+                cross_open=excluded.cross_open,
+                cross_high=excluded.cross_high,
+                cross_low=excluded.cross_low,
+                cross_close=excluded.cross_close,
+                confirmation_open=excluded.confirmation_open,
+                confirmation_high=excluded.confirmation_high,
+                confirmation_low=excluded.confirmation_low,
+                confirmation_close=excluded.confirmation_close,
+                confirmation_delay_minutes=excluded.confirmation_delay_minutes,
+                created_at=excluded.created_at
             """,
             values,
         )
