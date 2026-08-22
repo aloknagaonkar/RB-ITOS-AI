@@ -18,6 +18,7 @@ from .enums import (
 from .exceptions import BundleIdentityError, DomainValidationError
 
 _SUPPORTED_TIMEFRAMES = frozenset({"1m", "5m"})
+_SUPPORTED_BUNDLE_SCHEMA_VERSIONS = frozenset({"1.0", "1.1"})
 _MIDPOINT_ABS_TOLERANCE = 1e-9
 
 
@@ -346,6 +347,10 @@ class RedBarV2SignalBundle:
     def __post_init__(self) -> None:
         for name in ("schema_version", "bundle_id", "signal_id", "strategy_version", "idempotency_key"):
             _require_text(name, getattr(self, name))
+        if self.schema_version not in _SUPPORTED_BUNDLE_SCHEMA_VERSIONS:
+            raise DomainValidationError(f"unsupported bundle schema_version: {self.schema_version}")
+        if self.schema_version == "1.1" and self.instrument_key is None:
+            raise DomainValidationError("schema 1.1 requires underlying instrument_key")
         if self.instrument_key is not None:
             _require_text("instrument_key", self.instrument_key)
         _require_v2_strategy("strategy_id", self.strategy_id)
