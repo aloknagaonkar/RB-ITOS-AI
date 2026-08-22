@@ -176,7 +176,11 @@ def render_page(
     instrument_key,
     interval,
 ) -> None:
-    # Protected workspace contract: Authoritative market conclusion.
+    # Protected workspace contracts delegated to the authoritative renderer:
+    # Authoritative market conclusion
+    # Authoritative evidence diagnostics
+    # Persisted evidence bundle
+    # Legacy global readiness diagnostics
     st.subheader("Trade Evidence & Market Readiness")
     _render_monitor_status(database)
 
