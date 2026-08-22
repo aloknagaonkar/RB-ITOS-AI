@@ -7,7 +7,7 @@ from pathlib import Path
 import sqlite3
 from typing import Any, Mapping
 
-POLICY_VERSION = "market-evidence-v4"
+POLICY_VERSION = "market-evidence-v5"
 
 
 def _json(value: object) -> str:
@@ -23,8 +23,7 @@ def _bundle_id(underlying_name: str, view: Mapping[str, Any]) -> str:
     """Identify one aligned source observation, not one monitor cycle.
 
     Collection time is intentionally excluded. Re-reading the same underlying,
-    futures and option observations updates the same bundle instead of creating
-    an unbounded sequence of per-cycle duplicates.
+    futures and option observations resolves to the same immutable bundle.
     """
     anchors = (
         view.get("underlying_bar_close_timestamp")
@@ -82,6 +81,11 @@ def persist_market_evidence_bundle(
     underlying_name: str,
     view: Mapping[str, Any],
 ) -> str:
+    """Persist one immutable bundle for an aligned source observation.
+
+    Reprocessing an identical evidence identity is idempotent. The original
+    payload and creation timestamp are retained for auditability.
+    """
     path = Path(database_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     bundle_id = _bundle_id(underlying_name, view)
@@ -99,21 +103,7 @@ def persist_market_evidence_bundle(
                 trade_bias, blocking_reasons_json, caution_reasons_json,
                 policy_version, payload_json, created_at
             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            ON CONFLICT(bundle_id) DO UPDATE SET
-                as_of_timestamp=excluded.as_of_timestamp,
-                futures_collection_timestamp=excluded.futures_collection_timestamp,
-                observed_direction=excluded.observed_direction,
-                structural_state=excluded.structural_state,
-                direction_state=excluded.direction_state,
-                evidence_readiness=excluded.evidence_readiness,
-                contract_quality=excluded.contract_quality,
-                trade_eligibility=excluded.trade_eligibility,
-                trade_bias=excluded.trade_bias,
-                blocking_reasons_json=excluded.blocking_reasons_json,
-                caution_reasons_json=excluded.caution_reasons_json,
-                policy_version=excluded.policy_version,
-                payload_json=excluded.payload_json,
-                created_at=excluded.created_at
+            ON CONFLICT(bundle_id) DO NOTHING
             """,
             (
                 bundle_id,
