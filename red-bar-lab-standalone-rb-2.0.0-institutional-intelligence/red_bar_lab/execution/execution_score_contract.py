@@ -67,20 +67,31 @@ def calibration_is_ready(
 def truthful_execution_scores(
     row: Mapping[str, object],
 ) -> ExecutionScoreContract:
-    """Translate legacy committee fields into a truthful public contract."""
+    """Translate legacy committee fields into a truthful public contract.
+
+    An explicitly persisted ``calibrated_probability_pct`` is already a
+    calibrated-domain value and must be preserved. Calibration deciles are
+    required only before promoting a legacy or derived score into probability
+    terminology; they must not erase an explicit calibrated value.
+    """
     calibration_ready = calibration_is_ready(
         row.get("calibration_deciles")  # type: ignore[arg-type]
     )
     calibrated = row.get("calibrated_probability_pct")
-    calibrated_probability = (
+    explicit_calibrated_probability = (
         _number(calibrated)
-        if calibration_ready and calibrated not in (None, "")
+        if calibrated not in (None, "")
         else None
     )
+    calibrated_probability = explicit_calibrated_probability
     calibration_status = (
         "CALIBRATED"
         if calibrated_probability is not None
-        else "NOT_CALIBRATED"
+        else (
+            "CALIBRATION_READY"
+            if calibration_ready
+            else "NOT_CALIBRATED"
+        )
     )
     expectancy = row.get("expectancy_pct")
     return ExecutionScoreContract(
