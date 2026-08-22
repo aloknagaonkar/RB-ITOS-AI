@@ -20,10 +20,6 @@ class ContractQualityMetric:
 
     @property
     def weight(self) -> float:
-        # Keep low-quality contracts visible for research, but once a contract
-        # falls below the qualification threshold its aggregate contribution is
-        # clamped to the minimum advisory weight. Qualified contracts continue
-        # to scale proportionally with their quality score.
         if not self.eligible:
             return 0.10
         return max(0.10, min(1.0, self.quality_score / 100.0))
@@ -45,13 +41,7 @@ class ContractQualityMetric:
 
 
 class ContractQualityEngine:
-    """Advisory quality weighting for option-chain evidence.
-
-    Raw OI/premium velocity is never changed. This layer only controls how much
-    each contract contributes to aggregate Shadow intelligence. ATM is inferred
-    from the strike where call/put premiums are closest, which is robust when a
-    separate spot field is not persisted with the chain artifact.
-    """
+    """Advisory quality weighting for option-chain evidence."""
 
     @staticmethod
     def _num(value: object) -> float | None:
@@ -62,12 +52,16 @@ class ContractQualityEngine:
         except (TypeError, ValueError):
             return None
 
+    @staticmethod
+    def _records(frame: pd.DataFrame) -> list[dict[str, object]]:
+        return frame.to_dict(orient="records")
+
     @classmethod
     def infer_atm(cls, frame: pd.DataFrame) -> float | None:
         if frame is None or frame.empty or "strike" not in frame.columns:
             return None
         best: tuple[float, float] | None = None
-        for _, row in frame.iterrows():
+        for row in cls._records(frame):
             strike = cls._num(row.get("strike"))
             call = cls._num(row.get("call_ltp"))
             put = cls._num(row.get("put_ltp"))
@@ -80,7 +74,12 @@ class ContractQualityEngine:
 
     @classmethod
     def _strike_step(cls, frame: pd.DataFrame) -> float:
-        strikes = pd.to_numeric(frame.get("strike"), errors="coerce").dropna().sort_values().unique()
+        strikes = (
+            pd.to_numeric(frame.get("strike"), errors="coerce")
+            .dropna()
+            .sort_values()
+            .unique()
+        )
         if len(strikes) < 2:
             return 50.0
         diffs = pd.Series(strikes).diff().dropna()
@@ -104,7 +103,7 @@ class ContractQualityEngine:
         atm = cls.infer_atm(frame)
         step = max(1.0, cls._strike_step(frame))
         result: list[ContractQualityMetric] = []
-        for _, row in frame.iterrows():
+        for row in cls._records(frame):
             strike = cls._num(row.get("strike"))
             if strike is None:
                 continue
@@ -118,13 +117,19 @@ class ContractQualityEngine:
                 premium_score = min(100.0, max(0.0, (premium or 0.0) / 10.0 * 100.0))
                 oi_score = min(100.0, max(0.0, (oi or 0.0) / 500000.0 * 100.0))
                 volume_score = min(100.0, max(0.0, (volume or 0.0) / 1000000.0 * 100.0))
-                score = (
-                    proximity_score * 0.35
-                    + premium_score * 0.25
-                    + oi_score * 0.25
-                    + volume_score * 0.15
+                score = round(
+                    max(
+                        0.0,
+                        min(
+                            100.0,
+                            proximity_score * 0.35
+                            + premium_score * 0.25
+                            + oi_score * 0.25
+                            + volume_score * 0.15,
+                        ),
+                    ),
+                    2,
                 )
-                score = round(max(0.0, min(100.0, score)), 2)
                 result.append(
                     ContractQualityMetric(
                         strike=round(strike, 2),
