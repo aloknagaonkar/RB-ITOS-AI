@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 import logging
+import re
 from typing import Any
 from urllib.parse import quote, unquote
-import re
 
 import pandas as pd
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 
 logger = logging.getLogger(__name__)
@@ -15,6 +17,30 @@ logger = logging.getLogger(__name__)
 
 class UpstoxAPIError(RuntimeError):
     pass
+
+
+class ObservableRetry(Retry):
+    """Bounded idempotent retry policy with credential-safe telemetry."""
+
+    def increment(self, method=None, url=None, response=None, error=None, *args, **kwargs):
+        next_retry = super().increment(
+            method=method,
+            url=url,
+            response=response,
+            error=error,
+            *args,
+            **kwargs,
+        )
+        endpoint = str(url or "").split("?", 1)[0]
+        logger.warning(
+            "broker_get_retry method=%s endpoint=%s status=%s remaining=%s error=%s",
+            str(method or "UNKNOWN").upper(),
+            endpoint,
+            getattr(response, "status", "NONE"),
+            getattr(next_retry, "total", "UNKNOWN"),
+            type(error).__name__ if error is not None else "NONE",
+        )
+        return next_retry
 
 
 class UpstoxClient:
@@ -29,9 +55,34 @@ class UpstoxClient:
     ) -> None:
         self.access_token = access_token.strip()
         self.timeout = timeout
-        # RB-1.3.2: reuse TCP/TLS connections across broker REST calls.  A
-        # caller-supplied session keeps tests/adapters injectable.
         self.session = session or requests.Session()
+        self._configure_get_retry_policy()
+
+    def _configure_get_retry_policy(self) -> None:
+        retry = ObservableRetry(
+            total=3,
+            connect=3,
+            read=3,
+            status=3,
+            backoff_factor=0.5,
+            status_forcelist=(429, 502, 503, 504),
+            allowed_methods=frozenset({"GET", "HEAD", "OPTIONS"}),
+            respect_retry_after_header=True,
+            raise_on_status=False,
+        )
+        mount = getattr(self.session, "mount", None)
+        if callable(mount):
+            adapter = HTTPAdapter(max_retries=retry)
+            mount("https://", adapter)
+            mount("http://", adapter)
+        self.get_retry_policy = {
+            "total": 3,
+            "backoff_factor": 0.5,
+            "status_forcelist": (429, 502, 503, 504),
+            "allowed_methods": ("GET", "HEAD", "OPTIONS"),
+            "respect_retry_after_header": True,
+            "observability": "broker_get_retry",
+        }
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -101,7 +152,6 @@ class UpstoxClient:
             raise UpstoxAPIError(f"No active option expiries found for {instrument_key}.")
         return expiries
 
-
     def get_option_contracts(
         self,
         instrument_key: str,
@@ -169,7 +219,6 @@ class UpstoxClient:
             )
         return data
 
-
     def get_historical_oi(
         self,
         instrument_key: str,
@@ -215,42 +264,72 @@ class UpstoxClient:
         payload = response.json()
         data = payload.get("data") if isinstance(payload, dict) else None
         if not isinstance(data, dict):
-            raise UpstoxAPIError(
-                "Malformed historical Change-in-OI response."
-            )
+            raise UpstoxAPIError("Malformed historical Change-in-OI response.")
         return dict(data)
 
     def get_expired_option_expiries(self, instrument_key: str, *, timeout: float | None = None) -> list[str]:
-        """Return officially exposed historical expiries (read-only V2 API)."""
-        response = self.session.get(f"{self.BASE_URL_V2}/expired-instruments/expiries",
-            params={"instrument_key": instrument_key}, headers=self._headers(), timeout=timeout or self.timeout)
+        response = self.session.get(
+            f"{self.BASE_URL_V2}/expired-instruments/expiries",
+            params={"instrument_key": instrument_key},
+            headers=self._headers(),
+            timeout=timeout or self.timeout,
+        )
         self._raise_for_api_error(response)
-        payload = response.json(); data = payload.get("data") if isinstance(payload, dict) else None
-        if not isinstance(data, list): raise UpstoxAPIError("Malformed expired-expiry response.")
-        return sorted({str(item.get("expiry") if isinstance(item, dict) else item) for item in data
-                       if (item.get("expiry") if isinstance(item, dict) else item)})
+        payload = response.json()
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(data, list):
+            raise UpstoxAPIError("Malformed expired-expiry response.")
+        return sorted(
+            {
+                str(item.get("expiry") if isinstance(item, dict) else item)
+                for item in data
+                if (item.get("expiry") if isinstance(item, dict) else item)
+            }
+        )
 
     def get_expired_option_contracts(self, instrument_key: str, expiry_date: str, *, timeout: float | None = None) -> list[dict[str, Any]]:
-        """Discover expired CE/PE contracts without retaining authorization data."""
-        response = self.session.get(f"{self.BASE_URL_V2}/expired-instruments/option/contract",
-            params={"instrument_key": instrument_key, "expiry_date": expiry_date}, headers=self._headers(), timeout=timeout or self.timeout)
+        response = self.session.get(
+            f"{self.BASE_URL_V2}/expired-instruments/option/contract",
+            params={"instrument_key": instrument_key, "expiry_date": expiry_date},
+            headers=self._headers(),
+            timeout=timeout or self.timeout,
+        )
         self._raise_for_api_error(response)
-        payload=response.json(); data=payload.get("data") if isinstance(payload,dict) else None
-        if not isinstance(data,list): raise UpstoxAPIError("Malformed expired-contract response.")
-        return [dict(item) for item in data if isinstance(item,dict)]
+        payload = response.json()
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(data, list):
+            raise UpstoxAPIError("Malformed expired-contract response.")
+        return [dict(item) for item in data if isinstance(item, dict)]
 
-    def get_expired_historical_candles(self, expired_instrument_key: str, from_date: str,
-                                       to_date: str, *, interval: int = 1, timeout: float | None = None) -> pd.DataFrame:
-        """Fetch expired-contract OHLC/volume/OI candles; no chain fields exist."""
-        path=("/expired-instruments/historical-candle/"+self._encode_instrument_key(expired_instrument_key)
-              +f"/{interval}minute/{to_date}/{from_date}")
-        response=self.session.get(f"{self.BASE_URL_V2}{path}",headers=self._headers(),timeout=timeout or self.timeout)
-        if response.status_code in (401,403,429):
+    def get_expired_historical_candles(
+        self,
+        expired_instrument_key: str,
+        from_date: str,
+        to_date: str,
+        *,
+        interval: int = 1,
+        timeout: float | None = None,
+    ) -> pd.DataFrame:
+        path = (
+            "/expired-instruments/historical-candle/"
+            + self._encode_instrument_key(expired_instrument_key)
+            + f"/{interval}minute/{to_date}/{from_date}"
+        )
+        response = self.session.get(
+            f"{self.BASE_URL_V2}{path}",
+            headers=self._headers(),
+            timeout=timeout or self.timeout,
+        )
+        if response.status_code in (401, 403, 429):
             self._raise_for_api_error(response)
-        try: payload=response.json()
-        except (ValueError,TypeError): raise UpstoxAPIError("Malformed expired-candle response.") from None
-        data=payload.get("data") if isinstance(payload,dict) else None; candles=data.get("candles") if isinstance(data,dict) else None
-        if not response.ok or not isinstance(candles,list): raise UpstoxAPIError("Expired historical candles unavailable.")
+        try:
+            payload = response.json()
+        except (ValueError, TypeError):
+            raise UpstoxAPIError("Malformed expired-candle response.") from None
+        data = payload.get("data") if isinstance(payload, dict) else None
+        candles = data.get("candles") if isinstance(data, dict) else None
+        if not response.ok or not isinstance(candles, list):
+            raise UpstoxAPIError("Expired historical candles unavailable.")
         return self.candles_to_dataframe(candles)
 
     def get_historical_candles(
@@ -261,12 +340,6 @@ class UpstoxClient:
         interval: int = 5,
         unit: str = "minutes",
     ) -> pd.DataFrame:
-        """Retrieve dated OHLC candles from Upstox Historical Candle V3.
-
-        Dates must use YYYY-MM-DD. For minute intervals from 1 to 15, Upstox
-        allows up to one month per request, which is more than enough for the
-        two-trading-day pattern history used by the dashboard.
-        """
         path = (
             "/historical-candle/"
             f"{self._encode_instrument_key(instrument_key)}/{unit}/{interval}/"
@@ -287,9 +360,6 @@ class UpstoxClient:
         intraday = self._request_candles(instrument_key, path)
         if not intraday.empty:
             return intraday
-
-        # A short range includes weekends/holidays and lets the response identify
-        # the latest trading day without maintaining a separate exchange calendar.
         today = date.today()
         historical = self.get_historical_candles(
             instrument_key,
@@ -305,12 +375,13 @@ class UpstoxClient:
 
     @staticmethod
     def _encode_instrument_key(instrument_key: str) -> str:
-        """Return a canonical, exactly-once encoded Upstox path segment."""
         return quote(unquote(str(instrument_key)), safe="")
 
     def _request_candles(self, instrument_key: str, path: str) -> pd.DataFrame:
         response = self.session.get(
-            f"{self.BASE_URL_V3}{path}", headers=self._headers(), timeout=self.timeout
+            f"{self.BASE_URL_V3}{path}",
+            headers=self._headers(),
+            timeout=self.timeout,
         )
         error_code = error_message = ""
         try:
@@ -330,17 +401,25 @@ class UpstoxClient:
 
         frame = self.candles_to_dataframe(candles)
         safe_error_message = self._sanitize_log_text(
-            error_message, secrets=(self.access_token,)
+            error_message,
+            secrets=(self.access_token,),
         )
         logger.info(
             "Upstox candles instrument_key=%s endpoint=%s http_status=%s "
             "error_code=%s error_message=%s candle_count=%d",
-            instrument_key, path, response.status_code, error_code, safe_error_message,
+            instrument_key,
+            path,
+            response.status_code,
+            error_code,
+            safe_error_message,
             len(frame),
         )
         if response.status_code in (401, 403, 429):
-            message = ("Upstox authentication failed." if response.status_code in (401, 403)
-                       else "Upstox rate limit reached.")
+            message = (
+                "Upstox authentication failed."
+                if response.status_code in (401, 403)
+                else "Upstox rate limit reached."
+            )
             error = UpstoxAPIError(message)
             error.status_code = response.status_code
             raise error
@@ -348,7 +427,6 @@ class UpstoxClient:
 
     @staticmethod
     def _parse_error(payload: dict[str, Any]) -> tuple[str, str]:
-        """Extract Upstox error details without retaining or logging the payload."""
         errors = payload.get("errors")
         error: dict[str, Any] = {}
         if isinstance(errors, dict):
@@ -369,15 +447,24 @@ class UpstoxClient:
             return ""
 
     @classmethod
-    def _sanitize_log_text(cls, value: Any, *, secrets: tuple[str, ...] = (),
-                           maximum_length: int = 256) -> str:
-        """Return bounded, single-line text with credentials removed."""
+    def _sanitize_log_text(
+        cls,
+        value: Any,
+        *,
+        secrets: tuple[str, ...] = (),
+        maximum_length: int = 256,
+    ) -> str:
         text = cls._safe_text(value)
         text = " ".join(text.split())
-        text = re.sub(r"(?i)bearer\s+[A-Za-z0-9._~+\-/=]+", "Bearer [REDACTED]", text)
+        text = re.sub(
+            r"(?i)bearer\s+[A-Za-z0-9._~+\-/=]+",
+            "Bearer [REDACTED]",
+            text,
+        )
         text = re.sub(
             r"(?i)\b(access[_ -]?token|authorization|api[_ -]?secret|cookie)\b\s*[:=]\s*\S+",
-            r"\1=[REDACTED]", text,
+            r"\1=[REDACTED]",
+            text,
         )
         for secret in secrets:
             if secret:
@@ -423,13 +510,31 @@ class UpstoxClient:
         return df.sort_values("timestamp").reset_index(drop=True)
 
     @staticmethod
+    def _optional_value(mapping: dict[str, Any], key: str) -> Any | None:
+        raw = mapping.get(key)
+        if raw is None:
+            return None
+        try:
+            if pd.isna(raw):
+                return None
+        except (TypeError, ValueError):
+            pass
+        return raw
+
+    @staticmethod
+    def _optional_difference(left: Any | None, right: Any | None) -> float | None:
+        if left is None or right is None:
+            return None
+        try:
+            return float(left) - float(right)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
     def option_chain_to_dataframe(records: list[dict[str, Any]]) -> pd.DataFrame:
         rows: list[dict[str, Any]] = []
-
-        def value(mapping: dict[str, Any], key: str, default: float = 0.0) -> float:
-            raw = mapping.get(key, default)
-            return default if raw is None else raw
-
+        value = UpstoxClient._optional_value
+        difference = UpstoxClient._optional_difference
         for item in records:
             call = item.get("call_options") or {}
             put = item.get("put_options") or {}
@@ -437,7 +542,6 @@ class UpstoxClient:
             pmd = put.get("market_data") or {}
             cg = call.get("option_greeks") or {}
             pg = put.get("option_greeks") or {}
-
             call_ltp = value(cmd, "ltp")
             put_ltp = value(pmd, "ltp")
             call_close = value(cmd, "close_price")
@@ -446,52 +550,57 @@ class UpstoxClient:
             put_oi = value(pmd, "oi")
             call_prev_oi = value(cmd, "prev_oi")
             put_prev_oi = value(pmd, "prev_oi")
-
-            rows.append({
-                "expiry": item.get("expiry"),
-                "spot": value(item, "underlying_spot_price"),
-                "strike": value(item, "strike_price"),
-                "strike_pcr": value(item, "pcr"),
-                "call_instrument_key": call.get("instrument_key", ""),
-                "call_ltp": call_ltp,
-                "call_close": call_close,
-                "call_price_change": call_ltp - call_close,
-                "call_volume": value(cmd, "volume"),
-                "call_oi": call_oi,
-                "call_prev_oi": call_prev_oi,
-                "call_oi_change": call_oi - call_prev_oi,
-                "call_bid": value(cmd, "bid_price"),
-                "call_bid_qty": value(cmd, "bid_qty"),
-                "call_ask": value(cmd, "ask_price"),
-                "call_ask_qty": value(cmd, "ask_qty"),
-                "call_iv": value(cg, "iv"),
-                "call_delta": value(cg, "delta"),
-                "call_gamma": value(cg, "gamma"),
-                "call_theta": value(cg, "theta"),
-                "call_vega": value(cg, "vega"),
-                "call_pop": value(cg, "pop"),
-                "put_instrument_key": put.get("instrument_key", ""),
-                "put_ltp": put_ltp,
-                "put_close": put_close,
-                "put_price_change": put_ltp - put_close,
-                "put_volume": value(pmd, "volume"),
-                "put_oi": put_oi,
-                "put_prev_oi": put_prev_oi,
-                "put_oi_change": put_oi - put_prev_oi,
-                "put_bid": value(pmd, "bid_price"),
-                "put_bid_qty": value(pmd, "bid_qty"),
-                "put_ask": value(pmd, "ask_price"),
-                "put_ask_qty": value(pmd, "ask_qty"),
-                "put_iv": value(pg, "iv"),
-                "put_delta": value(pg, "delta"),
-                "put_gamma": value(pg, "gamma"),
-                "put_theta": value(pg, "theta"),
-                "put_vega": value(pg, "vega"),
-                "put_pop": value(pg, "pop"),
-            })
-
-        df = pd.DataFrame(rows).sort_values("strike").reset_index(drop=True)
+            rows.append(
+                {
+                    "expiry": item.get("expiry"),
+                    "spot": value(item, "underlying_spot_price"),
+                    "strike": value(item, "strike_price"),
+                    "strike_pcr": value(item, "pcr"),
+                    "call_instrument_key": call.get("instrument_key", ""),
+                    "call_ltp": call_ltp,
+                    "call_close": call_close,
+                    "call_price_change": difference(call_ltp, call_close),
+                    "call_volume": value(cmd, "volume"),
+                    "call_oi": call_oi,
+                    "call_prev_oi": call_prev_oi,
+                    "call_oi_change": difference(call_oi, call_prev_oi),
+                    "call_bid": value(cmd, "bid_price"),
+                    "call_bid_qty": value(cmd, "bid_qty"),
+                    "call_ask": value(cmd, "ask_price"),
+                    "call_ask_qty": value(cmd, "ask_qty"),
+                    "call_iv": value(cg, "iv"),
+                    "call_delta": value(cg, "delta"),
+                    "call_gamma": value(cg, "gamma"),
+                    "call_theta": value(cg, "theta"),
+                    "call_vega": value(cg, "vega"),
+                    "call_pop": value(cg, "pop"),
+                    "put_instrument_key": put.get("instrument_key", ""),
+                    "put_ltp": put_ltp,
+                    "put_close": put_close,
+                    "put_price_change": difference(put_ltp, put_close),
+                    "put_volume": value(pmd, "volume"),
+                    "put_oi": put_oi,
+                    "put_prev_oi": put_prev_oi,
+                    "put_oi_change": difference(put_oi, put_prev_oi),
+                    "put_bid": value(pmd, "bid_price"),
+                    "put_bid_qty": value(pmd, "bid_qty"),
+                    "put_ask": value(pmd, "ask_price"),
+                    "put_ask_qty": value(pmd, "ask_qty"),
+                    "put_iv": value(pg, "iv"),
+                    "put_delta": value(pg, "delta"),
+                    "put_gamma": value(pg, "gamma"),
+                    "put_theta": value(pg, "theta"),
+                    "put_vega": value(pg, "vega"),
+                    "put_pop": value(pg, "pop"),
+                }
+            )
+        if not rows:
+            return pd.DataFrame()
+        frame = pd.DataFrame(rows)
         text_columns = {"expiry", "call_instrument_key", "put_instrument_key"}
-        numeric = [column for column in df.columns if column not in text_columns]
-        df[numeric] = df[numeric].apply(pd.to_numeric, errors="coerce").fillna(0)
-        return df
+        numeric = [column for column in frame.columns if column not in text_columns]
+        frame[numeric] = frame[numeric].apply(pd.to_numeric, errors="coerce")
+        return frame.sort_values("strike", na_position="last").reset_index(drop=True)
+
+
+__all__ = ["ObservableRetry", "UpstoxAPIError", "UpstoxClient"]
