@@ -22,7 +22,7 @@ def resolve_red_bar_v2_canonical(
     evidence: LegacyV2DecisionEvidence | None = None,
     source_replay_id: str,
     resolved_at: datetime,
-    schema_version: str = "1.0",
+    schema_version: str = "1.1",
 ) -> RedBarV2CanonicalResolution:
     """Assemble canonical Sections 1-3 without changing legacy authority."""
     if not isinstance(source_replay_id, str) or not source_replay_id.strip():
