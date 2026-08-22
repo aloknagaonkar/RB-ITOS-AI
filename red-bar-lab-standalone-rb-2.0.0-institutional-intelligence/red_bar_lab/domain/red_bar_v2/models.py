@@ -322,26 +322,46 @@ class RedBarV2Decision:
             if not self.futures_vwap.fresh:
                 raise DomainValidationError("ALLOWED decision requires fresh futures VWAP evidence")
             _require_entry_timeframe(self.entry_type, self.evaluation_timeframe)
-            if self.direction is Direction.BULLISH:
-                aligned = (
-                    self.rsi.bullish_aligned
-                    and not self.rsi.bearish_aligned
-                    and self.futures_vwap.bullish_aligned
-                    and not self.futures_vwap.bearish_aligned
-                    and self.midpoint.bullish_aligned
-                    and not self.midpoint.bearish_aligned
-                )
+            rsi_vwap_aligned = (
+                self.rsi.bullish_aligned
+                and not self.rsi.bearish_aligned
+                and self.futures_vwap.bullish_aligned
+                and not self.futures_vwap.bearish_aligned
+            ) if self.direction is Direction.BULLISH else (
+                self.rsi.bearish_aligned
+                and not self.rsi.bullish_aligned
+                and self.futures_vwap.bearish_aligned
+                and not self.futures_vwap.bullish_aligned
+            )
+            if not rsi_vwap_aligned:
+                raise DomainValidationError("ALLOWED decision RSI/VWAP evidence must align with direction")
+            midpoint_aligned = (
+                self.midpoint.bullish_aligned
+                and not self.midpoint.bearish_aligned
+            ) if self.direction is Direction.BULLISH else (
+                self.midpoint.bearish_aligned
+                and not self.midpoint.bullish_aligned
+            )
+            expected_state = (
+                RedBarV2State.CONFIRMED_BULLISH
+                if self.direction is Direction.BULLISH
+                else RedBarV2State.CONFIRMED_BEARISH
+            ) if midpoint_aligned else (
+                RedBarV2State.PROVISIONAL_BULLISH
+                if self.direction is Direction.BULLISH
+                else RedBarV2State.PROVISIONAL_BEARISH
+            )
+            expected_strength = TrendStrength.CONFIRMED if midpoint_aligned else TrendStrength.PROVISIONAL
+            if self.entry_type is EntryType.INITIAL:
+                if not midpoint_aligned:
+                    raise DomainValidationError("INITIAL admission requires midpoint alignment")
+                if self.current_state is not expected_state or self.trend_strength is not TrendStrength.CONFIRMED:
+                    raise DomainValidationError("INITIAL admission must be confirmed")
             else:
-                aligned = (
-                    self.rsi.bearish_aligned
-                    and not self.rsi.bullish_aligned
-                    and self.futures_vwap.bearish_aligned
-                    and not self.futures_vwap.bullish_aligned
-                    and self.midpoint.bearish_aligned
-                    and not self.midpoint.bullish_aligned
-                )
-            if not aligned:
-                raise DomainValidationError("ALLOWED decision evidence must align with direction")
+                if self.current_state is not expected_state or self.trend_strength is not expected_strength:
+                    raise DomainValidationError(
+                        "REVERSAL state and trend_strength must match midpoint confirmation"
+                    )
             if not isclose(
                 float(self.midpoint.midpoint),
                 float(self.reference.midpoint),
