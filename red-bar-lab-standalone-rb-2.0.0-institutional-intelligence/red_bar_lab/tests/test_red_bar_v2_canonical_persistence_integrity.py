@@ -1,4 +1,5 @@
 from dataclasses import replace
+import json
 import sqlite3
 
 import pytest
@@ -8,6 +9,8 @@ from red_bar_lab.services.red_bar_v2_canonical import (
     CanonicalPersistenceCorruptionError,
     RedBarV2CanonicalPersistenceService,
     SQLiteRedBarV2CanonicalRepository,
+    canonical_json,
+    payload_sha256,
 )
 from red_bar_lab.tests.red_bar_v2_persistence_fixtures import UNDERLYING, make_resolution
 
@@ -81,4 +84,46 @@ def test_projection_mismatch_is_detected(tmp_path):
         )
         conn.commit()
     with pytest.raises(CanonicalPersistenceCorruptionError, match="projection mismatch"):
+        repository.get_resolution(result.resolution_id)
+
+
+def test_malformed_json_with_matching_digest_is_detected(tmp_path):
+    path = tmp_path / "red_bar.db"
+    repository, _, _, result = _persist(path)
+    malformed = "{not-json"
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            """
+            UPDATE canonical_red_bar_v2_resolutions
+            SET payload_json=?,payload_sha256=?
+            WHERE resolution_id=?
+            """,
+            (malformed, payload_sha256(malformed), result.resolution_id),
+        )
+        conn.commit()
+    with pytest.raises(CanonicalPersistenceCorruptionError, match="valid JSON"):
+        repository.get_resolution(result.resolution_id)
+
+
+def test_unsupported_resolution_schema_with_matching_digest_is_detected(tmp_path):
+    path = tmp_path / "red_bar.db"
+    repository, _, _, result = _persist(path)
+    with sqlite3.connect(path) as conn:
+        payload_json = conn.execute(
+            "SELECT payload_json FROM canonical_red_bar_v2_resolutions WHERE resolution_id=?",
+            (result.resolution_id,),
+        ).fetchone()[0]
+        payload = json.loads(payload_json)
+        payload["schema_version"] = "99.0"
+        changed = canonical_json(payload)
+        conn.execute(
+            """
+            UPDATE canonical_red_bar_v2_resolutions
+            SET payload_json=?,payload_sha256=?
+            WHERE resolution_id=?
+            """,
+            (changed, payload_sha256(changed), result.resolution_id),
+        )
+        conn.commit()
+    with pytest.raises(CanonicalPersistenceCorruptionError, match="unsupported resolution schema"):
         repository.get_resolution(result.resolution_id)
