@@ -13,20 +13,12 @@ def test_paper_monitor_assesses_and_logs_unified_futures_readiness():
     assert 'applicable=args.underlying == "NIFTY 50"' in source
     assert "futures_readiness_log_values(" in source
 
-    for field in (
-        "futures_readiness=%s",
-        "futures_readiness_reason=%s",
-        "futures_contract_status=%s",
-        "futures_market_status=%s",
-        "futures_candle_status=%s",
-        "futures_volume_status=%s",
-        "futures_oi_status=%s",
-        "futures_positioning_status=%s",
-        "futures_positioning_state=%s",
-        "futures_blocking_reasons=%s",
-        "futures_advisory_reasons=%s",
-    ):
-        assert field in source
+    # The circuit-breaker refactor logs the complete readiness payload as the
+    # stable tuple returned by futures_readiness_log_values(), rather than
+    # duplicating every tuple field in the monitor's format string.
+    assert "futures_readiness_values = futures_readiness_log_values(" in source
+    assert "futures_readiness=%s" in source
+    assert "futures_readiness_values," in source
 
 
 def test_unified_futures_readiness_remains_observational():
