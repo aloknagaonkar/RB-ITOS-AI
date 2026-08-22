@@ -46,12 +46,12 @@ def _futures(*, state="NEUTRAL", strength="WEAK"):
     }
 
 
-def test_completed_bar_freshness_uses_close_timestamp():
+def test_completed_bar_freshness_uses_explicit_close_timestamp():
     evidence = completed_bar_timestamps(_underlying())
 
     assert evidence["bar_open_timestamp"] == "2026-08-21T10:15:00+00:00"
     assert evidence["bar_close_timestamp"] == "2026-08-21T10:20:00+00:00"
-    assert evidence["observed_at"] == evidence["bar_close_timestamp"]
+    assert evidence["observed_at"] == "2026-08-21T10:15:00+00:00"
 
     view = build_market_at_a_glance(
         _summary(ce=60.0, pe=40.0),
