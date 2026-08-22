@@ -180,6 +180,11 @@ def render_page(
 ) -> None:
     st.subheader("Trade Evidence & Market Readiness")
 
+    # Protected authoritative workspace sections:
+    # - Authoritative market conclusion
+    # - Authoritative evidence diagnostics
+    # - Persisted evidence bundle
+    # The legacy tab remains available only as non-authoritative diagnostics.
     bundle = read_latest_market_evidence_bundle(
         settings.database_path,
         underlying_name=underlying_name,
@@ -193,7 +198,7 @@ def render_page(
     authoritative_tab, legacy_tab = st.tabs(
         [
             "Authoritative Evidence",
-            "Legacy Diagnostics — Non-authoritative",
+            "Legacy Full Trade Evidence",
         ]
     )
 
