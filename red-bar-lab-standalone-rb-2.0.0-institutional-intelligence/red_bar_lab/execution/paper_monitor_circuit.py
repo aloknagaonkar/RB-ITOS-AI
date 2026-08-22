@@ -4,7 +4,6 @@ from dataclasses import asdict, dataclass
 import json
 import os
 from pathlib import Path
-from typing import Any
 
 
 @dataclass(frozen=True)
@@ -19,9 +18,9 @@ class CircuitDecision:
 class PaperMonitorCircuitBreaker:
     """Fail closed for new entries while preserving position-management cycles.
 
-    State is persisted when a path is configured so a process restart does not
-    immediately forget an active market-data failure. Corrupt state is ignored
-    safely and replaced on the next transition.
+    State is persisted when explicitly configured. In the real monitor process,
+    the required Upstox token is present, so a default artifact path is used to
+    survive restarts without adding file writes to ordinary library imports.
     """
 
     def __init__(
@@ -39,6 +38,9 @@ class PaperMonitorCircuitBreaker:
             int(maximum_delay_seconds),
         )
         configured = state_path or os.getenv("RED_BAR_PAPER_MONITOR_CIRCUIT_STATE")
+        if not configured and os.getenv("UPSTOX_ACCESS_TOKEN"):
+            artifacts_root = Path(os.getenv("RED_BAR_ARTIFACTS_ROOT", "artifacts"))
+            configured = artifacts_root / "paper_monitor_circuit.json"
         self.state_path = Path(configured) if configured else None
         self.consecutive_failures = 0
         self._open = False
@@ -115,7 +117,6 @@ class PaperMonitorCircuitBreaker:
             )
             temporary.replace(self.state_path)
         except OSError:
-            # Persistence must never prevent position-management work.
             return
 
 
