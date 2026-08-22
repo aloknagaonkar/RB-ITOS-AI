@@ -44,12 +44,15 @@ def evaluate_signal_execution_limits(
     reentry_cooldown_seconds: int = 300,
     max_signal_age_seconds: int = 180,
     allow_stale_signal_override: bool = False,
+    enforce_freshness: bool = True,
 ) -> SignalExecutionLimitDecision:
-    """Fail closed before inserting a paper order for a canonical signal.
+    """Evaluate durable per-signal limits and optional live freshness policy.
 
-    The ledger is derived from persisted paper orders, so process restarts cannot
-    reset entry counts or cooldown state. Manual orders without a signal identity
-    remain outside this strategy-specific gate.
+    Persisted orders provide restart-safe entry and contract counts. Duplicate
+    protection applies only to an OPEN position; a closed contract may re-enter
+    when the total-entry ceiling and cooldown permit it. Freshness is optional so
+    historical evidence builders and low-level paper-engine tests are not made
+    dependent on wall-clock time. Live automation owns the freshness decision.
     """
 
     canonical = str(signal_id or "").strip()
@@ -68,7 +71,7 @@ def evaluate_signal_execution_limits(
         connection.row_factory = sqlite3.Row
         orders = connection.execute(
             """
-            SELECT instrument_token, entry_timestamp
+            SELECT instrument_token, entry_timestamp, status
             FROM paper_execution_orders
             WHERE account_id=? AND signal_id=?
             ORDER BY entry_timestamp
@@ -87,10 +90,15 @@ def evaluate_signal_execution_limits(
 
     existing_entries = len(orders)
     existing_contracts = len({int(row["instrument_token"]) for row in orders})
-    if any(int(row["instrument_token"]) == int(instrument_token) for row in orders):
+    open_duplicate = any(
+        int(row["instrument_token"]) == int(instrument_token)
+        and str(row["status"] or "").upper() == "OPEN"
+        for row in orders
+    )
+    if open_duplicate:
         return SignalExecutionLimitDecision(
             False,
-            "DUPLICATE_SIGNAL_CONTRACT",
+            "DUPLICATE_OPEN_SIGNAL_CONTRACT",
             existing_entries,
             existing_contracts,
             None,
@@ -105,7 +113,10 @@ def evaluate_signal_execution_limits(
             None,
             None,
         )
-    if existing_contracts >= max(1, int(max_contracts_per_signal)):
+    new_contract = not any(
+        int(row["instrument_token"]) == int(instrument_token) for row in orders
+    )
+    if new_contract and existing_contracts >= max(1, int(max_contracts_per_signal)):
         return SignalExecutionLimitDecision(
             False,
             "MAX_CONTRACTS_PER_SIGNAL_REACHED",
@@ -116,11 +127,11 @@ def evaluate_signal_execution_limits(
         )
 
     seconds_since_last_entry = None
-    if orders:
+    if orders and int(reentry_cooldown_seconds) > 0:
         last_entry = _timestamp(orders[-1]["entry_timestamp"])
         if last_entry is not None:
             seconds_since_last_entry = (current - last_entry).total_seconds()
-            if seconds_since_last_entry < max(0, int(reentry_cooldown_seconds)):
+            if seconds_since_last_entry < int(reentry_cooldown_seconds):
                 return SignalExecutionLimitDecision(
                     False,
                     "SIGNAL_REENTRY_COOLDOWN_ACTIVE",
@@ -129,6 +140,16 @@ def evaluate_signal_execution_limits(
                     None,
                     seconds_since_last_entry,
                 )
+
+    if not enforce_freshness:
+        return SignalExecutionLimitDecision(
+            True,
+            "DURABLE_SIGNAL_LIMITS_PASS",
+            existing_entries,
+            existing_contracts,
+            None,
+            seconds_since_last_entry,
+        )
 
     confirmation = _timestamp(signal["confirmation_timestamp"] if signal else None)
     if confirmation is None:
