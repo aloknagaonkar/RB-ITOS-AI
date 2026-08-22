@@ -10,11 +10,7 @@ from .event_access import event_bool, event_details
 from .evidence_producer import evidence_from_event_details
 from .exceptions import CanonicalResolutionError, LegacyMappingError
 from .legacy_adapter import build_canonical_decision, build_canonical_input_readiness
-from .models import (
-    LegacyV2DecisionEvidence,
-    LegacyV2MarketMetadata,
-    RedBarV2CanonicalResolution,
-)
+from .models import LegacyV2DecisionEvidence, LegacyV2MarketMetadata, RedBarV2CanonicalResolution
 
 
 def resolve_red_bar_v2_canonical(
@@ -48,6 +44,12 @@ def resolve_red_bar_v2_canonical(
             raise CanonicalResolutionError(
                 "allowed replay event does not expose complete authoritative event-time evidence"
             ) from exc
+
+    if resolved_evidence is not None:
+        if resolved_evidence.underlying_instrument_key != market_metadata.underlying_instrument_key:
+            raise CanonicalResolutionError("event evidence underlying instrument disagrees with replay metadata")
+        if resolved_evidence.futures_instrument_key != market_metadata.futures_instrument_key:
+            raise CanonicalResolutionError("event evidence futures instrument disagrees with health metadata")
 
     section_2 = build_canonical_decision(
         replay_event=replay_event,
