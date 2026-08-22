@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
-from math import isfinite
+from math import isclose, isfinite
 
 from .enums import (
     AdmissionOutcome,
@@ -15,14 +15,26 @@ from .enums import (
     RedBarV2State,
     TrendStrength,
 )
-from .exceptions import DomainValidationError
+from .exceptions import BundleIdentityError, DomainValidationError
 
 _SUPPORTED_TIMEFRAMES = frozenset({"1m", "5m"})
+_MIDPOINT_ABS_TOLERANCE = 1e-9
 
 
 def _require_text(name: str, value: str) -> None:
     if not isinstance(value, str) or not value.strip():
         raise DomainValidationError(f"{name} must be a non-empty string")
+
+
+def _require_v2_strategy(name: str, value: str) -> None:
+    _require_text(name, value)
+    if value != "RED_BAR_V2":
+        raise DomainValidationError(f"{name} must be RED_BAR_V2")
+
+
+def _require_bool(name: str, value: bool) -> None:
+    if not isinstance(value, bool):
+        raise DomainValidationError(f"{name} must be a bool")
 
 
 def _require_aware(name: str, value: datetime) -> None:
@@ -39,6 +51,14 @@ def _require_positive(name: str, value: float) -> None:
     _require_finite(name, value)
     if float(value) <= 0:
         raise DomainValidationError(f"{name} must be greater than zero")
+
+
+def _require_entry_timeframe(entry_type: EntryType, evaluation_timeframe: str) -> None:
+    expected = "1m" if entry_type is EntryType.INITIAL else "5m"
+    if evaluation_timeframe != expected:
+        raise DomainValidationError(
+            f"{entry_type.value} entry requires {expected} evaluation_timeframe"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,7 +106,9 @@ class MarketTimestampEvidence:
             value = getattr(self, name)
             if value is not None:
                 _require_aware(name, value)
-        if isinstance(self.maximum_age_seconds, bool) or self.maximum_age_seconds <= 0:
+        if isinstance(self.maximum_age_seconds, bool) or not isinstance(self.maximum_age_seconds, int):
+            raise DomainValidationError("maximum_age_seconds must be an int")
+        if self.maximum_age_seconds <= 0:
             raise DomainValidationError("maximum_age_seconds must be greater than zero")
         _require_text("reason", self.reason)
 
@@ -111,8 +133,11 @@ class RedBarV2InputReadiness:
     reason: str
 
     def __post_init__(self) -> None:
-        for name in ("strategy_id", "strategy_version", "source_name", "source_version", "reason_code", "reason"):
+        _require_v2_strategy("strategy_id", self.strategy_id)
+        for name in ("strategy_version", "source_name", "source_version", "reason_code", "reason"):
             _require_text(name, getattr(self, name))
+        _require_bool("futures_volume_available", self.futures_volume_available)
+        _require_bool("futures_vwap_available", self.futures_vwap_available)
         if self.reference is not None and self.reference.trading_date != self.trading_date:
             raise DomainValidationError("reference trading_date must match readiness trading_date")
         if self.outcome is RedBarV2Section1Outcome.REFERENCE_READY:
@@ -120,7 +145,7 @@ class RedBarV2InputReadiness:
                 raise DomainValidationError("REFERENCE_READY requires reference")
             if self.timestamps.context_status is not ContextStatus.FRESH:
                 raise DomainValidationError("REFERENCE_READY requires fresh context")
-            if not self.futures_instrument_key or not self.futures_instrument_key.strip():
+            if not isinstance(self.futures_instrument_key, str) or not self.futures_instrument_key.strip():
                 raise DomainValidationError("REFERENCE_READY requires futures instrument")
             if not self.futures_volume_available:
                 raise DomainValidationError("REFERENCE_READY requires futures volume")
@@ -141,6 +166,8 @@ class RsiEvidence:
     def __post_init__(self) -> None:
         for name in ("value", "bullish_threshold", "bearish_threshold"):
             _require_finite(name, getattr(self, name))
+        _require_bool("bullish_aligned", self.bullish_aligned)
+        _require_bool("bearish_aligned", self.bearish_aligned)
         if not 0 <= self.value <= 100:
             raise DomainValidationError("RSI value must be within [0, 100]")
         if not 0 <= self.bearish_threshold < self.bullish_threshold <= 100:
@@ -166,6 +193,9 @@ class FuturesVwapEvidence:
         _require_positive("comparison_price", self.comparison_price)
         _require_positive("vwap", self.vwap)
         _require_finite("volume", self.volume)
+        _require_bool("bullish_aligned", self.bullish_aligned)
+        _require_bool("bearish_aligned", self.bearish_aligned)
+        _require_bool("fresh", self.fresh)
         if self.volume < 0:
             raise DomainValidationError("volume must be non-negative")
         if self.bullish_aligned and self.bearish_aligned:
@@ -184,6 +214,8 @@ class MidpointEvidence:
     def __post_init__(self) -> None:
         _require_positive("index_close", self.index_close)
         _require_positive("midpoint", self.midpoint)
+        _require_bool("bullish_aligned", self.bullish_aligned)
+        _require_bool("bearish_aligned", self.bearish_aligned)
         if self.bullish_aligned and self.bearish_aligned:
             raise DomainValidationError("midpoint cannot be bullish and bearish aligned simultaneously")
 
@@ -212,7 +244,7 @@ class RedBarV2Decision:
     admission_reason: str
 
     def __post_init__(self) -> None:
-        _require_text("strategy_id", self.strategy_id)
+        _require_v2_strategy("strategy_id", self.strategy_id)
         _require_text("strategy_version", self.strategy_version)
         _require_aware("evaluation_timestamp", self.evaluation_timestamp)
         if self.evaluation_timeframe not in _SUPPORTED_TIMEFRAMES:
@@ -250,8 +282,44 @@ class RedBarV2Decision:
             missing = [name for name, value in required.items() if value is None]
             if missing:
                 raise DomainValidationError(f"ALLOWED decision missing: {', '.join(missing)}")
+            assert self.entry_type is not None
+            assert self.direction is not None
+            assert self.reference is not None
+            assert self.rsi is not None
+            assert self.futures_vwap is not None
+            assert self.midpoint is not None
             if self.context_status is not ContextStatus.FRESH:
                 raise DomainValidationError("ALLOWED decision requires fresh context")
+            if not self.futures_vwap.fresh:
+                raise DomainValidationError("ALLOWED decision requires fresh futures VWAP evidence")
+            _require_entry_timeframe(self.entry_type, self.evaluation_timeframe)
+            if self.direction is Direction.BULLISH:
+                aligned = (
+                    self.rsi.bullish_aligned
+                    and not self.rsi.bearish_aligned
+                    and self.futures_vwap.bullish_aligned
+                    and not self.futures_vwap.bearish_aligned
+                    and self.midpoint.bullish_aligned
+                    and not self.midpoint.bearish_aligned
+                )
+            else:
+                aligned = (
+                    self.rsi.bearish_aligned
+                    and not self.rsi.bullish_aligned
+                    and self.futures_vwap.bearish_aligned
+                    and not self.futures_vwap.bullish_aligned
+                    and self.midpoint.bearish_aligned
+                    and not self.midpoint.bullish_aligned
+                )
+            if not aligned:
+                raise DomainValidationError("ALLOWED decision evidence must align with direction")
+            if not isclose(
+                float(self.midpoint.midpoint),
+                float(self.reference.midpoint),
+                rel_tol=0.0,
+                abs_tol=_MIDPOINT_ABS_TOLERANCE,
+            ):
+                raise DomainValidationError("midpoint evidence must match reference midpoint")
             _require_text("admission_code", self.admission_code)
             _require_text("admission_reason", self.admission_reason)
 
@@ -277,14 +345,14 @@ class RedBarV2SignalBundle:
     created_at: datetime
 
     def __post_init__(self) -> None:
-        for name in ("schema_version", "bundle_id", "signal_id", "strategy_id", "strategy_version", "idempotency_key"):
+        for name in ("schema_version", "bundle_id", "signal_id", "strategy_version", "idempotency_key"):
             _require_text(name, getattr(self, name))
-        if self.strategy_id != "RED_BAR_V2":
-            raise DomainValidationError("strategy_id must be RED_BAR_V2")
+        _require_v2_strategy("strategy_id", self.strategy_id)
         _require_aware("evaluation_timestamp", self.evaluation_timestamp)
         _require_aware("created_at", self.created_at)
         if self.evaluation_timeframe not in _SUPPORTED_TIMEFRAMES:
             raise DomainValidationError(f"unsupported evaluation_timeframe: {self.evaluation_timeframe!r}")
+        _require_entry_timeframe(self.entry_type, self.evaluation_timeframe)
         if self.direction is Direction.BULLISH and self.option_side is not OptionSide.CE:
             raise DomainValidationError("BULLISH bundle requires CE")
         if self.direction is Direction.BEARISH and self.option_side is not OptionSide.PE:
@@ -308,3 +376,35 @@ class RedBarV2SignalBundle:
             raise DomainValidationError("bundle evaluation timestamp date must match trading_date")
         if decision.reference is None or decision.reference.trading_date != self.trading_date:
             raise DomainValidationError("bundle reference trading_date must match bundle trading_date")
+        if decision.futures_vwap is None:
+            raise DomainValidationError("signal bundle requires futures VWAP evidence")
+
+        from .identity import (
+            build_red_bar_v2_bundle_id,
+            build_red_bar_v2_idempotency_key,
+            build_red_bar_v2_signal_id,
+        )
+
+        expected_signal = build_red_bar_v2_signal_id(
+            strategy_version=self.strategy_version,
+            instrument_key=decision.futures_vwap.instrument_key,
+            trading_date=self.trading_date,
+            reference_id=decision.reference.reference_id,
+            evaluation_timestamp=self.evaluation_timestamp,
+            entry_type=self.entry_type,
+            direction=self.direction,
+        )
+        expected_bundle = build_red_bar_v2_bundle_id(
+            signal_id=expected_signal,
+            schema_version=self.schema_version,
+        )
+        expected_idempotency = build_red_bar_v2_idempotency_key(
+            signal_id=expected_signal,
+            option_side=self.option_side,
+        )
+        if self.signal_id != expected_signal:
+            raise BundleIdentityError("signal_id does not match canonical bundle fields")
+        if self.bundle_id != expected_bundle:
+            raise BundleIdentityError("bundle_id does not match canonical signal and schema")
+        if self.idempotency_key != expected_idempotency:
+            raise BundleIdentityError("idempotency_key does not match canonical signal and option side")
