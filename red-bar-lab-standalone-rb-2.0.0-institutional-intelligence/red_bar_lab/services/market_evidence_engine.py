@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sqlite3
+from statistics import median
 from typing import Any, Iterable, Mapping
 
 import pandas as pd
@@ -32,12 +33,16 @@ def _dt(value: object) -> datetime | None:
 
 
 def _strike_step(rows: list[Mapping[str, object]]) -> float | None:
-    strikes = sorted({_f(row.get("strike")) for row in rows if _f(row.get("strike")) is not None})
+    values = {_f(row.get("strike")) for row in rows}
+    strikes = sorted(value for value in values if value is not None)
     differences = [b - a for a, b in zip(strikes, strikes[1:]) if b > a]
-    return min(differences) if differences else None
+    return float(median(differences)) if differences else None
 
 
 def _distance_steps(row: Mapping[str, object], *, step: float | None) -> int:
+    explicit = _f(row.get("strike_offset_steps"))
+    if explicit is not None:
+        return max(0, int(round(abs(explicit))))
     strike = _f(row.get("strike"))
     atm = _f(row.get("atm_strike"))
     if strike is not None and atm is not None and step not in (None, 0):
@@ -70,7 +75,9 @@ def _eligible(row: Mapping[str, object]) -> tuple[bool, str]:
     spread_pct = effective_spread / midpoint * 100.0
     if spread_pct > 3.0:
         return False, "WIDE_SPREAD"
-    if iv is not None and not 1.0 <= iv <= 150.0:
+    if iv is None:
+        return False, "IV_UNAVAILABLE"
+    if not 1.0 <= iv <= 150.0:
         return False, "IV_OUTLIER"
     return True, "ELIGIBLE"
 
@@ -180,45 +187,50 @@ def read_option_score_history(
     path = Path(database_path)
     if not path.exists():
         return []
-    with sqlite3.connect(path) as connection:
-        connection.row_factory = sqlite3.Row
-        latest = connection.execute(
-            """SELECT observed_at, expiry FROM option_participation_snapshots
-               WHERE underlying_name=?
-               ORDER BY julianday(observed_at) DESC, observed_at DESC LIMIT 1""",
-            (underlying_name,),
-        ).fetchone()
-        if latest is None:
-            return []
-        latest_time = _dt(latest["observed_at"])
-        if latest_time is None:
-            return []
-        trading_date = latest_time.date().isoformat()
-        expiry = latest["expiry"]
-        stamps = connection.execute(
-            """SELECT DISTINCT observed_at FROM option_participation_snapshots
-               WHERE underlying_name=? AND substr(observed_at,1,10)=?
-                 AND (expiry=? OR (expiry IS NULL AND ? IS NULL))
-               ORDER BY julianday(observed_at) DESC, observed_at DESC LIMIT ?""",
-            (underlying_name, trading_date, expiry, expiry, max(1, int(limit))),
-        ).fetchall()
-        history: list[dict[str, Any]] = []
-        previous_time: datetime | None = None
-        for stamp in reversed(stamps):
-            observed = _dt(stamp["observed_at"])
-            if observed is None:
-                continue
-            if previous_time is not None and (observed - previous_time).total_seconds() > _MAX_HISTORY_GAP_SECONDS:
-                history = []
-            rows = connection.execute(
-                """SELECT * FROM option_participation_snapshots
-                   WHERE underlying_name=? AND observed_at=?""",
-                (underlying_name, stamp["observed_at"]),
+    try:
+        with sqlite3.connect(path) as connection:
+            connection.row_factory = sqlite3.Row
+            latest = connection.execute(
+                """SELECT observed_at, expiry FROM option_participation_snapshots
+                   WHERE underlying_name=?
+                   ORDER BY julianday(observed_at) DESC, observed_at DESC LIMIT 1""",
+                (underlying_name,),
+            ).fetchone()
+            if latest is None:
+                return []
+            latest_time = _dt(latest["observed_at"])
+            if latest_time is None:
+                return []
+            trading_date = latest_time.date().isoformat()
+            expiry = latest["expiry"]
+            stamps = connection.execute(
+                """SELECT DISTINCT observed_at FROM option_participation_snapshots
+                   WHERE underlying_name=? AND substr(observed_at,1,10)=?
+                     AND (expiry=? OR (expiry IS NULL AND ? IS NULL))
+                   ORDER BY julianday(observed_at) DESC, observed_at DESC LIMIT ?""",
+                (underlying_name, trading_date, expiry, expiry, max(1, int(limit))),
             ).fetchall()
-            summary = corrected_option_summary(dict(row) for row in rows)
-            summary["observed_at"] = stamp["observed_at"]
-            history.append(summary)
-            previous_time = observed
+            history: list[dict[str, Any]] = []
+            previous_time: datetime | None = None
+            for stamp in reversed(stamps):
+                observed = _dt(stamp["observed_at"])
+                if observed is None:
+                    continue
+                if previous_time is not None and (observed - previous_time).total_seconds() > _MAX_HISTORY_GAP_SECONDS:
+                    history = []
+                rows = connection.execute(
+                    """SELECT * FROM option_participation_snapshots
+                       WHERE underlying_name=? AND observed_at=?""",
+                    (underlying_name, stamp["observed_at"]),
+                ).fetchall()
+                summary = corrected_option_summary(dict(row) for row in rows)
+                summary["observed_at"] = stamp["observed_at"]
+                history.append(summary)
+                previous_time = observed
+    except sqlite3.OperationalError as exc:
+        if "no such table" in str(exc).lower():
+            return []
+        raise
     return history
 
 
