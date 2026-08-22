@@ -69,13 +69,15 @@ def truthful_execution_scores(
 ) -> ExecutionScoreContract:
     """Translate legacy committee fields into a truthful public contract.
 
-    An explicitly persisted ``calibrated_probability_pct`` is already a
-    calibrated-domain value and must be preserved. Calibration deciles are
-    required only before promoting a legacy or derived score into probability
-    terminology; they must not erase an explicit calibrated value.
+    Compatibility rows that contain an explicit calibrated probability but no
+    calibration payload preserve that stored value. When calibration deciles
+    are supplied, however, they become authoritative and the probability is
+    exposed only when all ten buckets satisfy the minimum evidence contract.
     """
+    calibration_deciles = row.get("calibration_deciles")
+    calibration_evidence_supplied = "calibration_deciles" in row
     calibration_ready = calibration_is_ready(
-        row.get("calibration_deciles")  # type: ignore[arg-type]
+        calibration_deciles  # type: ignore[arg-type]
     )
     calibrated = row.get("calibrated_probability_pct")
     explicit_calibrated_probability = (
@@ -83,7 +85,12 @@ def truthful_execution_scores(
         if calibrated not in (None, "")
         else None
     )
-    calibrated_probability = explicit_calibrated_probability
+    calibrated_probability = (
+        explicit_calibrated_probability
+        if explicit_calibrated_probability is not None
+        and (not calibration_evidence_supplied or calibration_ready)
+        else None
+    )
     calibration_status = (
         "CALIBRATED"
         if calibrated_probability is not None
