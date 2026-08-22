@@ -45,35 +45,34 @@ def completed_bar_timestamps(
     *,
     interval_minutes: int = 5,
 ) -> dict[str, Any]:
-    """Normalize a completed bar to explicit open and close timestamps.
+    """Add explicit completed-bar timestamps without changing source semantics.
 
-    Existing close timestamps are authoritative and are never shifted again.
-    Otherwise the persisted candle timestamp is treated as the bar-open label,
-    matching the resampled candle convention used by the evidence engines.
+    ``observed_at`` remains the source observation label. Consumers that need
+    completed-candle freshness must use ``bar_close_timestamp`` explicitly.
     """
     result = dict(evidence or {})
     explicit_close = _timestamp(result.get("bar_close_timestamp"))
+    explicit_open = _timestamp(result.get("bar_open_timestamp"))
     if explicit_close is not None:
         result["bar_close_timestamp"] = explicit_close.isoformat()
-        result["observed_at"] = explicit_close.isoformat()
-        opened = _timestamp(result.get("bar_open_timestamp"))
-        if opened is not None:
-            result["bar_open_timestamp"] = opened.isoformat()
-        else:
-            result.setdefault("bar_open_timestamp", None)
+        result["bar_open_timestamp"] = (
+            explicit_open.isoformat() if explicit_open is not None else None
+        )
         return result
 
     raw_open = result.get("bar_open_timestamp") or result.get("observed_at")
     opened = _timestamp(raw_open)
     if opened is None:
-        result.setdefault("bar_open_timestamp", raw_open if raw_open not in (None, "") else None)
+        result.setdefault(
+            "bar_open_timestamp",
+            raw_open if raw_open not in (None, "") else None,
+        )
         result.setdefault("bar_close_timestamp", None)
         return result
 
     closed = opened + timedelta(minutes=max(1, int(interval_minutes)))
     result["bar_open_timestamp"] = opened.isoformat()
     result["bar_close_timestamp"] = closed.isoformat()
-    result["observed_at"] = closed.isoformat()
     return result
 
 
@@ -101,7 +100,10 @@ def apply_affirmative_derivatives_gate(
     vwap_direction = str((futures_vwap or {}).get("direction") or "").upper()
     vwap_state = str((futures_vwap or {}).get("state") or "").upper()
 
-    option_confirms = direction in {"BULLISH", "BEARISH"} and option_direction == direction
+    option_confirms = (
+        direction in {"BULLISH", "BEARISH"}
+        and option_direction == direction
+    )
     futures_confirms = (
         direction in {"BULLISH", "BEARISH"}
         and futures_direction == direction
@@ -110,10 +112,12 @@ def apply_affirmative_derivatives_gate(
     futures_vwap_confirms = (
         direction in {"BULLISH", "BEARISH"}
         and vwap_direction == direction
-        and vwap_state not in {"UNAVAILABLE", "NEUTRAL", "CONFLICTED", ""}
+        and vwap_state
+        not in {"UNAVAILABLE", "NEUTRAL", "CONFLICTED", ""}
     )
     passed = option_confirms or futures_confirms or futures_vwap_confirms
-    confirmations = tuple(
+    result["derivatives_confirmation_passed"] = passed
+    result["derivatives_confirmations"] = tuple(
         label
         for label, value in (
             ("OPTIONS", option_confirms),
@@ -122,8 +126,6 @@ def apply_affirmative_derivatives_gate(
         )
         if value
     )
-    result["derivatives_confirmation_passed"] = passed
-    result["derivatives_confirmations"] = confirmations
 
     blockers = list(result.get("blocking_reasons") or ())
     if (
@@ -136,10 +138,12 @@ def apply_affirmative_derivatives_gate(
         result["trade_eligibility"] = "BLOCKED"
         result["trade_bias"] = "WAIT"
         result["primary_blocker"] = (
-            result.get("primary_blocker") or "DERIVATIVES_CONFIRMATION_MISSING"
+            result.get("primary_blocker")
+            or "DERIVATIVES_CONFIRMATION_MISSING"
         )
         result["confirmation"] = (
-            "Structure is confirmed, but no positive derivatives confirmation is present."
+            "Structure is confirmed, but no positive derivatives "
+            "confirmation is present."
         )
     result["blocking_reasons"] = tuple(blockers)
     return result
@@ -150,9 +154,7 @@ def _safe_evidence_time(view: Mapping[str, Any]) -> str | None:
     for key in (
         "option_timestamp",
         "futures_bar_close_timestamp",
-        "futures_market_timestamp",
         "underlying_bar_close_timestamp",
-        "underlying_timestamp",
     ):
         parsed = _timestamp(view.get(key))
         if parsed is not None:
@@ -166,11 +168,7 @@ def build_and_persist_authoritative_market_evidence(
     underlying_name: str,
     observed_at: datetime,
 ) -> dict[str, Any] | None:
-    """Collector/monitor-side authoritative bundle creation.
-
-    This function reads already persisted market inputs and the shared live
-    candle artifact. It performs no execution action.
-    """
+    """Collector-side authoritative bundle creation; never an execution action."""
     from red_bar_lab.ui.market_at_a_glance import build_market_at_a_glance
 
     rows = list(
@@ -199,18 +197,32 @@ def build_and_persist_authoritative_market_evidence(
     )
     futures = dict(futures_rows[0]) if futures_rows else {}
     if futures:
-        futures.setdefault("bar_open_timestamp", futures.get("latest_timestamp"))
+        futures["bar_open_timestamp"] = (
+            futures.get("bar_open_timestamp")
+            or futures.get("futures_bar_open_timestamp")
+        )
+        futures["bar_close_timestamp"] = (
+            futures.get("bar_close_timestamp")
+            or futures.get("futures_bar_close_timestamp")
+            or futures.get("latest_timestamp")
+        )
         futures = completed_bar_timestamps(futures)
     futures_vwap = build_futures_vwap_acceptance(futures)
 
     settings = RedBarSettings.from_env()
     layout = ArtifactLayout(settings)
-    instrument_key = UNDERLYINGS.get(underlying_name, "NSE_INDEX|Nifty 50")
+    instrument_key = UNDERLYINGS.get(
+        underlying_name,
+        "NSE_INDEX|Nifty 50",
+    )
     live_path = layout.live_session_path("upstox", instrument_key, 1)
     underlying = completed_bar_timestamps(
         read_underlying_evidence(live_path, as_of_timestamp=observed_at)
     )
-    intraday = read_intraday_acceptance(live_path, as_of_timestamp=observed_at)
+    intraday = read_intraday_acceptance(
+        live_path,
+        as_of_timestamp=observed_at,
+    )
 
     view = build_market_at_a_glance(
         summary,
@@ -226,10 +238,18 @@ def build_and_persist_authoritative_market_evidence(
         futures=futures,
         futures_vwap=futures_vwap,
     )
-    view["underlying_bar_open_timestamp"] = underlying.get("bar_open_timestamp")
-    view["underlying_bar_close_timestamp"] = underlying.get("bar_close_timestamp")
-    view["futures_bar_open_timestamp"] = futures.get("bar_open_timestamp")
-    view["futures_bar_close_timestamp"] = futures.get("bar_close_timestamp")
+    view["underlying_bar_open_timestamp"] = underlying.get(
+        "bar_open_timestamp"
+    )
+    view["underlying_bar_close_timestamp"] = underlying.get(
+        "bar_close_timestamp"
+    )
+    view["futures_bar_open_timestamp"] = futures.get(
+        "bar_open_timestamp"
+    )
+    view["futures_bar_close_timestamp"] = futures.get(
+        "bar_close_timestamp"
+    )
     view["safe_evidence_time"] = _safe_evidence_time(view)
     view["latest_complete_evidence_time"] = view["safe_evidence_time"]
     view["authority"] = "OBSERVATIONAL_ONLY"
