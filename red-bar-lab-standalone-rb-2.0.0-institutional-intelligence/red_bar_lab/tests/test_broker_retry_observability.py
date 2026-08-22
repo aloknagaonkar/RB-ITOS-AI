@@ -1,6 +1,6 @@
 import logging
 
-from red_bar_lab.runtime_hardening import ObservableRetry
+from red_bar_lab.brokers.upstox_client import ObservableRetry
 
 
 def test_observable_retry_logs_safe_endpoint(caplog):
@@ -37,6 +37,7 @@ def test_observable_retry_logs_safe_endpoint(caplog):
 def test_retry_policy_remains_idempotent_only():
     retry = ObservableRetry(
         total=3,
+        status_forcelist=(503,),
         allowed_methods=frozenset({"GET", "HEAD", "OPTIONS"}),
     )
 
