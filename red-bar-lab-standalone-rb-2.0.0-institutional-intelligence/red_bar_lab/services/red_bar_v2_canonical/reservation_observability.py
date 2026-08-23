@@ -17,10 +17,18 @@ from .reservation_repository import ReservationCorruptionError, SQLiteCanonicalR
 
 
 @dataclass(frozen=True, slots=True)
+class ReservationEventObservation:
+    event_type: str
+    event_timestamp: datetime
+    owner_id: str
+    reason_code: str
+
+
+@dataclass(frozen=True, slots=True)
 class ReservationObservationResult:
     status: str
     reservation: CanonicalBundleReservation | None
-    events: tuple[CanonicalReservationLifecycleEvent, ...]
+    events: tuple[ReservationEventObservation, ...]
 
     def __iter__(self) -> Iterator[object]:
         if self.status == "RESERVATION_DATA_CORRUPT":
@@ -108,13 +116,22 @@ class SQLiteReservationObservabilityRepository:
                     "SELECT event_id,reservation_id,bundle_id,event_type,event_timestamp,owner_id,reason_code,metadata_json,metadata_sha256 FROM canonical_red_bar_v2_bundle_reservation_events WHERE reservation_id=? AND bundle_id=? ORDER BY event_timestamp DESC,event_id DESC LIMIT ?",
                     (reservation.reservation_id, reservation.bundle_id, bounded),
                 ).fetchall()
-            events = tuple(self._decode_event(item) for item in rows)
-            for event in events:
+            verified = tuple(self._decode_event(item) for item in rows)
+            for event in verified:
                 if event.reservation_id != reservation.reservation_id:
                     raise ReservationCorruptionError("reservation event projection mismatch: reservation_id")
                 if event.bundle_id != reservation.bundle_id:
                     raise ReservationCorruptionError("reservation event projection mismatch: bundle_id")
-            return ReservationObservationResult("RESERVATION_DATA_AVAILABLE", reservation, events)
+            projected = tuple(
+                ReservationEventObservation(
+                    event_type=event.event_type.value,
+                    event_timestamp=event.event_timestamp,
+                    owner_id=event.owner_id,
+                    reason_code=event.reason_code,
+                )
+                for event in verified
+            )
+            return ReservationObservationResult("RESERVATION_DATA_AVAILABLE", reservation, projected)
         except ReservationCorruptionError:
             return ReservationObservationResult("RESERVATION_DATA_CORRUPT", None, ())
         except (FileNotFoundError, sqlite3.Error, OSError):
@@ -122,4 +139,3 @@ class SQLiteReservationObservabilityRepository:
 
 
 ReservationObservation = CanonicalBundleReservation
-ReservationEventObservation = CanonicalReservationLifecycleEvent
