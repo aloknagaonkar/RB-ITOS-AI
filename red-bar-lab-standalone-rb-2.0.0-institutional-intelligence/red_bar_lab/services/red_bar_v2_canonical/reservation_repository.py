@@ -148,12 +148,18 @@ class SQLiteCanonicalReservationRepository:
                 state=ReservationState(data["state"]),
                 reserved_at=datetime.fromisoformat(data["reserved_at"]),
                 lease_expires_at=datetime.fromisoformat(data["lease_expires_at"]),
-                released_at=datetime.fromisoformat(data["released_at"]) if data["released_at"] else None,
+                released_at=(
+                    datetime.fromisoformat(data["released_at"])
+                    if data["released_at"]
+                    else None
+                ),
                 release_reason=data["release_reason"],
                 schema_version=data["schema_version"],
             )
         except Exception as exc:
-            raise ReservationCorruptionError("reservation payload violates canonical schema") from exc
+            raise ReservationCorruptionError(
+                "reservation payload violates canonical schema"
+            ) from exc
         projections: dict[str, object] = {
             "reservation_id": reservation.reservation_id,
             "bundle_id": reservation.bundle_id,
@@ -161,17 +167,25 @@ class SQLiteCanonicalReservationRepository:
             "state": reservation.state.value,
             "reserved_at": reservation.reserved_at.isoformat(),
             "lease_expires_at": reservation.lease_expires_at.isoformat(),
-            "released_at": reservation.released_at.isoformat() if reservation.released_at else None,
+            "released_at": (
+                reservation.released_at.isoformat()
+                if reservation.released_at
+                else None
+            ),
             "release_reason": reservation.release_reason,
             "schema_version": reservation.schema_version,
         }
         for field, expected in projections.items():
             if row[field] != expected:
-                raise ReservationCorruptionError(f"reservation projection mismatch: {field}")
+                raise ReservationCorruptionError(
+                    f"reservation projection mismatch: {field}"
+                )
         return reservation
 
     @staticmethod
-    def _event_metadata(reservation: CanonicalBundleReservation) -> dict[str, object]:
+    def _event_metadata(
+        reservation: CanonicalBundleReservation,
+    ) -> dict[str, object]:
         return {
             "reservation_id": reservation.reservation_id,
             "bundle_id": reservation.bundle_id,
@@ -183,7 +197,10 @@ class SQLiteCanonicalReservationRepository:
         return canonical_reservation_json(cls._event_metadata(reservation))
 
     @classmethod
-    def _decode_event(cls, row: sqlite3.Row) -> CanonicalReservationLifecycleEvent:
+    def _decode_event(
+        cls,
+        row: sqlite3.Row,
+    ) -> CanonicalReservationLifecycleEvent:
         payload = str(row["metadata_json"])
         if reservation_sha256(payload) != str(row["metadata_sha256"]):
             raise ReservationCorruptionError("reservation event digest mismatch")
@@ -194,17 +211,25 @@ class SQLiteCanonicalReservationRepository:
                 reservation_id=str(row["reservation_id"]),
                 bundle_id=str(row["bundle_id"]),
                 event_type=ReservationEventType(str(row["event_type"])),
-                event_timestamp=datetime.fromisoformat(str(row["event_timestamp"])),
+                event_timestamp=datetime.fromisoformat(
+                    str(row["event_timestamp"])
+                ),
                 owner_id=str(row["owner_id"]),
                 reason_code=str(row["reason_code"]),
                 metadata=metadata,
             )
         except Exception as exc:
-            raise ReservationCorruptionError("reservation event violates canonical schema") from exc
+            raise ReservationCorruptionError(
+                "reservation event violates canonical schema"
+            ) from exc
         if metadata.get("reservation_id") != event.reservation_id:
-            raise ReservationCorruptionError("reservation event metadata mismatch: reservation_id")
+            raise ReservationCorruptionError(
+                "reservation event metadata mismatch: reservation_id"
+            )
         if metadata.get("bundle_id") != event.bundle_id:
-            raise ReservationCorruptionError("reservation event metadata mismatch: bundle_id")
+            raise ReservationCorruptionError(
+                "reservation event metadata mismatch: bundle_id"
+            )
         return event
 
     @classmethod
@@ -236,7 +261,10 @@ class SQLiteCanonicalReservationRepository:
             reservation_sha256(payload),
         )
         existing = conn.execute(
-            "SELECT event_id,reservation_id,bundle_id,event_type,event_timestamp,owner_id,reason_code,metadata_json,metadata_sha256 FROM canonical_red_bar_v2_bundle_reservation_events WHERE event_id=?",
+            "SELECT event_id,reservation_id,bundle_id,event_type,event_timestamp,"
+            "owner_id,reason_code,metadata_json,metadata_sha256 "
+            "FROM canonical_red_bar_v2_bundle_reservation_events "
+            "WHERE event_id=?",
             (event_id,),
         ).fetchone()
         if existing is not None:
@@ -252,10 +280,15 @@ class SQLiteCanonicalReservationRepository:
                 metadata=cls._event_metadata(reservation),
             )
             if decoded != expected:
-                raise ReservationConflictError("reservation event identity conflict")
+                raise ReservationConflictError(
+                    "reservation event identity conflict"
+                )
             return
         conn.execute(
-            "INSERT INTO canonical_red_bar_v2_bundle_reservation_events(event_id,reservation_id,bundle_id,event_type,event_timestamp,owner_id,reason_code,metadata_json,metadata_sha256) VALUES(?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO canonical_red_bar_v2_bundle_reservation_events("
+            "event_id,reservation_id,bundle_id,event_type,event_timestamp,"
+            "owner_id,reason_code,metadata_json,metadata_sha256) "
+            "VALUES(?,?,?,?,?,?,?,?,?)",
             values,
         )
 
@@ -269,10 +302,15 @@ class SQLiteCanonicalReservationRepository:
     ) -> None:
         payload = cls._payload(terminal)
         cursor = conn.execute(
-            "UPDATE canonical_red_bar_v2_bundle_reservations SET state=?,released_at=?,release_reason=?,payload_json=?,payload_sha256=?,updated_at=? WHERE reservation_id=? AND state=?",
+            "UPDATE canonical_red_bar_v2_bundle_reservations "
+            "SET state=?,released_at=?,release_reason=?,payload_json=?,"
+            "payload_sha256=?,updated_at=? "
+            "WHERE reservation_id=? AND state=?",
             (
                 terminal.state.value,
-                terminal.released_at.isoformat() if terminal.released_at else None,
+                terminal.released_at.isoformat()
+                if terminal.released_at
+                else None,
                 terminal.release_reason,
                 payload,
                 reservation_sha256(payload),
@@ -282,7 +320,9 @@ class SQLiteCanonicalReservationRepository:
             ),
         )
         if cursor.rowcount != 1:
-            raise ReservationConflictError("reservation state update conflict")
+            raise ReservationConflictError(
+                "reservation state update conflict"
+            )
 
     def reserve(
         self,
@@ -295,12 +335,30 @@ class SQLiteCanonicalReservationRepository:
         maximum_bundle_age_seconds: float = 120.0,
     ) -> CanonicalReservationResult:
         if not feature_enabled:
-            return CanonicalReservationResult(ReservationOutcome.RESERVATION_DISABLED, "FEATURE_DISABLED", None)
+            return CanonicalReservationResult(
+                ReservationOutcome.RESERVATION_DISABLED,
+                "FEATURE_DISABLED",
+                None,
+            )
         _aware(requested_at, "requested_at")
         conn = self._connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
-            verified = verify_canonical_bundle_evidence(conn, bundle_id=bundle_id)
+            bundle_row = conn.execute(
+                "SELECT 1 FROM canonical_red_bar_v2_bundles WHERE bundle_id=?",
+                (bundle_id,),
+            ).fetchone()
+            if bundle_row is None:
+                conn.execute("ROLLBACK")
+                return CanonicalReservationResult(
+                    ReservationOutcome.BUNDLE_UNAVAILABLE,
+                    "BUNDLE_NOT_FOUND",
+                    None,
+                )
+            verified = verify_canonical_bundle_evidence(
+                conn,
+                bundle_id=bundle_id,
+            )
             bundle = verified.bundle
             eligibility = evaluate_reservation_eligibility(
                 bundle=bundle,
@@ -311,9 +369,14 @@ class SQLiteCanonicalReservationRepository:
             )
             if not eligibility.eligible:
                 conn.execute("ROLLBACK")
-                return CanonicalReservationResult(ReservationOutcome.BUNDLE_INELIGIBLE, eligibility.reason_code, None)
+                return CanonicalReservationResult(
+                    ReservationOutcome.BUNDLE_INELIGIBLE,
+                    eligibility.reason_code,
+                    None,
+                )
             active_row = conn.execute(
-                "SELECT * FROM canonical_red_bar_v2_bundle_reservations WHERE bundle_id=? AND state='RESERVED'",
+                "SELECT * FROM canonical_red_bar_v2_bundle_reservations "
+                "WHERE bundle_id=? AND state='RESERVED'",
                 (bundle_id,),
             ).fetchone()
             if active_row is not None:
@@ -327,7 +390,12 @@ class SQLiteCanonicalReservationRepository:
                             "release_reason": "LEASE_EXPIRED",
                         }
                     )
-                    self._update_terminal(conn, current, expired, requested_at)
+                    self._update_terminal(
+                        conn,
+                        current,
+                        expired,
+                        requested_at,
+                    )
                     self._insert_event(
                         conn,
                         expired,
@@ -337,10 +405,18 @@ class SQLiteCanonicalReservationRepository:
                     )
                 elif current.owner_id == owner_id:
                     conn.execute("COMMIT")
-                    return CanonicalReservationResult(ReservationOutcome.IDEMPOTENT_REPLAY, "ACTIVE_OWNER_REPLAY", current)
+                    return CanonicalReservationResult(
+                        ReservationOutcome.IDEMPOTENT_REPLAY,
+                        "ACTIVE_OWNER_REPLAY",
+                        current,
+                    )
                 else:
                     conn.execute("COMMIT")
-                    return CanonicalReservationResult(ReservationOutcome.ALREADY_RESERVED, "ACTIVE_LEASE_OWNED", current)
+                    return CanonicalReservationResult(
+                        ReservationOutcome.ALREADY_RESERVED,
+                        "ACTIVE_LEASE_OWNED",
+                        current,
+                    )
             lease = min(max(int(lease_seconds), 5), 300)
             reservation = CanonicalBundleReservation(
                 reservation_id=build_reservation_id(
@@ -369,7 +445,11 @@ class SQLiteCanonicalReservationRepository:
             payload = self._payload(reservation)
             stored_at = requested_at.isoformat()
             conn.execute(
-                "INSERT INTO canonical_red_bar_v2_bundle_reservations(reservation_id,bundle_id,owner_id,state,reserved_at,lease_expires_at,released_at,release_reason,schema_version,payload_json,payload_sha256,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO canonical_red_bar_v2_bundle_reservations("
+                "reservation_id,bundle_id,owner_id,state,reserved_at,"
+                "lease_expires_at,released_at,release_reason,schema_version,"
+                "payload_json,payload_sha256,created_at,updated_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     reservation.reservation_id,
                     reservation.bundle_id,
@@ -386,25 +466,49 @@ class SQLiteCanonicalReservationRepository:
                     stored_at,
                 ),
             )
-            self._insert_event(conn, reservation, ReservationEventType.RESERVATION_ACQUIRED, requested_at, "ACQUIRED")
+            self._insert_event(
+                conn,
+                reservation,
+                ReservationEventType.RESERVATION_ACQUIRED,
+                requested_at,
+                "ACQUIRED",
+            )
             conn.execute("COMMIT")
-            return CanonicalReservationResult(ReservationOutcome.ACQUIRED, "ACQUIRED", reservation)
+            return CanonicalReservationResult(
+                ReservationOutcome.ACQUIRED,
+                "ACQUIRED",
+                reservation,
+            )
         except CanonicalPersistenceCorruptionError:
             if conn.in_transaction:
                 conn.execute("ROLLBACK")
-            return CanonicalReservationResult(ReservationOutcome.BUNDLE_CORRUPT, "BUNDLE_CORRUPT", None)
+            return CanonicalReservationResult(
+                ReservationOutcome.BUNDLE_CORRUPT,
+                "BUNDLE_CORRUPT",
+                None,
+            )
         except ReservationCorruptionError:
             if conn.in_transaction:
                 conn.execute("ROLLBACK")
-            return CanonicalReservationResult(ReservationOutcome.RESERVATION_CORRUPT, "RESERVATION_CORRUPT", None)
+            return CanonicalReservationResult(
+                ReservationOutcome.RESERVATION_CORRUPT,
+                "RESERVATION_CORRUPT",
+                None,
+            )
         except ReservationConflictError:
             if conn.in_transaction:
                 conn.execute("ROLLBACK")
-            return CanonicalReservationResult(ReservationOutcome.RESERVATION_CONFLICT, "RESERVATION_CONFLICT", None)
+            return CanonicalReservationResult(
+                ReservationOutcome.RESERVATION_CONFLICT,
+                "RESERVATION_CONFLICT",
+                None,
+            )
         except sqlite3.Error as exc:
             if conn.in_transaction:
                 conn.execute("ROLLBACK")
-            raise ReservationStorageError("reservation storage unavailable") from exc
+            raise ReservationStorageError(
+                "reservation storage unavailable"
+            ) from exc
         finally:
             conn.close()
 
@@ -421,28 +525,53 @@ class SQLiteCanonicalReservationRepository:
         try:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
-                "SELECT * FROM canonical_red_bar_v2_bundle_reservations WHERE reservation_id=?",
+                "SELECT * FROM canonical_red_bar_v2_bundle_reservations "
+                "WHERE reservation_id=?",
                 (reservation_id,),
             ).fetchone()
             if row is None:
                 conn.execute("COMMIT")
-                return CanonicalReservationResult(ReservationOutcome.BUNDLE_UNAVAILABLE, "RESERVATION_NOT_FOUND", None)
+                return CanonicalReservationResult(
+                    ReservationOutcome.BUNDLE_UNAVAILABLE,
+                    "RESERVATION_NOT_FOUND",
+                    None,
+                )
             current = self._from_row(row)
             if current.owner_id != owner_id:
                 conn.execute("COMMIT")
-                return CanonicalReservationResult(ReservationOutcome.ALREADY_RESERVED, "OWNER_MISMATCH", current)
+                return CanonicalReservationResult(
+                    ReservationOutcome.ALREADY_RESERVED,
+                    "OWNER_MISMATCH",
+                    current,
+                )
             if current.state is ReservationState.EXPIRED:
                 conn.execute("COMMIT")
-                return CanonicalReservationResult(ReservationOutcome.EXPIRED, "LEASE_EXPIRED", current)
+                return CanonicalReservationResult(
+                    ReservationOutcome.EXPIRED,
+                    "LEASE_EXPIRED",
+                    current,
+                )
             if current.state is ReservationState.RELEASED:
                 conn.execute("COMMIT")
-                return CanonicalReservationResult(ReservationOutcome.IDEMPOTENT_REPLAY, "ALREADY_RELEASED", current)
+                return CanonicalReservationResult(
+                    ReservationOutcome.IDEMPOTENT_REPLAY,
+                    "ALREADY_RELEASED",
+                    current,
+                )
             if current.state is not ReservationState.RESERVED:
                 conn.execute("COMMIT")
-                return CanonicalReservationResult(ReservationOutcome.TERMINAL_REJECTED, "RESERVATION_NOT_ACTIVE", current)
+                return CanonicalReservationResult(
+                    ReservationOutcome.TERMINAL_REJECTED,
+                    "RESERVATION_NOT_ACTIVE",
+                    current,
+                )
             if released_at < current.reserved_at:
                 conn.execute("ROLLBACK")
-                return CanonicalReservationResult(ReservationOutcome.INVALID_REQUEST, "RELEASE_BEFORE_RESERVATION", current)
+                return CanonicalReservationResult(
+                    ReservationOutcome.INVALID_REQUEST,
+                    "RELEASE_BEFORE_RESERVATION",
+                    current,
+                )
             if released_at >= current.lease_expires_at:
                 expired = CanonicalBundleReservation(
                     **{
@@ -452,7 +581,12 @@ class SQLiteCanonicalReservationRepository:
                         "release_reason": "LEASE_EXPIRED",
                     }
                 )
-                self._update_terminal(conn, current, expired, released_at)
+                self._update_terminal(
+                    conn,
+                    current,
+                    expired,
+                    released_at,
+                )
                 self._insert_event(
                     conn,
                     expired,
@@ -461,7 +595,11 @@ class SQLiteCanonicalReservationRepository:
                     "LEASE_EXPIRED",
                 )
                 conn.execute("COMMIT")
-                return CanonicalReservationResult(ReservationOutcome.EXPIRED, "LEASE_EXPIRED", expired)
+                return CanonicalReservationResult(
+                    ReservationOutcome.EXPIRED,
+                    "LEASE_EXPIRED",
+                    expired,
+                )
             released = CanonicalBundleReservation(
                 **{
                     **asdict(current),
@@ -470,36 +608,73 @@ class SQLiteCanonicalReservationRepository:
                     "release_reason": reason_code,
                 }
             )
-            self._update_terminal(conn, current, released, released_at)
-            self._insert_event(conn, released, ReservationEventType.RESERVATION_RELEASED, released_at, reason_code)
+            self._update_terminal(
+                conn,
+                current,
+                released,
+                released_at,
+            )
+            self._insert_event(
+                conn,
+                released,
+                ReservationEventType.RESERVATION_RELEASED,
+                released_at,
+                reason_code,
+            )
             conn.execute("COMMIT")
-            return CanonicalReservationResult(ReservationOutcome.RELEASED, reason_code, released)
+            return CanonicalReservationResult(
+                ReservationOutcome.RELEASED,
+                reason_code,
+                released,
+            )
         except ReservationCorruptionError:
             if conn.in_transaction:
                 conn.execute("ROLLBACK")
-            return CanonicalReservationResult(ReservationOutcome.RESERVATION_CORRUPT, "RESERVATION_CORRUPT", None)
+            return CanonicalReservationResult(
+                ReservationOutcome.RESERVATION_CORRUPT,
+                "RESERVATION_CORRUPT",
+                None,
+            )
         except ReservationConflictError:
             if conn.in_transaction:
                 conn.execute("ROLLBACK")
-            return CanonicalReservationResult(ReservationOutcome.RESERVATION_CONFLICT, "RESERVATION_CONFLICT", None)
+            return CanonicalReservationResult(
+                ReservationOutcome.RESERVATION_CONFLICT,
+                "RESERVATION_CONFLICT",
+                None,
+            )
         except sqlite3.Error as exc:
             if conn.in_transaction:
                 conn.execute("ROLLBACK")
-            raise ReservationStorageError("reservation storage unavailable") from exc
+            raise ReservationStorageError(
+                "reservation storage unavailable"
+            ) from exc
         finally:
             conn.close()
 
-    def get_active(self, *, bundle_id: str, at: datetime) -> CanonicalBundleReservation | None:
+    def get_active(
+        self,
+        *,
+        bundle_id: str,
+        at: datetime,
+    ) -> CanonicalBundleReservation | None:
         _aware(at, "at")
         try:
             with self._connect() as conn:
                 row = conn.execute(
-                    "SELECT * FROM canonical_red_bar_v2_bundle_reservations WHERE bundle_id=? AND state='RESERVED'",
+                    "SELECT * FROM canonical_red_bar_v2_bundle_reservations "
+                    "WHERE bundle_id=? AND state='RESERVED'",
                     (bundle_id,),
                 ).fetchone()
             if row is None:
                 return None
             reservation = self._from_row(row)
-            return reservation if at < reservation.lease_expires_at else None
+            return (
+                reservation
+                if at < reservation.lease_expires_at
+                else None
+            )
         except sqlite3.Error as exc:
-            raise ReservationStorageError("reservation storage unavailable") from exc
+            raise ReservationStorageError(
+                "reservation storage unavailable"
+            ) from exc
