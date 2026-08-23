@@ -4,9 +4,14 @@ from datetime import timedelta
 from pathlib import Path
 import sqlite3
 
+import pytest
+
 from red_bar_lab.services.red_bar_v2_canonical import (
     RedBarV2CanonicalPersistenceService,
     SQLiteRedBarV2CanonicalRepository,
+)
+from red_bar_lab.services.red_bar_v2_canonical.reservation_evidence_verification import (
+    ReservationCorruptionError,
 )
 from red_bar_lab.services.red_bar_v2_canonical.reservation_models import (
     ReservationOutcome,
@@ -90,7 +95,11 @@ def test_zero_events_is_corrupt_and_blocks_replay_release_and_active(tmp_path: P
         reason_code="RELEASE",
     )
     assert released.outcome is ReservationOutcome.RESERVATION_CORRUPT
-    assert repository.get_active(bundle_id=bundle.bundle_id, at=reservation.reserved_at + timedelta(seconds=1)) is None
+    with pytest.raises(ReservationCorruptionError, match="no lifecycle event history"):
+        repository.get_active(
+            bundle_id=bundle.bundle_id,
+            at=reservation.reserved_at + timedelta(seconds=1),
+        )
     observed = SQLiteReservationObservabilityRepository(tmp_path / "db.sqlite").latest_for_bundle(bundle_id=bundle.bundle_id)
     assert observed.status == "RESERVATION_DATA_CORRUPT"
     assert observed.reservation is None and observed.events == ()
