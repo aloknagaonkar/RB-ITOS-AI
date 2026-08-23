@@ -1,16 +1,27 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import date, datetime
 import json
 
 from .paper_execution_identity import build_execution_event_id, payload_sha256
 from .paper_execution_models import PaperExecutionEventType, PaperExecutionState
 from .paper_execution_repository import (
     PaperExecutionCorruptionError,
+    PaperExecutionStorageError,
     SQLiteCanonicalPaperExecutionRepository,
     VerifiedPaperExecution,
     _aware,
     command_from_payload,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class PendingReservationFinalization:
+    execution_id: str
+    reservation_id: str
+    state: PaperExecutionState
+    updated_at: datetime
 
 
 _EVENT_TARGET = {
@@ -204,3 +215,57 @@ class StrictSQLiteCanonicalPaperExecutionRepository(
             if row is not None
             else None
         )
+
+    def list_pending_finalization(
+        self,
+        *,
+        limit: int = 100,
+    ) -> tuple[PendingReservationFinalization, ...]:
+        bounded = max(1, min(int(limit), 500))
+        try:
+            with self._connect(read_only=True) as conn:
+                rows = conn.execute(
+                    """
+                    SELECT c.execution_id,c.reservation_id,c.state,c.updated_at
+                    FROM canonical_red_bar_v2_paper_commands c
+                    JOIN canonical_red_bar_v2_bundle_reservations r
+                      ON r.reservation_id=c.reservation_id
+                    WHERE c.state IN ('PAPER_FILLED','PAPER_REJECTED')
+                      AND r.state='RESERVED'
+                    ORDER BY c.updated_at ASC,c.execution_id ASC
+                    LIMIT ?
+                    """,
+                    (bounded,),
+                ).fetchall()
+        except PaperExecutionStorageError:
+            raise
+        return tuple(
+            PendingReservationFinalization(
+                execution_id=str(row["execution_id"]),
+                reservation_id=str(row["reservation_id"]),
+                state=PaperExecutionState(str(row["state"])),
+                updated_at=_aware(row["updated_at"], "updated_at"),
+            )
+            for row in rows
+        )
+
+    def count_trading_date_executions(self, *, trading_date: date) -> int:
+        if type(trading_date) is not date:
+            raise ValueError("trading_date must be date")
+        try:
+            with self._connect(read_only=True) as conn:
+                rows = conn.execute(
+                    "SELECT payload_json,payload_sha256 FROM "
+                    "canonical_red_bar_v2_paper_commands"
+                ).fetchall()
+        except PaperExecutionStorageError:
+            raise
+        count = 0
+        for row in rows:
+            payload = str(row["payload_json"])
+            if payload_sha256(payload) != str(row["payload_sha256"]):
+                raise PaperExecutionCorruptionError("command digest mismatch")
+            command = command_from_payload(payload)
+            if command.trading_date == trading_date:
+                count += 1
+        return count
