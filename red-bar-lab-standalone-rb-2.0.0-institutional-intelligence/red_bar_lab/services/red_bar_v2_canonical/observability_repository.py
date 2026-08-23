@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
+import json
 from pathlib import Path
 import sqlite3
 from typing import Protocol
+
+from red_bar_lab.domain.red_bar_v2 import red_bar_v2_bundle_from_dict
 
 from .persistence_models import (
     CanonicalBundleLifecycleEvent,
@@ -125,8 +128,27 @@ class SQLiteRedBarV2CanonicalObservabilityRepository:
     def bundle_events(self, *, bundle_id: str) -> tuple[CanonicalBundleLifecycleEvent, ...]:
         try:
             with self._connect() as conn:
-                if not self._table_exists(conn, "canonical_red_bar_v2_bundle_events"):
-                    return ()
+                required = (
+                    "canonical_red_bar_v2_bundles",
+                    "canonical_red_bar_v2_bundle_events",
+                )
+                if not all(self._table_exists(conn, name) for name in required):
+                    raise CanonicalPersistenceCorruptionError("resolution references missing canonical bundle tables")
+                bundle_row = conn.execute(
+                    "SELECT payload_json,payload_sha256 FROM canonical_red_bar_v2_bundles WHERE bundle_id=?",
+                    (bundle_id,),
+                ).fetchone()
+                if bundle_row is None:
+                    raise CanonicalPersistenceCorruptionError("resolution references missing bundle")
+                bundle_payload = str(bundle_row["payload_json"])
+                if payload_sha256(bundle_payload) != str(bundle_row["payload_sha256"]):
+                    raise CanonicalPersistenceCorruptionError("bundle payload digest mismatch")
+                try:
+                    bundle = red_bar_v2_bundle_from_dict(json.loads(bundle_payload))
+                except Exception as exc:
+                    raise CanonicalPersistenceCorruptionError("bundle payload violates canonical schema") from exc
+                if bundle.bundle_id != bundle_id:
+                    raise CanonicalPersistenceCorruptionError("bundle projection mismatch: bundle_id")
                 rows = conn.execute(
                     """
                     SELECT metadata_json,metadata_sha256
@@ -136,6 +158,8 @@ class SQLiteRedBarV2CanonicalObservabilityRepository:
                     """,
                     (bundle_id,),
                 ).fetchall()
+        except CanonicalPersistenceCorruptionError:
+            raise
         except sqlite3.Error as exc:
             raise CanonicalPersistenceUnavailableError(str(exc)) from exc
         events: list[CanonicalBundleLifecycleEvent] = []
