@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, time
 import os
+from pathlib import Path
 import signal
 from threading import Event
 from zoneinfo import ZoneInfo
@@ -53,6 +55,59 @@ def _market_session_active(now: datetime | None = None) -> bool:
         current.weekday() < 5
         and time(9, 15) <= current.time().replace(tzinfo=None) <= time(15, 30)
     )
+
+
+class SessionAwarePaperCanaryRuntime(PaperCanaryRuntime):
+    """Re-evaluates the exchange session before every isolated cycle."""
+
+    def run_cycle(self):
+        original = self.prerequisites
+        self.prerequisites = replace(
+            original,
+            market_session_active=_market_session_active(self.clock.now()),
+        )
+        try:
+            return super().run_cycle()
+        finally:
+            self.prerequisites = original
+
+
+class PaperCanaryProcessLock:
+    """Fail-closed single-process ownership using an exclusive lock file."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = Path(path)
+        self._fd: int | None = None
+
+    def acquire(self) -> bool:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            self._fd = os.open(
+                self.path,
+                os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+                0o600,
+            )
+            os.write(self._fd, str(os.getpid()).encode("ascii"))
+            os.fsync(self._fd)
+            return True
+        except FileExistsError:
+            self._fd = None
+            return False
+        except OSError:
+            self._fd = None
+            return False
+
+    def release(self) -> None:
+        if self._fd is not None:
+            try:
+                os.close(self._fd)
+            except OSError:
+                pass
+            self._fd = None
+        try:
+            self.path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def build_runtime(settings: RedBarSettings) -> PaperCanaryRuntime:
@@ -116,7 +171,7 @@ def build_runtime(settings: RedBarSettings) -> PaperCanaryRuntime:
             settings.red_bar_v2_canonical_paper_execution_mode
         ),
         worker_enabled=settings.red_bar_v2_paper_canary_worker_enabled,
-        market_session_active=_market_session_active(),
+        market_session_active=True,
     )
     policy = PaperCanaryPolicy(
         poll_seconds=settings.red_bar_v2_paper_canary_poll_seconds,
@@ -134,7 +189,7 @@ def build_runtime(settings: RedBarSettings) -> PaperCanaryRuntime:
             settings.red_bar_v2_paper_canary_required_probe_cycles
         ),
     )
-    return PaperCanaryRuntime(
+    return SessionAwarePaperCanaryRuntime(
         state_store=AtomicJsonPaperCanaryStateStore(
             settings.paper_canary_state_path
         ),
@@ -183,21 +238,36 @@ def main(argv: list[str] | None = None) -> int:
         print("Canonical paper-canary worker is disabled.")
         return 0
 
+    process_lock = PaperCanaryProcessLock(
+        settings.artifacts_root / "red_bar_v2_paper_canary.lock"
+    )
+    if not process_lock.acquire():
+        print("Canonical paper-canary worker ownership is unavailable.")
+        return 3
+
     stop_requested = Event()
     install_signal_handlers(stop_requested)
     try:
-        runtime = build_runtime(settings)
-    except Exception:
-        print("Canonical paper-canary configuration is unavailable.")
-        return 2
-
-    while not stop_requested.is_set():
         try:
-            emit_bounded_status(runtime.run_cycle())
+            runtime = build_runtime(settings)
         except Exception:
-            print("paper_canary outcome=ENTRY_SUSPENDED reason=WORKER_CYCLE_FAILED")
-        stop_requested.wait(settings.red_bar_v2_paper_canary_poll_seconds)
-    return 0
+            print("Canonical paper-canary configuration is unavailable.")
+            return 2
+
+        while not stop_requested.is_set():
+            try:
+                emit_bounded_status(runtime.run_cycle())
+            except Exception:
+                print(
+                    "paper_canary outcome=ENTRY_SUSPENDED "
+                    "reason=WORKER_CYCLE_FAILED"
+                )
+            stop_requested.wait(
+                settings.red_bar_v2_paper_canary_poll_seconds
+            )
+        return 0
+    finally:
+        process_lock.release()
 
 
 if __name__ == "__main__":
