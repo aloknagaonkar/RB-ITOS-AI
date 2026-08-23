@@ -51,9 +51,7 @@ def test_startup_policy_is_pure_and_exact():
         red_bar_v2_paper_canary_worker_enabled=True,
         red_bar_v2_canonical_paper_execution_mode="PAPER_CANARY",
     )
-    assert evaluate_paper_canary_startup(
-        _settings(**base)
-    ).reason_code == "CANONICAL_SHADOW_DISABLED"
+    assert evaluate_paper_canary_startup(_settings(**base)).reason_code == "CANONICAL_SHADOW_DISABLED"
     assert evaluate_paper_canary_startup(
         _settings(**base, red_bar_v2_canonical_shadow_enabled=True)
     ).reason_code == "CANONICAL_RESERVATION_DISABLED"
@@ -65,12 +63,19 @@ def test_startup_policy_is_pure_and_exact():
         )
     ).reason_code == "CANONICAL_PAPER_EXECUTION_DISABLED"
 
+    configured = dict(
+        **base,
+        red_bar_v2_canonical_shadow_enabled=True,
+        red_bar_v2_canonical_reservation_enabled=True,
+        red_bar_v2_canonical_paper_execution_enabled=True,
+    )
+    assert evaluate_paper_canary_startup(
+        _settings(**configured)
+    ).reason_code == "MARKET_DATA_PROVIDER_UNCONFIGURED"
     allowed = evaluate_paper_canary_startup(
         _settings(
-            **base,
-            red_bar_v2_canonical_shadow_enabled=True,
-            red_bar_v2_canonical_reservation_enabled=True,
-            red_bar_v2_canonical_paper_execution_enabled=True,
+            **configured,
+            red_bar_v2_paper_canary_market_data_provider="ZERODHA",
         )
     )
     assert allowed.action is PaperCanaryStartupAction.PAPER_CANARY
