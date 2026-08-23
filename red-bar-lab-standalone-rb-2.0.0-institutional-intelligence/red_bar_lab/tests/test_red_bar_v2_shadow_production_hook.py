@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pandas as pd
 
 from red_bar_lab.services.red_bar_v2_futures_replay_service import (
     run_monitored_red_bar_v2_futures_replay,
+)
+from red_bar_lab.services.red_bar_v2_live_shadow import (
+    submit_latest_live_canonical_shadow,
 )
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -43,17 +47,9 @@ def _frames():
     )
 
 
-def test_disabled_production_hook_does_not_construct_shadow_runtime(tmp_path, monkeypatch):
-    import red_bar_lab.services.red_bar_v2_futures_replay_service as module
-
-    monkeypatch.delenv("RED_BAR_V2_CANONICAL_SHADOW_ENABLED", raising=False)
-    monkeypatch.setattr(
-        module,
-        "get_red_bar_v2_shadow_runtime",
-        lambda **kwargs: None if kwargs["enabled"] is False else (_ for _ in ()).throw(AssertionError()),
-    )
+def _monitored(tmp_path):
     index_candles, futures_candles = _frames()
-    result = run_monitored_red_bar_v2_futures_replay(
+    return run_monitored_red_bar_v2_futures_replay(
         index_candles,
         futures_candles,
         instrument_key=UNDERLYING,
@@ -61,11 +57,17 @@ def test_disabled_production_hook_does_not_construct_shadow_runtime(tmp_path, mo
         artifacts_root=tmp_path,
         futures_expiry="2026-08-27",
     )
+
+
+def test_shared_monitored_replay_never_creates_canonical_shadow_database(tmp_path, monkeypatch):
+    monkeypatch.setenv("RED_BAR_V2_CANONICAL_SHADOW_ENABLED", "true")
+    result = _monitored(tmp_path)
     assert result.replay.instrument_key == UNDERLYING
+    assert not (tmp_path / "database" / "red_bar_strategy.db").exists()
 
 
-def test_enabled_production_hook_submits_without_mutating_legacy_result(tmp_path, monkeypatch):
-    import red_bar_lab.services.red_bar_v2_futures_replay_service as module
+def test_live_submission_sends_only_newest_candidate_event(tmp_path, monkeypatch):
+    import red_bar_lab.services.red_bar_v2_live_shadow as module
 
     submitted = []
 
@@ -74,44 +76,72 @@ def test_enabled_production_hook_submits_without_mutating_legacy_result(tmp_path
             submitted.append(task)
             return True
 
-    monkeypatch.setenv("RED_BAR_V2_CANONICAL_SHADOW_ENABLED", "true")
     monkeypatch.setattr(module, "get_red_bar_v2_shadow_runtime", lambda **kwargs: Runtime())
-    index_candles, futures_candles = _frames()
-    result = run_monitored_red_bar_v2_futures_replay(
-        index_candles,
-        futures_candles,
-        instrument_key=UNDERLYING,
-        vwap_instrument_key=FUTURES,
-        artifacts_root=tmp_path,
-        futures_expiry="2026-08-27",
+    monitored = _monitored(tmp_path)
+    settings = SimpleNamespace(
+        red_bar_v2_canonical_shadow_enabled=True,
+        database_path=tmp_path / "database" / "red_bar_strategy.db",
     )
-    allowed = [
-        event for event in result.replay.events
-        if event.event_type == "CANDIDATE_ADMISSION" and event.candidate_allowed is True
+
+    assert submit_latest_live_canonical_shadow(
+        monitored=monitored,
+        settings=settings,
+        instrument_key=UNDERLYING,
+        futures_instrument_key=FUTURES,
+        futures_expiry="2026-08-27",
+    ) is True
+
+    candidates = [
+        event for event in monitored.replay.events
+        if event.event_type == "CANDIDATE_ADMISSION"
     ]
-    assert allowed
-    assert submitted
-    assert submitted[0].replay_event in result.replay.events
+    assert candidates
+    assert len(submitted) == 1
+    assert submitted[0].replay_event.timestamp == max(event.timestamp for event in candidates)
     assert submitted[0].event_timestamp == submitted[0].replay_event.timestamp
-    assert result.replay.admitted_candidates >= 1
 
 
-def test_shadow_submission_failure_does_not_interrupt_monitored_replay(tmp_path, monkeypatch):
-    import red_bar_lab.services.red_bar_v2_futures_replay_service as module
+def test_disabled_live_submission_does_not_construct_runtime(tmp_path, monkeypatch):
+    import red_bar_lab.services.red_bar_v2_live_shadow as module
+
+    monkeypatch.setattr(
+        module,
+        "get_red_bar_v2_shadow_runtime",
+        lambda **kwargs: None if kwargs["enabled"] is False else (_ for _ in ()).throw(AssertionError()),
+    )
+    monitored = _monitored(tmp_path)
+    settings = SimpleNamespace(
+        red_bar_v2_canonical_shadow_enabled=False,
+        database_path=tmp_path / "database" / "red_bar_strategy.db",
+    )
+    assert submit_latest_live_canonical_shadow(
+        monitored=monitored,
+        settings=settings,
+        instrument_key=UNDERLYING,
+        futures_instrument_key=FUTURES,
+        futures_expiry="2026-08-27",
+    ) is False
+    assert not settings.database_path.exists()
+
+
+def test_live_shadow_failure_is_isolated(tmp_path, monkeypatch):
+    import red_bar_lab.services.red_bar_v2_live_shadow as module
 
     class Runtime:
         def submit(self, task):
             raise RuntimeError("shadow unavailable")
 
-    monkeypatch.setenv("RED_BAR_V2_CANONICAL_SHADOW_ENABLED", "true")
     monkeypatch.setattr(module, "get_red_bar_v2_shadow_runtime", lambda **kwargs: Runtime())
-    index_candles, futures_candles = _frames()
-    result = run_monitored_red_bar_v2_futures_replay(
-        index_candles,
-        futures_candles,
-        instrument_key=UNDERLYING,
-        vwap_instrument_key=FUTURES,
-        artifacts_root=tmp_path,
-        futures_expiry="2026-08-27",
+    monitored = _monitored(tmp_path)
+    settings = SimpleNamespace(
+        red_bar_v2_canonical_shadow_enabled=True,
+        database_path=tmp_path / "database" / "red_bar_strategy.db",
     )
-    assert result.replay.admitted_candidates >= 1
+    assert submit_latest_live_canonical_shadow(
+        monitored=monitored,
+        settings=settings,
+        instrument_key=UNDERLYING,
+        futures_instrument_key=FUTURES,
+        futures_expiry="2026-08-27",
+    ) is False
+    assert monitored.replay.admitted_candidates >= 1
