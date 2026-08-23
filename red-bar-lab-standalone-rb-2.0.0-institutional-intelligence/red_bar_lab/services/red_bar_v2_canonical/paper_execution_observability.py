@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import sqlite3
 
 from .paper_execution_ledger import StrictSQLiteCanonicalPaperExecutionRepository
 from .paper_execution_repository import (
@@ -94,7 +95,7 @@ class SQLiteCanonicalPaperExecutionObservabilityRepository:
             return PaperExecutionObservation(status, evidence)
         except (PaperExecutionCorruptionError, ReservationCorruptionError):
             return PaperExecutionObservation("EXECUTION_DATA_CORRUPT", None)
-        except (PaperExecutionStorageError, OSError):
+        except (PaperExecutionStorageError, sqlite3.Error, OSError):
             return PaperExecutionObservation(
                 "EXECUTION_DATABASE_UNAVAILABLE",
                 None,
