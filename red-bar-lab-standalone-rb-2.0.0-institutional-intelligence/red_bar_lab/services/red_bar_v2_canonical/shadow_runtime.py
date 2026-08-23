@@ -359,10 +359,22 @@ class RedBarV2CanonicalShadowRuntime:
             "event_timestamp": task.event_timestamp.isoformat(),
             **extra,
         }
-        if self._telemetry_sink is not None:
-            self._telemetry_sink(record)
-        else:
-            _LOGGER.info("red_bar_v2_shadow", extra={"shadow": record})
+        try:
+            if self._telemetry_sink is not None:
+                self._telemetry_sink(record)
+            else:
+                _LOGGER.info("red_bar_v2_shadow", extra={"shadow": record})
+        except Exception:
+            _LOGGER.exception(
+                "red_bar_v2_shadow_telemetry_failed",
+                extra={
+                    "shadow": {
+                        "reason_code": reason_code,
+                        "source_replay_id": task.source_replay_id,
+                        "event_timestamp": task.event_timestamp.isoformat(),
+                    }
+                },
+            )
 
     def submit(self, task: RedBarV2ShadowTask) -> bool:
         with self._submission_lock:
@@ -474,8 +486,10 @@ class RedBarV2CanonicalShadowRuntime:
                     exception_class=type(error).__name__,
                 )
             finally:
-                self._finish(task, observation)
-                self._queue.task_done()
+                try:
+                    self._finish(task, observation)
+                finally:
+                    self._queue.task_done()
 
 
 _RUNTIME_LOCK = Lock()
