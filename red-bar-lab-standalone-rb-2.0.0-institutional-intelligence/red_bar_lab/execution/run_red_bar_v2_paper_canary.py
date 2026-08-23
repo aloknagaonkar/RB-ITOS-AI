@@ -12,18 +12,21 @@ from red_bar_lab.brokers.zerodha_client import ZerodhaKiteClient
 from red_bar_lab.config import RedBarSettings
 from red_bar_lab.execution.paper_engine import RedBarPaperExecutionEngine
 from red_bar_lab.services.red_bar_v2_canonical.paper_canary_models import (
+    PaperCanaryCycleOutcome,
+    PaperCanaryCycleResult,
     PaperCanaryPolicy,
     PaperCanaryPrerequisites,
+    PaperCanaryWorkerStatus,
 )
 from red_bar_lab.services.red_bar_v2_canonical.paper_canary_repository import (
     SQLiteCanonicalPaperCandidateRepository,
 )
 from red_bar_lab.services.red_bar_v2_canonical.paper_canary_runtime import (
     PaperCanaryRuntime,
-    SystemClock,
 )
 from red_bar_lab.services.red_bar_v2_canonical.paper_canary_state_store import (
     AtomicJsonPaperCanaryStateStore,
+    PaperCanaryStateStorageError,
 )
 from red_bar_lab.services.red_bar_v2_canonical.paper_execution_adapter import (
     ExistingPaperContractSelector,
@@ -57,19 +60,58 @@ def _market_session_active(now: datetime | None = None) -> bool:
     )
 
 
+class ExchangeClock:
+    def now(self) -> datetime:
+        return datetime.now(IST)
+
+
+class _SessionClosedCandidateRepository:
+    def list_candidates(self, **kwargs):
+        return ()
+
+
 class SessionAwarePaperCanaryRuntime(PaperCanaryRuntime):
-    """Re-evaluates the exchange session before every isolated cycle."""
+    """Runs recovery first off-session, while making entry impossible."""
 
     def run_cycle(self):
-        original = self.prerequisites
+        cycle_now = self.clock.now()
+        session_active = _market_session_active(cycle_now)
+        original_prerequisites = self.prerequisites
+        original_candidates = self.candidate_repository
         self.prerequisites = replace(
-            original,
-            market_session_active=_market_session_active(self.clock.now()),
+            original_prerequisites,
+            market_session_active=session_active,
         )
+        if not session_active:
+            self.candidate_repository = _SessionClosedCandidateRepository()
         try:
-            return super().run_cycle()
+            result = super().run_cycle()
+            if not session_active and result.outcome is PaperCanaryCycleOutcome.HEALTHY_IDLE:
+                suspended = replace(
+                    result.state,
+                    worker_status=PaperCanaryWorkerStatus.ENTRY_SUSPENDED,
+                    entry_suspended=True,
+                    latest_reason_code="MARKET_SESSION_CLOSED",
+                )
+                try:
+                    suspended = self._safe_save(suspended)
+                except PaperCanaryStateStorageError:
+                    return PaperCanaryCycleResult(
+                        PaperCanaryCycleOutcome.STORAGE_UNAVAILABLE,
+                        "RUNTIME_STATE_SAVE_FAILED",
+                        replace(suspended, persistence_status="STATE_UNAVAILABLE"),
+                        result.execution_results,
+                    )
+                return PaperCanaryCycleResult(
+                    PaperCanaryCycleOutcome.ENTRY_SUSPENDED,
+                    "MARKET_SESSION_CLOSED",
+                    suspended,
+                    result.execution_results,
+                )
+            return result
         finally:
-            self.prerequisites = original
+            self.prerequisites = original_prerequisites
+            self.candidate_repository = original_candidates
 
 
 class PaperCanaryProcessLock:
@@ -199,7 +241,7 @@ def build_runtime(settings: RedBarSettings) -> PaperCanaryRuntime:
         recovery_service=recovery_service,
         execution_service=execution_service,
         execution_repository=execution_repository,
-        clock=SystemClock(),
+        clock=ExchangeClock(),
         prerequisites=prerequisites,
         policy=policy,
     )
