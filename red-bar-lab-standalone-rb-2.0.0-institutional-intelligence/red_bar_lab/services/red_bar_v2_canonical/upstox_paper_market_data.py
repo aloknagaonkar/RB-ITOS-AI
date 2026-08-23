@@ -38,9 +38,9 @@ class UpstoxPaperCanaryMarketData:
     def _map_error(exc: Exception) -> Exception:
         status = getattr(exc, "status_code", None)
         text = str(exc).lower()
-        if status in (401, 403) or "authentication" in text or "unauthorized" in text:
+        if status in (401, 403) or "http 401" in text or "http 403" in text or "authentication" in text or "unauthorized" in text:
             return PaperMarketDataAuthenticationError("Upstox authentication failed")
-        if status == 429 or "rate limit" in text:
+        if status == 429 or "http 429" in text or "rate limit" in text:
             return PaperMarketDataRateLimitError("Upstox rate limit reached")
         return PaperMarketDataUnavailableError("Upstox market data unavailable")
 
