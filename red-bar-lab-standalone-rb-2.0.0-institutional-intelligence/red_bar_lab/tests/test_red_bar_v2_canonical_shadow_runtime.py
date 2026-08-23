@@ -276,3 +276,35 @@ def test_compact_task_is_immutable_and_contains_no_full_replay_graph():
     assert not hasattr(task, "events")
     with pytest.raises(TypeError):
         task.replay_event_snapshot.details["new"] = "value"
+
+
+def test_telemetry_failure_does_not_stop_worker_or_break_queue_accounting():
+    coordinator = _Coordinator(_observation())
+    telemetry_calls = 0
+
+    def failing_telemetry(record):
+        nonlocal telemetry_calls
+        telemetry_calls += 1
+        raise RuntimeError("telemetry unavailable")
+
+    runtime = RedBarV2CanonicalShadowRuntime(
+        lambda: coordinator,
+        telemetry_sink=failing_telemetry,
+    )
+
+    first = _task("FIRST")
+    second = _task("SECOND")
+
+    assert runtime.submit(first) is True
+    runtime._queue.join()
+    assert "FIRST" in runtime._completed_ids
+    assert "FIRST" not in runtime._queued_or_in_flight_ids
+    assert runtime._worker.is_alive()
+
+    assert runtime.submit(second) is True
+    runtime._queue.join()
+    assert "SECOND" in runtime._completed_ids
+    assert "SECOND" not in runtime._queued_or_in_flight_ids
+    assert runtime._worker.is_alive()
+    assert coordinator.calls == 2
+    assert telemetry_calls >= 2
