@@ -25,7 +25,10 @@ class SQLiteCanonicalPaperExecutionObservabilityRepository:
 
     def latest_for_bundle(self, *, bundle_id: str) -> PaperExecutionObservation:
         if not self.path.exists():
-            return PaperExecutionObservation("EXECUTION_DATABASE_UNAVAILABLE", None)
+            return PaperExecutionObservation(
+                "EXECUTION_DATABASE_UNAVAILABLE",
+                None,
+            )
         repository = StrictSQLiteCanonicalPaperExecutionRepository(
             self.path,
             initialize=False,
@@ -37,20 +40,40 @@ class SQLiteCanonicalPaperExecutionObservabilityRepository:
                     "AND name='canonical_red_bar_v2_paper_commands'"
                 ).fetchone()
                 if table is None:
-                    return PaperExecutionObservation("NO_CANONICAL_EXECUTION", None)
+                    return PaperExecutionObservation(
+                        "NO_CANONICAL_EXECUTION",
+                        None,
+                    )
                 row = conn.execute(
-                    "SELECT execution_id FROM canonical_red_bar_v2_paper_commands "
-                    "WHERE bundle_id=? ORDER BY created_at DESC,command_id DESC LIMIT 1",
+                    "SELECT execution_id,reservation_id,state "
+                    "FROM canonical_red_bar_v2_paper_commands "
+                    "WHERE bundle_id=? "
+                    "ORDER BY created_at DESC,command_id DESC LIMIT 1",
                     (bundle_id,),
                 ).fetchone()
-            if row is None:
-                return PaperExecutionObservation("NO_CANONICAL_EXECUTION", None)
+                if row is None:
+                    return PaperExecutionObservation(
+                        "NO_CANONICAL_EXECUTION",
+                        None,
+                    )
+                reservation = conn.execute(
+                    "SELECT state FROM "
+                    "canonical_red_bar_v2_bundle_reservations "
+                    "WHERE reservation_id=?",
+                    (str(row["reservation_id"]),),
+                ).fetchone()
             evidence = repository.get_verified(
                 execution_id=str(row["execution_id"])
             )
+            unresolved_finalization = (
+                evidence.state.value in {"PAPER_FILLED", "PAPER_REJECTED"}
+                and reservation is not None
+                and str(reservation["state"]) == "RESERVED"
+            )
             status = (
                 "RECOVERY_REQUIRED"
-                if evidence.state.value
+                if unresolved_finalization
+                or evidence.state.value
                 in {"SUBMISSION_UNCERTAIN", "RECOVERY_REQUIRED"}
                 else "EXECUTION_DATA_AVAILABLE"
             )
