@@ -337,11 +337,13 @@ def test_read_only_observability_loads_scalar_evidence_without_writes(tmp_path: 
         feature_enabled=True,
     )
     before = path.stat().st_mtime_ns
-    reservation, events = SQLiteReservationObservabilityRepository(path).latest_for_bundle(
+    result = SQLiteReservationObservabilityRepository(path).latest_for_bundle(
         bundle_id=bundle.bundle_id
     )
-    assert reservation is not None and reservation.state == "RESERVED"
-    assert events and events[0].event_type == "RESERVATION_ACQUIRED"
+    assert result.status == "RESERVATION_DATA_AVAILABLE"
+    assert result.reservation is not None
+    assert result.reservation.state is ReservationState.RESERVED
+    assert result.events and result.events[0].event_type == "RESERVATION_ACQUIRED"
     assert path.stat().st_mtime_ns == before
 
 
