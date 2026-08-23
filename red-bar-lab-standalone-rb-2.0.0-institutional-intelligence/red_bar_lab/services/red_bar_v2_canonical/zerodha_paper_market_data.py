@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -16,6 +17,8 @@ from .paper_market_data import (
     PaperOptionInstrument,
     verify_quote_freshness,
 )
+
+IST = ZoneInfo("Asia/Kolkata")
 
 
 class ZerodhaPaperCanaryMarketData:
@@ -33,7 +36,7 @@ class ZerodhaPaperCanaryMarketData:
             raise PaperMarketDataCorruptionError("Zerodha quote timestamp missing")
         result = parsed.to_pydatetime()
         if result.tzinfo is None or result.utcoffset() is None:
-            raise PaperMarketDataCorruptionError("Zerodha quote timestamp is naive")
+            result = result.replace(tzinfo=IST)
         return result
 
     def option_instruments(self, *, underlying: str, evaluated_at: datetime) -> tuple[PaperOptionInstrument, ...]:
