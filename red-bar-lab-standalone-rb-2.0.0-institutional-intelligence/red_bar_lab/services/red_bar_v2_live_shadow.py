@@ -16,8 +16,15 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def _latest_admission_event(monitored: MonitoredRedBarV2FuturesReplayResult) -> ReplayEventLike | None:
-    candidates = tuple(event for event in monitored.replay.events if event.event_type == "CANDIDATE_ADMISSION")
-    return max(candidates, key=lambda item: item.timestamp) if candidates else None
+    return max(
+        (
+            event
+            for event in monitored.replay.events
+            if event.event_type == "CANDIDATE_ADMISSION"
+        ),
+        key=lambda event: event.timestamp,
+        default=None,
+    )
 
 
 def submit_latest_live_canonical_shadow(
