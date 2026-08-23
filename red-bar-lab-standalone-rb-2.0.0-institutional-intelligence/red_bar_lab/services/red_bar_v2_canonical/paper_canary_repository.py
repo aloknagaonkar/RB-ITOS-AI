@@ -52,14 +52,12 @@ class CanonicalPaperCandidateRepository(Protocol):
     ) -> tuple[CanonicalPaperCandidate, ...]: ...
 
 
-def _aware(value: object, field: str) -> datetime:
-    try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except Exception as exc:
-        raise PaperCanaryCandidateStorageError(f"invalid {field}") from exc
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise PaperCanaryCandidateStorageError(f"naive {field}")
-    return parsed
+def _age_seconds(now: datetime, evidence_at: datetime) -> float:
+    if evidence_at.tzinfo is None or evidence_at.utcoffset() is None:
+        raise ValueError("evidence timestamp must be timezone-aware")
+    return (
+        now.astimezone(timezone.utc) - evidence_at.astimezone(timezone.utc)
+    ).total_seconds()
 
 
 class SQLiteCanonicalPaperCandidateRepository:
@@ -77,6 +75,7 @@ class SQLiteCanonicalPaperCandidateRepository:
             raise ValueError("evaluated_at must be timezone-aware")
         bounded = max(1, min(int(limit), 50))
         maximum_age = max(0.0, float(maximum_age_seconds))
+        connection = None
         try:
             connection = sqlite3.connect(
                 f"file:{self.database_path.resolve().as_posix()}?mode=ro",
@@ -105,26 +104,40 @@ class SQLiteCanonicalPaperCandidateRepository:
                         connection,
                         bundle_id=bundle_id,
                     )
+                    bundle = verified.bundle
+                    readiness = verified.resolution.section_1
+                    timestamps = readiness.timestamps
+                    if bundle.strategy_id != "RED_BAR_V2":
+                        raise ValueError("wrong strategy")
+                    if bundle.evaluation_timeframe == "1m":
+                        index_at = timestamps.latest_index_1m
+                        futures_at = timestamps.latest_futures_1m
+                    elif bundle.evaluation_timeframe == "5m":
+                        index_at = timestamps.latest_index_5m
+                        futures_at = timestamps.latest_futures_5m
+                    else:
+                        raise ValueError("unsupported timeframe")
+                    if index_at is None or futures_at is None:
+                        continue
+                    freshness_ages = (
+                        _age_seconds(evaluated_at, bundle.evaluation_timestamp),
+                        _age_seconds(evaluated_at, index_at),
+                        _age_seconds(evaluated_at, futures_at),
+                    )
+                    if any(age < 0 or age > maximum_age for age in freshness_ages):
+                        continue
+                    reference = bundle.decision.reference
+                    if reference is None or float(reference.midpoint) <= 0:
+                        raise ValueError("invalid reference midpoint")
                 except CanonicalPersistenceCorruptionError as exc:
                     raise PaperCanaryCandidateCorruptionError(bundle_id) from exc
-                bundle = verified.bundle
-                if bundle.strategy_id != "RED_BAR_V2":
-                    raise PaperCanaryCandidateCorruptionError(bundle_id)
-                event_timestamp = bundle.evaluation_timestamp
-                age = (
-                    evaluated_at.astimezone(timezone.utc)
-                    - event_timestamp.astimezone(timezone.utc)
-                ).total_seconds()
-                if age < 0 or age > maximum_age:
-                    continue
-                reference = bundle.decision.reference
-                if reference is None or float(reference.midpoint) <= 0:
-                    raise PaperCanaryCandidateCorruptionError(bundle_id)
+                except ValueError as exc:
+                    raise PaperCanaryCandidateCorruptionError(bundle_id) from exc
                 candidates.append(
                     CanonicalPaperCandidate(
                         bundle_id=bundle.bundle_id,
                         idempotency_key=bundle.idempotency_key,
-                        event_timestamp=event_timestamp,
+                        event_timestamp=bundle.evaluation_timestamp,
                         created_at=bundle.created_at,
                         trading_date=bundle.trading_date,
                         spot_price=float(reference.midpoint),
@@ -138,7 +151,5 @@ class SQLiteCanonicalPaperCandidateRepository:
                 "canonical candidate database unavailable"
             ) from exc
         finally:
-            try:
+            if connection is not None:
                 connection.close()
-            except UnboundLocalError:
-                pass
