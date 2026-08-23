@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from math import isfinite
 from pathlib import Path
 import sqlite3
 from typing import Protocol
@@ -13,7 +14,7 @@ from .paper_execution_models import (
     CanonicalPaperContract,
     CanonicalPaperExecutionCommand,
 )
-from .paper_market_data import PaperCanaryMarketData
+from .paper_market_data import PaperCanaryMarketData, finite_positive_number
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,7 +63,10 @@ class ExistingPaperContractSelector:
         self.engine = engine
         self.market_data = market_data
         self.underlying_name = underlying_name
-        self.maximum_spread_pct = float(maximum_spread_pct)
+        self.maximum_spread_pct = finite_positive_number(
+            "maximum_spread_pct",
+            maximum_spread_pct,
+        )
 
     def select(
         self,
@@ -72,6 +76,7 @@ class ExistingPaperContractSelector:
         selected_at: datetime,
     ) -> CanonicalPaperContract | None:
         side = OptionSide(option_side)
+        spot = finite_positive_number("spot_price", spot_price)
         instruments = tuple(
             item
             for item in self.market_data.option_instruments(
@@ -85,7 +90,7 @@ class ExistingPaperContractSelector:
         nearest_expiry = min(item.expiry for item in instruments)
         ranked = sorted(
             (item for item in instruments if item.expiry == nearest_expiry),
-            key=lambda item: (abs(float(item.strike) - float(spot_price)), item.strike),
+            key=lambda item: (abs(float(item.strike) - spot), item.strike),
         )[:5]
         quotes = {
             quote.instrument_key: quote
@@ -102,10 +107,14 @@ class ExistingPaperContractSelector:
             bid = quote.bid_price
             ask = quote.ask_price
             if bid is not None and ask is not None:
-                spread_pct = (
-                    (float(ask) - float(bid))
-                    / max((float(ask) + float(bid)) / 2.0, 0.01)
-                ) * 100.0
+                bid_value = finite_positive_number("bid_price", bid)
+                ask_value = finite_positive_number("ask_price", ask)
+                midpoint = (ask_value + bid_value) / 2.0
+                if not isfinite(midpoint) or midpoint <= 0:
+                    raise ValueError("quote midpoint must be finite and positive")
+                spread_pct = ((ask_value - bid_value) / midpoint) * 100.0
+                if not isfinite(spread_pct):
+                    raise ValueError("spread percentage must be finite")
                 if spread_pct < 0 or spread_pct > self.maximum_spread_pct:
                     continue
             exchange = instrument.instrument_key.split("|", 1)[0]
