@@ -15,6 +15,7 @@ from .paper_market_data import (
     PaperMarketDataUnavailableError,
     PaperMarketQuote,
     PaperOptionInstrument,
+    finite_positive_number,
     verify_quote_freshness,
 )
 
@@ -26,7 +27,10 @@ class ZerodhaPaperCanaryMarketData:
 
     def __init__(self, client: ZerodhaKiteClient, *, maximum_quote_age_seconds: float) -> None:
         self._client = client
-        self._maximum_quote_age_seconds = float(maximum_quote_age_seconds)
+        self._maximum_quote_age_seconds = finite_positive_number(
+            "maximum_quote_age_seconds",
+            maximum_quote_age_seconds,
+        )
         self._symbol_to_key: dict[str, str] = {}
 
     @staticmethod
@@ -44,6 +48,8 @@ class ZerodhaPaperCanaryMarketData:
             frame = self._client.nfo_options(underlying_name=underlying, as_of=evaluated_at.date())
         except ZerodhaAPIError as exc:
             raise PaperMarketDataUnavailableError("Zerodha instruments unavailable") from exc
+        if frame.empty:
+            return ()
         output: list[PaperOptionInstrument] = []
         seen: set[str] = set()
         for _, row in frame.iterrows():
@@ -64,7 +70,7 @@ class ZerodhaPaperCanaryMarketData:
                     trading_symbol=symbol,
                     underlying=underlying,
                     expiry=row["expiry"],
-                    strike=float(row["strike"]),
+                    strike=finite_positive_number("strike", row["strike"]),
                     option_side=side,
                     lot_size=int(row.get("lot_size") or 1),
                     provider=self.provider_name,
