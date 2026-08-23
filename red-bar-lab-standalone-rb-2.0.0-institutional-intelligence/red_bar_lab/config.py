@@ -17,6 +17,14 @@ def _bounded_int(name: str, default: int, minimum: int, maximum: int) -> int:
     return min(max(raw, minimum), maximum)
 
 
+def _canonical_paper_mode() -> str:
+    value = os.getenv(
+        "RED_BAR_V2_CANONICAL_PAPER_EXECUTION_MODE",
+        "OBSERVE_ONLY",
+    ).strip().upper()
+    return value if value in {"OBSERVE_ONLY", "PAPER_CANARY"} else "INVALID"
+
+
 @dataclass(frozen=True)
 class RedBarSettings:
     app_name: str = "Red Bar Strategy Lab"
@@ -30,6 +38,8 @@ class RedBarSettings:
     red_bar_v2_canonical_reservation_enabled: bool = False
     red_bar_v2_canonical_reservation_lease_seconds: int = 30
     red_bar_v2_canonical_reservation_max_bundle_age_seconds: int = 120
+    red_bar_v2_canonical_paper_execution_enabled: bool = False
+    red_bar_v2_canonical_paper_execution_mode: str = "OBSERVE_ONLY"
 
     @property
     def database_path(self) -> Path:
@@ -80,6 +90,11 @@ class RedBarSettings:
                 5,
                 3600,
             ),
+            red_bar_v2_canonical_paper_execution_enabled=_env_bool(
+                "RED_BAR_V2_CANONICAL_PAPER_EXECUTION_ENABLED",
+                False,
+            ),
+            red_bar_v2_canonical_paper_execution_mode=_canonical_paper_mode(),
         )
 
 
