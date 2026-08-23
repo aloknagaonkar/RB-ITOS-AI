@@ -36,6 +36,14 @@ def _canonical_paper_mode() -> str:
     return value if value in {"OBSERVE_ONLY", "PAPER_CANARY"} else "INVALID"
 
 
+def _paper_canary_market_data_provider() -> str:
+    value = os.getenv(
+        "RED_BAR_V2_PAPER_CANARY_MARKET_DATA_PROVIDER",
+        "UNCONFIGURED",
+    ).strip().upper()
+    return value if value in {"ZERODHA", "UPSTOX", "UNCONFIGURED"} else "INVALID"
+
+
 @dataclass(frozen=True)
 class RedBarSettings:
     app_name: str = "Red Bar Strategy Lab"
@@ -52,6 +60,7 @@ class RedBarSettings:
     red_bar_v2_canonical_paper_execution_enabled: bool = False
     red_bar_v2_canonical_paper_execution_mode: str = "OBSERVE_ONLY"
     red_bar_v2_paper_canary_worker_enabled: bool = False
+    red_bar_v2_paper_canary_market_data_provider: str = "UNCONFIGURED"
     red_bar_v2_paper_canary_poll_seconds: float = 5.0
     red_bar_v2_paper_canary_max_actions_per_cycle: int = 1
     red_bar_v2_paper_canary_max_actions_per_day: int = 10
@@ -120,6 +129,9 @@ class RedBarSettings:
             red_bar_v2_paper_canary_worker_enabled=_env_bool(
                 "RED_BAR_V2_PAPER_CANARY_WORKER_ENABLED",
                 False,
+            ),
+            red_bar_v2_paper_canary_market_data_provider=(
+                _paper_canary_market_data_provider()
             ),
             red_bar_v2_paper_canary_poll_seconds=_bounded_float(
                 "RED_BAR_V2_PAPER_CANARY_POLL_SECONDS",
