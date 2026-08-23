@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
+from math import isfinite
 from typing import Protocol
 
 from red_bar_lab.domain.red_bar_v2 import OptionSide
@@ -37,10 +38,22 @@ def _text(name: str, value: object) -> str:
     return value
 
 
-def _positive_number(name: str, value: object) -> float:
-    if type(value) not in (int, float) or float(value) <= 0:
-        raise ValueError(f"{name} must be positive")
-    return float(value)
+def finite_positive_number(name: str, value: object) -> float:
+    if type(value) not in (int, float):
+        raise ValueError(f"{name} must be a finite positive number")
+    number = float(value)
+    if not isfinite(number) or number <= 0:
+        raise ValueError(f"{name} must be a finite positive number")
+    return number
+
+
+def finite_non_negative_number(name: str, value: object) -> float:
+    if type(value) not in (int, float):
+        raise ValueError(f"{name} must be a finite non-negative number")
+    number = float(value)
+    if not isfinite(number) or number < 0:
+        raise ValueError(f"{name} must be a finite non-negative number")
+    return number
 
 
 def _aware(name: str, value: object) -> datetime:
@@ -67,10 +80,10 @@ class PaperMarketQuote:
             raise ValueError("instrument_token must be positive")
         if type(self.instrument_token) is str and not self.instrument_token.strip():
             raise ValueError("instrument_token must be non-empty")
-        _positive_number("last_price", self.last_price)
+        finite_positive_number("last_price", self.last_price)
         for name, value in (("bid_price", self.bid_price), ("ask_price", self.ask_price)):
             if value is not None:
-                _positive_number(name, value)
+                finite_positive_number(name, value)
         if self.bid_price is not None and self.ask_price is not None:
             if float(self.bid_price) > float(self.ask_price):
                 raise ValueError("bid_price cannot exceed ask_price")
@@ -102,7 +115,7 @@ class PaperOptionInstrument:
         _text("underlying", self.underlying)
         if type(self.expiry) is not date:
             raise ValueError("expiry must be date")
-        _positive_number("strike", self.strike)
+        finite_positive_number("strike", self.strike)
         if type(self.option_side) is not OptionSide:
             raise ValueError("option_side must be OptionSide")
         if type(self.lot_size) is not int or self.lot_size <= 0:
@@ -137,11 +150,21 @@ def verify_quote_freshness(
     future_tolerance_seconds: float = 2.0,
 ) -> None:
     _aware("evaluated_at", evaluated_at)
+    maximum_age = finite_positive_number(
+        "maximum_age_seconds",
+        maximum_age_seconds,
+    )
+    future_tolerance = finite_non_negative_number(
+        "future_tolerance_seconds",
+        future_tolerance_seconds,
+    )
     age = (
         evaluated_at.astimezone(timezone.utc)
         - quote.quote_timestamp.astimezone(timezone.utc)
     ).total_seconds()
-    if age < -float(future_tolerance_seconds):
+    if not isfinite(age):
+        raise PaperMarketDataCorruptionError("provider quote age is not finite")
+    if age < -future_tolerance:
         raise PaperMarketDataCorruptionError("provider quote timestamp is in the future")
-    if age > float(maximum_age_seconds):
+    if age > maximum_age:
         raise PaperMarketDataUnavailableError("provider quote is stale")
