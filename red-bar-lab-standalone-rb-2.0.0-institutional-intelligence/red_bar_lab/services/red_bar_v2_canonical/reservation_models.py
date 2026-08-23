@@ -2,14 +2,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
+from types import MappingProxyType
+from typing import Mapping
 
 try:
     from enum import StrEnum
-except ImportError:  # pragma: no cover - Python 3.10 compatibility
+except ImportError:  # pragma: no cover
     from enum import Enum
 
     class StrEnum(str, Enum):
-        """Compatibility implementation for Python 3.10."""
+        """Python 3.10 compatibility."""
 
 from red_bar_lab.domain.red_bar_v2 import Direction, EntryType, OptionSide
 
@@ -33,10 +35,15 @@ class ReservationOutcome(StrEnum):
     BUNDLE_INELIGIBLE = "BUNDLE_INELIGIBLE"
     RESERVATION_DISABLED = "RESERVATION_DISABLED"
     STORAGE_UNAVAILABLE = "STORAGE_UNAVAILABLE"
+    INVALID_REQUEST = "INVALID_REQUEST"
+    RESERVATION_CORRUPT = "RESERVATION_CORRUPT"
+    RESERVATION_CONFLICT = "RESERVATION_CONFLICT"
+    UNEXPECTED_FAILURE = "UNEXPECTED_RESERVATION_FAILURE"
 
 
 class ReservationEventType(StrEnum):
     RESERVATION_ACQUIRED = "RESERVATION_ACQUIRED"
+    RESERVATION_REPLAYED = "RESERVATION_REPLAYED"
     RESERVATION_RELEASED = "RESERVATION_RELEASED"
     RESERVATION_EXPIRED = "RESERVATION_EXPIRED"
     RESERVATION_REJECTED = "RESERVATION_REJECTED"
@@ -51,6 +58,16 @@ def _aware(name: str, value: datetime) -> None:
 def _text(name: str, value: str) -> None:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{name} must be non-empty")
+
+
+def _freeze(value: object) -> object:
+    if isinstance(value, Mapping):
+        return MappingProxyType({str(key): _freeze(item) for key, item in value.items()})
+    if isinstance(value, list):
+        return tuple(_freeze(item) for item in value)
+    if isinstance(value, tuple):
+        return tuple(_freeze(item) for item in value)
+    return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,14 +93,8 @@ class CanonicalBundleReservation:
 
     def __post_init__(self) -> None:
         for name in (
-            "reservation_id",
-            "bundle_id",
-            "signal_id",
-            "idempotency_key",
-            "strategy_id",
-            "strategy_version",
-            "instrument_key",
-            "owner_id",
+            "reservation_id", "bundle_id", "signal_id", "idempotency_key",
+            "strategy_id", "strategy_version", "instrument_key", "owner_id",
             "schema_version",
         ):
             _text(name, getattr(self, name))
@@ -102,15 +113,21 @@ class CanonicalBundleReservation:
             if self.released_at is None or not self.release_reason:
                 raise ValueError("terminal reservation requires release timestamp and reason")
             _aware("released_at", self.released_at)
+            if self.released_at < self.reserved_at:
+                raise ValueError("terminal timestamp cannot precede reserved_at")
+            if self.state is ReservationState.EXPIRED and self.released_at != self.lease_expires_at:
+                raise ValueError("expired reservation timestamp must equal lease_expires_at")
+            if self.state is ReservationState.RELEASED and self.released_at >= self.lease_expires_at:
+                raise ValueError("released reservation must precede lease_expires_at")
         from .reservation_identity import build_reservation_id
 
-        expected_id = build_reservation_id(
+        expected = build_reservation_id(
             bundle_id=self.bundle_id,
             idempotency_key=self.idempotency_key,
             owner_id=self.owner_id,
             lease_epoch=self.reserved_at,
         )
-        if self.reservation_id != expected_id:
+        if self.reservation_id != expected:
             raise ValueError("reservation_id does not match canonical lease identity")
 
 
@@ -129,7 +146,7 @@ class CanonicalReservationResult:
 
 
 @dataclass(frozen=True, slots=True)
-class ReservationEvent:
+class CanonicalReservationLifecycleEvent:
     event_id: str
     reservation_id: str
     bundle_id: str
@@ -137,14 +154,24 @@ class ReservationEvent:
     event_timestamp: datetime
     owner_id: str
     reason_code: str
+    metadata: Mapping[str, object]
 
     def __post_init__(self) -> None:
-        for name in (
-            "event_id",
-            "reservation_id",
-            "bundle_id",
-            "owner_id",
-            "reason_code",
-        ):
+        for name in ("event_id", "reservation_id", "bundle_id", "owner_id", "reason_code"):
             _text(name, getattr(self, name))
         _aware("event_timestamp", self.event_timestamp)
+        from .reservation_identity import build_reservation_event_id
+
+        expected = build_reservation_event_id(
+            reservation_id=self.reservation_id,
+            event_type=self.event_type.value,
+            event_timestamp=self.event_timestamp,
+            owner_id=self.owner_id,
+            reason_code=self.reason_code,
+        )
+        if self.event_id != expected:
+            raise ValueError("event_id does not match canonical reservation event identity")
+        object.__setattr__(self, "metadata", _freeze(dict(self.metadata)))
+
+
+ReservationEvent = CanonicalReservationLifecycleEvent
