@@ -2,13 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import datetime
-import logging
 from pathlib import Path
 from typing import Iterable
 
 import pandas as pd
 
-from red_bar_lab.config import RedBarSettings
 from red_bar_lab.intelligence.red_bar_v2_futures_context import (
     build_red_bar_v2_futures_snapshot,
 )
@@ -23,12 +21,6 @@ from red_bar_lab.operations.red_bar_v2_ui_snapshot import (
 from red_bar_lab.operations.red_bar_v2_vwap_source import (
     persist_red_bar_v2_vwap_health,
 )
-from red_bar_lab.services.red_bar_v2_canonical.shadow_runtime import (
-    RedBarV2ShadowTask,
-    build_runtime_market_metadata,
-    build_runtime_source_replay_id,
-    get_red_bar_v2_shadow_runtime,
-)
 from red_bar_lab.services.red_bar_v2_futures_historical_replay import (
     replay_red_bar_v2_day_with_futures_vwap,
 )
@@ -39,8 +31,6 @@ from red_bar_lab.services.red_bar_v2_lifecycle_validation import (
     ReplayEventEpisode,
     summarize_replay_event_episodes,
 )
-
-_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -62,56 +52,6 @@ def _latest_timestamp(frame: pd.DataFrame) -> pd.Timestamp | None:
     return None
 
 
-def _submit_canonical_shadow(
-    *,
-    monitored: MonitoredRedBarV2FuturesReplayResult,
-    artifacts_root: str | Path,
-    instrument_key: str,
-    vwap_instrument_key: str,
-    futures_expiry: str | None,
-) -> None:
-    """Submit immutable replay events without delaying or controlling legacy flow."""
-    settings = RedBarSettings.from_env()
-    runtime = get_red_bar_v2_shadow_runtime(
-        enabled=settings.red_bar_v2_canonical_shadow_enabled,
-        database_path=Path(artifacts_root) / "database" / settings.database_name,
-    )
-    if runtime is None:
-        return
-
-    for event in monitored.replay.events:
-        if event.event_type != "CANDIDATE_ADMISSION":
-            continue
-        try:
-            metadata = build_runtime_market_metadata(
-                replay=monitored.replay,
-                health=monitored.health,
-                event=event,
-                instrument_key=instrument_key,
-                futures_instrument_key=vwap_instrument_key,
-                futures_expiry=futures_expiry,
-            )
-            source_replay_id = build_runtime_source_replay_id(
-                instrument_key=instrument_key,
-                trading_date=monitored.replay.trading_date,
-                event=event,
-            )
-            runtime.submit(
-                RedBarV2ShadowTask(
-                    replay=monitored.replay,
-                    health=monitored.health,
-                    replay_event=event,
-                    market_metadata=metadata,
-                    source_replay_id=source_replay_id,
-                    event_timestamp=event.timestamp,
-                )
-            )
-        except Exception:
-            # Canonical shadow construction is never allowed to interrupt the
-            # authoritative monitored replay or its existing consumers.
-            _LOGGER.exception("red_bar_v2_shadow_submission_failed")
-
-
 def run_monitored_red_bar_v2_futures_replay(
     index_candles: pd.DataFrame,
     futures_candles: pd.DataFrame,
@@ -123,6 +63,7 @@ def run_monitored_red_bar_v2_futures_replay(
     futures_expiry: str | None = None,
     exit_timestamps: Iterable[datetime | pd.Timestamp] = (),
 ) -> MonitoredRedBarV2FuturesReplayResult:
+    """Run monitored replay without acquiring live shadow-persistence authority."""
     replay, evaluation_health = replay_red_bar_v2_day_with_futures_vwap(
         index_candles,
         futures_candles,
@@ -195,15 +136,5 @@ def run_monitored_red_bar_v2_futures_replay(
     persist_red_bar_v2_ui_snapshot(
         ui_snapshot,
         artifacts_root=artifacts_root,
-    )
-
-    # Submission is bounded and non-blocking. The daemon worker owns canonical
-    # resolution and persistence; this call cannot become execution authority.
-    _submit_canonical_shadow(
-        monitored=monitored,
-        artifacts_root=artifacts_root,
-        instrument_key=instrument_key,
-        vwap_instrument_key=vwap_instrument_key,
-        futures_expiry=futures_expiry,
     )
     return monitored
