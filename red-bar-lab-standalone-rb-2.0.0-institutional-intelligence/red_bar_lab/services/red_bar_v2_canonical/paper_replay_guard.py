@@ -20,6 +20,13 @@ from .paper_execution_safety import (
     VerifiedReservationFinalizationService,
 )
 from .paper_execution_service import CanonicalPaperExecutionService
+from .paper_market_data import (
+    PaperMarketDataAuthenticationError,
+    PaperMarketDataConfigurationError,
+    PaperMarketDataCorruptionError,
+    PaperMarketDataRateLimitError,
+    PaperMarketDataUnavailableError,
+)
 from .persistence_models import CanonicalPersistenceCorruptionError
 from .reservation_evidence_verification import ReservationCorruptionError
 
@@ -56,15 +63,9 @@ class ReplayGuardedCanonicalPaperService(CanonicalPaperExecutionService):
             )
 
         if self.repository is None or self.selector is None or self.adapter is None:
-            return PaperExecutionResult(
-                PaperExecutionOutcome.STORAGE_UNAVAILABLE,
-                "PREFLIGHT_DEPENDENCY_UNAVAILABLE",
-            )
+            return PaperExecutionResult(PaperExecutionOutcome.STORAGE_UNAVAILABLE, "PREFLIGHT_DEPENDENCY_UNAVAILABLE")
         if self.reservation_service is None:
-            return PaperExecutionResult(
-                PaperExecutionOutcome.STORAGE_UNAVAILABLE,
-                "RESERVATION_SERVICE_UNAVAILABLE",
-            )
+            return PaperExecutionResult(PaperExecutionOutcome.STORAGE_UNAVAILABLE, "RESERVATION_SERVICE_UNAVAILABLE")
 
         try:
             canonical = self._read_canonical(bundle_id=bundle_id)
@@ -86,22 +87,14 @@ class ReplayGuardedCanonicalPaperService(CanonicalPaperExecutionService):
                 selected_at=requested_at,
             )
             if contract is None:
-                return PaperExecutionResult(
-                    PaperExecutionOutcome.CONTRACT_UNAVAILABLE,
-                    "CONTRACT_UNAVAILABLE",
-                )
+                return PaperExecutionResult(PaperExecutionOutcome.CONTRACT_UNAVAILABLE, "CONTRACT_UNAVAILABLE")
             if contract.option_side is not canonical.bundle.option_side:
-                return PaperExecutionResult(
-                    PaperExecutionOutcome.INVALID_REQUEST,
-                    "CONTRACT_OPTION_SIDE_MISMATCH",
-                )
+                return PaperExecutionResult(PaperExecutionOutcome.INVALID_REQUEST, "CONTRACT_OPTION_SIDE_MISMATCH")
 
             guarded = CanonicalPaperExecutionService(
                 database_path=self.database_path,
                 repository=self.repository,
-                reservation_service=VerifiedReservationFinalizationService(
-                    self.reservation_service
-                ),
+                reservation_service=VerifiedReservationFinalizationService(self.reservation_service),
                 selector=_SelectedContractSelector(contract),
                 adapter=UncertainPaperAdapterBoundary(self.adapter),
                 enabled=True,
@@ -115,30 +108,25 @@ class ReplayGuardedCanonicalPaperService(CanonicalPaperExecutionService):
                 quantity_lots=quantity_lots,
             )
         except LookupError:
-            return PaperExecutionResult(
-                PaperExecutionOutcome.BUNDLE_UNAVAILABLE,
-                "BUNDLE_NOT_FOUND",
-            )
+            return PaperExecutionResult(PaperExecutionOutcome.BUNDLE_UNAVAILABLE, "BUNDLE_NOT_FOUND")
         except CanonicalPersistenceCorruptionError:
-            return PaperExecutionResult(
-                PaperExecutionOutcome.BUNDLE_CORRUPT,
-                "BUNDLE_CORRUPT",
-            )
+            return PaperExecutionResult(PaperExecutionOutcome.BUNDLE_CORRUPT, "BUNDLE_CORRUPT")
         except ReservationCorruptionError:
-            return PaperExecutionResult(
-                PaperExecutionOutcome.RESERVATION_CORRUPT,
-                "RESERVATION_CORRUPT",
-            )
+            return PaperExecutionResult(PaperExecutionOutcome.RESERVATION_CORRUPT, "RESERVATION_CORRUPT")
+        except PaperMarketDataAuthenticationError:
+            return PaperExecutionResult(PaperExecutionOutcome.RECOVERY_REQUIRED, "MARKET_DATA_AUTHENTICATION_FAILED")
+        except PaperMarketDataConfigurationError:
+            return PaperExecutionResult(PaperExecutionOutcome.INVALID_REQUEST, "MARKET_DATA_CONFIGURATION_INVALID")
+        except PaperMarketDataRateLimitError:
+            return PaperExecutionResult(PaperExecutionOutcome.STORAGE_UNAVAILABLE, "MARKET_DATA_RATE_LIMITED")
+        except PaperMarketDataUnavailableError:
+            return PaperExecutionResult(PaperExecutionOutcome.STORAGE_UNAVAILABLE, "MARKET_DATA_UNAVAILABLE")
+        except PaperMarketDataCorruptionError:
+            return PaperExecutionResult(PaperExecutionOutcome.RECOVERY_REQUIRED, "MARKET_DATA_CORRUPT")
         except PaperExecutionCorruptionError:
-            return PaperExecutionResult(
-                PaperExecutionOutcome.RECOVERY_REQUIRED,
-                "EXECUTION_LEDGER_CORRUPT",
-            )
+            return PaperExecutionResult(PaperExecutionOutcome.RECOVERY_REQUIRED, "EXECUTION_LEDGER_CORRUPT")
         except PaperExecutionConflictError:
-            return PaperExecutionResult(
-                PaperExecutionOutcome.RECOVERY_REQUIRED,
-                "EXECUTION_LEDGER_CONFLICT",
-            )
+            return PaperExecutionResult(PaperExecutionOutcome.RECOVERY_REQUIRED, "EXECUTION_LEDGER_CONFLICT")
         except ReservationFinalizationRequired as exc:
             try:
                 previous = self.repository.find_by_idempotency_key(
@@ -154,17 +142,8 @@ class ReplayGuardedCanonicalPaperService(CanonicalPaperExecutionService):
                 paper_order_id=previous.paper_order_id if previous else None,
             )
         except (PaperExecutionStorageError, sqlite3.Error, OSError):
-            return PaperExecutionResult(
-                PaperExecutionOutcome.STORAGE_UNAVAILABLE,
-                "PREFLIGHT_STORAGE_UNAVAILABLE",
-            )
+            return PaperExecutionResult(PaperExecutionOutcome.STORAGE_UNAVAILABLE, "PREFLIGHT_STORAGE_UNAVAILABLE")
         except (ValueError, TypeError):
-            return PaperExecutionResult(
-                PaperExecutionOutcome.INVALID_REQUEST,
-                "INVALID_PREFLIGHT_INPUT",
-            )
+            return PaperExecutionResult(PaperExecutionOutcome.INVALID_REQUEST, "INVALID_PREFLIGHT_INPUT")
         except Exception:
-            return PaperExecutionResult(
-                PaperExecutionOutcome.RECOVERY_REQUIRED,
-                "UNEXPECTED_PREFLIGHT_FAILURE",
-            )
+            return PaperExecutionResult(PaperExecutionOutcome.RECOVERY_REQUIRED, "UNEXPECTED_PREFLIGHT_FAILURE")
