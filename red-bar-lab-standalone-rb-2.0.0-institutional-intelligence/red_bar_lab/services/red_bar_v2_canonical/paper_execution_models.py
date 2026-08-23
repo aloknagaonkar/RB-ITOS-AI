@@ -65,10 +65,15 @@ def _positive_int(name: str, value: object) -> int:
     return value
 
 
-def _aware(name: str, value: datetime) -> datetime:
-    if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+def _aware(name: str, value: object) -> datetime:
+    if type(value) is not datetime or value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{name} must be timezone-aware")
     return value
+
+
+def _enum(name: str, value: object, enum_type: type[Enum]) -> None:
+    if not isinstance(value, enum_type):
+        raise ValueError(f"{name} must be {enum_type.__name__}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,16 +97,26 @@ class CanonicalPaperContract:
         _text("instrument_key", self.instrument_key)
         _text("tradingsymbol", self.tradingsymbol)
         _text("exchange", self.exchange)
+        _enum("option_side", self.option_side, OptionSide)
         if type(self.strike) not in (int, float) or float(self.strike) <= 0:
             raise ValueError("strike must be positive")
+        if type(self.expiry) is not date:
+            raise ValueError("expiry must be date")
         _positive_int("lot_size", self.lot_size)
-        _aware("selected_at", self.selected_at)
-        _aware("quote_timestamp", self.quote_timestamp)
+        selected_at = _aware("selected_at", self.selected_at)
+        quote_at = _aware("quote_timestamp", self.quote_timestamp)
+        if quote_at > selected_at:
+            raise ValueError("quote_timestamp cannot be after selected_at")
         if type(self.last_price) not in (int, float) or float(self.last_price) <= 0:
             raise ValueError("last_price must be positive")
         for name, value in (("best_bid", self.best_bid), ("best_ask", self.best_ask)):
-            if value is not None and (type(value) not in (int, float) or float(value) <= 0):
+            if value is not None and (
+                type(value) not in (int, float) or float(value) <= 0
+            ):
                 raise ValueError(f"{name} must be positive when supplied")
+        if self.best_bid is not None and self.best_ask is not None:
+            if float(self.best_ask) < float(self.best_bid):
+                raise ValueError("best_ask cannot be below best_bid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,20 +147,30 @@ class CanonicalPaperExecutionCommand:
 
     def __post_init__(self) -> None:
         for name in (
-            "command_id", "execution_id", "reservation_id", "bundle_id", "signal_id",
-            "idempotency_key", "strategy_id", "strategy_version", "instrument_key",
-            "reservation_owner", "order_side", "order_type", "schema_version",
+            "command_id", "execution_id", "reservation_id", "bundle_id",
+            "signal_id", "idempotency_key", "strategy_id", "strategy_version",
+            "instrument_key", "reservation_owner", "order_side", "order_type",
+            "schema_version",
         ):
             _text(name, getattr(self, name))
         if self.strategy_id != "RED_BAR_V2":
             raise ValueError("strategy_id must be RED_BAR_V2")
         if self.schema_version != "1.0":
             raise ValueError("unsupported command schema")
+        if type(self.trading_date) is not date:
+            raise ValueError("trading_date must be date")
+        _enum("direction", self.direction, Direction)
+        _enum("option_side", self.option_side, OptionSide)
+        _enum("entry_type", self.entry_type, EntryType)
+        if type(self.contract) is not CanonicalPaperContract:
+            raise ValueError("contract must be CanonicalPaperContract")
         if self.contract.option_side is not self.option_side:
             raise ValueError("selected contract option side mismatch")
         _aware("signal_timestamp", self.signal_timestamp)
-        _aware("reservation_expiry", self.reservation_expiry)
-        _aware("created_at", self.created_at)
+        expiry = _aware("reservation_expiry", self.reservation_expiry)
+        created = _aware("created_at", self.created_at)
+        if created >= expiry:
+            raise ValueError("command must be created before reservation expiry")
         _positive_int("quantity", self.quantity)
         if self.quantity % self.contract.lot_size != 0:
             raise ValueError("quantity must be a multiple of lot_size")
@@ -169,7 +194,10 @@ class CanonicalPaperExecutionCommand:
             order_type=self.order_type,
             limit_price=self.limit_price,
         )
-        expected_command = build_command_id(execution_id=expected_execution, created_at=self.created_at)
+        expected_command = build_command_id(
+            execution_id=expected_execution,
+            created_at=self.created_at,
+        )
         if self.execution_id != expected_execution:
             raise ValueError("execution_id does not match canonical intent identity")
         if self.command_id != expected_command:
@@ -183,3 +211,13 @@ class PaperExecutionResult:
     command: CanonicalPaperExecutionCommand | None = None
     state: PaperExecutionState | None = None
     paper_order_id: str | None = None
+
+    def __post_init__(self) -> None:
+        _enum("outcome", self.outcome, PaperExecutionOutcome)
+        _text("reason_code", self.reason_code)
+        if self.command is not None and type(self.command) is not CanonicalPaperExecutionCommand:
+            raise ValueError("command must be CanonicalPaperExecutionCommand")
+        if self.state is not None:
+            _enum("state", self.state, PaperExecutionState)
+        if self.paper_order_id is not None:
+            _text("paper_order_id", self.paper_order_id)
