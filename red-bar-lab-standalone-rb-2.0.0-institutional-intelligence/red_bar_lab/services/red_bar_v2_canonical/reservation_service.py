@@ -7,7 +7,10 @@ from .reservation_models import (
     CanonicalReservationResult,
     ReservationOutcome,
 )
-from .reservation_repository import SQLiteCanonicalReservationRepository
+from .reservation_repository import (
+    ReservationStorageError,
+    SQLiteCanonicalReservationRepository,
+)
 
 OBSERVATIONAL_OWNER_ID = "CANONICAL_RESERVATION_VALIDATOR"
 DEFAULT_LEASE_SECONDS = 30
@@ -31,6 +34,22 @@ class RedBarV2CanonicalReservationService:
             3600,
         )
 
+    @staticmethod
+    def _disabled() -> CanonicalReservationResult:
+        return CanonicalReservationResult(
+            ReservationOutcome.RESERVATION_DISABLED,
+            "FEATURE_DISABLED",
+            None,
+        )
+
+    @staticmethod
+    def _storage_unavailable() -> CanonicalReservationResult:
+        return CanonicalReservationResult(
+            ReservationOutcome.STORAGE_UNAVAILABLE,
+            "STORAGE_UNAVAILABLE",
+            None,
+        )
+
     def reserve(
         self,
         *,
@@ -39,19 +58,18 @@ class RedBarV2CanonicalReservationService:
         requested_at: datetime,
     ) -> CanonicalReservationResult:
         if not self._enabled or self._repository is None:
-            return CanonicalReservationResult(
-                ReservationOutcome.RESERVATION_DISABLED,
-                "FEATURE_DISABLED",
-                None,
+            return self._disabled()
+        try:
+            return self._repository.reserve(
+                bundle_id=bundle_id,
+                owner_id=owner_id,
+                requested_at=requested_at,
+                lease_seconds=self._lease_seconds,
+                feature_enabled=True,
+                maximum_bundle_age_seconds=self._maximum_bundle_age_seconds,
             )
-        return self._repository.reserve(
-            bundle_id=bundle_id,
-            owner_id=owner_id,
-            requested_at=requested_at,
-            lease_seconds=self._lease_seconds,
-            feature_enabled=True,
-            maximum_bundle_age_seconds=self._maximum_bundle_age_seconds,
-        )
+        except ReservationStorageError:
+            return self._storage_unavailable()
 
     def release(
         self,
@@ -62,17 +80,16 @@ class RedBarV2CanonicalReservationService:
         reason_code: str,
     ) -> CanonicalReservationResult:
         if not self._enabled or self._repository is None:
-            return CanonicalReservationResult(
-                ReservationOutcome.RESERVATION_DISABLED,
-                "FEATURE_DISABLED",
-                None,
+            return self._disabled()
+        try:
+            return self._repository.release(
+                reservation_id=reservation_id,
+                owner_id=owner_id,
+                released_at=released_at,
+                reason_code=reason_code,
             )
-        return self._repository.release(
-            reservation_id=reservation_id,
-            owner_id=owner_id,
-            released_at=released_at,
-            reason_code=reason_code,
-        )
+        except ReservationStorageError:
+            return self._storage_unavailable()
 
     def get_active(
         self,
@@ -82,4 +99,7 @@ class RedBarV2CanonicalReservationService:
     ) -> CanonicalBundleReservation | None:
         if not self._enabled or self._repository is None:
             return None
-        return self._repository.get_active(bundle_id=bundle_id, at=at)
+        try:
+            return self._repository.get_active(bundle_id=bundle_id, at=at)
+        except ReservationStorageError:
+            return None
