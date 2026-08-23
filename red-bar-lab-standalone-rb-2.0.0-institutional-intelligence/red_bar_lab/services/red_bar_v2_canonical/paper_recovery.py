@@ -43,23 +43,12 @@ class ControlledCanonicalPaperRecoveryService:
         self.owner_id = owner_id
 
     def _candidate_ids(self, *, limit: int) -> tuple[str, ...]:
-        ids = list(self.repository.list_non_terminal(limit=limit))
-        with self.repository._connect(read_only=True) as conn:
-            rows = conn.execute(
-                "SELECT c.execution_id "
-                "FROM canonical_red_bar_v2_paper_commands c "
-                "JOIN canonical_red_bar_v2_bundle_reservations r "
-                "ON r.reservation_id=c.reservation_id "
-                "WHERE c.state IN ('PAPER_FILLED','PAPER_REJECTED') "
-                "AND r.state='RESERVED' "
-                "ORDER BY c.updated_at,c.execution_id LIMIT ?",
-                (max(1, min(int(limit), 500)),),
-            ).fetchall()
-        for row in rows:
-            execution_id = str(row["execution_id"])
-            if execution_id not in ids:
-                ids.append(execution_id)
-        return tuple(ids[: max(1, min(int(limit), 500))])
+        bounded = max(1, min(int(limit), 500))
+        ids = list(self.repository.list_non_terminal(limit=bounded))
+        for pending in self.repository.list_pending_finalization(limit=bounded):
+            if pending.execution_id not in ids:
+                ids.append(pending.execution_id)
+        return tuple(ids[:bounded])
 
     def _release(
         self,
@@ -85,8 +74,6 @@ class ControlledCanonicalPaperRecoveryService:
         except (TimeoutError, ConnectionError, sqlite3.Error, OSError):
             return None, "RECOVERY_LOOKUP_UNAVAILABLE"
         except Exception:
-            # Defensive recovery-cycle boundary. No payload, quote, token or
-            # account data is logged or returned, and submission is never retried.
             return None, "RECOVERY_LOOKUP_FAILED"
 
     def _finalize_reservation(
