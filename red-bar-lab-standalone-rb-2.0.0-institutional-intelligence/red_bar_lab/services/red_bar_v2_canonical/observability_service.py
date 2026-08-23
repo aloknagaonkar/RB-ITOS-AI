@@ -51,14 +51,12 @@ def _freshness(record: ObservabilityResolutionRecord, now: datetime) -> tuple[st
         raise ValueError("now must be timezone-aware")
     current = now.astimezone(INDIA_MARKET_TZ)
     event_time = _require_aware(record.envelope.section_2.evaluation_timestamp, "event timestamp")
-    persisted_time = _require_aware(record.persisted_at, "persisted_at")
+    _require_aware(record.persisted_at, "persisted_at")
     trading_date = record.envelope.trading_date
     if trading_date > current.date():
         raise CanonicalPersistenceCorruptionError("future trading date")
     if event_time.date() != trading_date:
         raise CanonicalPersistenceCorruptionError("event timestamp market date mismatch")
-    if persisted_time < event_time and (event_time - persisted_time).total_seconds() > CLOCK_SKEW_TOLERANCE_SECONDS:
-        raise CanonicalPersistenceCorruptionError("persisted_at materially precedes event timestamp")
     if trading_date < current.date():
         return "HISTORICAL", None
     age = (current - event_time).total_seconds()
@@ -243,8 +241,6 @@ class RedBarV2CanonicalObservabilityService:
             events = self._repository.bundle_events(bundle_id=latest.envelope.section_3.bundle_id) if latest.envelope.section_3 else ()
             freshness, age = _freshness(latest, current)
             delay = (latest.persisted_at - latest.envelope.section_2.evaluation_timestamp).total_seconds()
-            if delay < -CLOCK_SKEW_TOLERANCE_SECONDS:
-                raise CanonicalPersistenceCorruptionError("persisted_at materially precedes event timestamp")
             persistence = CanonicalPersistenceView(
                 resolution_id=latest.envelope.resolution_id,
                 source_replay_id=latest.envelope.source_replay_id,
@@ -252,7 +248,7 @@ class RedBarV2CanonicalObservabilityService:
                 bundle_schema_version=latest.envelope.section_3.schema_version if latest.envelope.section_3 else None,
                 persisted_at=latest.persisted_at,
                 event_timestamp=latest.envelope.section_2.evaluation_timestamp,
-                persistence_delay_seconds=max(delay, 0.0),
+                persistence_delay_seconds=delay,
                 payload_integrity="VERIFIED",
                 event_count=len(events),
                 persistence_outcome="PERSISTED",
