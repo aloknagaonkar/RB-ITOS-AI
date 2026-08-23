@@ -76,6 +76,14 @@ class VerifiedPaperExecution:
     events: tuple[tuple[PaperExecutionEventType, datetime, str, str | None], ...]
 
 
+@dataclass(frozen=True, slots=True)
+class PendingReservationFinalization:
+    execution_id: str
+    reservation_id: str
+    state: PaperExecutionState
+    updated_at: datetime
+
+
 def _aware(value: object, field: str) -> datetime:
     try:
         parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
@@ -124,18 +132,27 @@ def command_from_payload(payload: str) -> CanonicalPaperExecutionCommand:
             best_ask=raw.get("best_ask"),
         )
         return CanonicalPaperExecutionCommand(
-            command_id=data["command_id"], execution_id=data["execution_id"],
-            reservation_id=data["reservation_id"], bundle_id=data["bundle_id"],
-            signal_id=data["signal_id"], idempotency_key=data["idempotency_key"],
-            strategy_id=data["strategy_id"], strategy_version=data["strategy_version"],
-            instrument_key=data["instrument_key"], trading_date=date.fromisoformat(data["trading_date"]),
-            direction=Direction(data["direction"]), option_side=OptionSide(data["option_side"]),
+            command_id=data["command_id"],
+            execution_id=data["execution_id"],
+            reservation_id=data["reservation_id"],
+            bundle_id=data["bundle_id"],
+            signal_id=data["signal_id"],
+            idempotency_key=data["idempotency_key"],
+            strategy_id=data["strategy_id"],
+            strategy_version=data["strategy_version"],
+            instrument_key=data["instrument_key"],
+            trading_date=date.fromisoformat(data["trading_date"]),
+            direction=Direction(data["direction"]),
+            option_side=OptionSide(data["option_side"]),
             entry_type=EntryType(data["entry_type"]),
             signal_timestamp=_aware(data["signal_timestamp"], "signal_timestamp"),
             reservation_owner=data["reservation_owner"],
             reservation_expiry=_aware(data["reservation_expiry"], "reservation_expiry"),
-            contract=contract, quantity=data["quantity"], order_side=data["order_side"],
-            order_type=data["order_type"], limit_price=data.get("limit_price"),
+            contract=contract,
+            quantity=data["quantity"],
+            order_side=data["order_side"],
+            order_type=data["order_type"],
+            limit_price=data.get("limit_price"),
             created_at=_aware(data["created_at"], "created_at"),
             schema_version=data["schema_version"],
         )
@@ -158,19 +175,25 @@ class SQLiteCanonicalPaperExecutionRepository:
             if read_only:
                 if not self.path.exists():
                     raise FileNotFoundError(str(self.path))
-                conn = sqlite3.connect(f"file:{self.path.resolve().as_posix()}?mode=ro", uri=True)
+                conn = sqlite3.connect(
+                    f"file:{self.path.resolve().as_posix()}?mode=ro",
+                    uri=True,
+                )
             else:
                 conn = sqlite3.connect(self.path, isolation_level=None)
             conn.row_factory = sqlite3.Row
             conn.execute("PRAGMA busy_timeout=5000")
             return conn
         except (sqlite3.Error, OSError) as exc:
-            raise PaperExecutionStorageError("paper execution database unavailable") from exc
+            raise PaperExecutionStorageError(
+                "paper execution database unavailable"
+            ) from exc
 
     @staticmethod
     def _insert_event(
         conn: sqlite3.Connection,
-        *, command: CanonicalPaperExecutionCommand,
+        *,
+        command: CanonicalPaperExecutionCommand,
         event_type: PaperExecutionEventType,
         at: datetime,
         reason_code: str,
@@ -185,20 +208,36 @@ class SQLiteCanonicalPaperExecutionRepository:
         metadata = canonical_json({
             "execution_id": command.execution_id,
             "command_id": command.command_id,
-            "state": event_type.value.replace("COMMAND_", "").replace("SUBMISSION_", "SUBMISSION_"),
+            "state": event_type.value.replace("COMMAND_", "").replace(
+                "SUBMISSION_", "SUBMISSION_"
+            ),
         })
         existing = conn.execute(
             "SELECT * FROM canonical_red_bar_v2_paper_execution_events WHERE event_id=?",
             (event_id,),
         ).fetchone()
         values = (
-            event_id, command.execution_id, command.command_id, event_type.value,
-            at.isoformat(), reason_code, paper_order_id, metadata, payload_sha256(metadata),
+            event_id,
+            command.execution_id,
+            command.command_id,
+            event_type.value,
+            at.isoformat(),
+            reason_code,
+            paper_order_id,
+            metadata,
+            payload_sha256(metadata),
         )
         if existing is not None:
             actual = tuple(existing[key] for key in (
-                "event_id", "execution_id", "command_id", "event_type", "event_timestamp",
-                "reason_code", "paper_order_id", "metadata_json", "metadata_sha256",
+                "event_id",
+                "execution_id",
+                "command_id",
+                "event_type",
+                "event_timestamp",
+                "reason_code",
+                "paper_order_id",
+                "metadata_json",
+                "metadata_sha256",
             ))
             if actual != values:
                 raise PaperExecutionConflictError("paper execution event conflict")
@@ -223,23 +262,38 @@ class SQLiteCanonicalPaperExecutionRepository:
             conn.execute(
                 "INSERT INTO canonical_red_bar_v2_paper_commands VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
-                    command.command_id, command.execution_id, command.reservation_id,
-                    command.bundle_id, command.signal_id, command.idempotency_key,
-                    PaperExecutionState.PREPARED.value, None, "COMMAND_PREPARED",
-                    command.created_at.isoformat(), command.created_at.isoformat(),
-                    command.schema_version, payload, payload_sha256(payload),
+                    command.command_id,
+                    command.execution_id,
+                    command.reservation_id,
+                    command.bundle_id,
+                    command.signal_id,
+                    command.idempotency_key,
+                    PaperExecutionState.PREPARED.value,
+                    None,
+                    "COMMAND_PREPARED",
+                    command.created_at.isoformat(),
+                    command.created_at.isoformat(),
+                    command.schema_version,
+                    payload,
+                    payload_sha256(payload),
                 ),
             )
             self._insert_event(
-                conn, command=command, event_type=PaperExecutionEventType.COMMAND_PREPARED,
-                at=command.created_at, reason_code="COMMAND_PREPARED", paper_order_id=None,
+                conn,
+                command=command,
+                event_type=PaperExecutionEventType.COMMAND_PREPARED,
+                at=command.created_at,
+                reason_code="COMMAND_PREPARED",
+                paper_order_id=None,
             )
             conn.execute("COMMIT")
             return self.get_verified(execution_id=command.execution_id)
         except sqlite3.IntegrityError as exc:
             if conn.in_transaction:
                 conn.execute("ROLLBACK")
-            raise PaperExecutionConflictError("duplicate canonical paper execution") from exc
+            raise PaperExecutionConflictError(
+                "duplicate canonical paper execution"
+            ) from exc
         except Exception:
             if conn.in_transaction:
                 conn.execute("ROLLBACK")
@@ -260,26 +314,62 @@ class SQLiteCanonicalPaperExecutionRepository:
     ) -> VerifiedPaperExecution:
         current = self.get_verified(execution_id=execution_id)
         allowed = {
-            PaperExecutionState.PREPARED: {PaperExecutionState.SUBMISSION_STARTED, PaperExecutionState.RECOVERY_REQUIRED},
-            PaperExecutionState.SUBMISSION_STARTED: {PaperExecutionState.PAPER_ACCEPTED, PaperExecutionState.PAPER_REJECTED, PaperExecutionState.SUBMISSION_UNCERTAIN},
-            PaperExecutionState.PAPER_ACCEPTED: {PaperExecutionState.PAPER_FILLED, PaperExecutionState.RECOVERY_REQUIRED},
-            PaperExecutionState.SUBMISSION_UNCERTAIN: {PaperExecutionState.PAPER_ACCEPTED, PaperExecutionState.PAPER_REJECTED, PaperExecutionState.RECOVERY_REQUIRED},
-            PaperExecutionState.RECOVERY_REQUIRED: {PaperExecutionState.PAPER_ACCEPTED, PaperExecutionState.PAPER_REJECTED, PaperExecutionState.SUBMISSION_UNCERTAIN},
+            PaperExecutionState.PREPARED: {
+                PaperExecutionState.SUBMISSION_STARTED,
+                PaperExecutionState.RECOVERY_REQUIRED,
+            },
+            PaperExecutionState.SUBMISSION_STARTED: {
+                PaperExecutionState.PAPER_ACCEPTED,
+                PaperExecutionState.PAPER_REJECTED,
+                PaperExecutionState.SUBMISSION_UNCERTAIN,
+            },
+            PaperExecutionState.PAPER_ACCEPTED: {
+                PaperExecutionState.PAPER_FILLED,
+                PaperExecutionState.RECOVERY_REQUIRED,
+            },
+            PaperExecutionState.SUBMISSION_UNCERTAIN: {
+                PaperExecutionState.PAPER_ACCEPTED,
+                PaperExecutionState.PAPER_REJECTED,
+                PaperExecutionState.RECOVERY_REQUIRED,
+            },
+            PaperExecutionState.RECOVERY_REQUIRED: {
+                PaperExecutionState.PAPER_ACCEPTED,
+                PaperExecutionState.PAPER_REJECTED,
+                PaperExecutionState.SUBMISSION_UNCERTAIN,
+            },
         }
-        if current.state is not expected_state or new_state not in allowed.get(current.state, set()):
+        if (
+            current.state is not expected_state
+            or new_state not in allowed.get(current.state, set())
+        ):
             raise PaperExecutionConflictError("invalid paper execution transition")
         conn = self._connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
             cursor = conn.execute(
-                "UPDATE canonical_red_bar_v2_paper_commands SET state=?,paper_order_id=?,reason_code=?,updated_at=? WHERE execution_id=? AND state=?",
-                (new_state.value, paper_order_id, reason_code, at.isoformat(), execution_id, expected_state.value),
+                "UPDATE canonical_red_bar_v2_paper_commands "
+                "SET state=?,paper_order_id=?,reason_code=?,updated_at=? "
+                "WHERE execution_id=? AND state=?",
+                (
+                    new_state.value,
+                    paper_order_id,
+                    reason_code,
+                    at.isoformat(),
+                    execution_id,
+                    expected_state.value,
+                ),
             )
             if cursor.rowcount != 1:
-                raise PaperExecutionConflictError("paper execution transition conflict")
+                raise PaperExecutionConflictError(
+                    "paper execution transition conflict"
+                )
             self._insert_event(
-                conn, command=current.command, event_type=event_type, at=at,
-                reason_code=reason_code, paper_order_id=paper_order_id,
+                conn,
+                command=current.command,
+                event_type=event_type,
+                at=at,
+                reason_code=reason_code,
+                paper_order_id=paper_order_id,
             )
             conn.execute("COMMIT")
         except Exception:
@@ -303,34 +393,56 @@ class SQLiteCanonicalPaperExecutionRepository:
                 raise PaperExecutionCorruptionError("command digest mismatch")
             command = command_from_payload(payload)
             projections = {
-                "command_id": command.command_id, "execution_id": command.execution_id,
-                "reservation_id": command.reservation_id, "bundle_id": command.bundle_id,
-                "signal_id": command.signal_id, "idempotency_key": command.idempotency_key,
+                "command_id": command.command_id,
+                "execution_id": command.execution_id,
+                "reservation_id": command.reservation_id,
+                "bundle_id": command.bundle_id,
+                "signal_id": command.signal_id,
+                "idempotency_key": command.idempotency_key,
                 "schema_version": command.schema_version,
             }
             for field, expected in projections.items():
                 if row[field] != expected:
-                    raise PaperExecutionCorruptionError(f"command projection mismatch: {field}")
+                    raise PaperExecutionCorruptionError(
+                        f"command projection mismatch: {field}"
+                    )
             state = PaperExecutionState(str(row["state"]))
             event_rows = conn.execute(
-                "SELECT * FROM canonical_red_bar_v2_paper_execution_events WHERE execution_id=? ORDER BY event_timestamp,event_id",
+                "SELECT * FROM canonical_red_bar_v2_paper_execution_events "
+                "WHERE execution_id=? ORDER BY event_timestamp,event_id",
                 (execution_id,),
             ).fetchall()
         if not event_rows:
-            raise PaperExecutionCorruptionError("paper execution has no lifecycle history")
+            raise PaperExecutionCorruptionError(
+                "paper execution has no lifecycle history"
+            )
         events = []
         for item in event_rows:
             metadata = str(item["metadata_json"])
             if payload_sha256(metadata) != str(item["metadata_sha256"]):
-                raise PaperExecutionCorruptionError("paper execution event digest mismatch")
+                raise PaperExecutionCorruptionError(
+                    "paper execution event digest mismatch"
+                )
+            timestamp = _aware(item["event_timestamp"], "event_timestamp")
             expected_id = build_execution_event_id(
-                execution_id=command.execution_id, event_type=str(item["event_type"]),
-                event_timestamp=_aware(item["event_timestamp"], "event_timestamp"),
+                execution_id=command.execution_id,
+                event_type=str(item["event_type"]),
+                event_timestamp=timestamp,
                 reason_code=str(item["reason_code"]),
             )
-            if item["event_id"] != expected_id or item["command_id"] != command.command_id:
-                raise PaperExecutionCorruptionError("paper execution event identity mismatch")
-            events.append((PaperExecutionEventType(str(item["event_type"])), _aware(item["event_timestamp"], "event_timestamp"), str(item["reason_code"]), item["paper_order_id"]))
+            if (
+                item["event_id"] != expected_id
+                or item["command_id"] != command.command_id
+            ):
+                raise PaperExecutionCorruptionError(
+                    "paper execution event identity mismatch"
+                )
+            events.append((
+                PaperExecutionEventType(str(item["event_type"])),
+                timestamp,
+                str(item["reason_code"]),
+                item["paper_order_id"],
+            ))
         if events[0][0] is not PaperExecutionEventType.COMMAND_PREPARED:
             raise PaperExecutionCorruptionError("prepared event must be first")
         expected_last = {
@@ -343,20 +455,71 @@ class SQLiteCanonicalPaperExecutionRepository:
             PaperExecutionState.RECOVERY_REQUIRED: PaperExecutionEventType.RECOVERY_REQUIRED,
         }[state]
         if events[-1][0] is not expected_last:
-            raise PaperExecutionCorruptionError("paper execution state/history mismatch")
-        terminal = {PaperExecutionState.PAPER_FILLED, PaperExecutionState.PAPER_REJECTED}
-        if state in terminal and any(event[1] > events[-1][1] for event in events):
-            raise PaperExecutionCorruptionError("event after terminal state")
+            raise PaperExecutionCorruptionError(
+                "paper execution state/history mismatch"
+            )
         return VerifiedPaperExecution(
-            command=command, state=state, reason_code=str(row["reason_code"]),
-            paper_order_id=row["paper_order_id"], events=tuple(events),
+            command=command,
+            state=state,
+            reason_code=str(row["reason_code"]),
+            paper_order_id=row["paper_order_id"],
+            events=tuple(events),
         )
 
     def list_non_terminal(self, *, limit: int = 100) -> tuple[str, ...]:
         bounded = min(max(int(limit), 1), 500)
         with self._connect(read_only=True) as conn:
             rows = conn.execute(
-                "SELECT execution_id FROM canonical_red_bar_v2_paper_commands WHERE state NOT IN ('PAPER_FILLED','PAPER_REJECTED') ORDER BY updated_at LIMIT ?",
+                "SELECT execution_id FROM canonical_red_bar_v2_paper_commands "
+                "WHERE state NOT IN ('PAPER_FILLED','PAPER_REJECTED') "
+                "ORDER BY updated_at LIMIT ?",
                 (bounded,),
             ).fetchall()
         return tuple(str(row["execution_id"]) for row in rows)
+
+    def list_pending_finalization(
+        self,
+        *,
+        limit: int = 100,
+    ) -> tuple[PendingReservationFinalization, ...]:
+        bounded = min(max(int(limit), 1), 500)
+        with self._connect(read_only=True) as conn:
+            rows = conn.execute(
+                """
+                SELECT c.execution_id,c.reservation_id,c.state,c.updated_at
+                FROM canonical_red_bar_v2_paper_commands c
+                JOIN canonical_red_bar_v2_bundle_reservations r
+                  ON r.reservation_id=c.reservation_id
+                WHERE c.state IN ('PAPER_FILLED','PAPER_REJECTED')
+                  AND r.state='RESERVED'
+                ORDER BY c.updated_at ASC,c.execution_id ASC
+                LIMIT ?
+                """,
+                (bounded,),
+            ).fetchall()
+        return tuple(
+            PendingReservationFinalization(
+                execution_id=str(row["execution_id"]),
+                reservation_id=str(row["reservation_id"]),
+                state=PaperExecutionState(str(row["state"])),
+                updated_at=_aware(row["updated_at"], "updated_at"),
+            )
+            for row in rows
+        )
+
+    def count_trading_date_executions(self, *, trading_date: date) -> int:
+        if type(trading_date) is not date:
+            raise ValueError("trading_date must be date")
+        with self._connect(read_only=True) as conn:
+            rows = conn.execute(
+                "SELECT payload_json,payload_sha256 "
+                "FROM canonical_red_bar_v2_paper_commands"
+            ).fetchall()
+        count = 0
+        for row in rows:
+            payload = str(row["payload_json"])
+            if payload_sha256(payload) != str(row["payload_sha256"]):
+                raise PaperExecutionCorruptionError("command digest mismatch")
+            if command_from_payload(payload).trading_date == trading_date:
+                count += 1
+        return count
