@@ -6,7 +6,7 @@ import hashlib
 import json
 import logging
 from pathlib import Path
-from queue import Full, Queue
+from queue import Empty, Full, Queue
 from threading import Lock, Thread
 from typing import Mapping
 
@@ -138,16 +138,42 @@ class RedBarV2CanonicalShadowRuntime:
     def __init__(self, coordinator: RedBarV2CanonicalShadowCoordinator, *, queue_size: int = 128) -> None:
         self._coordinator = coordinator
         self._queue: Queue[RedBarV2ShadowTask] = Queue(maxsize=queue_size)
+        self._submission_lock = Lock()
+        self._submitted_source_ids: set[str] = set()
         self._worker = Thread(target=self._run, name="rbv2-canonical-shadow", daemon=True)
         self._worker.start()
 
     def submit(self, task: RedBarV2ShadowTask) -> bool:
-        try:
-            self._queue.put_nowait(task)
+        """Submit a live observation once, replacing stale queued work if saturated."""
+        with self._submission_lock:
+            if task.source_replay_id in self._submitted_source_ids:
+                return False
+            try:
+                self._queue.put_nowait(task)
+            except Full:
+                try:
+                    stale = self._queue.get_nowait()
+                except Empty:
+                    _LOGGER.warning("red_bar_v2_shadow", extra={"reason_code": "SHADOW_QUEUE_FULL"})
+                    return False
+                else:
+                    self._queue.task_done()
+                    self._submitted_source_ids.discard(stale.source_replay_id)
+                try:
+                    self._queue.put_nowait(task)
+                except Full:
+                    _LOGGER.warning("red_bar_v2_shadow", extra={"reason_code": "SHADOW_QUEUE_FULL"})
+                    return False
+                _LOGGER.warning(
+                    "red_bar_v2_shadow",
+                    extra={
+                        "reason_code": "SHADOW_STALE_TASK_REPLACED",
+                        "replaced_source_replay_id": stale.source_replay_id,
+                        "new_source_replay_id": task.source_replay_id,
+                    },
+                )
+            self._submitted_source_ids.add(task.source_replay_id)
             return True
-        except Full:
-            _LOGGER.warning("red_bar_v2_shadow", extra={"reason_code": "SHADOW_QUEUE_FULL"})
-            return False
 
     def _run(self) -> None:
         while True:
@@ -184,13 +210,17 @@ def get_red_bar_v2_shadow_runtime(
         existing = _RUNTIMES.get(key)
         if existing is not None:
             return existing
-        repository = SQLiteRedBarV2CanonicalRepository(Path(database_path), busy_timeout_ms=250)
-        service = RedBarV2CanonicalPersistenceService(repository)
-        coordinator = RedBarV2CanonicalShadowCoordinator(
-            service,
-            enabled=True,
-            telemetry_sink=lambda record: _LOGGER.info("red_bar_v2_shadow", extra={"shadow": record}),
-        )
-        runtime = RedBarV2CanonicalShadowRuntime(coordinator)
+        try:
+            repository = SQLiteRedBarV2CanonicalRepository(Path(database_path), busy_timeout_ms=250)
+            service = RedBarV2CanonicalPersistenceService(repository)
+            coordinator = RedBarV2CanonicalShadowCoordinator(
+                service,
+                enabled=True,
+                telemetry_sink=lambda record: _LOGGER.info("red_bar_v2_shadow", extra={"shadow": record}),
+            )
+            runtime = RedBarV2CanonicalShadowRuntime(coordinator)
+        except Exception:
+            _LOGGER.exception("red_bar_v2_shadow_runtime_initialization_failed")
+            return None
         _RUNTIMES[key] = runtime
         return runtime
