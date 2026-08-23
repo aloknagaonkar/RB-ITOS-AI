@@ -172,16 +172,13 @@ def test_duplicate_while_processing_is_rejected_and_success_completes():
     assert entered.wait(2)
     assert runtime.submit(task) is False
     release.set()
-    for _ in range(1000):
-        if "A" in runtime._completed_ids:
-            break
+    runtime._queue.join()
     assert "A" in runtime._completed_ids
     assert runtime.submit(task) is False
 
 
 def test_initialization_failure_releases_id_for_later_retry():
     retry_released = Event()
-    persisted = Event()
     attempts = 0
     coordinator = _Coordinator(_observation())
 
@@ -201,11 +198,8 @@ def test_initialization_failure_releases_id_for_later_retry():
     assert runtime.submit(task) is True
     assert retry_released.wait(2)
     assert runtime.submit(task) is True
-    for _ in range(1000):
-        if "A" in runtime._completed_ids:
-            persisted.set()
-            break
-    assert persisted.is_set()
+    runtime._queue.join()
+    assert "A" in runtime._completed_ids
     assert attempts == 2
     assert coordinator.calls == 1
 
