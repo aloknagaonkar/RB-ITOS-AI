@@ -9,6 +9,7 @@ from red_bar_lab.config import RedBarSettings
 from red_bar_lab.services.red_bar_v2_canonical.observability_repository import SQLiteRedBarV2CanonicalObservabilityRepository
 from red_bar_lab.services.red_bar_v2_canonical.observability_service import RedBarV2CanonicalObservabilityService
 from red_bar_lab.services.red_bar_v2_canonical.reservation_observability import SQLiteReservationObservabilityRepository
+from red_bar_lab.ui.canonical_paper_canary_panel import render_canonical_paper_canary_panel
 from red_bar_lab.ui.canonical_paper_execution_panel import render_canonical_paper_execution_panel
 from red_bar_lab.ui.historical_red_bar_v2_windows import _render_window_panel
 from red_bar_lab.ui.red_bar_v2_promotion_panel import render_red_bar_v2_promotion_panel
@@ -80,6 +81,7 @@ def _render_reservation_boundary(settings: RedBarSettings, bundle_id: str | None
 def _render_execution_boundaries(settings: RedBarSettings, bundle_id: str | None) -> None:
     _render_reservation_boundary(settings, bundle_id)
     render_canonical_paper_execution_panel(st, settings, bundle_id)
+    render_canonical_paper_canary_panel(st, settings)
 
 
 def _render_shadow_observability(settings: RedBarSettings, instrument_key: str) -> None:
