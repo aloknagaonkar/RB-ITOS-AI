@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import sqlite3
 
 from .reservation_models import (
     CanonicalBundleReservation,
@@ -68,7 +69,7 @@ class RedBarV2CanonicalReservationService:
                 feature_enabled=True,
                 maximum_bundle_age_seconds=self._maximum_bundle_age_seconds,
             )
-        except ReservationStorageError:
+        except (ReservationStorageError, sqlite3.Error):
             return self._storage_unavailable()
 
     def release(
@@ -88,7 +89,7 @@ class RedBarV2CanonicalReservationService:
                 released_at=released_at,
                 reason_code=reason_code,
             )
-        except ReservationStorageError:
+        except (ReservationStorageError, sqlite3.Error):
             return self._storage_unavailable()
 
     def get_active(
@@ -101,5 +102,5 @@ class RedBarV2CanonicalReservationService:
             return None
         try:
             return self._repository.get_active(bundle_id=bundle_id, at=at)
-        except ReservationStorageError:
+        except (ReservationStorageError, sqlite3.Error):
             return None
