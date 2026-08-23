@@ -164,7 +164,6 @@ class PaperCanaryPrerequisites:
             and self.paper_execution_enabled
             and self.paper_execution_mode == "PAPER_CANARY"
             and self.worker_enabled
-            and self.market_session_active
         )
 
 
