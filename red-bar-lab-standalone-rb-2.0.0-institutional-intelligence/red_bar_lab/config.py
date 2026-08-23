@@ -12,6 +12,11 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _bounded_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    raw = int(os.getenv(name, str(default)))
+    return min(max(raw, minimum), maximum)
+
+
 @dataclass(frozen=True)
 class RedBarSettings:
     app_name: str = "Red Bar Strategy Lab"
@@ -22,6 +27,9 @@ class RedBarSettings:
     default_underlying: str = "NIFTY 50"
     default_interval_minutes: int = 1
     red_bar_v2_canonical_shadow_enabled: bool = False
+    red_bar_v2_canonical_reservation_enabled: bool = False
+    red_bar_v2_canonical_reservation_lease_seconds: int = 30
+    red_bar_v2_canonical_reservation_max_bundle_age_seconds: int = 120
 
     @property
     def database_path(self) -> Path:
@@ -55,6 +63,22 @@ class RedBarSettings:
             red_bar_v2_canonical_shadow_enabled=_env_bool(
                 "RED_BAR_V2_CANONICAL_SHADOW_ENABLED",
                 False,
+            ),
+            red_bar_v2_canonical_reservation_enabled=_env_bool(
+                "RED_BAR_V2_CANONICAL_RESERVATION_ENABLED",
+                False,
+            ),
+            red_bar_v2_canonical_reservation_lease_seconds=_bounded_int(
+                "RED_BAR_V2_CANONICAL_RESERVATION_LEASE_SECONDS",
+                30,
+                5,
+                300,
+            ),
+            red_bar_v2_canonical_reservation_max_bundle_age_seconds=_bounded_int(
+                "RED_BAR_V2_CANONICAL_RESERVATION_MAX_BUNDLE_AGE_SECONDS",
+                120,
+                5,
+                3600,
             ),
         )
 
