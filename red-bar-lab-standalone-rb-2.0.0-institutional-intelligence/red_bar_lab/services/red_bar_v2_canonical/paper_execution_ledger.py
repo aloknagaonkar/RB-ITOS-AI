@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from .paper_execution_identity import build_execution_event_id, payload_sha256
 from .paper_execution_models import PaperExecutionEventType, PaperExecutionState
 from .paper_execution_repository import (
@@ -10,16 +12,6 @@ from .paper_execution_repository import (
     command_from_payload,
 )
 
-
-_EVENT_RANK = {
-    PaperExecutionEventType.COMMAND_PREPARED: 10,
-    PaperExecutionEventType.SUBMISSION_STARTED: 20,
-    PaperExecutionEventType.SUBMISSION_UNCERTAIN: 30,
-    PaperExecutionEventType.PAPER_ACCEPTED: 40,
-    PaperExecutionEventType.RECOVERY_REQUIRED: 50,
-    PaperExecutionEventType.PAPER_FILLED: 60,
-    PaperExecutionEventType.PAPER_REJECTED: 60,
-}
 
 _EVENT_TARGET = {
     PaperExecutionEventType.COMMAND_PREPARED: PaperExecutionState.PREPARED,
@@ -114,11 +106,17 @@ class StrictSQLiteCanonicalPaperExecutionRepository(
         derived_state: PaperExecutionState | None = None
         previous_timestamp = None
         for item in event_rows:
-            metadata = str(item["metadata_json"])
-            if payload_sha256(metadata) != str(item["metadata_sha256"]):
+            metadata_json = str(item["metadata_json"])
+            if payload_sha256(metadata_json) != str(item["metadata_sha256"]):
                 raise PaperExecutionCorruptionError(
                     "paper execution event digest mismatch"
                 )
+            try:
+                metadata = json.loads(metadata_json)
+            except Exception as exc:
+                raise PaperExecutionCorruptionError(
+                    "paper execution event metadata schema mismatch"
+                ) from exc
             timestamp = _aware(item["event_timestamp"], "event_timestamp")
             if previous_timestamp is not None and timestamp < previous_timestamp:
                 raise PaperExecutionCorruptionError(
@@ -131,6 +129,15 @@ class StrictSQLiteCanonicalPaperExecutionRepository(
                 raise PaperExecutionCorruptionError(
                     "unknown paper execution event type"
                 ) from exc
+            target_state = _EVENT_TARGET[event_type]
+            if (
+                metadata.get("execution_id") != command.execution_id
+                or metadata.get("command_id") != command.command_id
+                or metadata.get("state") != target_state.value
+            ):
+                raise PaperExecutionCorruptionError(
+                    "paper execution event metadata mismatch"
+                )
             expected_id = build_execution_event_id(
                 execution_id=command.execution_id,
                 event_type=event_type.value,
@@ -149,7 +156,7 @@ class StrictSQLiteCanonicalPaperExecutionRepository(
                 raise PaperExecutionCorruptionError(
                     "paper execution lifecycle transition mismatch"
                 )
-            derived_state = _EVENT_TARGET[event_type]
+            derived_state = target_state
             events.append(
                 (
                     event_type,
