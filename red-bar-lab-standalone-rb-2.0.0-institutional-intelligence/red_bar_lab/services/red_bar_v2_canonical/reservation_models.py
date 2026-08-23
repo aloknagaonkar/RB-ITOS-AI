@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
-from enum import StrEnum
+
+try:
+    from enum import StrEnum
+except ImportError:  # pragma: no cover - Python 3.10 compatibility
+    from enum import Enum
+
+    class StrEnum(str, Enum):
+        """Compatibility implementation for Python 3.10."""
 
 from red_bar_lab.domain.red_bar_v2 import Direction, EntryType, OptionSide
 
@@ -69,8 +76,14 @@ class CanonicalBundleReservation:
 
     def __post_init__(self) -> None:
         for name in (
-            "reservation_id", "bundle_id", "signal_id", "idempotency_key",
-            "strategy_id", "strategy_version", "instrument_key", "owner_id",
+            "reservation_id",
+            "bundle_id",
+            "signal_id",
+            "idempotency_key",
+            "strategy_id",
+            "strategy_version",
+            "instrument_key",
+            "owner_id",
             "schema_version",
         ):
             _text(name, getattr(self, name))
@@ -89,6 +102,16 @@ class CanonicalBundleReservation:
             if self.released_at is None or not self.release_reason:
                 raise ValueError("terminal reservation requires release timestamp and reason")
             _aware("released_at", self.released_at)
+        from .reservation_identity import build_reservation_id
+
+        expected_id = build_reservation_id(
+            bundle_id=self.bundle_id,
+            idempotency_key=self.idempotency_key,
+            owner_id=self.owner_id,
+            lease_epoch=self.reserved_at,
+        )
+        if self.reservation_id != expected_id:
+            raise ValueError("reservation_id does not match canonical lease identity")
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +139,12 @@ class ReservationEvent:
     reason_code: str
 
     def __post_init__(self) -> None:
-        for name in ("event_id", "reservation_id", "bundle_id", "owner_id", "reason_code"):
+        for name in (
+            "event_id",
+            "reservation_id",
+            "bundle_id",
+            "owner_id",
+            "reason_code",
+        ):
             _text(name, getattr(self, name))
         _aware("event_timestamp", self.event_timestamp)
