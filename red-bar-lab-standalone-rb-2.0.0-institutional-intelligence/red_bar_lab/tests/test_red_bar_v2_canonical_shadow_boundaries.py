@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from red_bar_lab.services.red_bar_v2_canonical import (
@@ -10,10 +12,67 @@ from red_bar_lab.services.red_bar_v2_canonical import (
     RedBarV2CanonicalPersistenceService,
     RedBarV2CanonicalShadowCoordinator,
     SQLiteRedBarV2CanonicalRepository,
+    build_runtime_market_metadata,
+    build_runtime_source_replay_id,
 )
-from red_bar_lab.tests.test_red_bar_v2_canonical_shadow_runtime import (
-    _real_event_fixture,
+from red_bar_lab.services.red_bar_v2_futures_historical_replay import (
+    replay_red_bar_v2_day_with_futures_vwap,
 )
+
+IST = timezone(timedelta(hours=5, minutes=30))
+UNDERLYING = "NSE_INDEX|Nifty 50"
+FUTURES = "NSE_FO|NIFTY-FUT"
+
+
+def _candles(closes: list[float], volumes: list[float]) -> pd.DataFrame:
+    timestamps = pd.date_range(
+        datetime(2026, 8, 24, 9, 15, tzinfo=IST),
+        periods=len(closes),
+        freq="1min",
+    )
+    opens = [closes[0] - 0.2, *closes[:-1]]
+    return pd.DataFrame(
+        {
+            "open": opens,
+            "high": [max(o, c) + 0.4 for o, c in zip(opens, closes)],
+            "low": [min(o, c) - 0.4 for o, c in zip(opens, closes)],
+            "close": closes,
+            "volume": volumes,
+        },
+        index=timestamps,
+    )
+
+
+def _real_event_fixture():
+    index_closes = [100.0, 101.0, 102.0, 103.0, 104.0]
+    index_closes += [103.0, 101.0, 99.0, 97.0, 95.0]
+    index_closes += [96.0 + index * 0.9 for index in range(40)]
+    futures_closes = [200.0 + index * 0.6 for index in range(50)]
+    replay, health = replay_red_bar_v2_day_with_futures_vwap(
+        _candles(index_closes, [10.0 + index for index in range(50)]),
+        _candles(futures_closes, [1000.0 + index * 10.0 for index in range(50)]),
+        instrument_key=UNDERLYING,
+        vwap_instrument_key=FUTURES,
+    )
+    event = next(
+        item
+        for item in replay.events
+        if item.event_type == "CANDIDATE_ADMISSION" and item.candidate_allowed is True
+    )
+    metadata = build_runtime_market_metadata(
+        replay=replay,
+        health=health,
+        event=event,
+        instrument_key=UNDERLYING,
+        futures_instrument_key=FUTURES,
+        futures_expiry="2026-08-27",
+    )
+    source_id = build_runtime_source_replay_id(
+        instrument_key=UNDERLYING,
+        trading_date=replay.trading_date,
+        event=event,
+    )
+    return replay, health, event, metadata, source_id
 
 
 def _coordinator(path: Path):
