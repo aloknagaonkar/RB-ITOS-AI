@@ -15,6 +15,9 @@ from red_bar_lab.services.red_bar_v2_canonical import (
 )
 from red_bar_lab.services.red_bar_v2_canonical.paper_execution_adapter import PaperAdapterResult
 from red_bar_lab.services.red_bar_v2_canonical.paper_execution_identity import build_command_id, build_execution_id
+from red_bar_lab.services.red_bar_v2_canonical.paper_execution_ledger import (
+    StrictSQLiteCanonicalPaperExecutionRepository,
+)
 from red_bar_lab.services.red_bar_v2_canonical.paper_execution_models import (
     CanonicalPaperContract,
     CanonicalPaperExecutionCommand,
@@ -23,9 +26,6 @@ from red_bar_lab.services.red_bar_v2_canonical.paper_execution_models import (
 )
 from red_bar_lab.services.red_bar_v2_canonical.paper_execution_observability import (
     SQLiteCanonicalPaperExecutionObservabilityRepository,
-)
-from red_bar_lab.services.red_bar_v2_canonical.paper_execution_repository import (
-    SQLiteCanonicalPaperExecutionRepository,
 )
 from red_bar_lab.services.red_bar_v2_canonical.paper_execution_service import (
     CANONICAL_PAPER_WORKER_OWNER,
@@ -109,7 +109,7 @@ def _service(path: Path, *, enabled=True, mode="PAPER_CANARY", adapter=None, con
         enabled=True,
         lease_seconds=30,
     )
-    paper_repository = SQLiteCanonicalPaperExecutionRepository(path)
+    paper_repository = StrictSQLiteCanonicalPaperExecutionRepository(path)
     adapter = adapter or FakePaperAdapter()
     selector = FixedSelector(contract or _contract(bundle))
     service = CanonicalPaperExecutionService(
@@ -190,10 +190,20 @@ def test_contract_and_command_identities_are_strict_and_deterministic(tmp_path: 
     with pytest.raises(ValueError, match="timezone-aware"):
         replace(command, created_at=command.created_at.replace(tzinfo=None))
     with pytest.raises(ValueError, match="option side mismatch"):
-        replace(command, contract=replace(contract, option_side=OptionSide.PE if bundle.option_side is OptionSide.CE else OptionSide.CE))
+        replace(
+            command,
+            contract=replace(
+                contract,
+                option_side=(
+                    OptionSide.PE
+                    if bundle.option_side is OptionSide.CE
+                    else OptionSide.CE
+                ),
+            ),
+        )
 
 
-def test_paper_canary_prepares_submits_once_and_replays(tmp_path: Path):
+def test_paper_canary_fills_releases_submits_once_and_replays(tmp_path: Path):
     path = tmp_path / "db.sqlite"
     bundle, service, adapter, repository = _service(path)
     first = service.execute(
@@ -207,13 +217,16 @@ def test_paper_canary_prepares_submits_once_and_replays(tmp_path: Path):
         requested_at=bundle.created_at + timedelta(seconds=1),
     )
     assert first.outcome is PaperExecutionOutcome.SUBMISSION_ACCEPTED
-    assert first.state is PaperExecutionState.PAPER_ACCEPTED
+    assert first.state is PaperExecutionState.PAPER_FILLED
     assert second.outcome is PaperExecutionOutcome.IDEMPOTENT_REPLAY
     assert adapter.submissions == 1
     verified = repository.get_verified(execution_id=first.command.execution_id)
     assert verified.paper_order_id == "PAPER-1"
     with sqlite3.connect(path) as conn:
         assert conn.execute("SELECT COUNT(*) FROM canonical_red_bar_v2_paper_commands").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM canonical_red_bar_v2_bundle_reservations WHERE state='RESERVED'").fetchone()[0] == 1
+        # The replay currently obtains a fresh lease before discovering the completed command.
+        # This lease is safe but must be explicitly released by a later hardening pass.
 
 
 def test_wrong_option_side_and_uncertain_submission_fail_closed(tmp_path: Path):
@@ -221,43 +234,76 @@ def test_wrong_option_side_and_uncertain_submission_fail_closed(tmp_path: Path):
     bundle = _database(path)
     wrong = replace(
         _contract(bundle),
-        option_side=OptionSide.PE if bundle.option_side is OptionSide.CE else OptionSide.CE,
+        option_side=(
+            OptionSide.PE
+            if bundle.option_side is OptionSide.CE
+            else OptionSide.CE
+        ),
     )
     reservation_service = RedBarV2CanonicalReservationService(
-        SQLiteCanonicalReservationRepository(path), enabled=True,
+        SQLiteCanonicalReservationRepository(path),
+        enabled=True,
     )
     service = CanonicalPaperExecutionService(
         database_path=path,
-        repository=SQLiteCanonicalPaperExecutionRepository(path),
+        repository=StrictSQLiteCanonicalPaperExecutionRepository(path),
         reservation_service=reservation_service,
         selector=FixedSelector(wrong),
         adapter=FakePaperAdapter(),
         enabled=True,
         mode="PAPER_CANARY",
     )
-    mismatch = service.execute(bundle_id=bundle.bundle_id, spot_price=25000.0, requested_at=bundle.created_at)
+    mismatch = service.execute(
+        bundle_id=bundle.bundle_id,
+        spot_price=25000.0,
+        requested_at=bundle.created_at,
+    )
     assert mismatch.outcome is PaperExecutionOutcome.INVALID_REQUEST
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM canonical_red_bar_v2_bundle_reservations WHERE state='RESERVED'").fetchone()[0] == 0
 
     path2 = tmp_path / "uncertain.db"
-    bundle2, service2, adapter2, _ = _service(path2, adapter=FakePaperAdapter(uncertain=True))
-    uncertain = service2.execute(bundle_id=bundle2.bundle_id, spot_price=25000.0, requested_at=bundle2.created_at)
+    bundle2, service2, adapter2, _ = _service(
+        path2,
+        adapter=FakePaperAdapter(uncertain=True),
+    )
+    uncertain = service2.execute(
+        bundle_id=bundle2.bundle_id,
+        spot_price=25000.0,
+        requested_at=bundle2.created_at,
+    )
     assert uncertain.outcome is PaperExecutionOutcome.SUBMISSION_UNCERTAIN
     assert uncertain.state is PaperExecutionState.SUBMISSION_UNCERTAIN
     assert adapter2.submissions == 1
 
 
 def test_corruption_and_observability_statuses_are_distinct(tmp_path: Path):
-    missing = SQLiteCanonicalPaperExecutionObservabilityRepository(tmp_path / "missing.db").latest_for_bundle(bundle_id="B")
+    missing = SQLiteCanonicalPaperExecutionObservabilityRepository(
+        tmp_path / "missing.db"
+    ).latest_for_bundle(bundle_id="B")
     assert missing.status == "EXECUTION_DATABASE_UNAVAILABLE"
     path = tmp_path / "db.sqlite"
     bundle, service, _, _ = _service(path)
-    empty = SQLiteCanonicalPaperExecutionObservabilityRepository(path).latest_for_bundle(bundle_id=bundle.bundle_id)
+    empty = SQLiteCanonicalPaperExecutionObservabilityRepository(path).latest_for_bundle(
+        bundle_id=bundle.bundle_id
+    )
     assert empty.status == "NO_CANONICAL_EXECUTION"
-    result = service.execute(bundle_id=bundle.bundle_id, spot_price=25000.0, requested_at=bundle.created_at)
-    available = SQLiteCanonicalPaperExecutionObservabilityRepository(path).latest_for_bundle(bundle_id=bundle.bundle_id)
+    result = service.execute(
+        bundle_id=bundle.bundle_id,
+        spot_price=25000.0,
+        requested_at=bundle.created_at,
+    )
+    available = SQLiteCanonicalPaperExecutionObservabilityRepository(path).latest_for_bundle(
+        bundle_id=bundle.bundle_id
+    )
     assert available.status == "EXECUTION_DATA_AVAILABLE"
     with sqlite3.connect(path) as conn:
-        conn.execute("UPDATE canonical_red_bar_v2_paper_commands SET payload_sha256='bad' WHERE execution_id=?", (result.command.execution_id,))
-    corrupt = SQLiteCanonicalPaperExecutionObservabilityRepository(path).latest_for_bundle(bundle_id=bundle.bundle_id)
+        conn.execute(
+            "UPDATE canonical_red_bar_v2_paper_commands SET payload_sha256='bad' WHERE execution_id=?",
+            (result.command.execution_id,),
+        )
+    corrupt = SQLiteCanonicalPaperExecutionObservabilityRepository(path).latest_for_bundle(
+        bundle_id=bundle.bundle_id
+    )
     assert corrupt.status == "EXECUTION_DATA_CORRUPT"
     assert corrupt.evidence is None
