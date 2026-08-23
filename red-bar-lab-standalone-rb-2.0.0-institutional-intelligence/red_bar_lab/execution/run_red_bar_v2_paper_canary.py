@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, time
+from enum import Enum
 import os
 from pathlib import Path
 import signal
@@ -12,11 +13,14 @@ from red_bar_lab.brokers.zerodha_client import ZerodhaKiteClient
 from red_bar_lab.config import RedBarSettings
 from red_bar_lab.execution.paper_engine import RedBarPaperExecutionEngine
 from red_bar_lab.services.red_bar_v2_canonical.paper_canary_models import (
+    PaperCanaryCircuitState,
     PaperCanaryCycleOutcome,
     PaperCanaryCycleResult,
     PaperCanaryPolicy,
     PaperCanaryPrerequisites,
+    PaperCanaryRuntimeState,
     PaperCanaryWorkerStatus,
+    initial_runtime_state,
 )
 from red_bar_lab.services.red_bar_v2_canonical.paper_canary_repository import (
     SQLiteCanonicalPaperCandidateRepository,
@@ -26,6 +30,7 @@ from red_bar_lab.services.red_bar_v2_canonical.paper_canary_runtime import (
 )
 from red_bar_lab.services.red_bar_v2_canonical.paper_canary_state_store import (
     AtomicJsonPaperCanaryStateStore,
+    PaperCanaryStateCorruptionError,
     PaperCanaryStateStorageError,
 )
 from red_bar_lab.services.red_bar_v2_canonical.paper_execution_adapter import (
@@ -52,6 +57,71 @@ from red_bar_lab.storage.database import RedBarDatabase
 IST = ZoneInfo("Asia/Kolkata")
 
 
+class PaperCanaryStartupAction(str, Enum):
+    DISABLED = "DISABLED"
+    OBSERVE_ONLY = "OBSERVE_ONLY"
+    CONFIGURATION_INVALID = "CONFIGURATION_INVALID"
+    PAPER_CANARY = "PAPER_CANARY"
+
+
+@dataclass(frozen=True, slots=True)
+class PaperCanaryStartupDecision:
+    action: PaperCanaryStartupAction
+    reason_code: str
+    runtime_construction_allowed: bool
+
+
+def evaluate_paper_canary_startup(
+    settings: RedBarSettings,
+) -> PaperCanaryStartupDecision:
+    """Pure startup policy. Reads settings only and performs no I/O."""
+    if not settings.red_bar_v2_paper_canary_worker_enabled:
+        return PaperCanaryStartupDecision(
+            PaperCanaryStartupAction.DISABLED,
+            "WORKER_DISABLED",
+            False,
+        )
+    mode = settings.red_bar_v2_canonical_paper_execution_mode
+    if mode == "OBSERVE_ONLY":
+        return PaperCanaryStartupDecision(
+            PaperCanaryStartupAction.OBSERVE_ONLY,
+            "OBSERVE_ONLY",
+            False,
+        )
+    if mode != "PAPER_CANARY":
+        return PaperCanaryStartupDecision(
+            PaperCanaryStartupAction.CONFIGURATION_INVALID,
+            "INVALID_PAPER_EXECUTION_MODE",
+            False,
+        )
+    prerequisites = (
+        (
+            settings.red_bar_v2_canonical_shadow_enabled,
+            "CANONICAL_SHADOW_DISABLED",
+        ),
+        (
+            settings.red_bar_v2_canonical_reservation_enabled,
+            "CANONICAL_RESERVATION_DISABLED",
+        ),
+        (
+            settings.red_bar_v2_canonical_paper_execution_enabled,
+            "CANONICAL_PAPER_EXECUTION_DISABLED",
+        ),
+    )
+    for enabled, reason_code in prerequisites:
+        if not enabled:
+            return PaperCanaryStartupDecision(
+                PaperCanaryStartupAction.CONFIGURATION_INVALID,
+                reason_code,
+                False,
+            )
+    return PaperCanaryStartupDecision(
+        PaperCanaryStartupAction.PAPER_CANARY,
+        "PAPER_CANARY_STARTUP_ALLOWED",
+        True,
+    )
+
+
 def _market_session_active(now: datetime | None = None) -> bool:
     current = (now or datetime.now(IST)).astimezone(IST)
     return (
@@ -71,7 +141,31 @@ class _SessionClosedCandidateRepository:
 
 
 class SessionAwarePaperCanaryRuntime(PaperCanaryRuntime):
-    """Runs recovery first off-session, while making entry impossible."""
+    """Runs recovery first off-session and records escaped process failures."""
+
+    def record_process_boundary_failure(
+        self,
+        *,
+        failed_at: datetime,
+        reason_code: str,
+    ) -> PaperCanaryRuntimeState:
+        if (
+            not isinstance(failed_at, datetime)
+            or failed_at.tzinfo is None
+            or failed_at.utcoffset() is None
+        ):
+            raise ValueError("failed_at must be timezone-aware")
+        if not isinstance(reason_code, str) or not reason_code.strip():
+            raise ValueError("reason_code must be non-empty")
+        # Corrupt/unreadable prior state is never hidden or replaced.
+        state = self.state_store.load() or initial_runtime_state()
+        failed = self._failure_state(
+            state,
+            now=failed_at,
+            reason=reason_code,
+            status=PaperCanaryWorkerStatus.ENTRY_SUSPENDED,
+        )
+        return self._safe_save(failed)
 
     def run_cycle(self):
         cycle_now = self.clock.now()
@@ -86,7 +180,10 @@ class SessionAwarePaperCanaryRuntime(PaperCanaryRuntime):
             self.candidate_repository = _SessionClosedCandidateRepository()
         try:
             result = super().run_cycle()
-            if not session_active and result.outcome is PaperCanaryCycleOutcome.HEALTHY_IDLE:
+            if (
+                not session_active
+                and result.outcome is PaperCanaryCycleOutcome.HEALTHY_IDLE
+            ):
                 suspended = replace(
                     result.state,
                     worker_status=PaperCanaryWorkerStatus.ENTRY_SUSPENDED,
@@ -99,7 +196,10 @@ class SessionAwarePaperCanaryRuntime(PaperCanaryRuntime):
                     return PaperCanaryCycleResult(
                         PaperCanaryCycleOutcome.STORAGE_UNAVAILABLE,
                         "RUNTIME_STATE_SAVE_FAILED",
-                        replace(suspended, persistence_status="STATE_UNAVAILABLE"),
+                        replace(
+                            suspended,
+                            persistence_status="STATE_UNAVAILABLE",
+                        ),
                         result.execution_results,
                     )
                 return PaperCanaryCycleResult(
@@ -115,41 +215,91 @@ class SessionAwarePaperCanaryRuntime(PaperCanaryRuntime):
 
 
 class PaperCanaryProcessLock:
-    """Fail-closed single-process ownership using an exclusive lock file."""
+    """Non-blocking OS ownership lock with bounded PID metadata."""
 
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
-        self._fd: int | None = None
+        self._file = None
+        self._locked = False
+
+    def _try_os_lock(self) -> None:
+        if os.name == "nt":
+            import msvcrt
+
+            self._file.seek(0)
+            msvcrt.locking(self._file.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(
+                self._file.fileno(),
+                fcntl.LOCK_EX | fcntl.LOCK_NB,
+            )
+
+    def _unlock(self) -> None:
+        if os.name == "nt":
+            import msvcrt
+
+            self._file.seek(0)
+            msvcrt.locking(self._file.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(self._file.fileno(), fcntl.LOCK_UN)
 
     def acquire(self) -> bool:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            self._fd = os.open(
-                self.path,
-                os.O_CREAT | os.O_EXCL | os.O_WRONLY,
-                0o600,
-            )
-            os.write(self._fd, str(os.getpid()).encode("ascii"))
-            os.fsync(self._fd)
+        if self._locked:
             return True
-        except FileExistsError:
-            self._fd = None
-            return False
-        except OSError:
-            self._fd = None
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self._file = self.path.open("a+b")
+            if self.path.stat().st_size == 0:
+                self._file.write(b"0")
+                self._file.flush()
+            self._try_os_lock()
+            self._locked = True
+            metadata = f"pid={os.getpid()}\n".encode("ascii")
+            self._file.seek(0)
+            self._file.truncate(0)
+            self._file.write(metadata[:64])
+            self._file.flush()
+            os.fsync(self._file.fileno())
+            return True
+        except (OSError, BlockingIOError):
+            if self._file is not None:
+                try:
+                    self._file.close()
+                except OSError:
+                    pass
+            self._file = None
+            self._locked = False
             return False
 
     def release(self) -> None:
-        if self._fd is not None:
+        if self._file is None:
+            self._locked = False
+            return
+        try:
+            if self._locked:
+                try:
+                    self._unlock()
+                except OSError:
+                    pass
+        finally:
             try:
-                os.close(self._fd)
+                self._file.close()
             except OSError:
                 pass
-            self._fd = None
-        try:
-            self.path.unlink(missing_ok=True)
-        except OSError:
-            pass
+            self._file = None
+            self._locked = False
+
+    def __enter__(self) -> PaperCanaryProcessLock:
+        if not self.acquire():
+            raise RuntimeError("PAPER_CANARY_PROCESS_OWNERSHIP_UNAVAILABLE")
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        self.release()
 
 
 def build_runtime(settings: RedBarSettings) -> PaperCanaryRuntime:
@@ -248,6 +398,9 @@ def build_runtime(settings: RedBarSettings) -> PaperCanaryRuntime:
 
 
 def run_once(settings: RedBarSettings):
+    decision = evaluate_paper_canary_startup(settings)
+    if not decision.runtime_construction_allowed:
+        raise RuntimeError(decision.reason_code)
     return build_runtime(settings).run_cycle()
 
 
@@ -274,17 +427,35 @@ def emit_bounded_status(result) -> None:
     )
 
 
+def _emit_startup(decision: PaperCanaryStartupDecision) -> None:
+    print(
+        "paper_canary "
+        f"outcome={decision.action.value} "
+        f"reason={decision.reason_code}"
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     settings = RedBarSettings.from_env()
-    if not settings.red_bar_v2_paper_canary_worker_enabled:
-        print("Canonical paper-canary worker is disabled.")
+    decision = evaluate_paper_canary_startup(settings)
+    if decision.action in {
+        PaperCanaryStartupAction.DISABLED,
+        PaperCanaryStartupAction.OBSERVE_ONLY,
+    }:
+        _emit_startup(decision)
         return 0
+    if decision.action is PaperCanaryStartupAction.CONFIGURATION_INVALID:
+        _emit_startup(decision)
+        return 2
 
     process_lock = PaperCanaryProcessLock(
         settings.artifacts_root / "red_bar_v2_paper_canary.lock"
     )
     if not process_lock.acquire():
-        print("Canonical paper-canary worker ownership is unavailable.")
+        print(
+            "paper_canary outcome=ENTRY_SUSPENDED "
+            "reason=PROCESS_OWNERSHIP_UNAVAILABLE"
+        )
         return 3
 
     stop_requested = Event()
@@ -293,17 +464,36 @@ def main(argv: list[str] | None = None) -> int:
         try:
             runtime = build_runtime(settings)
         except Exception:
-            print("Canonical paper-canary configuration is unavailable.")
+            print(
+                "paper_canary outcome=CONFIGURATION_INVALID "
+                "reason=RUNTIME_CONSTRUCTION_FAILED"
+            )
             return 2
 
         while not stop_requested.is_set():
             try:
                 emit_bounded_status(runtime.run_cycle())
             except Exception:
-                print(
-                    "paper_canary outcome=ENTRY_SUSPENDED "
-                    "reason=WORKER_CYCLE_FAILED"
-                )
+                try:
+                    state = runtime.record_process_boundary_failure(
+                        failed_at=runtime.clock.now(),
+                        reason_code="WORKER_CYCLE_FAILED",
+                    )
+                    print(
+                        "paper_canary outcome=ENTRY_SUSPENDED "
+                        "reason=WORKER_CYCLE_FAILED "
+                        f"circuit={state.circuit_state.value}"
+                    )
+                except (
+                    PaperCanaryStateStorageError,
+                    PaperCanaryStateCorruptionError,
+                    OSError,
+                ):
+                    print(
+                        "paper_canary outcome=STORAGE_UNAVAILABLE "
+                        "reason=RUNTIME_STATE_FAILURE_UNPERSISTED"
+                    )
+                    return 4
             stop_requested.wait(
                 settings.red_bar_v2_paper_canary_poll_seconds
             )
