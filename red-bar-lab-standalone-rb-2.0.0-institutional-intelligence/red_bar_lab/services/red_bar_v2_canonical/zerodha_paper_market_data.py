@@ -45,13 +45,19 @@ class ZerodhaPaperCanaryMarketData:
         except ZerodhaAPIError as exc:
             raise PaperMarketDataUnavailableError("Zerodha instruments unavailable") from exc
         output: list[PaperOptionInstrument] = []
+        seen: set[str] = set()
         for _, row in frame.iterrows():
             try:
                 side = OptionSide(str(row["instrument_type"]))
                 token = int(row["instrument_token"])
-                symbol = str(row["tradingsymbol"])
-                exchange = str(row.get("exchange") or "NFO")
+                symbol = str(row["tradingsymbol"]).strip()
+                exchange = str(row.get("exchange") or "NFO").strip()
                 key = f"{exchange}|{token}"
+                if not symbol or key in seen:
+                    raise PaperMarketDataCorruptionError(
+                        "Zerodha contract identity missing or duplicated"
+                    )
+                seen.add(key)
                 output.append(PaperOptionInstrument(
                     instrument_key=key,
                     instrument_token=token,
@@ -64,8 +70,12 @@ class ZerodhaPaperCanaryMarketData:
                     provider=self.provider_name,
                 ))
                 self._symbol_to_key[f"{exchange}:{symbol}"] = key
-            except (KeyError, TypeError, ValueError):
-                continue
+            except PaperMarketDataCorruptionError:
+                raise
+            except (KeyError, TypeError, ValueError) as exc:
+                raise PaperMarketDataCorruptionError(
+                    "malformed Zerodha option contract"
+                ) from exc
         return tuple(output)
 
     def quotes(self, *, instrument_keys: tuple[str, ...], evaluated_at: datetime) -> tuple[PaperMarketQuote, ...]:
@@ -89,15 +99,20 @@ class ZerodhaPaperCanaryMarketData:
             buy = depth.get("buy") or []
             sell = depth.get("sell") or []
             timestamp = self._timestamp(row.get("timestamp") or row.get("last_trade_time"))
-            quote = PaperMarketQuote(
-                instrument_key=requested,
-                instrument_token=row.get("instrument_token") or requested.rsplit("|", 1)[-1],
-                last_price=row.get("last_price"),
-                bid_price=(buy[0].get("price") if buy else None),
-                ask_price=(sell[0].get("price") if sell else None),
-                quote_timestamp=timestamp,
-                provider=self.provider_name,
-            )
+            try:
+                quote = PaperMarketQuote(
+                    instrument_key=requested,
+                    instrument_token=row.get("instrument_token") or requested.rsplit("|", 1)[-1],
+                    last_price=row.get("last_price"),
+                    bid_price=(buy[0].get("price") if buy else None),
+                    ask_price=(sell[0].get("price") if sell else None),
+                    quote_timestamp=timestamp,
+                    provider=self.provider_name,
+                )
+            except (TypeError, ValueError) as exc:
+                raise PaperMarketDataCorruptionError(
+                    "malformed Zerodha quote values"
+                ) from exc
             verify_quote_freshness(
                 quote,
                 evaluated_at=evaluated_at,
