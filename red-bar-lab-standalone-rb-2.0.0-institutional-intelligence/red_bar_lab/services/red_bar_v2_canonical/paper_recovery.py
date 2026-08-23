@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import sqlite3
 
 from .paper_execution_adapter import CanonicalPaperAdapter
 from .paper_execution_ledger import StrictSQLiteCanonicalPaperExecutionRepository
@@ -78,6 +79,16 @@ class ControlledCanonicalPaperRecoveryService:
             and result.reservation is not None
         )
 
+    def _lookup_fail_closed(self, *, execution_id: str):
+        try:
+            return self.adapter.lookup(execution_id=execution_id), None
+        except (TimeoutError, ConnectionError, sqlite3.Error, OSError):
+            return None, "RECOVERY_LOOKUP_UNAVAILABLE"
+        except Exception:
+            # Defensive recovery-cycle boundary. No payload, quote, token or
+            # account data is logged or returned, and submission is never retried.
+            return None, "RECOVERY_LOOKUP_FAILED"
+
     def _finalize_reservation(
         self,
         *,
@@ -147,7 +158,20 @@ class ControlledCanonicalPaperRecoveryService:
                     )
                     continue
 
-                observed = self.adapter.lookup(execution_id=execution_id)
+                observed, lookup_failure = self._lookup_fail_closed(
+                    execution_id=execution_id
+                )
+                if lookup_failure is not None:
+                    results.append(
+                        PaperExecutionResult(
+                            PaperExecutionOutcome.RECOVERY_REQUIRED,
+                            lookup_failure,
+                            command=current.command,
+                            state=current.state,
+                            paper_order_id=current.paper_order_id,
+                        )
+                    )
+                    continue
                 if observed is None:
                     results.append(
                         PaperExecutionResult(
