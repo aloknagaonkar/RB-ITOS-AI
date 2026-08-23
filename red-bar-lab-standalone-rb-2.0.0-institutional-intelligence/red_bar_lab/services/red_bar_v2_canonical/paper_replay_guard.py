@@ -1,10 +1,27 @@
 from __future__ import annotations
 
 from datetime import datetime
+import sqlite3
 
 from .paper_execution_ledger import StrictSQLiteCanonicalPaperExecutionRepository
-from .paper_execution_models import PaperExecutionMode, PaperExecutionOutcome, PaperExecutionResult
+from .paper_execution_models import (
+    PaperExecutionMode,
+    PaperExecutionOutcome,
+    PaperExecutionResult,
+)
+from .paper_execution_repository import (
+    PaperExecutionConflictError,
+    PaperExecutionCorruptionError,
+    PaperExecutionStorageError,
+)
+from .paper_execution_safety import (
+    ReservationFinalizationRequired,
+    UncertainPaperAdapterBoundary,
+    VerifiedReservationFinalizationService,
+)
 from .paper_execution_service import CanonicalPaperExecutionService
+from .persistence_models import CanonicalPersistenceCorruptionError
+from .reservation_evidence_verification import ReservationCorruptionError
 
 
 class _SelectedContractSelector:
@@ -18,7 +35,7 @@ class _SelectedContractSelector:
 
 
 class ReplayGuardedCanonicalPaperService(CanonicalPaperExecutionService):
-    """Returns verified persisted paper evidence before acquiring another lease."""
+    """Fail-closed replay preflight and paper-only execution boundary."""
 
     repository: StrictSQLiteCanonicalPaperExecutionRepository | None
 
@@ -30,72 +47,124 @@ class ReplayGuardedCanonicalPaperService(CanonicalPaperExecutionService):
         requested_at: datetime,
         quantity_lots: int = 1,
     ) -> PaperExecutionResult:
-        if self.enabled and self.mode is PaperExecutionMode.PAPER_CANARY:
-            try:
-                canonical = self._read_canonical(bundle_id=bundle_id)
-                if self.repository is not None:
-                    previous = self.repository.find_by_idempotency_key(
-                        idempotency_key=canonical.bundle.idempotency_key
-                    )
-                    if previous is not None:
-                        return PaperExecutionResult(
-                            PaperExecutionOutcome.IDEMPOTENT_REPLAY,
-                            "IDEMPOTENT_REPLAY",
-                            command=previous.command,
-                            state=previous.state,
-                            paper_order_id=previous.paper_order_id,
-                        )
+        if not self.enabled or self.mode is not PaperExecutionMode.PAPER_CANARY:
+            return super().execute(
+                bundle_id=bundle_id,
+                spot_price=spot_price,
+                requested_at=requested_at,
+                quantity_lots=quantity_lots,
+            )
 
-                # Contract compatibility is a pre-reservation admission rule.
-                # A wrong CE/PE contract is terminal input rejection and must not
-                # create an active lease that then needs compensating cleanup.
-                if self.selector is not None:
-                    contract = self.selector.select(
-                        option_side=canonical.bundle.option_side.value,
-                        spot_price=float(spot_price),
-                        selected_at=requested_at,
-                    )
-                    if contract is None:
-                        return PaperExecutionResult(
-                            PaperExecutionOutcome.CONTRACT_UNAVAILABLE,
-                            "CONTRACT_UNAVAILABLE",
-                        )
-                    if contract.option_side is not canonical.bundle.option_side:
-                        return PaperExecutionResult(
-                            PaperExecutionOutcome.INVALID_REQUEST,
-                            "CONTRACT_OPTION_SIDE_MISMATCH",
-                        )
+        if self.repository is None or self.selector is None or self.adapter is None:
+            return PaperExecutionResult(
+                PaperExecutionOutcome.STORAGE_UNAVAILABLE,
+                "PREFLIGHT_DEPENDENCY_UNAVAILABLE",
+            )
+        if self.reservation_service is None:
+            return PaperExecutionResult(
+                PaperExecutionOutcome.STORAGE_UNAVAILABLE,
+                "RESERVATION_SERVICE_UNAVAILABLE",
+            )
 
-                    guarded = CanonicalPaperExecutionService(
-                        database_path=self.database_path,
-                        repository=self.repository,
-                        reservation_service=self.reservation_service,
-                        selector=_SelectedContractSelector(contract),
-                        adapter=self.adapter,
-                        enabled=self.enabled,
-                        mode=self.mode.value,
-                        owner_id=self.owner_id,
-                    )
-                    return guarded.execute(
-                        bundle_id=bundle_id,
-                        spot_price=spot_price,
-                        requested_at=requested_at,
-                        quantity_lots=quantity_lots,
-                    )
-            except LookupError:
+        try:
+            canonical = self._read_canonical(bundle_id=bundle_id)
+            previous = self.repository.find_by_idempotency_key(
+                idempotency_key=canonical.bundle.idempotency_key
+            )
+            if previous is not None:
                 return PaperExecutionResult(
-                    PaperExecutionOutcome.BUNDLE_UNAVAILABLE,
-                    "BUNDLE_NOT_FOUND",
+                    PaperExecutionOutcome.IDEMPOTENT_REPLAY,
+                    "IDEMPOTENT_REPLAY",
+                    command=previous.command,
+                    state=previous.state,
+                    paper_order_id=previous.paper_order_id,
                 )
-            except Exception as exc:
-                if exc.__class__.__name__.endswith("CorruptionError"):
-                    return PaperExecutionResult(
-                        PaperExecutionOutcome.BUNDLE_CORRUPT,
-                        "BUNDLE_CORRUPT",
-                    )
-        return super().execute(
-            bundle_id=bundle_id,
-            spot_price=spot_price,
-            requested_at=requested_at,
-            quantity_lots=quantity_lots,
-        )
+
+            contract = self.selector.select(
+                option_side=canonical.bundle.option_side.value,
+                spot_price=float(spot_price),
+                selected_at=requested_at,
+            )
+            if contract is None:
+                return PaperExecutionResult(
+                    PaperExecutionOutcome.CONTRACT_UNAVAILABLE,
+                    "CONTRACT_UNAVAILABLE",
+                )
+            if contract.option_side is not canonical.bundle.option_side:
+                return PaperExecutionResult(
+                    PaperExecutionOutcome.INVALID_REQUEST,
+                    "CONTRACT_OPTION_SIDE_MISMATCH",
+                )
+
+            guarded = CanonicalPaperExecutionService(
+                database_path=self.database_path,
+                repository=self.repository,
+                reservation_service=VerifiedReservationFinalizationService(
+                    self.reservation_service
+                ),
+                selector=_SelectedContractSelector(contract),
+                adapter=UncertainPaperAdapterBoundary(self.adapter),
+                enabled=True,
+                mode=PaperExecutionMode.PAPER_CANARY.value,
+                owner_id=self.owner_id,
+            )
+            return guarded.execute(
+                bundle_id=bundle_id,
+                spot_price=spot_price,
+                requested_at=requested_at,
+                quantity_lots=quantity_lots,
+            )
+        except LookupError:
+            return PaperExecutionResult(
+                PaperExecutionOutcome.BUNDLE_UNAVAILABLE,
+                "BUNDLE_NOT_FOUND",
+            )
+        except CanonicalPersistenceCorruptionError:
+            return PaperExecutionResult(
+                PaperExecutionOutcome.BUNDLE_CORRUPT,
+                "BUNDLE_CORRUPT",
+            )
+        except ReservationCorruptionError:
+            return PaperExecutionResult(
+                PaperExecutionOutcome.RESERVATION_CORRUPT,
+                "RESERVATION_CORRUPT",
+            )
+        except PaperExecutionCorruptionError:
+            return PaperExecutionResult(
+                PaperExecutionOutcome.RECOVERY_REQUIRED,
+                "EXECUTION_LEDGER_CORRUPT",
+            )
+        except PaperExecutionConflictError:
+            return PaperExecutionResult(
+                PaperExecutionOutcome.RECOVERY_REQUIRED,
+                "EXECUTION_LEDGER_CONFLICT",
+            )
+        except ReservationFinalizationRequired as exc:
+            try:
+                previous = self.repository.find_by_idempotency_key(
+                    idempotency_key=canonical.bundle.idempotency_key
+                )
+            except (PaperExecutionCorruptionError, PaperExecutionStorageError):
+                previous = None
+            return PaperExecutionResult(
+                PaperExecutionOutcome.RECOVERY_REQUIRED,
+                f"RESERVATION_FINALIZATION_REQUIRED:{exc.reason_code}",
+                command=previous.command if previous else None,
+                state=previous.state if previous else None,
+                paper_order_id=previous.paper_order_id if previous else None,
+            )
+        except (PaperExecutionStorageError, sqlite3.Error, OSError):
+            return PaperExecutionResult(
+                PaperExecutionOutcome.STORAGE_UNAVAILABLE,
+                "PREFLIGHT_STORAGE_UNAVAILABLE",
+            )
+        except (ValueError, TypeError):
+            return PaperExecutionResult(
+                PaperExecutionOutcome.INVALID_REQUEST,
+                "INVALID_PREFLIGHT_INPUT",
+            )
+        except Exception:
+            return PaperExecutionResult(
+                PaperExecutionOutcome.RECOVERY_REQUIRED,
+                "UNEXPECTED_PREFLIGHT_FAILURE",
+            )
