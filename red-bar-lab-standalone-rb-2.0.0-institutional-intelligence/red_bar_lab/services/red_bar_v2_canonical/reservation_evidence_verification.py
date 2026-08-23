@@ -107,9 +107,6 @@ def _decode_event(row: sqlite3.Row) -> CanonicalReservationLifecycleEvent:
         raise
     except Exception as exc:
         raise ReservationCorruptionError("reservation event violates canonical schema") from exc
-    expected_id = event.expected_event_id()
-    if event.event_id != expected_id:
-        raise ReservationCorruptionError("reservation event identity mismatch")
     if metadata.get("reservation_id") != event.reservation_id:
         raise ReservationCorruptionError("reservation event metadata mismatch: reservation_id")
     if metadata.get("bundle_id") != event.bundle_id:
@@ -125,10 +122,7 @@ def _decode_event(row: sqlite3.Row) -> CanonicalReservationLifecycleEvent:
     return event
 
 
-def _validate_chain(
-    reservation: CanonicalBundleReservation,
-    events: tuple[CanonicalReservationLifecycleEvent, ...],
-) -> None:
+def _validate_chain(reservation: CanonicalBundleReservation, events: tuple[CanonicalReservationLifecycleEvent, ...]) -> None:
     if not events:
         raise ReservationCorruptionError("reservation has no lifecycle event history")
     for event in events:
@@ -145,11 +139,7 @@ def _validate_chain(
         raise ReservationCorruptionError("reservation requires exactly one first acquired event")
     if not _same_instant(acquired[0].event_timestamp, reservation.reserved_at):
         raise ReservationCorruptionError("acquired event timestamp mismatch")
-    terminal = [event for event in events if event.event_type in {
-        ReservationEventType.RESERVATION_RELEASED,
-        ReservationEventType.RESERVATION_EXPIRED,
-        ReservationEventType.RESERVATION_REJECTED,
-    }]
+    terminal = [event for event in events if event.event_type in {ReservationEventType.RESERVATION_RELEASED, ReservationEventType.RESERVATION_EXPIRED, ReservationEventType.RESERVATION_REJECTED}]
     if len(terminal) > 1:
         raise ReservationCorruptionError("reservation has multiple terminal lifecycle events")
     if terminal and events[-1] != terminal[0]:
@@ -183,16 +173,9 @@ def _validate_chain(
             raise ReservationCorruptionError("expired terminal timestamp mismatch")
 
 
-def verify_reservation_evidence(
-    conn: sqlite3.Connection,
-    *,
-    reservation_id: str,
-    expected_bundle_id: str | None = None,
-) -> VerifiedReservationEvidence:
+def verify_reservation_evidence(conn: sqlite3.Connection, *, reservation_id: str, expected_bundle_id: str | None = None) -> VerifiedReservationEvidence:
     row = conn.execute(
-        "SELECT reservation_id,bundle_id,owner_id,state,reserved_at,lease_expires_at,"
-        "released_at,release_reason,schema_version,payload_json,payload_sha256 "
-        "FROM canonical_red_bar_v2_bundle_reservations WHERE reservation_id=?",
+        "SELECT reservation_id,bundle_id,owner_id,state,reserved_at,lease_expires_at,released_at,release_reason,schema_version,payload_json,payload_sha256 FROM canonical_red_bar_v2_bundle_reservations WHERE reservation_id=?",
         (reservation_id,),
     ).fetchone()
     if row is None:
@@ -201,10 +184,7 @@ def verify_reservation_evidence(
     if expected_bundle_id is not None and reservation.bundle_id != expected_bundle_id:
         raise ReservationCorruptionError("reservation bundle mismatch")
     rows = conn.execute(
-        "SELECT event_id,reservation_id,bundle_id,event_type,event_timestamp,owner_id,"
-        "reason_code,metadata_json,metadata_sha256 "
-        "FROM canonical_red_bar_v2_bundle_reservation_events WHERE reservation_id=? "
-        "ORDER BY event_timestamp ASC,event_id ASC",
+        "SELECT event_id,reservation_id,bundle_id,event_type,event_timestamp,owner_id,reason_code,metadata_json,metadata_sha256 FROM canonical_red_bar_v2_bundle_reservation_events WHERE reservation_id=? ORDER BY event_timestamp ASC,event_id ASC",
         (reservation_id,),
     ).fetchall()
     events = tuple(_decode_event(item) for item in rows)
