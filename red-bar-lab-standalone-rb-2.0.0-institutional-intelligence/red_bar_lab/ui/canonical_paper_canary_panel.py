@@ -1,0 +1,78 @@
+from __future__ import annotations
+
+import pandas as pd
+
+from red_bar_lab.services.red_bar_v2_canonical.paper_canary_observability import (
+    PaperCanaryRuntimeObservabilityService,
+)
+
+
+def _text(value: object | None) -> str:
+    if value is None:
+        return "—"
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
+def render_canonical_paper_canary_panel(st, settings) -> None:
+    st.markdown("### 10. Canonical paper-canary runtime")
+    st.warning(
+        "PAPER ONLY — this panel is read-only. It cannot start the worker, "
+        "run recovery, submit an order, reset the circuit or repair state."
+    )
+    observation = PaperCanaryRuntimeObservabilityService(
+        settings.paper_canary_state_path
+    ).load(
+        worker_enabled=settings.red_bar_v2_paper_canary_worker_enabled,
+        mode=settings.red_bar_v2_canonical_paper_execution_mode,
+    )
+    st.metric("Runtime state", observation.status)
+    if observation.state is None:
+        message = {
+            "WORKER_DISABLED": "The independent paper-canary worker is disabled by configuration.",
+            "OBSERVE_ONLY": "Canonical paper execution remains observe-only.",
+            "CONFIGURATION_INVALID": "Runtime configuration is invalid and entry is fail-closed.",
+            "RUNTIME_STATE_CORRUPT": "The durable runtime state failed schema or digest validation.",
+            "RUNTIME_STATE_UNAVAILABLE": "No verified runtime state is currently available.",
+        }.get(observation.status, "No verified runtime state is available.")
+        if observation.status in {"RUNTIME_STATE_CORRUPT", "CONFIGURATION_INVALID"}:
+            st.error(message)
+        else:
+            st.info(message)
+        return
+
+    state = observation.state
+    fields = [
+        ("Worker configured", "YES" if settings.red_bar_v2_paper_canary_worker_enabled else "NO"),
+        ("Runtime mode", settings.red_bar_v2_canonical_paper_execution_mode),
+        ("Runtime authority", "PAPER ONLY"),
+        ("Worker status", state.worker_status.value),
+        ("Circuit state", state.circuit_state.value),
+        ("Entry suspended", "YES" if state.entry_suspended else "NO"),
+        ("Recovery allowed", "YES"),
+        ("Consecutive failures", str(state.consecutive_failures)),
+        ("Healthy recovery cycles", str(state.healthy_probe_cycles)),
+        ("Last cycle start", _text(state.last_cycle_started_at)),
+        ("Last cycle end", _text(state.last_cycle_completed_at)),
+        ("Last successful cycle", _text(state.last_successful_cycle_at)),
+        ("Next eligible cycle", _text(state.next_eligible_cycle_at)),
+        ("Candidate count", str(state.candidate_count)),
+        ("Attempted count", str(state.attempted_count)),
+        ("Accepted count", str(state.accepted_count)),
+        ("Rejected count", str(state.rejected_count)),
+        ("Uncertain count", str(state.uncertain_count)),
+        (
+            "Daily action count / limit",
+            f"{state.daily_action_count} / {settings.red_bar_v2_paper_canary_max_actions_per_day}",
+        ),
+        ("Latest reason code", state.latest_reason_code),
+        ("Latest canonical execution ID", _text(state.latest_execution_id)),
+        ("Worker-state persistence", state.persistence_status),
+        (
+            "Evidence freshness policy",
+            f"≤ {settings.red_bar_v2_paper_canary_max_bundle_age_seconds:g} seconds",
+        ),
+    ]
+    frame = pd.DataFrame(fields, columns=["Field", "Verified runtime value"], dtype="string")
+    st.dataframe(frame, hide_index=True, use_container_width=True)
