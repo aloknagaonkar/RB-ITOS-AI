@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
 
 import pandas as pd
 
+from red_bar_lab.config import RedBarSettings
 from red_bar_lab.services.red_bar_v2_futures_replay_service import (
     run_monitored_red_bar_v2_futures_replay,
 )
@@ -59,6 +59,13 @@ def _monitored(tmp_path):
     )
 
 
+def _settings(tmp_path, *, enabled: bool) -> RedBarSettings:
+    return RedBarSettings(
+        artifacts_root=tmp_path,
+        red_bar_v2_canonical_shadow_enabled=enabled,
+    )
+
+
 def test_shared_monitored_replay_never_creates_canonical_shadow_database(tmp_path, monkeypatch):
     monkeypatch.setenv("RED_BAR_V2_CANONICAL_SHADOW_ENABLED", "true")
     result = _monitored(tmp_path)
@@ -78,14 +85,10 @@ def test_live_submission_sends_only_newest_candidate_event(tmp_path, monkeypatch
 
     monkeypatch.setattr(module, "get_red_bar_v2_shadow_runtime", lambda **kwargs: Runtime())
     monitored = _monitored(tmp_path)
-    settings = SimpleNamespace(
-        red_bar_v2_canonical_shadow_enabled=True,
-        database_path=tmp_path / "database" / "red_bar_strategy.db",
-    )
 
     assert submit_latest_live_canonical_shadow(
         monitored=monitored,
-        settings=settings,
+        settings=_settings(tmp_path, enabled=True),
         instrument_key=UNDERLYING,
         futures_instrument_key=FUTURES,
         futures_expiry="2026-08-27",
@@ -97,8 +100,12 @@ def test_live_submission_sends_only_newest_candidate_event(tmp_path, monkeypatch
     ]
     assert candidates
     assert len(submitted) == 1
-    assert submitted[0].replay_event.timestamp == max(event.timestamp for event in candidates)
-    assert submitted[0].event_timestamp == submitted[0].replay_event.timestamp
+    assert submitted[0].replay_event_snapshot.timestamp == max(
+        event.timestamp for event in candidates
+    )
+    assert submitted[0].event_timestamp == submitted[0].replay_event_snapshot.timestamp
+    assert not hasattr(submitted[0], "replay")
+    assert not hasattr(submitted[0], "health")
 
 
 def test_disabled_live_submission_does_not_construct_runtime(tmp_path, monkeypatch):
@@ -110,10 +117,7 @@ def test_disabled_live_submission_does_not_construct_runtime(tmp_path, monkeypat
         lambda **kwargs: None if kwargs["enabled"] is False else (_ for _ in ()).throw(AssertionError()),
     )
     monitored = _monitored(tmp_path)
-    settings = SimpleNamespace(
-        red_bar_v2_canonical_shadow_enabled=False,
-        database_path=tmp_path / "database" / "red_bar_strategy.db",
-    )
+    settings = _settings(tmp_path, enabled=False)
     assert submit_latest_live_canonical_shadow(
         monitored=monitored,
         settings=settings,
@@ -133,13 +137,9 @@ def test_live_shadow_failure_is_isolated(tmp_path, monkeypatch):
 
     monkeypatch.setattr(module, "get_red_bar_v2_shadow_runtime", lambda **kwargs: Runtime())
     monitored = _monitored(tmp_path)
-    settings = SimpleNamespace(
-        red_bar_v2_canonical_shadow_enabled=True,
-        database_path=tmp_path / "database" / "red_bar_strategy.db",
-    )
     assert submit_latest_live_canonical_shadow(
         monitored=monitored,
-        settings=settings,
+        settings=_settings(tmp_path, enabled=True),
         instrument_key=UNDERLYING,
         futures_instrument_key=FUTURES,
         futures_expiry="2026-08-27",
