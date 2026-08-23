@@ -22,10 +22,7 @@ from .paper_execution_repository import (
     SQLiteCanonicalPaperExecutionRepository,
     command_payload,
 )
-from .reservation_evidence_verification import (
-    ReservationCorruptionError,
-    verify_reservation_evidence,
-)
+from .reservation_evidence_verification import ReservationCorruptionError, verify_reservation_evidence
 from .reservation_models import ReservationOutcome, ReservationState
 from .reservation_service import RedBarV2CanonicalReservationService
 
@@ -52,7 +49,7 @@ class CanonicalPaperExecutionService:
         self.adapter = adapter
         self.enabled = bool(enabled)
         try:
-            self.mode = PaperExecutionMode(str(mode).upper())
+            self.mode: PaperExecutionMode | None = PaperExecutionMode(str(mode).upper())
         except ValueError:
             self.mode = None
         self.owner_id = owner_id
@@ -60,6 +57,35 @@ class CanonicalPaperExecutionService:
     @staticmethod
     def _result(outcome: PaperExecutionOutcome, reason: str, **kwargs) -> PaperExecutionResult:
         return PaperExecutionResult(outcome=outcome, reason_code=reason, **kwargs)
+
+    def _release(self, *, reservation_id: str, released_at: datetime, reason: str) -> None:
+        if self.reservation_service is not None:
+            self.reservation_service.release(
+                reservation_id=reservation_id,
+                owner_id=self.owner_id,
+                released_at=released_at,
+                reason_code=reason,
+            )
+
+    def _read_canonical(self, *, bundle_id: str):
+        with sqlite3.connect(
+            f"file:{self.database_path.resolve().as_posix()}?mode=ro",
+            uri=True,
+        ) as conn:
+            conn.row_factory = sqlite3.Row
+            table = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='canonical_red_bar_v2_bundles'"
+            ).fetchone()
+            if table is None:
+                raise RuntimeError("MISSING_CANONICAL_BUNDLE_TABLE")
+            row = conn.execute(
+                "SELECT 1 FROM canonical_red_bar_v2_bundles WHERE bundle_id=?",
+                (bundle_id,),
+            ).fetchone()
+            if row is None:
+                raise LookupError("BUNDLE_NOT_FOUND")
+            return verify_canonical_bundle_evidence(conn, bundle_id=bundle_id)
 
     def _guarded_prepare(
         self,
@@ -127,24 +153,37 @@ class CanonicalPaperExecutionService:
                 created_at=now,
             )
             existing = conn.execute(
-                "SELECT execution_id FROM canonical_red_bar_v2_paper_commands WHERE idempotency_key=?",
+                "SELECT execution_id FROM canonical_red_bar_v2_paper_commands "
+                "WHERE idempotency_key=?",
                 (command.idempotency_key,),
             ).fetchone()
             if existing is not None:
                 conn.execute("COMMIT")
-                return self.repository.get_verified(execution_id=str(existing["execution_id"])), True
+                return self.repository.get_verified(
+                    execution_id=str(existing["execution_id"])
+                ), True
             payload = command_payload(command)
             conn.execute(
                 "INSERT INTO canonical_red_bar_v2_paper_commands("
-                "command_id,execution_id,reservation_id,bundle_id,signal_id,idempotency_key,"
-                "state,paper_order_id,reason_code,created_at,updated_at,schema_version,payload_json,payload_sha256"
-                ") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "command_id,execution_id,reservation_id,bundle_id,signal_id,"
+                "idempotency_key,state,paper_order_id,reason_code,created_at,"
+                "updated_at,schema_version,payload_json,payload_sha256) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
-                    command.command_id, command.execution_id, command.reservation_id,
-                    command.bundle_id, command.signal_id, command.idempotency_key,
-                    PaperExecutionState.PREPARED.value, None, "COMMAND_PREPARED",
-                    now.isoformat(), now.isoformat(), command.schema_version,
-                    payload, payload_sha256(payload),
+                    command.command_id,
+                    command.execution_id,
+                    command.reservation_id,
+                    command.bundle_id,
+                    command.signal_id,
+                    command.idempotency_key,
+                    PaperExecutionState.PREPARED.value,
+                    None,
+                    "COMMAND_PREPARED",
+                    now.isoformat(),
+                    now.isoformat(),
+                    command.schema_version,
+                    payload,
+                    payload_sha256(payload),
                 ),
             )
             self.repository._insert_event(
@@ -183,11 +222,8 @@ class CanonicalPaperExecutionService:
         if not all((self.repository, self.reservation_service, self.selector, self.adapter)):
             return self._result(PaperExecutionOutcome.STORAGE_UNAVAILABLE, "DEPENDENCY_UNAVAILABLE")
 
-        # Selection is market-data/readiness work and occurs before reservation mutation.
         try:
-            with sqlite3.connect(f"file:{self.database_path.resolve().as_posix()}?mode=ro", uri=True) as conn:
-                conn.row_factory = sqlite3.Row
-                canonical = verify_canonical_bundle_evidence(conn, bundle_id=bundle_id)
+            canonical = self._read_canonical(bundle_id=bundle_id)
             contract = self.selector.select(
                 option_side=canonical.bundle.option_side.value,
                 spot_price=float(spot_price),
@@ -195,6 +231,10 @@ class CanonicalPaperExecutionService:
             )
         except LookupError:
             return self._result(PaperExecutionOutcome.BUNDLE_UNAVAILABLE, "BUNDLE_NOT_FOUND")
+        except RuntimeError as exc:
+            if str(exc) == "MISSING_CANONICAL_BUNDLE_TABLE":
+                return self._result(PaperExecutionOutcome.BUNDLE_CORRUPT, str(exc))
+            return self._result(PaperExecutionOutcome.STORAGE_UNAVAILABLE, "CANONICAL_READ_UNAVAILABLE")
         except Exception as exc:
             if exc.__class__.__name__.endswith("CorruptionError"):
                 return self._result(PaperExecutionOutcome.BUNDLE_CORRUPT, "BUNDLE_CORRUPT")
@@ -208,7 +248,10 @@ class CanonicalPaperExecutionService:
             owner_id=self.owner_id,
             requested_at=requested_at,
         )
-        if reserved.outcome not in {ReservationOutcome.ACQUIRED, ReservationOutcome.IDEMPOTENT_REPLAY} or reserved.reservation is None:
+        if reserved.outcome not in {
+            ReservationOutcome.ACQUIRED,
+            ReservationOutcome.IDEMPOTENT_REPLAY,
+        } or reserved.reservation is None:
             mapping = {
                 ReservationOutcome.BUNDLE_UNAVAILABLE: PaperExecutionOutcome.BUNDLE_UNAVAILABLE,
                 ReservationOutcome.BUNDLE_CORRUPT: PaperExecutionOutcome.BUNDLE_CORRUPT,
@@ -218,27 +261,45 @@ class CanonicalPaperExecutionService:
                 ReservationOutcome.ALREADY_RESERVED: PaperExecutionOutcome.RESERVATION_OWNER_MISMATCH,
                 ReservationOutcome.STORAGE_UNAVAILABLE: PaperExecutionOutcome.STORAGE_UNAVAILABLE,
             }
-            return self._result(mapping.get(reserved.outcome, PaperExecutionOutcome.RESERVATION_UNAVAILABLE), reserved.reason_code)
+            return self._result(
+                mapping.get(reserved.outcome, PaperExecutionOutcome.RESERVATION_UNAVAILABLE),
+                reserved.reason_code,
+            )
 
+        reservation_id = reserved.reservation.reservation_id
         try:
             prepared, replay = self._guarded_prepare(
                 bundle_id=bundle_id,
-                reservation_id=reserved.reservation.reservation_id,
+                reservation_id=reservation_id,
                 contract=contract,
                 quantity=quantity,
                 now=requested_at,
             )
         except PermissionError:
-            return self._result(PaperExecutionOutcome.RESERVATION_OWNER_MISMATCH, "RESERVATION_OWNER_MISMATCH")
+            return self._result(
+                PaperExecutionOutcome.RESERVATION_OWNER_MISMATCH,
+                "RESERVATION_OWNER_MISMATCH",
+            )
         except TimeoutError:
-            return self._result(PaperExecutionOutcome.RESERVATION_EXPIRED, "RESERVATION_EXPIRED")
+            return self._result(
+                PaperExecutionOutcome.RESERVATION_EXPIRED,
+                "RESERVATION_EXPIRED",
+            )
         except ReservationCorruptionError:
-            return self._result(PaperExecutionOutcome.RESERVATION_CORRUPT, "RESERVATION_CORRUPT")
+            return self._result(
+                PaperExecutionOutcome.RESERVATION_CORRUPT,
+                "RESERVATION_CORRUPT",
+            )
         except PaperExecutionConflictError:
             return self._result(PaperExecutionOutcome.IDEMPOTENT_REPLAY, "IDEMPOTENT_REPLAY")
         except PaperExecutionStorageError:
             return self._result(PaperExecutionOutcome.STORAGE_UNAVAILABLE, "STORAGE_UNAVAILABLE")
         except Exception as exc:
+            self._release(
+                reservation_id=reservation_id,
+                released_at=requested_at,
+                reason="PAPER_CONSTRUCTION_REJECTED",
+            )
             if exc.__class__.__name__.endswith("CorruptionError"):
                 return self._result(PaperExecutionOutcome.BUNDLE_CORRUPT, "BUNDLE_CORRUPT")
             return self._result(PaperExecutionOutcome.INVALID_REQUEST, type(exc).__name__.upper())
@@ -277,33 +338,58 @@ class CanonicalPaperExecutionService:
                 state=uncertain.state,
                 paper_order_id=uncertain.paper_order_id,
             )
-        target_state = PaperExecutionState.PAPER_ACCEPTED if adapter_result.accepted else PaperExecutionState.PAPER_REJECTED
-        event_type = PaperExecutionEventType.PAPER_ACCEPTED if adapter_result.accepted else PaperExecutionEventType.PAPER_REJECTED
-        completed = self.repository.transition(
+        if not adapter_result.accepted:
+            rejected = self.repository.transition(
+                execution_id=started.command.execution_id,
+                expected_state=PaperExecutionState.SUBMISSION_STARTED,
+                new_state=PaperExecutionState.PAPER_REJECTED,
+                event_type=PaperExecutionEventType.PAPER_REJECTED,
+                at=requested_at,
+                reason_code=adapter_result.reason_code,
+                paper_order_id=adapter_result.paper_order_id,
+            )
+            self._release(
+                reservation_id=reservation_id,
+                released_at=requested_at,
+                reason="PAPER_EXECUTION_REJECTED",
+            )
+            return self._result(
+                PaperExecutionOutcome.SUBMISSION_REJECTED,
+                adapter_result.reason_code,
+                command=rejected.command,
+                state=rejected.state,
+                paper_order_id=rejected.paper_order_id,
+            )
+
+        accepted = self.repository.transition(
             execution_id=started.command.execution_id,
             expected_state=PaperExecutionState.SUBMISSION_STARTED,
-            new_state=target_state,
-            event_type=event_type,
+            new_state=PaperExecutionState.PAPER_ACCEPTED,
+            event_type=PaperExecutionEventType.PAPER_ACCEPTED,
             at=requested_at,
             reason_code=adapter_result.reason_code,
             paper_order_id=adapter_result.paper_order_id,
         )
-        if not adapter_result.accepted:
-            self.reservation_service.release(
-                reservation_id=reserved.reservation.reservation_id,
-                owner_id=self.owner_id,
-                released_at=requested_at,
-                reason_code="PAPER_EXECUTION_REJECTED",
-            )
-            outcome = PaperExecutionOutcome.SUBMISSION_REJECTED
-        else:
-            outcome = PaperExecutionOutcome.SUBMISSION_ACCEPTED
+        filled = self.repository.transition(
+            execution_id=accepted.command.execution_id,
+            expected_state=PaperExecutionState.PAPER_ACCEPTED,
+            new_state=PaperExecutionState.PAPER_FILLED,
+            event_type=PaperExecutionEventType.PAPER_FILLED,
+            at=requested_at,
+            reason_code="PAPER_EXECUTION_COMPLETED",
+            paper_order_id=adapter_result.paper_order_id,
+        )
+        self._release(
+            reservation_id=reservation_id,
+            released_at=requested_at,
+            reason="PAPER_EXECUTION_COMPLETED",
+        )
         return self._result(
-            outcome,
+            PaperExecutionOutcome.SUBMISSION_ACCEPTED,
             adapter_result.reason_code,
-            command=completed.command,
-            state=completed.state,
-            paper_order_id=completed.paper_order_id,
+            command=filled.command,
+            state=filled.state,
+            paper_order_id=filled.paper_order_id,
         )
 
 
@@ -317,48 +403,90 @@ class CanonicalPaperExecutionRecoveryService:
         self.repository = repository
         self.adapter = adapter
 
-    def recover(self, *, observed_at: datetime, limit: int = 100) -> tuple[PaperExecutionResult, ...]:
-        results = []
+    def recover(
+        self,
+        *,
+        observed_at: datetime,
+        limit: int = 100,
+    ) -> tuple[PaperExecutionResult, ...]:
+        results: list[PaperExecutionResult] = []
         for execution_id in self.repository.list_non_terminal(limit=limit):
             try:
                 current = self.repository.get_verified(execution_id=execution_id)
                 existing = self.adapter.lookup(execution_id=execution_id)
                 if existing is None:
-                    results.append(PaperExecutionResult(
-                        PaperExecutionOutcome.RECOVERY_REQUIRED,
-                        "NO_PROVEN_PAPER_RESULT",
-                        command=current.command,
-                        state=current.state,
-                    ))
+                    results.append(
+                        PaperExecutionResult(
+                            PaperExecutionOutcome.RECOVERY_REQUIRED,
+                            "NO_PROVEN_PAPER_RESULT",
+                            command=current.command,
+                            state=current.state,
+                        )
+                    )
                     continue
                 if existing.uncertain:
-                    results.append(PaperExecutionResult(
-                        PaperExecutionOutcome.SUBMISSION_UNCERTAIN,
-                        existing.reason_code,
-                        command=current.command,
-                        state=current.state,
-                    ))
+                    results.append(
+                        PaperExecutionResult(
+                            PaperExecutionOutcome.SUBMISSION_UNCERTAIN,
+                            existing.reason_code,
+                            command=current.command,
+                            state=current.state,
+                        )
+                    )
                     continue
-                if current.state in {PaperExecutionState.PREPARED, PaperExecutionState.SUBMISSION_STARTED, PaperExecutionState.SUBMISSION_UNCERTAIN, PaperExecutionState.RECOVERY_REQUIRED}:
-                    expected = current.state
-                    target = PaperExecutionState.PAPER_ACCEPTED if existing.accepted else PaperExecutionState.PAPER_REJECTED
-                    event = PaperExecutionEventType.PAPER_ACCEPTED if existing.accepted else PaperExecutionEventType.PAPER_REJECTED
+                if current.state is PaperExecutionState.PREPARED:
+                    current = self.repository.transition(
+                        execution_id=execution_id,
+                        expected_state=PaperExecutionState.PREPARED,
+                        new_state=PaperExecutionState.SUBMISSION_STARTED,
+                        event_type=PaperExecutionEventType.SUBMISSION_STARTED,
+                        at=observed_at,
+                        reason_code="RECOVERY_SUBMISSION_OBSERVED",
+                    )
+                if current.state in {
+                    PaperExecutionState.SUBMISSION_STARTED,
+                    PaperExecutionState.SUBMISSION_UNCERTAIN,
+                    PaperExecutionState.RECOVERY_REQUIRED,
+                }:
+                    target = (
+                        PaperExecutionState.PAPER_ACCEPTED
+                        if existing.accepted
+                        else PaperExecutionState.PAPER_REJECTED
+                    )
+                    event = (
+                        PaperExecutionEventType.PAPER_ACCEPTED
+                        if existing.accepted
+                        else PaperExecutionEventType.PAPER_REJECTED
+                    )
                     reconciled = self.repository.transition(
                         execution_id=execution_id,
-                        expected_state=expected,
+                        expected_state=current.state,
                         new_state=target,
                         event_type=event,
                         at=observed_at,
                         reason_code=existing.reason_code,
                         paper_order_id=existing.paper_order_id,
                     )
-                    results.append(PaperExecutionResult(
-                        PaperExecutionOutcome.SUBMISSION_ACCEPTED if existing.accepted else PaperExecutionOutcome.SUBMISSION_REJECTED,
-                        existing.reason_code,
-                        command=reconciled.command,
-                        state=reconciled.state,
-                        paper_order_id=reconciled.paper_order_id,
-                    ))
-            except (PaperExecutionCorruptionError, PaperExecutionConflictError, PaperExecutionStorageError):
-                results.append(PaperExecutionResult(PaperExecutionOutcome.RECOVERY_REQUIRED, "RECOVERY_VERIFICATION_FAILED"))
+                    results.append(
+                        PaperExecutionResult(
+                            PaperExecutionOutcome.SUBMISSION_ACCEPTED
+                            if existing.accepted
+                            else PaperExecutionOutcome.SUBMISSION_REJECTED,
+                            existing.reason_code,
+                            command=reconciled.command,
+                            state=reconciled.state,
+                            paper_order_id=reconciled.paper_order_id,
+                        )
+                    )
+            except (
+                PaperExecutionCorruptionError,
+                PaperExecutionConflictError,
+                PaperExecutionStorageError,
+            ):
+                results.append(
+                    PaperExecutionResult(
+                        PaperExecutionOutcome.RECOVERY_REQUIRED,
+                        "RECOVERY_VERIFICATION_FAILED",
+                    )
+                )
         return tuple(results)
