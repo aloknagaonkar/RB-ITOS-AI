@@ -15,12 +15,34 @@ def _text(value: object | None) -> str:
     return str(value)
 
 
+def _provider_projection(settings) -> tuple[str, str, str]:
+    provider = settings.red_bar_v2_paper_canary_market_data_provider
+    if provider in {"ZERODHA", "UPSTOX"}:
+        return provider, "READY", "PROVIDER_SELECTED"
+    if provider == "UNCONFIGURED":
+        return provider, "MISSING", "MARKET_DATA_PROVIDER_UNCONFIGURED"
+    return provider, "INVALID", "MARKET_DATA_PROVIDER_INVALID"
+
+
 def render_canonical_paper_canary_panel(st, settings) -> None:
     st.markdown("### 10. Canonical paper-canary runtime")
     st.warning(
         "PAPER ONLY — this panel is read-only. It cannot start the worker, "
         "run recovery, submit an order, reset the circuit or repair state."
     )
+    provider, provider_status, provider_reason = _provider_projection(settings)
+    provider_frame = pd.DataFrame(
+        [
+            ("Market-data provider", provider),
+            ("Provider configuration", provider_status),
+            ("Provider status reason", provider_reason),
+            ("Latest provider evidence timestamp", "—"),
+        ],
+        columns=["Field", "Read-only configuration value"],
+        dtype="string",
+    )
+    st.dataframe(provider_frame, hide_index=True, use_container_width=True)
+
     observation = PaperCanaryRuntimeObservabilityService(
         settings.paper_canary_state_path
     ).load(
@@ -62,17 +84,11 @@ def render_canonical_paper_canary_panel(st, settings) -> None:
         ("Accepted count", str(state.accepted_count)),
         ("Rejected count", str(state.rejected_count)),
         ("Uncertain count", str(state.uncertain_count)),
-        (
-            "Daily action count / limit",
-            f"{state.daily_action_count} / {settings.red_bar_v2_paper_canary_max_actions_per_day}",
-        ),
+        ("Daily action count / limit", f"{state.daily_action_count} / {settings.red_bar_v2_paper_canary_max_actions_per_day}"),
         ("Latest reason code", state.latest_reason_code),
         ("Latest canonical execution ID", _text(state.latest_execution_id)),
         ("Worker-state persistence", state.persistence_status),
-        (
-            "Evidence freshness policy",
-            f"≤ {settings.red_bar_v2_paper_canary_max_bundle_age_seconds:g} seconds",
-        ),
+        ("Evidence freshness policy", f"≤ {settings.red_bar_v2_paper_canary_max_bundle_age_seconds:g} seconds"),
     ]
     frame = pd.DataFrame(fields, columns=["Field", "Verified runtime value"], dtype="string")
     st.dataframe(frame, hide_index=True, use_container_width=True)
