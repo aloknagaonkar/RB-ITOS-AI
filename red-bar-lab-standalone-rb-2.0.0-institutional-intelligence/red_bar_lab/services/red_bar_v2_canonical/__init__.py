@@ -44,10 +44,14 @@ from .shadow_coordinator import (
     RedBarV2ShadowObservation,
 )
 from .shadow_runtime import (
+    CanonicalHealthSnapshot,
+    CanonicalReplayEventSnapshot,
+    CanonicalReplaySnapshot,
     RedBarV2CanonicalShadowRuntime,
     RedBarV2ShadowTask,
     build_runtime_market_metadata,
     build_runtime_source_replay_id,
+    build_shadow_task,
     get_red_bar_v2_shadow_runtime,
 )
 from .sqlite_repository import SQLiteRedBarV2CanonicalRepository
@@ -55,11 +59,14 @@ from .sqlite_repository import SQLiteRedBarV2CanonicalRepository
 __all__ = [
     "CanonicalBundleEventType",
     "CanonicalBundleLifecycleEvent",
+    "CanonicalHealthSnapshot",
     "CanonicalPersistenceConflictError",
     "CanonicalPersistenceCorruptionError",
     "CanonicalPersistenceError",
     "CanonicalPersistenceResult",
     "CanonicalPersistenceUnavailableError",
+    "CanonicalReplayEventSnapshot",
+    "CanonicalReplaySnapshot",
     "CanonicalResolutionError",
     "LegacyMappingError",
     "LegacyV2DecisionEvidence",
@@ -86,6 +93,7 @@ __all__ = [
     "build_legacy_v2_decision_evidence",
     "build_runtime_market_metadata",
     "build_runtime_source_replay_id",
+    "build_shadow_task",
     "canonical_json",
     "compare_legacy_to_canonical",
     "create_red_bar_v2_signal_bundle",
