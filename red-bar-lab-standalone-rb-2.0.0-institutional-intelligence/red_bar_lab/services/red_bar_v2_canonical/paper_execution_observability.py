@@ -9,6 +9,10 @@ from .paper_execution_repository import (
     PaperExecutionStorageError,
     VerifiedPaperExecution,
 )
+from .reservation_evidence_verification import (
+    ReservationCorruptionError,
+    verify_reservation_evidence,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,7 +49,7 @@ class SQLiteCanonicalPaperExecutionObservabilityRepository:
                         None,
                     )
                 row = conn.execute(
-                    "SELECT execution_id,reservation_id,state "
+                    "SELECT execution_id,reservation_id,bundle_id "
                     "FROM canonical_red_bar_v2_paper_commands "
                     "WHERE bundle_id=? "
                     "ORDER BY created_at DESC,command_id DESC LIMIT 1",
@@ -56,19 +60,29 @@ class SQLiteCanonicalPaperExecutionObservabilityRepository:
                         "NO_CANONICAL_EXECUTION",
                         None,
                     )
-                reservation = conn.execute(
-                    "SELECT state FROM "
-                    "canonical_red_bar_v2_bundle_reservations "
-                    "WHERE reservation_id=?",
-                    (str(row["reservation_id"]),),
-                ).fetchone()
-            evidence = repository.get_verified(
-                execution_id=str(row["execution_id"])
-            )
+                evidence = repository.get_verified(
+                    execution_id=str(row["execution_id"])
+                )
+                reservation_evidence = verify_reservation_evidence(
+                    conn,
+                    reservation_id=str(row["reservation_id"]),
+                    expected_bundle_id=bundle_id,
+                )
+
+            reservation = reservation_evidence.reservation
+            if (
+                evidence.command.reservation_id != reservation.reservation_id
+                or evidence.command.bundle_id != reservation.bundle_id
+                or str(row["bundle_id"]) != reservation.bundle_id
+            ):
+                return PaperExecutionObservation(
+                    "EXECUTION_DATA_CORRUPT",
+                    None,
+                )
+
             unresolved_finalization = (
                 evidence.state.value in {"PAPER_FILLED", "PAPER_REJECTED"}
-                and reservation is not None
-                and str(reservation["state"]) == "RESERVED"
+                and reservation.state.value == "RESERVED"
             )
             status = (
                 "RECOVERY_REQUIRED"
@@ -78,7 +92,7 @@ class SQLiteCanonicalPaperExecutionObservabilityRepository:
                 else "EXECUTION_DATA_AVAILABLE"
             )
             return PaperExecutionObservation(status, evidence)
-        except PaperExecutionCorruptionError:
+        except (PaperExecutionCorruptionError, ReservationCorruptionError):
             return PaperExecutionObservation("EXECUTION_DATA_CORRUPT", None)
         except (PaperExecutionStorageError, OSError):
             return PaperExecutionObservation(
