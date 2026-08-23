@@ -5,6 +5,7 @@ from datetime import datetime
 import json
 from pathlib import Path
 import sqlite3
+from typing import Iterator
 
 from .reservation_identity import reservation_sha256
 from .reservation_models import (
@@ -20,6 +21,14 @@ class ReservationObservationResult:
     status: str
     reservation: CanonicalBundleReservation | None
     events: tuple[CanonicalReservationLifecycleEvent, ...]
+
+    def __iter__(self) -> Iterator[object]:
+        if self.status == "RESERVATION_DATA_CORRUPT":
+            raise ReservationCorruptionError("reservation evidence corrupt")
+        if self.status == "RESERVATION_DATABASE_UNAVAILABLE":
+            raise FileNotFoundError("reservation database unavailable")
+        yield self.reservation
+        yield self.events
 
 
 class SQLiteReservationObservabilityRepository:
