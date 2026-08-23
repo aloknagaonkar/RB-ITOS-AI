@@ -14,6 +14,9 @@ from red_bar_lab.operations.red_bar_v2_ui_snapshot import (
 from red_bar_lab.services.red_bar_v2_futures_replay_service import (
     run_monitored_red_bar_v2_futures_replay,
 )
+from red_bar_lab.services.red_bar_v2_live_shadow import (
+    submit_latest_live_canonical_shadow,
+)
 
 
 _ACTIVE_ORDER_STATUSES = {
@@ -335,6 +338,13 @@ def evaluate_current_session_red_bar_v2(
         futures_symbol=(previous.futures_symbol if previous else None),
         futures_expiry=(previous.futures_expiry if previous else None),
         exit_timestamps=exit_timestamps,
+    )
+    submit_latest_live_canonical_shadow(
+        monitored=monitored,
+        settings=settings,
+        instrument_key=instrument_key,
+        futures_instrument_key=futures_key,
+        futures_expiry=(previous.futures_expiry if previous else None),
     )
 
     snapshot = read_red_bar_v2_ui_snapshot(settings.artifacts_root)
