@@ -27,37 +27,52 @@ def _render_reservation_boundary(settings: RedBarSettings, bundle_id: str | None
     if bundle_id is None:
         st.info("No canonical bundle is available for reservation observation.")
         return
-    try:
-        repository = SQLiteReservationObservabilityRepository(settings.database_path)
-        reservation, events = repository.latest_for_bundle(bundle_id=bundle_id, event_limit=25)
-    except (FileNotFoundError, OSError):
-        st.info("Reservation storage is not available. Legacy execution is unaffected.")
-        return
-    except Exception:
-        st.error("Reservation observability failed. No reservation evidence is trusted, and legacy execution is unaffected.")
-        return
-    if reservation is None:
+    result = SQLiteReservationObservabilityRepository(settings.database_path).latest_for_bundle(
+        bundle_id=bundle_id,
+        event_limit=25,
+    )
+    if result.status == "NO_RESERVATION":
         st.info("No persisted reservation exists for the selected canonical bundle.")
+        return
+    if result.status == "RESERVATION_DATA_CORRUPT":
+        st.error("Persisted reservation evidence failed integrity or lifecycle validation. No reservation evidence is trusted. Legacy execution is unaffected.")
+        return
+    if result.status == "RESERVATION_DATABASE_UNAVAILABLE":
+        st.info("Reservation storage is currently unavailable. Legacy execution is unaffected.")
+        return
+    reservation = result.reservation
+    if result.status != "RESERVATION_DATA_AVAILABLE" or reservation is None:
+        st.error("Reservation observability failed. No reservation evidence is trusted, and legacy execution is unaffected.")
         return
     frame = pd.DataFrame(
         [
             ("Reservation feature", "ENABLED"),
-            ("Reservation state", reservation.state),
+            ("Reservation state", reservation.state.value),
             ("Reservation ID", reservation.reservation_id),
             ("Bundle ID", reservation.bundle_id),
             ("Owner ID", reservation.owner_id),
             ("Reserved timestamp", reservation.reserved_at.isoformat()),
             ("Lease expiry", reservation.lease_expires_at.isoformat()),
-            ("Released timestamp", _text(reservation.released_at)),
+            ("Released timestamp", _text(reservation.released_at.isoformat() if reservation.released_at else None)),
             ("Reason code", _text(reservation.release_reason)),
         ],
         columns=["Field", "Persisted value"],
         dtype="string",
     )
     st.dataframe(frame, hide_index=True, use_container_width=True)
-    if events:
-        event_frame = pd.DataFrame([asdict(item) for item in events]).astype("string")
-        event_frame.columns = ["Event type", "Event timestamp", "Owner ID", "Reason code"]
+    if result.events:
+        event_frame = pd.DataFrame(
+            [
+                {
+                    "Event type": item.event_type,
+                    "Event timestamp": item.event_timestamp.isoformat(),
+                    "Owner ID": item.owner_id,
+                    "Reason code": item.reason_code,
+                }
+                for item in result.events
+            ],
+            dtype="string",
+        )
         st.dataframe(event_frame, hide_index=True, use_container_width=True)
 
 
