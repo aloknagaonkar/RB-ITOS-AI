@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from datetime import datetime, timezone
+from datetime import datetime
 from math import isclose
 from typing import Protocol
 
@@ -12,6 +12,7 @@ from .paper_market_data import (
     PaperMarketDataAuthenticationError,
     PaperMarketDataCorruptionError,
     PaperMarketDataRateLimitError,
+    PaperMarketDataStaleError,
     PaperMarketDataUnavailableError,
     verify_timestamp_freshness,
 )
@@ -48,18 +49,14 @@ def _dominant_interval(strikes: tuple[float, ...]) -> float:
     counts = Counter(positive)
     highest = max(counts.values())
     modes = sorted(value for value, count in counts.items() if count == highest)
-    if len(modes) != 1:
-        raise PaperMarketDataCorruptionError("ambiguous strike interval")
-    interval = modes[0]
-    if highest < 2:
-        raise PaperMarketDataCorruptionError("irregular strike interval")
-    return interval
+    if len(modes) != 1 or highest < 2:
+        raise PaperMarketDataCorruptionError("ambiguous or irregular strike interval")
+    return modes[0]
 
 
 def _nearest_atm(strikes: tuple[float, ...], spot: float) -> float:
     if not strikes:
         raise PaperMarketDataCorruptionError("ATM strike unavailable")
-    # Deterministic halfway rule: lower strike wins.
     return min(
         set(float(value) for value in strikes),
         key=lambda value: (abs(value - spot), value),
@@ -86,13 +83,9 @@ class PaperMarketDataReadinessService:
         self.policy = policy
         self.clock = clock
         if policy.strike_steps != 4:
-            raise ValueError(
-                "readiness strike_steps must be 4 for bounded 18-row evidence"
-            )
+            raise ValueError("readiness strike_steps must be exactly 4")
         if policy.min_ce_coverage != 9 or policy.min_pe_coverage != 9:
-            raise ValueError(
-                "readiness CE and PE coverage must each be exactly 9"
-            )
+            raise ValueError("readiness CE and PE coverage must each be exactly 9")
 
     def _report(
         self,
@@ -101,7 +94,6 @@ class PaperMarketDataReadinessService:
         underlying: str,
         status: MarketDataReadinessStatus,
         reason: str,
-        provider: str | None = None,
         underlying_key: str | None = None,
         spot: float | None = None,
         spot_timestamp: datetime | None = None,
@@ -112,22 +104,15 @@ class PaperMarketDataReadinessService:
     ) -> MarketDataReadinessReport:
         evidence = tuple(contracts)
         expected = 18 if expiry is not None and atm is not None else 0
-        observed = len(evidence)
-        ready = sum(
-            item.status is ContractReadinessStatus.READY for item in evidence
-        )
-        ce = sum(item.option_side is OptionSide.CE for item in evidence)
-        pe = sum(item.option_side is OptionSide.PE for item in evidence)
-        provider_name = provider or self.market_data.provider_name
         return MarketDataReadinessReport(
             probe_id=build_probe_id(
-                provider=provider_name,
+                provider=self.market_data.provider_name,
                 underlying=underlying,
                 evaluated_at=evaluated_at,
                 expiry=expiry,
                 atm_strike=atm,
             ),
-            provider=provider_name,
+            provider=self.market_data.provider_name,
             underlying=underlying,
             underlying_instrument_key=underlying_key,
             evaluated_at=evaluated_at,
@@ -137,13 +122,35 @@ class PaperMarketDataReadinessService:
             strike_interval=interval,
             atm_strike=atm,
             expected_contract_count=expected,
-            observed_contract_count=observed,
-            ready_contract_count=ready,
-            ce_coverage=ce,
-            pe_coverage=pe,
+            observed_contract_count=len(evidence),
+            ready_contract_count=sum(
+                item.status is ContractReadinessStatus.READY
+                for item in evidence
+            ),
+            ce_coverage=sum(
+                item.option_side is OptionSide.CE for item in evidence
+            ),
+            pe_coverage=sum(
+                item.option_side is OptionSide.PE for item in evidence
+            ),
             status=status,
             reason_code=reason,
             contracts=evidence,
+        )
+
+    def _spot_failure(
+        self,
+        *,
+        evaluated_at: datetime,
+        underlying: str,
+        status: MarketDataReadinessStatus,
+        reason: str,
+    ) -> MarketDataReadinessReport:
+        return self._report(
+            evaluated_at=evaluated_at,
+            underlying=underlying,
+            status=status,
+            reason=reason,
         )
 
     def evaluate(self, *, underlying: str) -> MarketDataReadinessReport:
@@ -151,8 +158,6 @@ class PaperMarketDataReadinessService:
         if evaluated_at.tzinfo is None or evaluated_at.utcoffset() is None:
             raise ValueError("readiness clock must be timezone-aware")
 
-        # Spot acquisition and classification are deliberately isolated from
-        # option-chain acquisition; no exception-message inspection is used.
         try:
             spot_quote = self.market_data.underlying_quote(
                 underlying=underlying,
@@ -162,43 +167,48 @@ class PaperMarketDataReadinessService:
                 spot_quote.provider != self.market_data.provider_name
                 or spot_quote.underlying != underlying
             ):
-                raise PaperMarketDataCorruptionError(
-                    "underlying quote identity mismatch"
-                )
+                raise PaperMarketDataCorruptionError("underlying identity mismatch")
             verify_timestamp_freshness(
                 timestamp=spot_quote.quote_timestamp,
                 evaluated_at=evaluated_at,
                 maximum_age_seconds=self.policy.max_quote_age_seconds,
             )
         except PaperMarketDataAuthenticationError:
-            return self._report(
+            return self._spot_failure(
                 evaluated_at=evaluated_at,
                 underlying=underlying,
                 status=MarketDataReadinessStatus.AUTHENTICATION_FAILED,
                 reason="AUTHENTICATION_FAILED",
             )
         except PaperMarketDataRateLimitError:
-            return self._report(
+            return self._spot_failure(
                 evaluated_at=evaluated_at,
                 underlying=underlying,
                 status=MarketDataReadinessStatus.RATE_LIMITED,
                 reason="RATE_LIMITED",
             )
         except PaperMarketDataUnavailableError:
-            return self._report(
+            return self._spot_failure(
                 evaluated_at=evaluated_at,
                 underlying=underlying,
                 status=MarketDataReadinessStatus.SPOT_UNAVAILABLE,
                 reason="SPOT_UNAVAILABLE",
             )
         except (PaperMarketDataCorruptionError, ValueError, TypeError):
-            return self._report(
+            return self._spot_failure(
                 evaluated_at=evaluated_at,
                 underlying=underlying,
                 status=MarketDataReadinessStatus.DATA_CORRUPT,
                 reason="DATA_CORRUPT",
             )
 
+        common = dict(
+            evaluated_at=evaluated_at,
+            underlying=underlying,
+            underlying_key=spot_quote.instrument_key,
+            spot=spot_quote.last_price,
+            spot_timestamp=spot_quote.quote_timestamp,
+        )
         try:
             instruments = self.market_data.option_instruments(
                 underlying=underlying,
@@ -206,175 +216,116 @@ class PaperMarketDataReadinessService:
             )
         except PaperMarketDataAuthenticationError:
             return self._report(
-                evaluated_at=evaluated_at,
-                underlying=underlying,
+                **common,
                 status=MarketDataReadinessStatus.AUTHENTICATION_FAILED,
                 reason="AUTHENTICATION_FAILED",
             )
         except PaperMarketDataRateLimitError:
             return self._report(
-                evaluated_at=evaluated_at,
-                underlying=underlying,
+                **common,
                 status=MarketDataReadinessStatus.RATE_LIMITED,
                 reason="RATE_LIMITED",
             )
         except PaperMarketDataUnavailableError:
             return self._report(
-                evaluated_at=evaluated_at,
-                underlying=underlying,
+                **common,
                 status=MarketDataReadinessStatus.PROVIDER_UNAVAILABLE,
                 reason="PROVIDER_UNAVAILABLE",
-                underlying_key=spot_quote.instrument_key,
-                spot=spot_quote.last_price,
-                spot_timestamp=spot_quote.quote_timestamp,
             )
         except (PaperMarketDataCorruptionError, ValueError, TypeError):
             return self._report(
-                evaluated_at=evaluated_at,
-                underlying=underlying,
+                **common,
                 status=MarketDataReadinessStatus.DATA_CORRUPT,
                 reason="DATA_CORRUPT",
-                underlying_key=spot_quote.instrument_key,
-                spot=spot_quote.last_price,
-                spot_timestamp=spot_quote.quote_timestamp,
             )
-
         if not instruments:
             return self._report(
-                evaluated_at=evaluated_at,
-                underlying=underlying,
+                **common,
                 status=MarketDataReadinessStatus.CHAIN_UNAVAILABLE,
                 reason="CHAIN_UNAVAILABLE",
-                underlying_key=spot_quote.instrument_key,
-                spot=spot_quote.last_price,
-                spot_timestamp=spot_quote.quote_timestamp,
             )
 
         try:
-            expiries_ce = {
-                item.expiry
-                for item in instruments
+            ce_expiries = {
+                item.expiry for item in instruments
                 if item.option_side is OptionSide.CE
             }
-            expiries_pe = {
-                item.expiry
-                for item in instruments
+            pe_expiries = {
+                item.expiry for item in instruments
                 if item.option_side is OptionSide.PE
             }
-            valid_common_expiries = sorted(
-                expiry
-                for expiry in expiries_ce & expiries_pe
-                if expiry >= evaluated_at.date()
+            valid_expiries = sorted(
+                value
+                for value in ce_expiries & pe_expiries
+                if value >= evaluated_at.date()
             )
-            if not valid_common_expiries:
+            if not valid_expiries:
                 return self._report(
-                    evaluated_at=evaluated_at,
-                    underlying=underlying,
+                    **common,
                     status=MarketDataReadinessStatus.CHAIN_UNAVAILABLE,
                     reason="NO_NON_EXPIRED_COMMON_EXPIRY",
-                    underlying_key=spot_quote.instrument_key,
-                    spot=spot_quote.last_price,
-                    spot_timestamp=spot_quote.quote_timestamp,
                 )
-            expiry = valid_common_expiries[0]
+            expiry = valid_expiries[0]
             expiry_items = tuple(
                 item for item in instruments if item.expiry == expiry
             )
-
-            grouped_cells: dict[tuple[OptionSide, float], list] = defaultdict(list)
+            grouped: dict[tuple[OptionSide, float], list] = defaultdict(list)
             for item in expiry_items:
-                grouped_cells[(item.option_side, float(item.strike))].append(item)
-            if any(len(items) > 1 for items in grouped_cells.values()):
-                raise PaperMarketDataCorruptionError(
-                    "duplicate option contracts occupy one readiness cell"
-                )
+                grouped[(item.option_side, float(item.strike))].append(item)
+            if any(len(items) > 1 for items in grouped.values()):
+                raise PaperMarketDataCorruptionError("duplicate option cell")
 
-            common_strikes = tuple(
-                sorted(
-                    {
-                        strike
-                        for side, strike in grouped_cells
-                        if side is OptionSide.CE
-                    }
-                    & {
-                        strike
-                        for side, strike in grouped_cells
-                        if side is OptionSide.PE
-                    }
-                )
-            )
+            ce_strikes = {
+                strike for side, strike in grouped if side is OptionSide.CE
+            }
+            pe_strikes = {
+                strike for side, strike in grouped if side is OptionSide.PE
+            }
+            common_strikes = tuple(sorted(ce_strikes & pe_strikes))
             interval = _dominant_interval(common_strikes)
             atm = _nearest_atm(common_strikes, spot_quote.last_price)
             target_strikes = tuple(
                 atm + interval * offset for offset in range(-4, 5)
             )
-
-            # The detected interval must be regular throughout the exact target
-            # window. Missing target strikes are incomplete coverage; additional
-            # irregular common strikes inside the bounded window are corruption.
             target_set = {round(value, 8) for value in target_strikes}
-            common_in_window = {
+            window_common = {
                 round(value, 8)
                 for value in common_strikes
                 if target_strikes[0] <= value <= target_strikes[-1]
             }
-            missing_target_strikes = target_set - common_in_window
-            extra_window_strikes = common_in_window - target_set
-            if extra_window_strikes:
-                raise PaperMarketDataCorruptionError(
-                    "irregular strike interval inside readiness window"
-                )
-            if missing_target_strikes:
+            if window_common - target_set:
+                raise PaperMarketDataCorruptionError("irregular target window")
+            if target_set - window_common:
                 return self._report(
-                    evaluated_at=evaluated_at,
-                    underlying=underlying,
-                    status=(
-                        MarketDataReadinessStatus.CHAIN_COVERAGE_INCOMPLETE
-                    ),
+                    **common,
+                    status=MarketDataReadinessStatus.CHAIN_COVERAGE_INCOMPLETE,
                     reason="CHAIN_COVERAGE_INCOMPLETE",
-                    underlying_key=spot_quote.instrument_key,
-                    spot=spot_quote.last_price,
-                    spot_timestamp=spot_quote.quote_timestamp,
                     expiry=expiry,
                     interval=interval,
                     atm=atm,
                 )
 
-            expected_cells = tuple(
-                (side, strike, offset)
-                for offset, strike in zip(range(-4, 5), target_strikes)
-                for side in (OptionSide.CE, OptionSide.PE)
-            )
             selected = []
             seen_keys: set[str] = set()
-            for side, strike, offset in expected_cells:
-                cell_items = grouped_cells.get((side, float(strike)), [])
-                if not cell_items:
-                    return self._report(
-                        evaluated_at=evaluated_at,
-                        underlying=underlying,
-                        status=(
-                            MarketDataReadinessStatus.CHAIN_COVERAGE_INCOMPLETE
-                        ),
-                        reason="CHAIN_COVERAGE_INCOMPLETE",
-                        underlying_key=spot_quote.instrument_key,
-                        spot=spot_quote.last_price,
-                        spot_timestamp=spot_quote.quote_timestamp,
-                        expiry=expiry,
-                        interval=interval,
-                        atm=atm,
-                    )
-                if len(cell_items) != 1:
-                    raise PaperMarketDataCorruptionError(
-                        "ambiguous readiness contract cell"
-                    )
-                item = cell_items[0]
-                if item.instrument_key in seen_keys:
-                    raise PaperMarketDataCorruptionError(
-                        "duplicate option identity"
-                    )
-                seen_keys.add(item.instrument_key)
-                selected.append((item, offset))
+            for offset, strike in zip(range(-4, 5), target_strikes):
+                for side in (OptionSide.CE, OptionSide.PE):
+                    cell = grouped.get((side, float(strike)), [])
+                    if not cell:
+                        return self._report(
+                            **common,
+                            status=MarketDataReadinessStatus.CHAIN_COVERAGE_INCOMPLETE,
+                            reason="CHAIN_COVERAGE_INCOMPLETE",
+                            expiry=expiry,
+                            interval=interval,
+                            atm=atm,
+                        )
+                    if len(cell) != 1:
+                        raise PaperMarketDataCorruptionError("ambiguous option cell")
+                    item = cell[0]
+                    if item.instrument_key in seen_keys:
+                        raise PaperMarketDataCorruptionError("duplicate identity")
+                    seen_keys.add(item.instrument_key)
+                    selected.append((item, offset))
 
             quotes = self.market_data.quotes(
                 instrument_keys=tuple(
@@ -385,70 +336,62 @@ class PaperMarketDataReadinessService:
             quote_map = {quote.instrument_key: quote for quote in quotes}
             if len(quote_map) != len(quotes):
                 raise PaperMarketDataCorruptionError("duplicate quote identity")
-            requested_keys = {item.instrument_key for item, _ in selected}
-            if any(key not in requested_keys for key in quote_map):
-                raise PaperMarketDataCorruptionError(
-                    "unrequested quote identity"
-                )
+            requested = {item.instrument_key for item, _ in selected}
+            if any(key not in requested for key in quote_map):
+                raise PaperMarketDataCorruptionError("unrequested quote identity")
         except PaperMarketDataAuthenticationError:
             return self._report(
-                evaluated_at=evaluated_at,
-                underlying=underlying,
+                **common,
                 status=MarketDataReadinessStatus.AUTHENTICATION_FAILED,
                 reason="AUTHENTICATION_FAILED",
             )
         except PaperMarketDataRateLimitError:
             return self._report(
-                evaluated_at=evaluated_at,
-                underlying=underlying,
+                **common,
                 status=MarketDataReadinessStatus.RATE_LIMITED,
                 reason="RATE_LIMITED",
             )
+        except PaperMarketDataStaleError:
+            return self._report(
+                **common,
+                status=MarketDataReadinessStatus.QUOTES_STALE,
+                reason="QUOTES_STALE",
+                expiry=locals().get("expiry"),
+                interval=locals().get("interval"),
+                atm=locals().get("atm"),
+            )
         except PaperMarketDataUnavailableError:
             return self._report(
-                evaluated_at=evaluated_at,
-                underlying=underlying,
+                **common,
                 status=MarketDataReadinessStatus.QUOTES_UNAVAILABLE,
                 reason="QUOTES_UNAVAILABLE",
-                underlying_key=spot_quote.instrument_key,
-                spot=spot_quote.last_price,
-                spot_timestamp=spot_quote.quote_timestamp,
                 expiry=locals().get("expiry"),
                 interval=locals().get("interval"),
                 atm=locals().get("atm"),
             )
         except (PaperMarketDataCorruptionError, ValueError, TypeError):
             return self._report(
-                evaluated_at=evaluated_at,
-                underlying=underlying,
+                **common,
                 status=MarketDataReadinessStatus.DATA_CORRUPT,
                 reason="DATA_CORRUPT",
-                underlying_key=spot_quote.instrument_key,
-                spot=spot_quote.last_price,
-                spot_timestamp=spot_quote.quote_timestamp,
             )
 
         evidence = []
         for item, offset in selected:
             quote = quote_map.get(item.instrument_key)
             if quote is None:
-                status = ContractReadinessStatus.QUOTE_MISSING
+                row_status = ContractReadinessStatus.QUOTE_MISSING
                 reason = "QUOTE_MISSING"
-                spread = None
-                last = bid = ask = timestamp = None
+                last = bid = ask = timestamp = spread = None
             else:
                 if (
                     quote.provider != self.market_data.provider_name
                     or quote.instrument_key != item.instrument_key
                 ):
                     return self._report(
-                        evaluated_at=evaluated_at,
-                        underlying=underlying,
+                        **common,
                         status=MarketDataReadinessStatus.DATA_CORRUPT,
                         reason="DATA_CORRUPT",
-                        underlying_key=spot_quote.instrument_key,
-                        spot=spot_quote.last_price,
-                        spot_timestamp=spot_quote.quote_timestamp,
                         expiry=expiry,
                         interval=interval,
                         atm=atm,
@@ -461,40 +404,34 @@ class PaperMarketDataReadinessService:
                     verify_timestamp_freshness(
                         timestamp=timestamp,
                         evaluated_at=evaluated_at,
-                        maximum_age_seconds=(
-                            self.policy.max_quote_age_seconds
-                        ),
+                        maximum_age_seconds=self.policy.max_quote_age_seconds,
                     )
-                except PaperMarketDataUnavailableError:
-                    status = ContractReadinessStatus.QUOTE_STALE
+                except PaperMarketDataStaleError:
+                    row_status = ContractReadinessStatus.QUOTE_STALE
                     reason = "QUOTE_STALE"
                     spread = None
                 except (PaperMarketDataCorruptionError, ValueError, TypeError):
                     return self._report(
-                        evaluated_at=evaluated_at,
-                        underlying=underlying,
+                        **common,
                         status=MarketDataReadinessStatus.DATA_CORRUPT,
                         reason="DATA_CORRUPT",
-                        underlying_key=spot_quote.instrument_key,
-                        spot=spot_quote.last_price,
-                        spot_timestamp=spot_quote.quote_timestamp,
                         expiry=expiry,
                         interval=interval,
                         atm=atm,
                     )
                 else:
                     if bid is None or ask is None:
-                        status = ContractReadinessStatus.BID_ASK_MISSING
+                        row_status = ContractReadinessStatus.BID_ASK_MISSING
                         reason = "BID_ASK_MISSING"
                         spread = None
                     else:
                         midpoint = (bid + ask) / 2.0
                         spread = ((ask - bid) / midpoint) * 100.0
                         if spread > self.policy.maximum_spread_percentage:
-                            status = ContractReadinessStatus.SPREAD_TOO_WIDE
+                            row_status = ContractReadinessStatus.SPREAD_TOO_WIDE
                             reason = "SPREAD_TOO_WIDE"
                         else:
-                            status = ContractReadinessStatus.READY
+                            row_status = ContractReadinessStatus.READY
                             reason = "READY"
             evidence.append(
                 ContractReadinessEvidence(
@@ -511,70 +448,61 @@ class PaperMarketDataReadinessService:
                     ask,
                     spread,
                     timestamp,
-                    status,
+                    row_status,
                     reason,
                 )
             )
 
-        ready = sum(
-            row.status is ContractReadinessStatus.READY for row in evidence
-        )
-        stale = any(
+        if any(
             row.status is ContractReadinessStatus.QUOTE_STALE
             for row in evidence
-        )
-        missing = any(
+        ):
+            status, reason = MarketDataReadinessStatus.QUOTES_STALE, "QUOTES_STALE"
+        elif any(
             row.status is ContractReadinessStatus.QUOTE_MISSING
             for row in evidence
-        )
-        partial = any(
-            row.status
-            in {
+        ):
+            status, reason = (
+                MarketDataReadinessStatus.QUOTES_UNAVAILABLE,
+                "QUOTES_UNAVAILABLE",
+            )
+        elif any(
+            row.status in {
                 ContractReadinessStatus.BID_ASK_MISSING,
                 ContractReadinessStatus.SPREAD_TOO_WIDE,
             }
             for row in evidence
-        )
-        ce_coverage = sum(
-            row.option_side is OptionSide.CE for row in evidence
-        )
-        pe_coverage = sum(
-            row.option_side is OptionSide.PE for row in evidence
-        )
-        if stale:
-            overall, reason = (
-                MarketDataReadinessStatus.QUOTES_STALE,
-                "QUOTES_STALE",
-            )
-        elif missing:
-            overall, reason = (
-                MarketDataReadinessStatus.QUOTES_UNAVAILABLE,
-                "QUOTES_UNAVAILABLE",
-            )
-        elif partial:
-            overall, reason = (
+        ):
+            status, reason = (
                 MarketDataReadinessStatus.QUOTE_QUALITY_PARTIAL,
                 "QUOTE_QUALITY_PARTIAL",
             )
-        elif (
-            ready == 18
-            and ce_coverage >= self.policy.min_ce_coverage
-            and pe_coverage >= self.policy.min_pe_coverage
-        ):
-            overall, reason = MarketDataReadinessStatus.READY, "READY"
         else:
-            overall, reason = (
-                MarketDataReadinessStatus.DATA_CORRUPT,
-                "DATA_CORRUPT",
+            ready = sum(
+                row.status is ContractReadinessStatus.READY
+                for row in evidence
             )
+            ce_coverage = sum(
+                row.option_side is OptionSide.CE for row in evidence
+            )
+            pe_coverage = sum(
+                row.option_side is OptionSide.PE for row in evidence
+            )
+            if (
+                ready == 18
+                and ce_coverage >= self.policy.min_ce_coverage
+                and pe_coverage >= self.policy.min_pe_coverage
+            ):
+                status, reason = MarketDataReadinessStatus.READY, "READY"
+            else:
+                status, reason = (
+                    MarketDataReadinessStatus.DATA_CORRUPT,
+                    "DATA_CORRUPT",
+                )
         return self._report(
-            evaluated_at=evaluated_at,
-            underlying=underlying,
-            status=overall,
+            **common,
+            status=status,
             reason=reason,
-            underlying_key=spot_quote.instrument_key,
-            spot=spot_quote.last_price,
-            spot_timestamp=spot_quote.quote_timestamp,
             expiry=expiry,
             interval=interval,
             atm=atm,
