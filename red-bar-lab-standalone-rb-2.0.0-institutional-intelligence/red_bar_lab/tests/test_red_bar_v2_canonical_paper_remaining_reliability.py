@@ -16,7 +16,6 @@ from red_bar_lab.services.red_bar_v2_canonical.paper_recovery import (
     ControlledCanonicalPaperRecoveryService,
 )
 from red_bar_lab.tests.test_red_bar_v2_canonical_paper_execution import (
-    FakePaperAdapter,
     _service,
 )
 
@@ -49,13 +48,13 @@ class _TwoCandidateRepository:
     def __init__(self) -> None:
         self.rows = {
             "E1": SimpleNamespace(
-                command=SimpleNamespace(reservation_id="R1"),
+                command=None,
                 state=PaperExecutionState.SUBMISSION_STARTED,
                 paper_order_id=None,
                 reason_code="SUBMISSION_STARTED",
             ),
             "E2": SimpleNamespace(
-                command=SimpleNamespace(reservation_id="R2"),
+                command=None,
                 state=PaperExecutionState.SUBMISSION_STARTED,
                 paper_order_id=None,
                 reason_code="SUBMISSION_STARTED",
