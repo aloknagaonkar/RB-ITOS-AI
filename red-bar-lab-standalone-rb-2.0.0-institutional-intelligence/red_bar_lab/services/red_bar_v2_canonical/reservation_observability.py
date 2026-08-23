@@ -2,32 +2,28 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import json
 from pathlib import Path
 import sqlite3
 
-
-@dataclass(frozen=True, slots=True)
-class ReservationObservation:
-    reservation_id: str
-    bundle_id: str
-    owner_id: str
-    state: str
-    reserved_at: datetime
-    lease_expires_at: datetime
-    released_at: datetime | None
-    release_reason: str | None
+from .reservation_identity import reservation_sha256
+from .reservation_models import (
+    CanonicalBundleReservation,
+    CanonicalReservationLifecycleEvent,
+    ReservationEventType,
+)
+from .reservation_repository import ReservationCorruptionError, SQLiteCanonicalReservationRepository
 
 
 @dataclass(frozen=True, slots=True)
-class ReservationEventObservation:
-    event_type: str
-    event_timestamp: datetime
-    owner_id: str
-    reason_code: str
+class ReservationObservationResult:
+    status: str
+    reservation: CanonicalBundleReservation | None
+    events: tuple[CanonicalReservationLifecycleEvent, ...]
 
 
 class SQLiteReservationObservabilityRepository:
-    """Read-only reservation projection. It never creates a database or schema."""
+    """Read-only, integrity-verifying reservation projection."""
 
     def __init__(self, path: Path, *, busy_timeout_ms: int = 250) -> None:
         self.path = Path(path)
@@ -52,66 +48,69 @@ class SQLiteReservationObservabilityRepository:
             (name,),
         ).fetchone() is not None
 
+    @staticmethod
+    def _decode_event(row: sqlite3.Row) -> CanonicalReservationLifecycleEvent:
+        payload = str(row["metadata_json"])
+        if reservation_sha256(payload) != str(row["metadata_sha256"]):
+            raise ReservationCorruptionError("reservation event digest mismatch")
+        try:
+            metadata = json.loads(payload)
+            event = CanonicalReservationLifecycleEvent(
+                event_id=str(row["event_id"]),
+                reservation_id=str(row["reservation_id"]),
+                bundle_id=str(row["bundle_id"]),
+                event_type=ReservationEventType(str(row["event_type"])),
+                event_timestamp=datetime.fromisoformat(str(row["event_timestamp"])),
+                owner_id=str(row["owner_id"]),
+                reason_code=str(row["reason_code"]),
+                metadata=metadata,
+            )
+        except Exception as exc:
+            raise ReservationCorruptionError("reservation event violates canonical schema") from exc
+        if metadata.get("reservation_id") != event.reservation_id:
+            raise ReservationCorruptionError("reservation event metadata mismatch: reservation_id")
+        if metadata.get("bundle_id") != event.bundle_id:
+            raise ReservationCorruptionError("reservation event metadata mismatch: bundle_id")
+        return event
+
     def latest_for_bundle(
         self,
         *,
         bundle_id: str,
         event_limit: int = 25,
-    ) -> tuple[ReservationObservation | None, tuple[ReservationEventObservation, ...]]:
+    ) -> ReservationObservationResult:
         bounded = min(max(int(event_limit), 1), 100)
-        with self._connect() as conn:
-            if not self._table_exists(conn, "canonical_red_bar_v2_bundle_reservations"):
-                return None, ()
-            row = conn.execute(
-                """
-                SELECT reservation_id,bundle_id,owner_id,state,reserved_at,
-                       lease_expires_at,released_at,release_reason
-                FROM canonical_red_bar_v2_bundle_reservations
-                WHERE bundle_id=?
-                ORDER BY created_at DESC,reservation_id DESC
-                LIMIT 1
-                """,
-                (bundle_id,),
-            ).fetchone()
-            if row is None:
-                return None, ()
-            reservation = ReservationObservation(
-                reservation_id=str(row["reservation_id"]),
-                bundle_id=str(row["bundle_id"]),
-                owner_id=str(row["owner_id"]),
-                state=str(row["state"]),
-                reserved_at=datetime.fromisoformat(str(row["reserved_at"])),
-                lease_expires_at=datetime.fromisoformat(str(row["lease_expires_at"])),
-                released_at=(
-                    datetime.fromisoformat(str(row["released_at"]))
-                    if row["released_at"] is not None
-                    else None
-                ),
-                release_reason=(
-                    str(row["release_reason"])
-                    if row["release_reason"] is not None
-                    else None
-                ),
-            )
-            if not self._table_exists(conn, "canonical_red_bar_v2_bundle_reservation_events"):
-                return reservation, ()
-            rows = conn.execute(
-                """
-                SELECT event_type,event_timestamp,owner_id,reason_code
-                FROM canonical_red_bar_v2_bundle_reservation_events
-                WHERE bundle_id=?
-                ORDER BY event_timestamp DESC,event_id DESC
-                LIMIT ?
-                """,
-                (bundle_id, bounded),
-            ).fetchall()
-        events = tuple(
-            ReservationEventObservation(
-                event_type=str(item["event_type"]),
-                event_timestamp=datetime.fromisoformat(str(item["event_timestamp"])),
-                owner_id=str(item["owner_id"]),
-                reason_code=str(item["reason_code"]),
-            )
-            for item in rows
-        )
-        return reservation, events
+        try:
+            with self._connect() as conn:
+                if not self._table_exists(conn, "canonical_red_bar_v2_bundle_reservations"):
+                    return ReservationObservationResult("NO_RESERVATION", None, ())
+                row = conn.execute(
+                    "SELECT * FROM canonical_red_bar_v2_bundle_reservations WHERE bundle_id=? ORDER BY created_at DESC,reservation_id DESC LIMIT 1",
+                    (bundle_id,),
+                ).fetchone()
+                if row is None:
+                    return ReservationObservationResult("NO_RESERVATION", None, ())
+                reservation = SQLiteCanonicalReservationRepository._from_row(row)
+                if reservation.bundle_id != bundle_id:
+                    raise ReservationCorruptionError("reservation bundle mismatch")
+                if not self._table_exists(conn, "canonical_red_bar_v2_bundle_reservation_events"):
+                    raise ReservationCorruptionError("reservation event table missing")
+                rows = conn.execute(
+                    "SELECT event_id,reservation_id,bundle_id,event_type,event_timestamp,owner_id,reason_code,metadata_json,metadata_sha256 FROM canonical_red_bar_v2_bundle_reservation_events WHERE reservation_id=? AND bundle_id=? ORDER BY event_timestamp DESC,event_id DESC LIMIT ?",
+                    (reservation.reservation_id, reservation.bundle_id, bounded),
+                ).fetchall()
+            events = tuple(self._decode_event(item) for item in rows)
+            for event in events:
+                if event.reservation_id != reservation.reservation_id:
+                    raise ReservationCorruptionError("reservation event projection mismatch: reservation_id")
+                if event.bundle_id != reservation.bundle_id:
+                    raise ReservationCorruptionError("reservation event projection mismatch: bundle_id")
+            return ReservationObservationResult("RESERVATION_DATA_AVAILABLE", reservation, events)
+        except ReservationCorruptionError:
+            return ReservationObservationResult("RESERVATION_DATA_CORRUPT", None, ())
+        except (FileNotFoundError, sqlite3.Error, OSError):
+            return ReservationObservationResult("RESERVATION_DATABASE_UNAVAILABLE", None, ())
+
+
+ReservationObservation = CanonicalBundleReservation
+ReservationEventObservation = CanonicalReservationLifecycleEvent
