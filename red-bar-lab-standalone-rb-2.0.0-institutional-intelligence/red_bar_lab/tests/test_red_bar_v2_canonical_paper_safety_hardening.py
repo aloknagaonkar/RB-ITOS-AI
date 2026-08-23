@@ -65,7 +65,13 @@ class FailingLookupRepository(StrictSQLiteCanonicalPaperExecutionRepository):
 
 
 class CountingSelector(FixedSelector):
-    pass
+    def __init__(self, contract):
+        super().__init__(contract)
+        self.calls = 0
+
+    def select(self, **kwargs):
+        self.calls += 1
+        return super().select(**kwargs)
 
 
 def _service(path: Path, *, adapter, reservations=None, repository=None):
