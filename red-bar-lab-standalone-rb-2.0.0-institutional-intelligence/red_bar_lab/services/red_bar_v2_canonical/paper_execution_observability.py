@@ -3,10 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from .paper_execution_ledger import StrictSQLiteCanonicalPaperExecutionRepository
 from .paper_execution_repository import (
     PaperExecutionCorruptionError,
     PaperExecutionStorageError,
-    SQLiteCanonicalPaperExecutionRepository,
     VerifiedPaperExecution,
 )
 
@@ -26,7 +26,10 @@ class SQLiteCanonicalPaperExecutionObservabilityRepository:
     def latest_for_bundle(self, *, bundle_id: str) -> PaperExecutionObservation:
         if not self.path.exists():
             return PaperExecutionObservation("EXECUTION_DATABASE_UNAVAILABLE", None)
-        repository = SQLiteCanonicalPaperExecutionRepository(self.path, initialize=False)
+        repository = StrictSQLiteCanonicalPaperExecutionRepository(
+            self.path,
+            initialize=False,
+        )
         try:
             with repository._connect(read_only=True) as conn:
                 table = conn.execute(
@@ -42,14 +45,20 @@ class SQLiteCanonicalPaperExecutionObservabilityRepository:
                 ).fetchone()
             if row is None:
                 return PaperExecutionObservation("NO_CANONICAL_EXECUTION", None)
-            evidence = repository.get_verified(execution_id=str(row["execution_id"]))
+            evidence = repository.get_verified(
+                execution_id=str(row["execution_id"])
+            )
             status = (
                 "RECOVERY_REQUIRED"
-                if evidence.state.value in {"SUBMISSION_UNCERTAIN", "RECOVERY_REQUIRED"}
+                if evidence.state.value
+                in {"SUBMISSION_UNCERTAIN", "RECOVERY_REQUIRED"}
                 else "EXECUTION_DATA_AVAILABLE"
             )
             return PaperExecutionObservation(status, evidence)
         except PaperExecutionCorruptionError:
             return PaperExecutionObservation("EXECUTION_DATA_CORRUPT", None)
         except (PaperExecutionStorageError, OSError):
-            return PaperExecutionObservation("EXECUTION_DATABASE_UNAVAILABLE", None)
+            return PaperExecutionObservation(
+                "EXECUTION_DATABASE_UNAVAILABLE",
+                None,
+            )
