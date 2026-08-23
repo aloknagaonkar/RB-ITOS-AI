@@ -79,6 +79,12 @@ class CanonicalSection3View:
     bundle_id: str | None
     signal_id: str | None
     idempotency_key: str | None
+    underlying_instrument: str | None
+    trading_date: date | None
+    direction: str | None
+    option_side: str | None
+    entry_type: str | None
+    evaluation_timeframe: str | None
     lifecycle_status: str | None
     created_at: datetime | None
     event_history: tuple[CanonicalBundleEventView, ...]
