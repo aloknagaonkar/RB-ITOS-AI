@@ -96,10 +96,7 @@ class ExistingPaperContractSelector:
         }
         for instrument in ranked:
             quote = quotes.get(instrument.instrument_key)
-            token = _canonical_token(
-                instrument.instrument_token,
-                instrument.instrument_key,
-            )
+            token = _canonical_token(instrument.instrument_token, instrument.instrument_key)
             if quote is None or token is None:
                 continue
             bid = quote.bid_price
@@ -133,22 +130,16 @@ class ExistingPaperContractSelector:
 class _EngineQuoteFacade:
     """Expose only the engine's legacy read-only quote shape for one command."""
 
-    def __init__(
-        self,
-        *,
-        market_data: PaperCanaryMarketData,
-        instrument_key: str,
-        evaluated_at: datetime,
-    ) -> None:
+    def __init__(self, *, market_data: PaperCanaryMarketData, instrument_key: str) -> None:
         self.market_data = market_data
         self.instrument_key = instrument_key
-        self.evaluated_at = evaluated_at
         self.provider_name = market_data.provider_name
 
     def quote(self, keys: list[str]) -> dict[str, object]:
+        evaluated_at = datetime.now().astimezone()
         quotes = self.market_data.quotes(
             instrument_keys=(self.instrument_key,),
-            evaluated_at=self.evaluated_at,
+            evaluated_at=evaluated_at,
         )
         if not quotes:
             return {}
@@ -220,7 +211,6 @@ class ExistingRedBarPaperAdapter:
         quote_facade = _EngineQuoteFacade(
             market_data=self.market_data,
             instrument_key=command.contract.instrument_key,
-            evaluated_at=command.created_at,
         )
         try:
             row = self.engine.open_long_option(
