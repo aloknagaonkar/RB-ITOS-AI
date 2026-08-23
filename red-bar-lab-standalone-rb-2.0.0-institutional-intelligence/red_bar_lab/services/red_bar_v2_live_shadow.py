@@ -1,44 +1,43 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
-from typing import Any
 
+from red_bar_lab.config import RedBarSettings
 from red_bar_lab.services.red_bar_v2_canonical.shadow_runtime import (
-    RedBarV2ShadowTask,
+    ReplayEventLike,
     build_runtime_market_metadata,
     build_runtime_source_replay_id,
+    build_shadow_task,
     get_red_bar_v2_shadow_runtime,
 )
+from red_bar_lab.services.red_bar_v2_futures_replay_service import MonitoredRedBarV2FuturesReplayResult
 
 _LOGGER = logging.getLogger(__name__)
 
 
+def _latest_admission_event(monitored: MonitoredRedBarV2FuturesReplayResult) -> ReplayEventLike | None:
+    candidates = tuple(event for event in monitored.replay.events if event.event_type == "CANDIDATE_ADMISSION")
+    return max(candidates, key=lambda item: item.timestamp) if candidates else None
+
+
 def submit_latest_live_canonical_shadow(
     *,
-    monitored: Any,
-    settings: Any,
+    monitored: MonitoredRedBarV2FuturesReplayResult,
+    settings: RedBarSettings,
     instrument_key: str,
     futures_instrument_key: str,
     futures_expiry: str | None,
 ) -> bool:
-    """Submit only the newest live admission event; research callers never invoke this."""
     try:
         runtime = get_red_bar_v2_shadow_runtime(
-            enabled=bool(settings.red_bar_v2_canonical_shadow_enabled),
-            database_path=Path(settings.database_path),
+            enabled=settings.red_bar_v2_canonical_shadow_enabled,
+            database_path=settings.database_path,
         )
         if runtime is None:
             return False
-
-        candidates = tuple(
-            event
-            for event in monitored.replay.events
-            if str(getattr(event, "event_type", "")) == "CANDIDATE_ADMISSION"
-        )
-        if not candidates:
+        event = _latest_admission_event(monitored)
+        if event is None:
             return False
-        event = max(candidates, key=lambda item: item.timestamp)
         metadata = build_runtime_market_metadata(
             replay=monitored.replay,
             health=monitored.health,
@@ -53,13 +52,12 @@ def submit_latest_live_canonical_shadow(
             event=event,
         )
         return runtime.submit(
-            RedBarV2ShadowTask(
+            build_shadow_task(
                 replay=monitored.replay,
                 health=monitored.health,
                 replay_event=event,
                 market_metadata=metadata,
                 source_replay_id=source_replay_id,
-                event_timestamp=event.timestamp,
             )
         )
     except Exception:
