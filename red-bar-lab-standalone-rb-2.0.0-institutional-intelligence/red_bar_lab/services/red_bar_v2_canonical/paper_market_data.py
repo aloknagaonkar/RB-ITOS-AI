@@ -8,12 +8,32 @@ from typing import Protocol
 from red_bar_lab.domain.red_bar_v2 import OptionSide
 
 
-class PaperMarketDataError(Exception): pass
-class PaperMarketDataConfigurationError(PaperMarketDataError): pass
-class PaperMarketDataUnavailableError(PaperMarketDataError): pass
-class PaperMarketDataCorruptionError(PaperMarketDataError): pass
-class PaperMarketDataRateLimitError(PaperMarketDataError): pass
-class PaperMarketDataAuthenticationError(PaperMarketDataError): pass
+class PaperMarketDataError(Exception):
+    pass
+
+
+class PaperMarketDataConfigurationError(PaperMarketDataError):
+    pass
+
+
+class PaperMarketDataUnavailableError(PaperMarketDataError):
+    pass
+
+
+class PaperMarketDataStaleError(PaperMarketDataUnavailableError):
+    pass
+
+
+class PaperMarketDataCorruptionError(PaperMarketDataError):
+    pass
+
+
+class PaperMarketDataRateLimitError(PaperMarketDataError):
+    pass
+
+
+class PaperMarketDataAuthenticationError(PaperMarketDataError):
+    pass
 
 
 def _text(name: str, value: object) -> str:
@@ -82,8 +102,13 @@ class PaperMarketQuote:
             raise ValueError("instrument_token must be non-empty")
         finite_positive_number("last_price", self.last_price)
         for name, value in (("bid_price", self.bid_price), ("ask_price", self.ask_price)):
-            if value is not None: finite_positive_number(name, value)
-        if self.bid_price is not None and self.ask_price is not None and float(self.bid_price) > float(self.ask_price):
+            if value is not None:
+                finite_positive_number(name, value)
+        if (
+            self.bid_price is not None
+            and self.ask_price is not None
+            and float(self.bid_price) > float(self.ask_price)
+        ):
             raise ValueError("bid_price cannot exceed ask_price")
         _aware("quote_timestamp", self.quote_timestamp)
         _text("provider", self.provider)
@@ -111,30 +136,85 @@ class PaperOptionInstrument:
             raise ValueError("instrument_token must be non-empty")
         _text("trading_symbol", self.trading_symbol)
         _text("underlying", self.underlying)
-        if type(self.expiry) is not date: raise ValueError("expiry must be date")
+        if type(self.expiry) is not date:
+            raise ValueError("expiry must be date")
         finite_positive_number("strike", self.strike)
-        if type(self.option_side) is not OptionSide: raise ValueError("option_side must be OptionSide")
-        if type(self.lot_size) is not int or self.lot_size <= 0: raise ValueError("lot_size must be a positive integer")
+        if type(self.option_side) is not OptionSide:
+            raise ValueError("option_side must be OptionSide")
+        if type(self.lot_size) is not int or self.lot_size <= 0:
+            raise ValueError("lot_size must be a positive integer")
         _text("provider", self.provider)
 
 
 class PaperCanaryMarketData(Protocol):
     @property
     def provider_name(self) -> str: ...
-    def underlying_quote(self, *, underlying: str, evaluated_at: datetime) -> PaperUnderlyingQuote: ...
-    def option_instruments(self, *, underlying: str, evaluated_at: datetime) -> tuple[PaperOptionInstrument, ...]: ...
-    def quotes(self, *, instrument_keys: tuple[str, ...], evaluated_at: datetime) -> tuple[PaperMarketQuote, ...]: ...
+
+    def underlying_quote(
+        self,
+        *,
+        underlying: str,
+        evaluated_at: datetime,
+    ) -> PaperUnderlyingQuote: ...
+
+    def option_instruments(
+        self,
+        *,
+        underlying: str,
+        evaluated_at: datetime,
+    ) -> tuple[PaperOptionInstrument, ...]: ...
+
+    def quotes(
+        self,
+        *,
+        instrument_keys: tuple[str, ...],
+        evaluated_at: datetime,
+    ) -> tuple[PaperMarketQuote, ...]: ...
 
 
-def verify_timestamp_freshness(*, timestamp: datetime, evaluated_at: datetime, maximum_age_seconds: float, future_tolerance_seconds: float = 2.0) -> None:
-    _aware("timestamp", timestamp); _aware("evaluated_at", evaluated_at)
-    maximum_age = finite_positive_number("maximum_age_seconds", maximum_age_seconds)
-    future_tolerance = finite_non_negative_number("future_tolerance_seconds", future_tolerance_seconds)
-    age = (evaluated_at.astimezone(timezone.utc) - timestamp.astimezone(timezone.utc)).total_seconds()
-    if not isfinite(age): raise PaperMarketDataCorruptionError("provider evidence age is not finite")
-    if age < -future_tolerance: raise PaperMarketDataCorruptionError("provider timestamp is in the future")
-    if age > maximum_age: raise PaperMarketDataUnavailableError("provider evidence is stale")
+def verify_timestamp_freshness(
+    *,
+    timestamp: datetime,
+    evaluated_at: datetime,
+    maximum_age_seconds: float,
+    future_tolerance_seconds: float = 2.0,
+) -> None:
+    _aware("timestamp", timestamp)
+    _aware("evaluated_at", evaluated_at)
+    maximum_age = finite_positive_number(
+        "maximum_age_seconds",
+        maximum_age_seconds,
+    )
+    future_tolerance = finite_non_negative_number(
+        "future_tolerance_seconds",
+        future_tolerance_seconds,
+    )
+    age = (
+        evaluated_at.astimezone(timezone.utc)
+        - timestamp.astimezone(timezone.utc)
+    ).total_seconds()
+    if not isfinite(age):
+        raise PaperMarketDataCorruptionError(
+            "provider evidence age is not finite"
+        )
+    if age < -future_tolerance:
+        raise PaperMarketDataCorruptionError(
+            "provider timestamp is in the future"
+        )
+    if age > maximum_age:
+        raise PaperMarketDataStaleError("provider evidence is stale")
 
 
-def verify_quote_freshness(quote: PaperMarketQuote, *, evaluated_at: datetime, maximum_age_seconds: float, future_tolerance_seconds: float = 2.0) -> None:
-    verify_timestamp_freshness(timestamp=quote.quote_timestamp, evaluated_at=evaluated_at, maximum_age_seconds=maximum_age_seconds, future_tolerance_seconds=future_tolerance_seconds)
+def verify_quote_freshness(
+    quote: PaperMarketQuote,
+    *,
+    evaluated_at: datetime,
+    maximum_age_seconds: float,
+    future_tolerance_seconds: float = 2.0,
+) -> None:
+    verify_timestamp_freshness(
+        timestamp=quote.quote_timestamp,
+        evaluated_at=evaluated_at,
+        maximum_age_seconds=maximum_age_seconds,
+        future_tolerance_seconds=future_tolerance_seconds,
+    )
