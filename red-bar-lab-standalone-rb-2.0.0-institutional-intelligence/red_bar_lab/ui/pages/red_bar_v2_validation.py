@@ -8,12 +8,57 @@ import streamlit as st
 from red_bar_lab.config import RedBarSettings
 from red_bar_lab.services.red_bar_v2_canonical.observability_repository import SQLiteRedBarV2CanonicalObservabilityRepository
 from red_bar_lab.services.red_bar_v2_canonical.observability_service import RedBarV2CanonicalObservabilityService
+from red_bar_lab.services.red_bar_v2_canonical.reservation_observability import SQLiteReservationObservabilityRepository
 from red_bar_lab.ui.historical_red_bar_v2_windows import _render_window_panel
 from red_bar_lab.ui.red_bar_v2_promotion_panel import render_red_bar_v2_promotion_panel
 
 
 def _text(value: object | None) -> str:
     return "—" if value is None else str(value)
+
+
+def _render_reservation_boundary(settings: RedBarSettings, bundle_id: str | None) -> None:
+    st.markdown("### 8. Bundle reservation boundary")
+    st.warning("RESERVED does not mean ordered or executed. No capital, order or position was created.")
+    st.caption("Execution authority remains legacy-only. This section is read-only and cannot acquire, renew, release, reject or expire a reservation.")
+    if not settings.red_bar_v2_canonical_reservation_enabled:
+        st.info("Reservation boundary implemented; automatic reservation is disabled.")
+        return
+    if bundle_id is None:
+        st.info("No canonical bundle is available for reservation observation.")
+        return
+    try:
+        repository = SQLiteReservationObservabilityRepository(settings.database_path)
+        reservation, events = repository.latest_for_bundle(bundle_id=bundle_id, event_limit=25)
+    except (FileNotFoundError, OSError):
+        st.info("Reservation storage is not available. Legacy execution is unaffected.")
+        return
+    except Exception:
+        st.error("Reservation observability failed. No reservation evidence is trusted, and legacy execution is unaffected.")
+        return
+    if reservation is None:
+        st.info("No persisted reservation exists for the selected canonical bundle.")
+        return
+    frame = pd.DataFrame(
+        [
+            ("Reservation feature", "ENABLED"),
+            ("Reservation state", reservation.state),
+            ("Reservation ID", reservation.reservation_id),
+            ("Bundle ID", reservation.bundle_id),
+            ("Owner ID", reservation.owner_id),
+            ("Reserved timestamp", reservation.reserved_at.isoformat()),
+            ("Lease expiry", reservation.lease_expires_at.isoformat()),
+            ("Released timestamp", _text(reservation.released_at)),
+            ("Reason code", _text(reservation.release_reason)),
+        ],
+        columns=["Field", "Persisted value"],
+        dtype="string",
+    )
+    st.dataframe(frame, hide_index=True, use_container_width=True)
+    if events:
+        event_frame = pd.DataFrame([asdict(item) for item in events]).astype("string")
+        event_frame.columns = ["Event type", "Event timestamp", "Owner ID", "Reason code"]
+        st.dataframe(event_frame, hide_index=True, use_container_width=True)
 
 
 def _render_shadow_observability(settings: RedBarSettings, instrument_key: str) -> None:
@@ -40,17 +85,21 @@ def _render_shadow_observability(settings: RedBarSettings, instrument_key: str) 
 
     if status.availability == "CANONICAL_DATA_CORRUPT":
         st.error("Persisted canonical evidence failed digest, schema or projection validation. Untrusted evidence is not rendered or repaired.")
+        _render_reservation_boundary(settings, None)
         return
     if status.availability == "CANONICAL_READ_FAILED":
         st.error("Canonical observability failed while building the read-only projection. No partial evidence is trusted, and legacy execution is unaffected.")
+        _render_reservation_boundary(settings, None)
         return
     if status.availability in {"SHADOW_DISABLED", "WAITING_FOR_FIRST_OBSERVATION", "CANONICAL_DATABASE_UNAVAILABLE"}:
         st.info("No trusted canonical observation is available yet. Opening or refreshing this page does not initialize schema or start shadow processing.")
+        _render_reservation_boundary(settings, None)
         return
 
     section_1, section_2, section_3, parity, persistence = view.section_1, view.section_2, view.section_3, view.parity, view.persistence
     if not all((section_1, section_2, section_3, parity, persistence)):
         st.error("Canonical projection is incomplete; no untrusted partial evidence is rendered.")
+        _render_reservation_boundary(settings, None)
         return
 
     st.markdown("### 1. Input readiness")
@@ -153,6 +202,8 @@ def _render_shadow_observability(settings: RedBarSettings, instrument_key: str) 
     with st.expander("7. What happened from signal detection to shadow persistence?"):
         st.markdown("1. Legacy Red Bar V2 completed its authoritative evaluation.\n2. The newest admission event was copied into an immutable compact snapshot.\n3. The canonical state machine interpreted the same event-time evidence.\n4. Legacy and canonical outcomes were compared.\n5. The canonical resolution was stored as observational evidence.\n6. No order, position or exit was changed by this process.")
         st.caption(f"Selected observation: {persistence.resolution_id}; admission {section_2.admission_outcome}; parity {parity.overall}.")
+
+    _render_reservation_boundary(settings, section_3.bundle_id if section_3.bundle_available else None)
 
 
 def render_page(settings, layout, database, token, underlying_name, instrument_key, interval) -> None:
