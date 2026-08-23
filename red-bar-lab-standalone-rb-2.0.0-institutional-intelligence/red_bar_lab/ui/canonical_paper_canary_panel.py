@@ -5,47 +5,35 @@ import pandas as pd
 from red_bar_lab.services.red_bar_v2_canonical.paper_canary_observability import (
     PaperCanaryRuntimeObservabilityService,
 )
+from red_bar_lab.ui.canonical_market_data_readiness_panel import (
+    render_canonical_market_data_readiness_panel,
+)
 
 
 def _text(value: object | None) -> str:
-    if value is None:
-        return "—"
-    if hasattr(value, "isoformat"):
-        return value.isoformat()
+    if value is None: return "—"
+    if hasattr(value, "isoformat"): return value.isoformat()
     return str(value)
 
 
 def _provider_projection(settings) -> tuple[str, str, str]:
     provider = settings.red_bar_v2_paper_canary_market_data_provider
-    if provider in {"ZERODHA", "UPSTOX"}:
-        return provider, "READY", "PROVIDER_SELECTED"
-    if provider == "UNCONFIGURED":
-        return provider, "MISSING", "MARKET_DATA_PROVIDER_UNCONFIGURED"
+    if provider in {"ZERODHA", "UPSTOX"}: return provider, "READY", "PROVIDER_SELECTED"
+    if provider == "UNCONFIGURED": return provider, "MISSING", "MARKET_DATA_PROVIDER_UNCONFIGURED"
     return provider, "INVALID", "MARKET_DATA_PROVIDER_INVALID"
 
 
-def render_canonical_paper_canary_panel(st, settings) -> None:
+def _render_paper_canary_runtime(st, settings) -> None:
     st.markdown("### 10. Canonical paper-canary runtime")
-    st.warning(
-        "PAPER ONLY — this panel is read-only. It cannot start the worker, "
-        "run recovery, submit an order, reset the circuit or repair state."
-    )
+    st.warning("PAPER ONLY — this panel is read-only. It cannot start the worker, run recovery, submit an order, reset the circuit or repair state.")
     provider, provider_status, provider_reason = _provider_projection(settings)
-    provider_frame = pd.DataFrame(
-        [
-            ("Market-data provider", provider),
-            ("Provider configuration", provider_status),
-            ("Provider status reason", provider_reason),
-            ("Latest provider evidence timestamp", "—"),
-        ],
-        columns=["Field", "Read-only configuration value"],
-        dtype="string",
-    )
-    st.dataframe(provider_frame, hide_index=True, use_container_width=True)
-
-    observation = PaperCanaryRuntimeObservabilityService(
-        settings.paper_canary_state_path
-    ).load(
+    st.dataframe(pd.DataFrame([
+        ("Market-data provider", provider),
+        ("Provider configuration", provider_status),
+        ("Provider status reason", provider_reason),
+        ("Latest provider evidence timestamp", "—"),
+    ], columns=["Field", "Read-only configuration value"], dtype="string"), hide_index=True, use_container_width=True)
+    observation = PaperCanaryRuntimeObservabilityService(settings.paper_canary_state_path).load(
         worker_enabled=settings.red_bar_v2_paper_canary_worker_enabled,
         mode=settings.red_bar_v2_canonical_paper_execution_mode,
     )
@@ -58,12 +46,9 @@ def render_canonical_paper_canary_panel(st, settings) -> None:
             "RUNTIME_STATE_CORRUPT": "The durable runtime state failed schema or digest validation.",
             "RUNTIME_STATE_UNAVAILABLE": "No verified runtime state is currently available.",
         }.get(observation.status, "No verified runtime state is available.")
-        if observation.status in {"RUNTIME_STATE_CORRUPT", "CONFIGURATION_INVALID"}:
-            st.error(message)
-        else:
-            st.info(message)
+        if observation.status in {"RUNTIME_STATE_CORRUPT", "CONFIGURATION_INVALID"}: st.error(message)
+        else: st.info(message)
         return
-
     state = observation.state
     fields = [
         ("Worker configured", "YES" if settings.red_bar_v2_paper_canary_worker_enabled else "NO"),
@@ -90,5 +75,9 @@ def render_canonical_paper_canary_panel(st, settings) -> None:
         ("Worker-state persistence", state.persistence_status),
         ("Evidence freshness policy", f"≤ {settings.red_bar_v2_paper_canary_max_bundle_age_seconds:g} seconds"),
     ]
-    frame = pd.DataFrame(fields, columns=["Field", "Verified runtime value"], dtype="string")
-    st.dataframe(frame, hide_index=True, use_container_width=True)
+    st.dataframe(pd.DataFrame(fields, columns=["Field", "Verified runtime value"], dtype="string"), hide_index=True, use_container_width=True)
+
+
+def render_canonical_paper_canary_panel(st, settings) -> None:
+    _render_paper_canary_runtime(st, settings)
+    render_canonical_market_data_readiness_panel(st, settings)
