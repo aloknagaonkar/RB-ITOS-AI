@@ -13,7 +13,18 @@ def _env_bool(name: str, default: bool = False) -> bool:
 
 
 def _bounded_int(name: str, default: int, minimum: int, maximum: int) -> int:
-    raw = int(os.getenv(name, str(default)))
+    try:
+        raw = int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        raw = default
+    return min(max(raw, minimum), maximum)
+
+
+def _bounded_float(name: str, default: float, minimum: float, maximum: float) -> float:
+    try:
+        raw = float(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        raw = default
     return min(max(raw, minimum), maximum)
 
 
@@ -40,10 +51,21 @@ class RedBarSettings:
     red_bar_v2_canonical_reservation_max_bundle_age_seconds: int = 120
     red_bar_v2_canonical_paper_execution_enabled: bool = False
     red_bar_v2_canonical_paper_execution_mode: str = "OBSERVE_ONLY"
+    red_bar_v2_paper_canary_worker_enabled: bool = False
+    red_bar_v2_paper_canary_poll_seconds: float = 5.0
+    red_bar_v2_paper_canary_max_actions_per_cycle: int = 1
+    red_bar_v2_paper_canary_max_actions_per_day: int = 10
+    red_bar_v2_paper_canary_max_bundle_age_seconds: float = 120.0
+    red_bar_v2_paper_canary_failure_threshold: int = 3
+    red_bar_v2_paper_canary_required_probe_cycles: int = 1
 
     @property
     def database_path(self) -> Path:
         return self.artifacts_root / "database" / self.database_name
+
+    @property
+    def paper_canary_state_path(self) -> Path:
+        return self.artifacts_root / "red_bar_v2_paper_canary_state.json"
 
     @property
     def logs_root(self) -> Path:
@@ -95,6 +117,46 @@ class RedBarSettings:
                 False,
             ),
             red_bar_v2_canonical_paper_execution_mode=_canonical_paper_mode(),
+            red_bar_v2_paper_canary_worker_enabled=_env_bool(
+                "RED_BAR_V2_PAPER_CANARY_WORKER_ENABLED",
+                False,
+            ),
+            red_bar_v2_paper_canary_poll_seconds=_bounded_float(
+                "RED_BAR_V2_PAPER_CANARY_POLL_SECONDS",
+                5.0,
+                2.0,
+                60.0,
+            ),
+            red_bar_v2_paper_canary_max_actions_per_cycle=_bounded_int(
+                "RED_BAR_V2_PAPER_CANARY_MAX_ACTIONS_PER_CYCLE",
+                1,
+                1,
+                2,
+            ),
+            red_bar_v2_paper_canary_max_actions_per_day=_bounded_int(
+                "RED_BAR_V2_PAPER_CANARY_MAX_ACTIONS_PER_DAY",
+                10,
+                1,
+                50,
+            ),
+            red_bar_v2_paper_canary_max_bundle_age_seconds=_bounded_float(
+                "RED_BAR_V2_PAPER_CANARY_MAX_BUNDLE_AGE_SECONDS",
+                120.0,
+                15.0,
+                300.0,
+            ),
+            red_bar_v2_paper_canary_failure_threshold=_bounded_int(
+                "RED_BAR_V2_PAPER_CANARY_FAILURE_THRESHOLD",
+                3,
+                1,
+                10,
+            ),
+            red_bar_v2_paper_canary_required_probe_cycles=_bounded_int(
+                "RED_BAR_V2_PAPER_CANARY_REQUIRED_PROBE_CYCLES",
+                1,
+                1,
+                5,
+            ),
         )
 
 
