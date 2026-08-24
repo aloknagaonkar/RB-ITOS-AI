@@ -20,6 +20,18 @@ $workerRoot = Join-Path $projectRoot (Join-Path $artifactsRoot "market_trend_res
 $statusPath = Join-Path $workerRoot "supervisor_state.json"
 New-Item -ItemType Directory -Path $workerRoot -Force | Out-Null
 
+if (Test-Path $statusPath) {
+    try {
+        $existing = Get-Content $statusPath -Raw | ConvertFrom-Json
+        $existingProcess = Get-Process -Id ([int]$existing.supervisor_pid) -ErrorAction SilentlyContinue
+        if ($null -ne $existingProcess -and $existing.supervisor_state -in @("STARTING", "RUNNING", "BACKING_OFF", "CIRCUIT_OPEN")) {
+            Write-Host "ALREADY_RUNNING" -ForegroundColor Yellow
+            Write-Host "Status: $statusPath"
+            exit 0
+        }
+    } catch { }
+}
+
 $arguments = @("-m", "red_bar_lab.execution.run_market_trend_research_supervisor")
 Start-Process -FilePath $python -ArgumentList $arguments -WorkingDirectory $projectRoot -WindowStyle Hidden | Out-Null
 
@@ -43,6 +55,6 @@ do {
     }
 } while ((Get-Date) -lt $deadline)
 
-Write-Host "ALREADY_RUNNING or STARTING" -ForegroundColor Yellow
+Write-Host "STARTING" -ForegroundColor Yellow
 Write-Host "Status: $statusPath"
 exit 0
