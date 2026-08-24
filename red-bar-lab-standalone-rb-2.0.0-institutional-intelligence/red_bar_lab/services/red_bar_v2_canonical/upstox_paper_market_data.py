@@ -274,11 +274,19 @@ class UpstoxPaperCanaryMarketData:
         requested_keys: tuple[str, ...],
         require_known_token: bool = True,
     ) -> dict[str, dict[str, Any]]:
+        payload_count = len(payload)
+        if requested_keys and payload_count == 0:
+            raise self._quote_diagnostic(
+                reason_code="OPTION_QUOTE_COUNT_INCOMPLETE",
+                payload_count=0,
+                correlated_count=0,
+                rejected_count=len(requested_keys),
+                rejected_field="quote_identity",
+            )
         exact, normalized, tokens = self._requested_indexes(
             requested_keys,
             require_known_token=require_known_token,
         )
-        payload_count = len(payload)
         matched: dict[str, dict[str, Any]] = {}
 
         for response_key, raw_row in payload.items():
