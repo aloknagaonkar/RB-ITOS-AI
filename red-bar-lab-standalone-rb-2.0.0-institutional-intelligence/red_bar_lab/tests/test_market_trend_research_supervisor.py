@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -97,6 +96,45 @@ def test_supervisor_starts_exactly_one_child_without_token_argument(tmp_path, mo
     assert status["child_pid"] == 1234
     assert "secret-token" not in supervisor.config.state_path.read_text(encoding="utf-8")
     assert "secret-token" not in supervisor.config.log_path.read_text(encoding="utf-8")
+
+
+def test_unexpected_exits_open_circuit_and_prevent_restart_storm(tmp_path, monkeypatch):
+    monkeypatch.setenv("UPSTOX_ACCESS_TOKEN", "secret-token")
+    monkeypatch.setenv("MARKET_TREND_RESEARCH_CALENDAR_VERIFIED", "true")
+    config = SupervisorConfig(
+        work_root=tmp_path / "artifacts" / "red_bar" / "market_trend_research",
+        initial_backoff_seconds=0.001,
+        maximum_backoff_seconds=0.002,
+        stable_run_seconds=10.0,
+        maximum_rapid_failures=2,
+        circuit_cooldown_seconds=0.001,
+        heartbeat_seconds=0.001,
+        graceful_stop_seconds=0.001,
+    )
+    calls = []
+    holder = {}
+
+    def factory(command, **kwargs):
+        calls.append(command)
+        if len(calls) >= 3:
+            holder["supervisor"].request_stop()
+            return FakeProcess(pid=2000 + len(calls), exit_code=None)
+        return FakeProcess(pid=2000 + len(calls), exit_code=1)
+
+    supervisor = MarketTrendResearchSupervisor(
+        config=config,
+        process_factory=factory,
+        random_source=lambda: 0.0,
+    )
+    holder["supervisor"] = supervisor
+    assert supervisor.run() == 0
+    assert len(calls) == 3
+    log = config.log_path.read_text(encoding="utf-8")
+    assert '"state": "BACKING_OFF"' in log
+    assert '"state": "CIRCUIT_OPEN"' in log
+    status = read_supervisor_state(config.state_path)
+    assert status["supervisor_state"] == "STOPPED"
+    assert status["restart_count"] == 2
 
 
 def test_missing_token_fails_closed(tmp_path, monkeypatch):
