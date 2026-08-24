@@ -14,10 +14,12 @@ from .models import (
     MorningReference,
     OpeningOiBaseline,
     OptionOiCell,
+    PcrBias,
     ResearchDataQuality,
     ResearchLatencyEvidence,
     ResearchState,
 )
+from .policy import MarketTrendResearchPolicy
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS market_trend_research_snapshots (
@@ -45,7 +47,7 @@ CREATE TABLE IF NOT EXISTS market_trend_research_oi_baselines (
  baseline_timestamp TEXT NOT NULL,
  expiry TEXT NOT NULL,
  payload_json TEXT NOT NULL,
- PRIMARY KEY(underlying, trading_date)
+ PRIMARY KEY(underlying,trading_date)
 );
 CREATE TABLE IF NOT EXISTS market_trend_research_source_snapshots (
  snapshot_key TEXT PRIMARY KEY,
@@ -87,7 +89,28 @@ def _json(value: object) -> str:
 
 
 def _payload(snapshot: DualPcrResearchSnapshot) -> str:
-    return _json(asdict(snapshot))
+    payload = asdict(snapshot)
+    policy = MarketTrendResearchPolicy()
+    for panel_name in ("current_panel", "morning_panel"):
+        panel = payload.get(panel_name)
+        if not isinstance(panel, dict):
+            continue
+        aggregate = panel.get("aggregate")
+        if not isinstance(aggregate, dict) or aggregate.get("direction_evidence") is not None:
+            continue
+        raw_classification = aggregate.get("classification", PcrBias.UNAVAILABLE)
+        classification = (
+            raw_classification
+            if isinstance(raw_classification, PcrBias)
+            else PcrBias(str(raw_classification))
+        )
+        aggregate["direction_evidence"] = asdict(
+            policy.direction_evidence(
+                aggregate.get("pcr"),
+                classification=classification,
+            )
+        )
+    return _json(payload)
 
 
 def _utc_iso(value: datetime, *, field_name: str) -> str:
@@ -122,10 +145,7 @@ class MarketTrendResearchRepository:
         consecutive_failures: int = 0,
     ) -> DualPcrResearchSnapshot:
         """Publish one externally visible record through one SQLite commit."""
-        source_timestamp = _utc_iso(
-            snapshot.source_timestamp,
-            field_name="source_timestamp",
-        )
+        source_timestamp = _utc_iso(snapshot.source_timestamp, field_name="source_timestamp")
         evaluated_at = _utc_iso(snapshot.evaluated_at, field_name="evaluated_at")
         persistence_started = monotonic()
         with self._connect() as connection:
@@ -157,11 +177,7 @@ class MarketTrendResearchRepository:
             )
             persistence_ms = (monotonic() - persistence_started) * 1000.0
             end_to_end_ms = (monotonic() - evaluation_started) * 1000.0
-            final_state = (
-                ResearchState.TIMEOUT
-                if end_to_end_ms > hard_deadline_ms
-                else snapshot.quality.state
-            )
+            final_state = ResearchState.TIMEOUT if end_to_end_ms > hard_deadline_ms else snapshot.quality.state
             quality = (
                 ResearchDataQuality(
                     ResearchState.TIMEOUT,
@@ -198,10 +214,7 @@ class MarketTrendResearchRepository:
         return final_snapshot
 
     def persist(self, snapshot: DualPcrResearchSnapshot) -> None:
-        source_timestamp = _utc_iso(
-            snapshot.source_timestamp,
-            field_name="source_timestamp",
-        )
+        source_timestamp = _utc_iso(snapshot.source_timestamp, field_name="source_timestamp")
         evaluated_at = _utc_iso(snapshot.evaluated_at, field_name="evaluated_at")
         with self._connect() as connection:
             connection.execute(
@@ -257,11 +270,7 @@ class MarketTrendResearchRepository:
             return cursor.rowcount == 1
 
     def load_reference(self, *, underlying: str, trading_date: date) -> dict[str, Any] | None:
-        return self._load_daily(
-            table="market_trend_research_references",
-            underlying=underlying,
-            trading_date=trading_date,
-        )
+        return self._load_daily(table="market_trend_research_references", underlying=underlying, trading_date=trading_date)
 
     def create_oi_baseline(self, baseline: OpeningOiBaseline) -> bool:
         with self._connect() as connection:
@@ -281,17 +290,10 @@ class MarketTrendResearchRepository:
             return cursor.rowcount == 1
 
     def load_oi_baseline(self, *, underlying: str, trading_date: date) -> dict[str, Any] | None:
-        return self._load_daily(
-            table="market_trend_research_oi_baselines",
-            underlying=underlying,
-            trading_date=trading_date,
-        )
+        return self._load_daily(table="market_trend_research_oi_baselines", underlying=underlying, trading_date=trading_date)
 
     def _load_daily(self, *, table: str, underlying: str, trading_date: date) -> dict[str, Any] | None:
-        if table not in {
-            "market_trend_research_references",
-            "market_trend_research_oi_baselines",
-        }:
+        if table not in {"market_trend_research_references", "market_trend_research_oi_baselines"}:
             raise ValueError("unsupported research table")
         if not self.path.exists():
             return None
