@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from typing import Protocol
 
 from .models import PcrBias
@@ -9,6 +9,23 @@ from .models import PcrBias
 
 class ExchangeSessionCalendar(Protocol):
     def sessions_between(self, start: date, end: date) -> tuple[date, ...]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class StaticExchangeSessionCalendar:
+    """Explicit weekday calendar with injected exchange holidays."""
+    holidays: frozenset[date] = frozenset()
+
+    def sessions_between(self, start: date, end: date) -> tuple[date, ...]:
+        if end < start:
+            return ()
+        sessions: list[date] = []
+        current = start
+        while current <= end:
+            if current.weekday() < 5 and current not in self.holidays:
+                sessions.append(current)
+            current += timedelta(days=1)
+        return tuple(sessions)
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,9 +41,12 @@ class MarketTrendResearchPolicy:
     maximum_window_steps: int = 5
 
     def classify(self, pcr: float) -> PcrBias:
-        if pcr < self.bearish_below: return PcrBias.BEARISH
-        if pcr < self.bullish_from: return PcrBias.NEUTRAL
-        if pcr <= self.strongly_bullish_above: return PcrBias.BULLISH
+        if pcr < self.bearish_below:
+            return PcrBias.BEARISH
+        if pcr < self.bullish_from:
+            return PcrBias.NEUTRAL
+        if pcr <= self.strongly_bullish_above:
+            return PcrBias.BULLISH
         return PcrBias.STRONGLY_BULLISH
 
     def sessions_to_expiry(self, trading_date: date, expiry: date, calendar: ExchangeSessionCalendar) -> int:
