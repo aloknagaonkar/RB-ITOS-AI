@@ -23,6 +23,9 @@ def test_workspace_page_renders_windows_before_promotion(monkeypatch):
         def caption(self, value):
             calls.append(("caption", value))
 
+        def divider(self):
+            calls.append(("divider", None))
+
         def columns(self, count):
             return tuple(SimpleNamespace(metric=lambda *args, **kwargs: None) for _ in range(count))
 
