@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, time
+from datetime import datetime, time, timezone
+import json
+import logging
+from logging.handlers import RotatingFileHandler
 import os
 import signal
 
@@ -19,6 +22,8 @@ from red_bar_lab.services.market_trend_research import (
 )
 from red_bar_lab.services.red_bar_v2_canonical.upstox_paper_market_data import UpstoxPaperCanaryMarketData
 from red_bar_lab.services.upstox_service import RedBarUpstoxService, resolve_access_token
+
+AUTHORITY = "OBSERVATIONAL_ONLY"
 
 
 class _UnderlyingSpotAdapter:
@@ -63,6 +68,44 @@ def _clock(name: str, default: str) -> time:
         return time(hour, minute, second)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{name}_INVALID") from exc
+
+
+def _safe_reason(value: object) -> str:
+    text = str(value).strip().upper()
+    if text and len(text) <= 64 and all(
+        character.isalnum() or character in "_-" for character in text
+    ):
+        return text
+    return type(value).__name__.upper()[:64]
+
+
+def _worker_logger(settings: RedBarSettings) -> logging.Logger:
+    log_path = settings.artifacts_root / "market_trend_research" / "logs" / "worker.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    logger = logging.getLogger("market_trend_research_worker")
+    for handler in tuple(logger.handlers):
+        handler.close()
+        logger.removeHandler(handler)
+    logger.setLevel(logging.INFO)
+    handler = RotatingFileHandler(
+        log_path,
+        maxBytes=1_000_000,
+        backupCount=3,
+        encoding="utf-8",
+    )
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(handler)
+    logger.propagate = False
+    return logger
+
+
+def _log(logger: logging.Logger, event: str, **fields: object) -> None:
+    logger.info(json.dumps({
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "event": event,
+        "authority": AUTHORITY,
+        **fields,
+    }, sort_keys=True))
 
 
 def build_runtime() -> tuple[MarketTrendResearchRuntime, int]:
@@ -128,10 +171,22 @@ def build_runtime() -> tuple[MarketTrendResearchRuntime, int]:
 
 
 def main() -> int:
+    settings = RedBarSettings.from_env()
+    logger = _worker_logger(settings)
     if not _bool("MARKET_TREND_RESEARCH_RUNTIME_ENABLED", False):
-        print("market-trend-research-runtime outcome=DISABLED authority=OBSERVATIONAL_ONLY")
+        _log(logger, "RUNTIME_DISABLED", safe_reason="MARKET_TREND_RESEARCH_RUNTIME_DISABLED")
+        print(f"market-trend-research-runtime outcome=DISABLED authority={AUTHORITY}")
         return 2
-    runtime, request_timeout = build_runtime()
+    try:
+        runtime, request_timeout = build_runtime()
+    except Exception as exc:
+        reason = _safe_reason(exc)
+        _log(logger, "RUNTIME_CONFIGURATION_ERROR", safe_reason=reason)
+        print(
+            "market-trend-research-runtime outcome=CONFIGURATION_ERROR "
+            f"reason={reason} authority={AUTHORITY}"
+        )
+        return 2
 
     def _stop(_signum, _frame) -> None:
         runtime.stop()
@@ -139,15 +194,24 @@ def main() -> int:
     signal.signal(signal.SIGINT, _stop)
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, _stop)
+    _log(
+        logger,
+        "RUNTIME_STARTED",
+        cadence_seconds=runtime.config.refresh_seconds,
+        provider="UPSTOX",
+        request_timeout_seconds=request_timeout,
+    )
     print(
         "market-trend-research-runtime outcome=STARTED cadence_seconds="
         f"{runtime.config.refresh_seconds} provider=UPSTOX "
-        f"request_timeout_seconds={request_timeout} authority=OBSERVATIONAL_ONLY"
+        f"request_timeout_seconds={request_timeout} authority={AUTHORITY}"
     )
     try:
         runtime.run_forever()
     except KeyboardInterrupt:
         runtime.stop()
+    finally:
+        _log(logger, "RUNTIME_STOPPED")
     return 0
 
 
