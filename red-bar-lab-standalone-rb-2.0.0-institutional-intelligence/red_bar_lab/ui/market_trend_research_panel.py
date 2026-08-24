@@ -5,239 +5,212 @@ from typing import Any
 
 import streamlit as st
 
-from red_bar_lab.services.market_trend_research.repository import (
-    MarketTrendResearchRepository,
-)
+from red_bar_lab.services.market_trend_research.repository import MarketTrendResearchRepository
 from red_bar_lab.ui._shared import _arrow_safe_rows
+
+COLUMNS = (
+    "Strike",
+    "Position",
+    "CE current OI",
+    "CE previous OI",
+    "CE ΔOI",
+    "CE ΔOI%",
+    "PE current OI",
+    "PE previous OI",
+    "PE ΔOI",
+    "PE ΔOI%",
+)
+
+
+def _indian(value: object) -> str:
+    if value is None:
+        return "Not available"
+    number = int(round(float(value)))
+    sign = "−" if number < 0 else ""
+    digits = str(abs(number))
+    if len(digits) <= 3:
+        return sign + digits
+    last = digits[-3:]
+    lead = digits[:-3]
+    groups: list[str] = []
+    while lead:
+        groups.append(lead[-2:])
+        lead = lead[:-2]
+    return sign + ",".join(reversed(groups)) + "," + last
+
+
+def _signed(value: object) -> str:
+    if value is None:
+        return "Not available"
+    number = float(value)
+    prefix = "+" if number > 0 else "−" if number < 0 else ""
+    return prefix + _indian(abs(number))
+
+
+def _percent(value: object) -> str:
+    if value is None:
+        return "Not available"
+    number = float(value)
+    prefix = "+" if number > 0 else "−" if number < 0 else ""
+    return f"{prefix}{abs(number):.2f}%"
 
 
 def _number(value: object, digits: int = 3) -> str:
-    return "—" if value is None else f"{float(value):.{digits}f}"
+    return "Not available" if value is None else f"{float(value):.{digits}f}"
 
 
-def _strike_rows(panel: dict[str, Any]) -> list[dict[str, Any]]:
-    return [
-        dict(row)
-        for row in panel.get("rows") or []
-        if row.get("position") != "TOTAL"
-    ]
-
-
-def _leader(
-    rows: list[dict[str, Any]],
-    *,
-    field: str,
-    largest: bool,
-) -> dict[str, object]:
-    available = [row for row in rows if row.get(field) is not None]
-    if not available:
-        return {"strike": "—", "change": None, "percentage": None}
-    selected = (max if largest else min)(
-        available,
-        key=lambda row: float(row[field]),
-    )
-    prefix = "ce" if field.startswith("ce_") else "pe"
+def _bias(value: object) -> str:
     return {
-        "strike": selected.get("strike"),
-        "change": selected.get(field),
-        "percentage": selected.get(f"{prefix}_change_pct"),
-    }
+        "BEARISH": "Bearish PCR evidence",
+        "NEUTRAL": "Neutral PCR evidence",
+        "BULLISH": "Bullish PCR evidence",
+        "STRONGLY_BULLISH": "Strongly bullish PCR evidence",
+        "UNAVAILABLE": "PCR evidence not available",
+    }.get(str(value), "PCR evidence not available")
 
 
-def _render_leaders(panel: dict[str, Any]) -> None:
-    rows = _strike_rows(panel)
-    leaders = [
-        ("Largest CE OI addition", _leader(rows, field="ce_change", largest=True)),
-        ("Largest CE OI reduction", _leader(rows, field="ce_change", largest=False)),
-        ("Largest PE OI addition", _leader(rows, field="pe_change", largest=True)),
-        ("Largest PE OI reduction", _leader(rows, field="pe_change", largest=False)),
-    ]
-    st.dataframe(
-        _arrow_safe_rows(
-            [
-                {
-                    "Leader": label,
-                    "Strike": evidence["strike"],
-                    "Absolute change": evidence["change"],
-                    "Change percentage": evidence["percentage"],
-                }
-                for label, evidence in leaders
-            ]
-        ),
-        width="stretch",
-        hide_index=True,
-    )
+def _table_rows(panel: dict[str, Any]) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for row in panel.get("rows") or []:
+        rows.append({
+            "Strike": str(row.get("strike", "Not available")),
+            "Position": str(row.get("position", "Not available")),
+            "CE current OI": _indian(row.get("ce_current_oi")),
+            "CE previous OI": _indian(row.get("ce_baseline_oi")),
+            "CE ΔOI": _signed(row.get("ce_change")),
+            "CE ΔOI%": _percent(row.get("ce_change_pct")),
+            "PE current OI": _indian(row.get("pe_current_oi")),
+            "PE previous OI": _indian(row.get("pe_baseline_oi")),
+            "PE ΔOI": _signed(row.get("pe_change")),
+            "PE ΔOI%": _percent(row.get("pe_change_pct")),
+        })
+    return rows
 
 
-def _render_panel(panel: dict[str, Any], *, morning: bool) -> None:
-    st.markdown(f"### {panel.get('name', 'PCR research')}")
-    aggregate = panel.get("aggregate") or {}
-    metrics = st.columns(6)
-    metrics[0].metric("Spot", _number(panel.get("spot"), 2))
-    metrics[1].metric("ATM", _number(panel.get("atm"), 0))
-    metrics[2].metric("Expiry", panel.get("expiry") or "—")
-    metrics[3].metric("Window", f"ATM ±{panel.get('window_steps', '—')}")
-    metrics[4].metric("PCR", _number(aggregate.get("pcr")))
-    metrics[5].metric(
-        "PCR directional evidence",
-        aggregate.get("classification") or "UNAVAILABLE",
-    )
-    movement = st.columns(5)
-    movement[0].metric("Previous PCR", _number(aggregate.get("previous_pcr")))
-    movement[1].metric("PCR change", _number(aggregate.get("absolute_change")))
-    movement[2].metric(
-        "PCR change %",
-        _number(aggregate.get("percentage_change"), 2),
-    )
-    movement[3].metric(
-        "PCR slope / minute",
-        _number(aggregate.get("slope_per_minute"), 5),
-    )
-    movement[4].metric(
-        "Persistence",
-        (
-            f"{aggregate.get('persistence_state', 'UNAVAILABLE')} "
-            f"×{aggregate.get('consecutive_count', 0)}"
-        ),
-    )
+def _range(panel: dict[str, Any]) -> str:
     strikes = [
-        row.get("strike")
-        for row in _strike_rows(panel)
+        float(row["strike"])
+        for row in panel.get("rows") or []
         if isinstance(row.get("strike"), (int, float))
     ]
-    strike_range = (
-        f"{min(strikes):.0f}–{max(strikes):.0f}" if strikes else "—"
+    return "Not available" if not strikes else f"{min(strikes):.0f}–{max(strikes):.0f}"
+
+
+def _footer(panel: dict[str, Any]) -> None:
+    rows = panel.get("rows") or []
+    total = next((row for row in rows if row.get("position") == "TOTAL"), {})
+    aggregate = panel.get("aggregate") or {}
+    st.write(
+        f"Overall CE OI change: {_signed(total.get('ce_change'))} "
+        f"({_percent(total.get('ce_change_pct'))})"
     )
-    st.caption(
-        f"Sessions to expiry: {panel.get('sessions_to_expiry', '—')} · "
-        f"Strike interval: {_number(panel.get('strike_interval'), 0)} · "
-        f"Selected strikes: {strike_range} · "
-        f"Contracts: {panel.get('observed_contract_count', 0)}/"
-        f"{panel.get('expected_contract_count', 0)} · "
-        f"Snapshot: {panel.get('source_timestamp', '—')}"
+    st.write(
+        f"Overall PE OI change: {_signed(total.get('pe_change'))} "
+        f"({_percent(total.get('pe_change_pct'))})"
     )
-    if morning:
-        st.caption(
-            f"Morning anchor: {panel.get('anchor_timestamp') or 'UNAVAILABLE'} · "
-            f"Anchor status: {panel.get('anchor_status') or 'UNAVAILABLE'} · "
-            f"Fixed spot: {_number(panel.get('anchor_spot'), 2)} · "
-            f"Fixed ATM: {_number(panel.get('anchor_atm'), 0)} · "
-            f"Anchor relevance: {panel.get('anchor_relevance') or 'UNAVAILABLE'}"
+    st.write(
+        "PCR calculation: Total current PE OI ÷ Total current CE OI = "
+        f"{_number(aggregate.get('pcr'))}"
+    )
+    st.write(f"PCR directional evidence: {_bias(aggregate.get('classification'))}")
+    st.write(f"Data status: {panel.get('data_status') or 'Not available'}")
+
+
+def _render_morning(projection: dict[str, Any]) -> None:
+    st.markdown("## Morning Fixed-Level PCR")
+    panel = projection.get("morning_panel")
+    reference = projection.get("morning_reference") or {}
+    baseline = projection.get("opening_oi_baseline") or {}
+    quality = projection.get("quality") or {}
+    if not panel:
+        st.info(
+            "Morning research is waiting for the reference level or the complete opening OI baseline."
         )
-    st.dataframe(
-        _arrow_safe_rows(panel.get("rows") or []),
-        width="stretch",
-        hide_index=True,
-    )
-    st.markdown("#### OI leaders")
-    _render_leaders(panel)
+        st.write(f"Reference-level status: {reference.get('status') or 'Not available'}")
+        st.write(f"OI-baseline status: {baseline.get('status') or 'Not available'}")
+        return
+    aggregate = panel.get("aggregate") or {}
+    summary = [
+        {"Field": "Reference-level status", "Value": reference.get("status") or "Not available"},
+        {"Field": "NIFTY reference level", "Value": _number(reference.get("reference_spot"), 2)},
+        {"Field": "Reference timestamp", "Value": reference.get("reference_timestamp") or "Not available"},
+        {"Field": "Fixed ATM", "Value": _number(reference.get("fixed_atm"), 0)},
+        {"Field": "Actual expiry", "Value": panel.get("expiry") or "Not available"},
+        {"Field": "Sessions to expiry", "Value": str(panel.get("sessions_to_expiry", "Not available"))},
+        {"Field": "Window", "Value": f"ATM ±{panel.get('window_steps', 'Not available')}"},
+        {"Field": "Fixed strike range", "Value": _range(panel)},
+        {"Field": "Expected/observed contracts", "Value": f"{panel.get('expected_contract_count', 0)}/{panel.get('observed_contract_count', 0)}"},
+        {"Field": "OI-baseline status", "Value": baseline.get("status") or "Not available"},
+        {"Field": "OI-baseline timestamp", "Value": baseline.get("baseline_timestamp") or "Not available"},
+        {"Field": "Current source timestamp", "Value": panel.get("source_timestamp") or "Not available"},
+        {"Field": "Source age", "Value": f"{_number(quality.get('source_age_seconds'), 1)} seconds"},
+        {"Field": "PCR", "Value": _number(aggregate.get("pcr"))},
+        {"Field": "PCR directional evidence", "Value": _bias(aggregate.get("classification"))},
+    ]
+    st.dataframe(_arrow_safe_rows(summary), width="stretch", hide_index=True)
+    st.dataframe(_arrow_safe_rows(_table_rows(panel)), width="stretch", hide_index=True)
+    _footer(panel)
 
 
-def render_market_trend_research_panel(
-    database_path: str | Path,
-    *,
-    underlying: str,
-) -> None:
-    st.error(
-        "OBSERVATIONAL ONLY — this research does not generate signals or trades."
-    )
-    projection = MarketTrendResearchRepository(database_path).latest_projection(
-        underlying=underlying
-    )
+def _render_current(projection: dict[str, Any]) -> None:
+    st.markdown("## Current/Overall PCR")
+    panel = projection.get("current_panel") or {}
+    aggregate = panel.get("aggregate") or {}
+    quality = projection.get("quality") or {}
+    summary = [
+        {"Field": "Current NIFTY level", "Value": _number(panel.get("spot"), 2)},
+        {"Field": "Current ATM", "Value": _number(panel.get("atm"), 0)},
+        {"Field": "Actual expiry", "Value": panel.get("expiry") or "Not available"},
+        {"Field": "Sessions to expiry", "Value": str(panel.get("sessions_to_expiry", "Not available"))},
+        {"Field": "Window", "Value": f"ATM ±{panel.get('window_steps', 'Not available')}"},
+        {"Field": "Selected strike range", "Value": _range(panel)},
+        {"Field": "Expected/observed contracts", "Value": f"{panel.get('expected_contract_count', 0)}/{panel.get('observed_contract_count', 0)}"},
+        {"Field": "Current snapshot timestamp", "Value": panel.get("source_timestamp") or "Not available"},
+        {"Field": "Previous comparable snapshot timestamp", "Value": panel.get("previous_timestamp") or "Not available"},
+        {"Field": "Source age", "Value": f"{_number(quality.get('source_age_seconds'), 1)} seconds"},
+        {"Field": "PCR", "Value": _number(aggregate.get("pcr"))},
+        {"Field": "Previous PCR", "Value": _number(aggregate.get("previous_pcr"))},
+        {"Field": "PCR change", "Value": _number(aggregate.get("absolute_change"))},
+        {"Field": "PCR change percentage", "Value": _percent(aggregate.get("percentage_change"))},
+        {"Field": "PCR slope", "Value": _number(aggregate.get("slope_per_minute"), 5)},
+        {"Field": "Persistence", "Value": aggregate.get("persistence_state") or "Not available"},
+        {"Field": "PCR directional evidence", "Value": _bias(aggregate.get("classification"))},
+    ]
+    st.dataframe(_arrow_safe_rows(summary), width="stretch", hide_index=True)
+    st.dataframe(_arrow_safe_rows(_table_rows(panel)), width="stretch", hide_index=True)
+    _footer(panel)
+
+
+def render_market_trend_research_panel(database_path: str | Path, *, underlying: str) -> None:
+    st.error("OBSERVATIONAL ONLY")
+    st.write("Final market direction: NOT YET CALCULATED")
+    st.write("Signal generated: NO")
+    st.write("Canonical bundle created: NO")
+    st.write("Opportunity queued: NO")
+    st.write("Paper trade created: NO")
+    repository = MarketTrendResearchRepository(database_path)
+    projection = repository.latest_projection(underlying=underlying)
+    health = repository.latest_runtime_health()
     if not projection:
         st.info("No persisted Market Trend Research projection is available.")
-        st.caption("Runtime mode: ONE_SHOT")
-        st.caption("Automatic refresh: NOT CONNECTED")
-        st.caption("Final market direction: NOT YET CALCULATED")
-        st.caption("Signal generated: NO")
-        st.caption("Canonical bundle created: NO")
-        st.caption("Opportunity queued: NO")
-        st.caption("Paper trade created: NO")
         return
-
-    quality = projection.get("quality") or {}
-    latency = projection.get("latency") or {}
-    current = projection.get("current_panel") or {}
-    morning = projection.get("morning_panel")
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Final market direction", "NOT YET CALCULATED")
-    c2.metric(
-        "Current PCR bias",
-        (current.get("aggregate") or {}).get("classification") or "UNAVAILABLE",
-    )
-    c3.metric(
-        "Morning PCR bias",
-        ((morning or {}).get("aggregate") or {}).get("classification")
-        or "UNAVAILABLE",
-    )
-    c4.metric("Agreement", projection.get("agreement_state") or "UNAVAILABLE")
-    c5.metric("Evidence quality", quality.get("state") or "UNAVAILABLE")
     st.caption(
-        f"Calendar source: {projection.get('calendar_source') or 'UNAVAILABLE'} · "
-        f"Runtime mode: {projection.get('runtime_mode') or 'ONE_SHOT'} · "
-        f"Automatic refresh: {projection.get('automatic_refresh') or 'NOT_CONNECTED'}"
+        f"Runtime mode: {projection.get('runtime_mode', 'ONE_SHOT')} · "
+        f"Automatic refresh: {projection.get('automatic_refresh', 'NOT_CONNECTED')} · "
+        f"Calendar source: {projection.get('calendar_source', 'Not available')}"
     )
-    st.caption(
-        f"Snapshot age: {_number(quality.get('source_age_seconds'), 1)} seconds · "
-        f"End-to-end latency: {_number(latency.get('end_to_end_ms'), 1)} ms"
-    )
-
-    _render_panel(current, morning=False)
-    if morning:
-        _render_panel(morning, morning=True)
-    else:
-        st.warning("MORNING_ANCHOR_UNAVAILABLE")
-
-    if morning:
-        st.markdown("### Current versus Morning PCR")
-        current_pcr = (current.get("aggregate") or {}).get("pcr")
-        morning_pcr = (morning.get("aggregate") or {}).get("pcr")
-        difference = (
-            None
-            if current_pcr is None or morning_pcr is None
-            else float(current_pcr) - float(morning_pcr)
+    if health:
+        st.caption(
+            f"Heartbeat: {health.get('heartbeat_at', 'Not available')} · "
+            f"Last success: {health.get('last_success_at', 'Not available')} · "
+            f"Consecutive failures: {health.get('consecutive_failures', 0)}"
         )
-        st.dataframe(
-            _arrow_safe_rows(
-                [
-                    {
-                        "Current PCR": current_pcr,
-                        "Morning PCR": morning_pcr,
-                        "Difference": difference,
-                        "Current bias": (current.get("aggregate") or {}).get(
-                            "classification"
-                        ),
-                        "Morning bias": (morning.get("aggregate") or {}).get(
-                            "classification"
-                        ),
-                        "Agreement": projection.get("agreement_state"),
-                        "Interpretation": (
-                            "Both windows show the same PCR directional evidence."
-                            if projection.get("agreement_state") == "AGREE"
-                            else "Current and fixed-morning PCR evidence diverge."
-                        ),
-                    }
-                ]
-            ),
-            width="stretch",
-            hide_index=True,
-        )
-
-    st.markdown("### Performance")
-    st.dataframe(
-        _arrow_safe_rows([latency]),
-        width="stretch",
-        hide_index=True,
-    )
-    with st.expander("What happened?", expanded=False):
-        for index, line in enumerate(
-            projection.get("explanation") or (),
-            start=1,
-        ):
-            st.write(f"{index}. {line}")
-
-    st.caption("Authority: OBSERVATIONAL ONLY")
-    st.caption("Signal generated: NO")
-    st.caption("Canonical bundle created: NO")
-    st.caption("Opportunity queued: NO")
-    st.caption("Paper trade created: NO")
+    _render_morning(projection)
+    _render_current(projection)
+    with st.expander("Diagnostics", expanded=False):
+        st.write({
+            "quality": projection.get("quality"),
+            "latency": projection.get("latency"),
+            "lifecycle_state": projection.get("lifecycle_state"),
+            "agreement_state": projection.get("agreement_state"),
+        })
