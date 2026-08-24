@@ -22,17 +22,26 @@ def _calendar() -> StaticExchangeSessionCalendar:
         "false",
     ).strip().lower() in {"1", "true", "yes", "on"}
     raw = os.getenv("MARKET_TREND_RESEARCH_HOLIDAYS")
-    if not verified or raw is None:
+    if not verified:
         return StaticExchangeSessionCalendar(
             holidays=frozenset(),
             source_name="UNVERIFIED_WEEKDAY_ONLY",
             verified=False,
         )
-    values = [value.strip() for value in raw.split(",") if value.strip()]
+    values = [
+        value.strip()
+        for value in (raw or "").split(",")
+        if value.strip()
+    ]
     holidays = frozenset(date.fromisoformat(value) for value in values)
+    source_name = (
+        "MARKET_TREND_RESEARCH_HOLIDAYS_VERIFIED"
+        if holidays
+        else "MARKET_TREND_RESEARCH_NO_HOLIDAYS_VERIFIED"
+    )
     return StaticExchangeSessionCalendar(
         holidays=holidays,
-        source_name="MARKET_TREND_RESEARCH_HOLIDAYS_VERIFIED",
+        source_name=source_name,
         verified=True,
     )
 
