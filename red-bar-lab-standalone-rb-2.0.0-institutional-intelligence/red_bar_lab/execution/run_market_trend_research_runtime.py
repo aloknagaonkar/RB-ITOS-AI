@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, time
 import os
+import signal
 
 from red_bar_lab.brokers.upstox_client import UpstoxClient
 from red_bar_lab.config import RedBarSettings
@@ -16,9 +17,7 @@ from red_bar_lab.services.market_trend_research import (
     ResearchRuntimeConfig,
     UpstoxResearchChainCollector,
 )
-from red_bar_lab.services.red_bar_v2_canonical.upstox_paper_market_data import (
-    UpstoxPaperCanaryMarketData,
-)
+from red_bar_lab.services.red_bar_v2_canonical.upstox_paper_market_data import UpstoxPaperCanaryMarketData
 from red_bar_lab.services.upstox_service import RedBarUpstoxService, resolve_access_token
 
 
@@ -26,12 +25,7 @@ class _UnderlyingSpotAdapter:
     def __init__(self, market: UpstoxPaperCanaryMarketData) -> None:
         self.market = market
 
-    def spot(
-        self,
-        *,
-        underlying: str,
-        evaluated_at: datetime,
-    ) -> tuple[float, datetime]:
+    def spot(self, *, underlying: str, evaluated_at: datetime) -> tuple[float, datetime]:
         quote = self.market.underlying_quote(
             underlying=underlying,
             evaluated_at=evaluated_at,
@@ -41,9 +35,7 @@ class _UnderlyingSpotAdapter:
 
 def _bool(name: str, default: bool = False) -> bool:
     raw = os.getenv(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
+    return default if raw is None else raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _float(name: str, default: float) -> float:
@@ -65,55 +57,37 @@ def _clock(name: str, default: str) -> time:
     parts = raw.split(":")
     if len(parts) not in {2, 3}:
         raise ValueError(f"{name}_INVALID")
-    hour, minute = int(parts[0]), int(parts[1])
-    second = int(parts[2]) if len(parts) == 3 else 0
-    return time(hour, minute, second)
+    try:
+        hour, minute = int(parts[0]), int(parts[1])
+        second = int(parts[2]) if len(parts) == 3 else 0
+        return time(hour, minute, second)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name}_INVALID") from exc
 
 
-def main() -> int:
-    enabled = _bool("MARKET_TREND_RESEARCH_RUNTIME_ENABLED", False)
-    if not enabled:
-        print(
-            "market-trend-research-runtime outcome=DISABLED "
-            "authority=OBSERVATIONAL_ONLY"
-        )
-        return 2
+def build_runtime() -> tuple[MarketTrendResearchRuntime, int]:
     settings = RedBarSettings.from_env()
     calendar = verified_calendar()
+    unattended = _bool("MARKET_TREND_RESEARCH_UNATTENDED", False)
+    if unattended and not calendar.verified:
+        raise ValueError("CALENDAR_UNVERIFIED")
     policy = MarketTrendResearchPolicy(
-        maximum_source_age_seconds=_float(
-            "MARKET_TREND_RESEARCH_MAX_SOURCE_AGE_SECONDS", 30.0
-        ),
-        hard_deadline_seconds=_float(
-            "MARKET_TREND_RESEARCH_HARD_DEADLINE_SECONDS", 2.0
-        ),
-        reference_start=_clock(
-            "MARKET_TREND_RESEARCH_REFERENCE_START", "09:08:00"
-        ),
-        reference_cutoff=_clock(
-            "MARKET_TREND_RESEARCH_REFERENCE_CUTOFF", "09:14:59"
-        ),
-        oi_baseline_start=_clock(
-            "MARKET_TREND_RESEARCH_OI_BASELINE_START", "09:15:00"
-        ),
+        maximum_source_age_seconds=_float("MARKET_TREND_RESEARCH_MAX_SOURCE_AGE_SECONDS", 30.0),
+        hard_deadline_seconds=_float("MARKET_TREND_RESEARCH_HARD_DEADLINE_SECONDS", 2.0),
+        reference_start=_clock("MARKET_TREND_RESEARCH_REFERENCE_START", "09:08:00"),
+        reference_cutoff=_clock("MARKET_TREND_RESEARCH_REFERENCE_CUTOFF", "09:14:59"),
+        oi_baseline_start=_clock("MARKET_TREND_RESEARCH_OI_BASELINE_START", "09:15:00"),
     )
     repository = MarketTrendResearchRepository(settings.database_path)
-    provider_name = os.getenv(
-        "MARKET_TREND_RESEARCH_PROVIDER", "UPSTOX"
-    ).strip().upper()
+    provider_name = os.getenv("MARKET_TREND_RESEARCH_PROVIDER", "UPSTOX").strip().upper()
     if provider_name != "UPSTOX":
         raise ValueError("MARKET_TREND_RESEARCH_PROVIDER_UNSUPPORTED")
-    request_timeout = _int(
-        "MARKET_TREND_RESEARCH_REQUEST_TIMEOUT_SECONDS", 10
-    )
+    request_timeout = _int("MARKET_TREND_RESEARCH_REQUEST_TIMEOUT_SECONDS", 10)
     if not 1 <= request_timeout <= 60:
         raise ValueError("MARKET_TREND_RESEARCH_REQUEST_TIMEOUT_INVALID")
     token = resolve_access_token()
     client = UpstoxClient(token, timeout=request_timeout)
-    provider = RedBarUpstoxService(
-        token,
-        client_factory=lambda _token: client,
-    )
+    provider = RedBarUpstoxService(token, client_factory=lambda _token: client)
     spot_market = UpstoxPaperCanaryMarketData(
         client,
         underlying_keys={settings.default_underlying: "NSE_INDEX|Nifty 50"},
@@ -141,19 +115,34 @@ def main() -> int:
         repository=repository,
         config=ResearchRuntimeConfig(
             enabled=True,
-            refresh_seconds=_float(
-                "MARKET_TREND_RESEARCH_REFRESH_SECONDS", 5.0
-            ),
-            maximum_backoff_seconds=_float(
-                "MARKET_TREND_RESEARCH_MAX_BACKOFF_SECONDS", 60.0
-            ),
+            refresh_seconds=_float("MARKET_TREND_RESEARCH_REFRESH_SECONDS", 5.0),
+            maximum_backoff_seconds=_float("MARKET_TREND_RESEARCH_MAX_BACKOFF_SECONDS", 60.0),
+            maximum_consecutive_failures=_int("MARKET_TREND_RESEARCH_MAX_CONSECUTIVE_FAILURES", 5),
+            failure_cooldown_seconds=_float("MARKET_TREND_RESEARCH_FAILURE_COOLDOWN_SECONDS", 60.0),
+            session_start=_clock("MARKET_TREND_RESEARCH_SESSION_START", "09:08:00"),
+            session_end=_clock("MARKET_TREND_RESEARCH_SESSION_END", "15:30:00"),
+            unattended=unattended,
         ),
     )
+    return runtime, request_timeout
+
+
+def main() -> int:
+    if not _bool("MARKET_TREND_RESEARCH_RUNTIME_ENABLED", False):
+        print("market-trend-research-runtime outcome=DISABLED authority=OBSERVATIONAL_ONLY")
+        return 2
+    runtime, request_timeout = build_runtime()
+
+    def _stop(_signum, _frame) -> None:
+        runtime.stop()
+
+    signal.signal(signal.SIGINT, _stop)
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, _stop)
     print(
         "market-trend-research-runtime outcome=STARTED cadence_seconds="
         f"{runtime.config.refresh_seconds} provider=UPSTOX "
-        f"request_timeout_seconds={request_timeout} "
-        "authority=OBSERVATIONAL_ONLY"
+        f"request_timeout_seconds={request_timeout} authority=OBSERVATIONAL_ONLY"
     )
     try:
         runtime.run_forever()
