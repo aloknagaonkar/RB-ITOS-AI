@@ -71,20 +71,11 @@ def test_research_ui_has_exact_two_primary_tables_in_required_order():
     assert "MORNING_COLUMNS =" in source
     assert "CURRENT_COLUMNS =" in source
     for label in (
-        "CE current OI",
-        "CE opening OI",
-        "CE since-open ΔOI",
-        "CE since-open ΔOI%",
-        "PE current OI",
-        "PE opening OI",
-        "PE since-open ΔOI",
-        "PE since-open ΔOI%",
-        "CE previous-day OI",
-        "CE day ΔOI",
-        "CE day ΔOI%",
-        "PE previous-day OI",
-        "PE day ΔOI",
-        "PE day ΔOI%",
+        "CE current OI", "CE opening OI", "CE since-open ΔOI",
+        "CE since-open ΔOI%", "PE current OI", "PE opening OI",
+        "PE since-open ΔOI", "PE since-open ΔOI%",
+        "CE previous-day OI", "CE OI change today", "CE OI change %",
+        "PE previous-day OI", "PE OI change today", "PE OI change %",
     ):
         assert label in source
     assert "Short-term OI movement since previous refresh" in source
