@@ -1,7 +1,8 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 import sqlite3
 
+from red_bar_lab.execution.run_market_trend_research import _calendar
 from red_bar_lab.services.market_trend_research.source import (
     OptionParticipationSnapshotSource,
 )
@@ -74,6 +75,32 @@ def test_source_reuses_one_persisted_normalized_batch_without_provider(tmp_path)
     ).read_text(encoding="utf-8")
     assert "requests" not in source_text
     assert "UpstoxClient" not in source_text
+
+
+def test_verified_calendar_accepts_missing_empty_holiday_variable(monkeypatch):
+    monkeypatch.setenv("MARKET_TREND_RESEARCH_CALENDAR_VERIFIED", "true")
+    monkeypatch.delenv("MARKET_TREND_RESEARCH_HOLIDAYS", raising=False)
+    calendar = _calendar()
+    assert calendar.verified is True
+    assert calendar.holidays == frozenset()
+    assert calendar.source_name == "MARKET_TREND_RESEARCH_NO_HOLIDAYS_VERIFIED"
+
+
+def test_verified_calendar_parses_declared_holidays(monkeypatch):
+    monkeypatch.setenv("MARKET_TREND_RESEARCH_CALENDAR_VERIFIED", "true")
+    monkeypatch.setenv("MARKET_TREND_RESEARCH_HOLIDAYS", "2026-08-26,2026-10-02")
+    calendar = _calendar()
+    assert calendar.verified is True
+    assert calendar.holidays == frozenset({date(2026, 8, 26), date(2026, 10, 2)})
+    assert calendar.source_name == "MARKET_TREND_RESEARCH_HOLIDAYS_VERIFIED"
+
+
+def test_unverified_calendar_remains_fail_closed(monkeypatch):
+    monkeypatch.delenv("MARKET_TREND_RESEARCH_CALENDAR_VERIFIED", raising=False)
+    monkeypatch.delenv("MARKET_TREND_RESEARCH_HOLIDAYS", raising=False)
+    calendar = _calendar()
+    assert calendar.verified is False
+    assert calendar.source_name == "UNVERIFIED_WEEKDAY_ONLY"
 
 
 def test_market_readiness_page_adds_only_the_research_tab_contract():
