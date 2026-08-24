@@ -84,6 +84,7 @@ def _snapshot() -> DualPcrResearchSnapshot:
         latency=ResearchLatencyEvidence(1.0, 1.0, 1.0, 1.0, 4.0),
         agreement_state="UNAVAILABLE",
         explanation=("Final market direction has not yet been calculated.",),
+        calendar_source="TEST_VERIFIED_CALENDAR",
     )
 
 
@@ -95,6 +96,9 @@ def test_repository_isolated_atomic_projection_and_anchor(tmp_path):
     projection = repository.latest_projection(underlying="NIFTY 50")
     assert projection is not None
     assert projection["authority"] == "OBSERVATIONAL_ONLY"
+    assert projection["calendar_source"] == "TEST_VERIFIED_CALENDAR"
+    assert projection["runtime_mode"] == "ONE_SHOT"
+    assert projection["automatic_refresh"] == "NOT_CONNECTED"
     assert projection["current_panel"]["rows"][-1]["strike"] == "OVERALL TOTAL"
 
     calculator = DualPcrCalculator(MarketTrendResearchPolicy())
