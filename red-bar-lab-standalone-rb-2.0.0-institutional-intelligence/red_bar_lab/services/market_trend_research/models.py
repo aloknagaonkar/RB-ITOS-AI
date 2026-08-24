@@ -38,7 +38,11 @@ def _text(name: str, value: object) -> str:
 
 
 def _aware(name: str, value: object) -> datetime:
-    if type(value) is not datetime or value.tzinfo is None or value.utcoffset() is None:
+    if (
+        type(value) is not datetime
+        or value.tzinfo is None
+        or value.utcoffset() is None
+    ):
         raise ValueError(f"{name} must be timezone-aware")
     return value
 
@@ -64,11 +68,18 @@ class OptionOiCell:
 
     def __post_init__(self) -> None:
         _text("instrument_key", self.instrument_key)
-        if self.option_side not in {"CE", "PE"}: raise ValueError("option_side invalid")
+        if self.option_side not in {"CE", "PE"}:
+            raise ValueError("option_side invalid")
         _number("strike", self.strike, positive=True)
-        if type(self.expiry) is not date: raise ValueError("expiry invalid")
+        if type(self.expiry) is not date:
+            raise ValueError("expiry invalid")
         _number("current_oi", self.current_oi)
-        if self.provider_prev_oi is not None: _number("provider_prev_oi", self.provider_prev_oi)
+        if self.current_oi < 0:
+            raise ValueError("current_oi cannot be negative")
+        if self.provider_prev_oi is not None:
+            _number("provider_prev_oi", self.provider_prev_oi)
+            if self.provider_prev_oi < 0:
+                raise ValueError("provider_prev_oi cannot be negative")
         _aware("source_timestamp", self.source_timestamp)
 
 
@@ -90,6 +101,20 @@ class PcrWindowDefinition:
     strikes: tuple[float, ...]
     instrument_keys: tuple[str, ...]
 
+    def __post_init__(self) -> None:
+        if type(self.expiry) is not date:
+            raise ValueError("expiry invalid")
+        _number("atm", self.atm, positive=True)
+        _number("strike_interval", self.strike_interval, positive=True)
+        if type(self.window_steps) is not int or not 1 <= self.window_steps <= 5:
+            raise ValueError("window_steps invalid")
+        if len(self.strikes) != (2 * self.window_steps) + 1:
+            raise ValueError("strike population invalid")
+        if len(self.instrument_keys) != self.expected_contract_count:
+            raise ValueError("instrument population invalid")
+        if len(set(self.instrument_keys)) != len(self.instrument_keys):
+            raise ValueError("duplicate instrument identity")
+
     @property
     def expected_contract_count(self) -> int:
         return ((2 * self.window_steps) + 1) * 2
@@ -106,6 +131,7 @@ class PcrAggregate:
     percentage_change: float | None
     slope_per_minute: float | None
     persistence_state: str
+    consecutive_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +150,7 @@ class PcrResearchPanel:
     aggregate: PcrAggregate
     rows: tuple[dict[str, object], ...]
     anchor_timestamp: datetime | None = None
+    anchor_status: str | None = None
     anchor_spot: float | None = None
     anchor_atm: float | None = None
     anchor_relevance: str | None = None
@@ -163,7 +190,27 @@ class DualPcrResearchSnapshot:
     authority: str = AUTHORITY
     schema_version: str = SCHEMA_VERSION
 
+    def __post_init__(self) -> None:
+        _text("snapshot_id", self.snapshot_id)
+        _text("underlying", self.underlying)
+        _text("provider", self.provider)
+        _aware("source_timestamp", self.source_timestamp)
+        _aware("evaluated_at", self.evaluated_at)
+        if self.authority != AUTHORITY:
+            raise ValueError("research authority invalid")
+        if self.schema_version != SCHEMA_VERSION:
+            raise ValueError("research schema version invalid")
+
     @classmethod
-    def build_id(cls, *, underlying: str, provider: str, source_timestamp: datetime) -> str:
-        payload = f"{underlying}|{provider}|{source_timestamp.isoformat()}|{SCHEMA_VERSION}"
+    def build_id(
+        cls,
+        *,
+        underlying: str,
+        provider: str,
+        source_timestamp: datetime,
+    ) -> str:
+        payload = (
+            f"{underlying}|{provider}|{source_timestamp.isoformat()}|"
+            f"{SCHEMA_VERSION}"
+        )
         return "MTR-" + sha256(payload.encode()).hexdigest()[:32]
