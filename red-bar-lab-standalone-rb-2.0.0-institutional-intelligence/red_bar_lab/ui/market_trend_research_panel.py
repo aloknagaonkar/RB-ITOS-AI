@@ -146,6 +146,8 @@ def render_market_trend_research_panel(
     )
     if not projection:
         st.info("No persisted Market Trend Research projection is available.")
+        st.caption("Runtime mode: ONE_SHOT")
+        st.caption("Automatic refresh: NOT CONNECTED")
         st.caption("Final market direction: NOT YET CALCULATED")
         st.caption("Signal generated: NO")
         st.caption("Canonical bundle created: NO")
@@ -170,6 +172,11 @@ def render_market_trend_research_panel(
     )
     c4.metric("Agreement", projection.get("agreement_state") or "UNAVAILABLE")
     c5.metric("Evidence quality", quality.get("state") or "UNAVAILABLE")
+    st.caption(
+        f"Calendar source: {projection.get('calendar_source') or 'UNAVAILABLE'} · "
+        f"Runtime mode: {projection.get('runtime_mode') or 'ONE_SHOT'} · "
+        f"Automatic refresh: {projection.get('automatic_refresh') or 'NOT_CONNECTED'}"
+    )
     st.caption(
         f"Snapshot age: {_number(quality.get('source_age_seconds'), 1)} seconds · "
         f"End-to-end latency: {_number(latency.get('end_to_end_ms'), 1)} ms"
