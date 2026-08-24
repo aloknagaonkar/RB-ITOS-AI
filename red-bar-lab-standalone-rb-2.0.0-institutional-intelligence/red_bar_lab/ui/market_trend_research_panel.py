@@ -384,6 +384,7 @@ def _render_operational_status(
     st.dataframe(_arrow_safe_rows([{
         "Collector status": health_view.state,
         "Projection status": projection_label,
+        "Source age": _source_age_text(projection_age),
         "UI refresh": f"Every {MARKET_TREND_RESEARCH_UI_REFRESH_SECONDS:g}s",
     }]), width="stretch", hide_index=True)
     st.write(f"Collector status: {health_view.state}")
