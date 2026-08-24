@@ -11,12 +11,26 @@ from red_bar_lab.services.market_trend_research import (
     MarketTrendResearchService,
     OptionParticipationSnapshotSource,
 )
-from red_bar_lab.services.market_trend_research.policy import StaticExchangeSessionCalendar
+from red_bar_lab.services.market_trend_research.policy import (
+    StaticExchangeSessionCalendar,
+)
 
 
-def _holidays() -> frozenset[date]:
-    values = [value.strip() for value in os.getenv("MARKET_TREND_RESEARCH_HOLIDAYS", "").split(",") if value.strip()]
-    return frozenset(date.fromisoformat(value) for value in values)
+def _calendar() -> StaticExchangeSessionCalendar:
+    raw = os.getenv("MARKET_TREND_RESEARCH_HOLIDAYS")
+    if raw is None:
+        return StaticExchangeSessionCalendar(
+            holidays=frozenset(),
+            source_name="UNVERIFIED_WEEKDAY_ONLY",
+            verified=False,
+        )
+    values = [value.strip() for value in raw.split(",") if value.strip()]
+    holidays = frozenset(date.fromisoformat(value) for value in values)
+    return StaticExchangeSessionCalendar(
+        holidays=holidays,
+        source_name="MARKET_TREND_RESEARCH_HOLIDAYS",
+        verified=True,
+    )
 
 
 def main() -> int:
@@ -27,23 +41,42 @@ def main() -> int:
         source=OptionParticipationSnapshotSource(settings.database_path),
         repository=repository,
         policy=policy,
-        calendar=StaticExchangeSessionCalendar(_holidays()),
+        calendar=_calendar(),
         calculator=DualPcrCalculator(policy),
     )
     try:
-        snapshot = service.evaluate(underlying=settings.default_underlying, evaluated_at=datetime.now().astimezone())
+        snapshot = service.evaluate(
+            underlying=settings.default_underlying,
+            evaluated_at=datetime.now().astimezone(),
+        )
     except ValueError as exc:
-        reason = str(exc) if str(exc).isupper() and len(str(exc)) <= 64 else "RESEARCH_EVALUATION_FAILED"
-        print(f"market-trend-research outcome=INCOMPLETE reason={reason} authority=OBSERVATIONAL_ONLY")
+        reason = (
+            str(exc)
+            if str(exc).isupper() and len(str(exc)) <= 64
+            else "RESEARCH_EVALUATION_FAILED"
+        )
+        print(
+            "market-trend-research "
+            f"outcome=INCOMPLETE reason={reason} "
+            "runtime=ONE_SHOT automatic_refresh=NOT_CONNECTED "
+            "authority=OBSERVATIONAL_ONLY"
+        )
         return 2
     print(
         "market-trend-research "
         f"outcome={snapshot.quality.state.value} "
         f"current_pcr={snapshot.current_panel.aggregate.pcr} "
         f"morning_pcr={None if snapshot.morning_panel is None else snapshot.morning_panel.aggregate.pcr} "
+        f"calendar_source={snapshot.calendar_source} "
+        "runtime=ONE_SHOT automatic_refresh=NOT_CONNECTED "
         "authority=OBSERVATIONAL_ONLY"
     )
-    return 0 if snapshot.quality.state.value in {"READY", "MORNING_ANCHOR_UNAVAILABLE"} else 2
+    return (
+        0
+        if snapshot.quality.state.value
+        in {"READY", "MORNING_ANCHOR_UNAVAILABLE"}
+        else 2
+    )
 
 
 if __name__ == "__main__":
