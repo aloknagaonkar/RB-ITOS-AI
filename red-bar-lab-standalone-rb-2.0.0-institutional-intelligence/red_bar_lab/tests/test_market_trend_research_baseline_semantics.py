@@ -97,18 +97,18 @@ def test_previous_day_opening_and_refresh_are_explicit_and_independent():
     row = _panel(cells=cells, opening=opening, refresh=refresh).rows[0]
 
     assert row["ce_previous_day_oi"] == 90.0
-    assert row["ce_previous_day_change"] == 30.0
+    assert row["ce_day_change"] == 30.0
     assert row["ce_opening_oi"] == 100.0
     assert row["ce_opening_change"] == 20.0
     assert row["ce_previous_refresh_oi"] == 119.0
-    assert row["ce_previous_refresh_change"] == 1.0
+    assert row["ce_refresh_change"] == 1.0
 
     assert row["pe_previous_day_oi"] == 100.0
-    assert row["pe_previous_day_change"] == 50.0
+    assert row["pe_day_change"] == 50.0
     assert row["pe_opening_oi"] == 130.0
     assert row["pe_opening_change"] == 20.0
     assert row["pe_previous_refresh_oi"] == 149.0
-    assert row["pe_previous_refresh_change"] == 1.0
+    assert row["pe_refresh_change"] == 1.0
 
 
 def test_previous_refresh_never_replaces_previous_day_baseline():
@@ -117,8 +117,8 @@ def test_previous_refresh_never_replaces_previous_day_baseline():
     row = _panel(cells=cells, refresh=refresh).rows[0]
     assert row["ce_previous_day_oi"] == 80.0
     assert row["ce_previous_refresh_oi"] == 120.0
-    assert row["ce_previous_day_change"] == 40.0
-    assert row["ce_previous_refresh_change"] == 0.0
+    assert row["ce_day_change"] == 40.0
+    assert row["ce_refresh_change"] == 0.0
 
 
 def test_missing_and_zero_previous_day_baselines_remain_explicit():
@@ -126,15 +126,15 @@ def test_missing_and_zero_previous_day_baselines_remain_explicit():
         cells=_cells(ce_previous_day=None, pe_previous_day=None)
     ).rows[0]
     assert missing["ce_previous_day_oi"] is None
-    assert missing["ce_previous_day_change_reason"] == "BASELINE_MISSING"
-    assert missing["ce_previous_day_change_pct"] is None
+    assert missing["ce_day_change_reason"] == "BASELINE_MISSING"
+    assert missing["ce_day_change_pct"] is None
 
     zero = _panel(
         cells=_cells(ce_previous_day=0.0, pe_previous_day=0.0)
     ).rows[0]
-    assert zero["ce_previous_day_change"] == 120.0
-    assert zero["ce_previous_day_change_pct"] is None
-    assert zero["ce_previous_day_change_reason"] == "ZERO_BASELINE"
+    assert zero["ce_day_change"] == 120.0
+    assert zero["ce_day_change_pct"] is None
+    assert zero["ce_day_change_reason"] == "ZERO_BASELINE"
 
 
 def test_aggregate_percentages_use_aggregate_totals_not_percentage_average():
@@ -161,7 +161,7 @@ def test_aggregate_percentages_use_aggregate_totals_not_percentage_average():
         / total["ce_previous_day_oi"]
         * 100.0
     )
-    assert total["ce_previous_day_change_pct"] == expected_ce_pct
+    assert total["ce_day_change_pct"] == expected_ce_pct
 
 
 def test_partial_baseline_disables_aggregate_percentage():
@@ -178,8 +178,8 @@ def test_partial_baseline_disables_aggregate_percentage():
     )
     total = _panel(cells=tuple(cells)).rows[-1]
     assert total["ce_previous_day_oi"] is None
-    assert total["ce_previous_day_change_pct"] is None
-    assert total["ce_previous_day_change_reason"] == "BASELINE_MISSING"
+    assert total["ce_day_change_pct"] is None
+    assert total["ce_day_change_reason"] == "BASELINE_MISSING"
 
 
 def test_ui_contract_names_primary_baselines_and_refresh_diagnostics_only():
