@@ -193,6 +193,16 @@ class MarketTrendResearchRuntime:
         self._health()
         return delay
 
+    def _wait_with_heartbeat(self, seconds: float, *, lifecycle: str | None = None) -> None:
+        deadline = self.monotonic_clock() + max(0.0, seconds)
+        while not self.stop_event.is_set():
+            remaining = deadline - self.monotonic_clock()
+            if remaining <= 0:
+                return
+            self.stop_event.wait(min(self.config.refresh_seconds, remaining))
+            if not self.stop_event.is_set():
+                self._health(lifecycle)
+
     def run_forever(self) -> None:
         if not self.config.enabled:
             raise ValueError("MARKET_TREND_RESEARCH_RUNTIME_DISABLED")
@@ -200,11 +210,23 @@ class MarketTrendResearchRuntime:
             while not self.stop_event.is_set():
                 cycle_started = self.monotonic_clock()
                 delay = self.config.refresh_seconds
+                lifecycle: str | None = None
                 try:
                     self.run_cycle()
+                    lifecycle = self._session_lifecycle(self.now())
+                    if self.suspended_until_monotonic is not None:
+                        lifecycle = "PROVIDER_CIRCUIT_OPEN"
                 except Exception as exc:
                     delay = self._record_failure(exc)
+                    lifecycle = (
+                        "PROVIDER_CIRCUIT_OPEN"
+                        if self.suspended_until_monotonic is not None
+                        else self.last_failure_reason
+                    )
                 elapsed = self.monotonic_clock() - cycle_started
-                self.stop_event.wait(max(0.0, delay - elapsed))
+                self._wait_with_heartbeat(
+                    max(0.0, delay - elapsed),
+                    lifecycle=lifecycle,
+                )
         finally:
             self._health("STOPPED")
