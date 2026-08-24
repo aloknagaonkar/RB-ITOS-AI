@@ -15,8 +15,8 @@ from red_bar_lab.services.market_trend_research.source import (
     SourceReadResult,
 )
 
-REFERENCE_TIME = datetime(2026, 8, 24, 3, 38, 3, tzinfo=timezone.utc)  # 09:08:03 IST
-BASELINE_TIME = datetime(2026, 8, 24, 3, 45, 5, tzinfo=timezone.utc)  # 09:15:05 IST
+REFERENCE_TIME = datetime(2026, 8, 24, 3, 38, 3, tzinfo=timezone.utc)
+BASELINE_TIME = datetime(2026, 8, 24, 3, 45, 5, tzinfo=timezone.utc)
 EXPIRY = date(2026, 8, 25)
 
 
@@ -26,9 +26,7 @@ def _chain(*, timestamp, spot=24250.0, ce=100.0, pe=125.0):
         strike = 24250.0 + offset * 50.0
         cells.append(OptionOiCell(f"CE-{strike}", "CE", strike, EXPIRY, ce, 90.0, timestamp))
         cells.append(OptionOiCell(f"PE-{strike}", "PE", strike, EXPIRY, pe, 100.0, timestamp))
-    return NormalizedChainSnapshot(
-        "NIFTY 50", "UPSTOX", timestamp, spot, EXPIRY, tuple(cells)
-    )
+    return NormalizedChainSnapshot("NIFTY 50", "UPSTOX", timestamp, spot, EXPIRY, tuple(cells))
 
 
 class Source:
@@ -53,8 +51,7 @@ def _service(tmp_path, source, policy=None, calendar=None):
 
 def test_reference_then_oi_baseline_are_separate_immutable_stages(tmp_path):
     first = _service(tmp_path, Source((_chain(timestamp=REFERENCE_TIME),))).evaluate(
-        underlying="NIFTY 50",
-        evaluated_at=REFERENCE_TIME + timedelta(seconds=5),
+        underlying="NIFTY 50", evaluated_at=REFERENCE_TIME + timedelta(seconds=5)
     )
     assert first.lifecycle_state.value == "WAITING_FOR_OI_BASELINE"
     assert first.morning_reference is not None
@@ -63,8 +60,7 @@ def test_reference_then_oi_baseline_are_separate_immutable_stages(tmp_path):
     assert first.morning_panel is None
 
     second = _service(tmp_path, Source((_chain(timestamp=BASELINE_TIME),))).evaluate(
-        underlying="NIFTY 50",
-        evaluated_at=BASELINE_TIME + timedelta(seconds=5),
+        underlying="NIFTY 50", evaluated_at=BASELINE_TIME + timedelta(seconds=5)
     )
     assert second.lifecycle_state.value == "MORNING_RESEARCH_READY"
     assert second.morning_reference is not None
@@ -96,9 +92,10 @@ def test_baseline_does_not_move_and_current_oi_continues_updating(tmp_path):
         underlying="NIFTY 50", evaluated_at=BASELINE_TIME + timedelta(seconds=5)
     )
     later = BASELINE_TIME + timedelta(minutes=10)
-    snapshot = _service(tmp_path, Source((_chain(timestamp=later, spot=24500.0, ce=130.0, pe=150.0),))).evaluate(
-        underlying="NIFTY 50", evaluated_at=later + timedelta(seconds=5)
-    )
+    snapshot = _service(
+        tmp_path,
+        Source((_chain(timestamp=later, spot=24500.0, ce=130.0, pe=150.0),)),
+    ).evaluate(underlying="NIFTY 50", evaluated_at=later + timedelta(seconds=5))
     assert snapshot.opening_oi_baseline is not None
     assert snapshot.opening_oi_baseline.baseline_timestamp == BASELINE_TIME
     assert snapshot.morning_panel is not None
@@ -114,23 +111,33 @@ def test_no_reference_before_start_or_after_cutoff(tmp_path):
         underlying="NIFTY 50", evaluated_at=too_early + timedelta(seconds=5)
     )
     assert early.morning_reference is None
-    assert early.quality.state.value == "MORNING_REFERENCE_UNAVAILABLE"
+    assert early.lifecycle_state.value == "WAITING_FOR_REFERENCE"
 
     late = datetime(2026, 8, 24, 3, 45, tzinfo=timezone.utc)
     late_snapshot = _service(tmp_path / "late", Source((_chain(timestamp=late),))).evaluate(
         underlying="NIFTY 50", evaluated_at=late + timedelta(seconds=5)
     )
     assert late_snapshot.morning_reference is None
+    assert late_snapshot.quality.state.value == "MORNING_REFERENCE_UNAVAILABLE"
 
 
 def test_partial_or_stale_snapshot_cannot_create_oi_baseline(tmp_path):
     _service(tmp_path, Source((_chain(timestamp=REFERENCE_TIME),))).evaluate(
         underlying="NIFTY 50", evaluated_at=REFERENCE_TIME + timedelta(seconds=5)
     )
-    partial = _chain(timestamp=BASELINE_TIME)
+    complete = _chain(timestamp=BASELINE_TIME)
+    partial_cells = tuple(
+        cell
+        for cell in complete.cells
+        if not (cell.strike == 24350.0 and cell.option_side == "PE")
+    )
     partial = NormalizedChainSnapshot(
-        partial.underlying, partial.provider, partial.source_timestamp,
-        partial.spot, partial.expiry, partial.cells[:-1]
+        complete.underlying,
+        complete.provider,
+        complete.source_timestamp,
+        complete.spot,
+        complete.expiry,
+        partial_cells,
     )
     with pytest.raises(ValueError, match="PARTIAL_CONTRACT_WINDOW"):
         _service(tmp_path, Source((partial,))).evaluate(
