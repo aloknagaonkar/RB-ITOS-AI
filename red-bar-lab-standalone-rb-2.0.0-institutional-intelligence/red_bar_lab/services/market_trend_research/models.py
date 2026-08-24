@@ -39,6 +39,25 @@ class PcrBias(str, Enum):
     UNAVAILABLE = "UNAVAILABLE"
 
 
+class PcrMarketDirection(str, Enum):
+    BULLISH = "BULLISH"
+    BEARISH = "BEARISH"
+    NEUTRAL = "NEUTRAL"
+    UNAVAILABLE = "UNAVAILABLE"
+
+
+@dataclass(frozen=True, slots=True)
+class PcrDirectionEvidence:
+    direction: PcrMarketDirection
+    classification: PcrBias
+    pcr: float | None
+    lower_bound: float | None
+    upper_bound: float | None
+    reason_code: str
+    explanation: str
+    authority: str = AUTHORITY
+
+
 def _text(name: str, value: object, *, maximum: int = 128) -> str:
     if type(value) is not str or not value.strip() or len(value) > maximum:
         raise ValueError(f"{name} must be bounded text")
@@ -162,6 +181,7 @@ class PcrAggregate:
     slope_per_minute: float | None
     persistence_state: str
     consecutive_count: int
+    direction_evidence: PcrDirectionEvidence | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,12 +221,8 @@ class ResearchLatencyEvidence:
 
     def __post_init__(self) -> None:
         for name in (
-            "provider_request_ms",
-            "database_read_ms",
-            "normalization_ms",
-            "calculation_ms",
-            "persistence_ms",
-            "end_to_end_ms",
+            "provider_request_ms", "database_read_ms", "normalization_ms",
+            "calculation_ms", "persistence_ms", "end_to_end_ms",
         ):
             value = _number(name, getattr(self, name))
             if value < 0:
@@ -260,15 +276,6 @@ class DualPcrResearchSnapshot:
             raise ValueError("research schema version invalid")
 
     @classmethod
-    def build_id(
-        cls,
-        *,
-        underlying: str,
-        provider: str,
-        source_timestamp: datetime,
-    ) -> str:
-        payload = (
-            f"{underlying}|{provider}|{source_timestamp.isoformat()}|"
-            f"{SCHEMA_VERSION}"
-        )
+    def build_id(cls, *, underlying: str, provider: str, source_timestamp: datetime) -> str:
+        payload = f"{underlying}|{provider}|{source_timestamp.isoformat()}|{SCHEMA_VERSION}"
         return "MTR-" + sha256(payload.encode()).hexdigest()[:32]
