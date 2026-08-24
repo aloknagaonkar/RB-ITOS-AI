@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, time, timedelta
 from typing import Protocol
 
 from .models import PcrBias
@@ -16,8 +16,6 @@ class ExchangeSessionCalendar(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class StaticExchangeSessionCalendar:
-    """Explicit weekday calendar backed by a verified holiday set."""
-
     holidays: frozenset[date] = frozenset()
     source_name: str = "INJECTED_VERIFIED_CALENDAR"
     verified: bool = True
@@ -43,10 +41,9 @@ class MarketTrendResearchPolicy:
     strongly_bullish_above: float = 1.50
     maximum_source_age_seconds: float = 30.0
     hard_deadline_seconds: float = 2.0
-    anchor_hour: int = 9
-    anchor_minute: int = 16
-    anchor_on_time_tolerance_seconds: int = 30
-    maximum_anchor_delay_seconds: int = 300
+    reference_start: time = time(9, 8)
+    reference_cutoff: time = time(9, 14, 59)
+    oi_baseline_start: time = time(9, 15)
     minimum_window_steps: int = 1
     maximum_window_steps: int = 5
 
@@ -59,10 +56,10 @@ class MarketTrendResearchPolicy:
             raise ValueError("maximum_source_age_seconds invalid")
         if self.hard_deadline_seconds <= 0:
             raise ValueError("hard_deadline_seconds invalid")
-        if self.anchor_on_time_tolerance_seconds < 0:
-            raise ValueError("anchor_on_time_tolerance_seconds invalid")
-        if self.maximum_anchor_delay_seconds < self.anchor_on_time_tolerance_seconds:
-            raise ValueError("maximum_anchor_delay_seconds invalid")
+        if self.reference_cutoff < self.reference_start:
+            raise ValueError("reference window invalid")
+        if self.oi_baseline_start <= self.reference_start:
+            raise ValueError("OI baseline start invalid")
 
     def classify(self, pcr: float) -> PcrBias:
         if pcr < self.bearish_below:
@@ -108,6 +105,6 @@ class MarketTrendResearchPolicy:
 
     @staticmethod
     def expected_contract_count(window_steps: int) -> int:
-        if type(window_steps) is not int or window_steps < 1 or window_steps > 5:
+        if type(window_steps) is not int or not 1 <= window_steps <= 5:
             raise ValueError("window_steps invalid")
         return ((2 * window_steps) + 1) * 2
