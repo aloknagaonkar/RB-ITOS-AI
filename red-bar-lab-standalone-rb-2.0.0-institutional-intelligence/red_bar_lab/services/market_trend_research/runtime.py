@@ -5,11 +5,13 @@ from datetime import datetime, timezone
 from threading import Event
 from time import monotonic
 from typing import Generic, TypeVar
+from zoneinfo import ZoneInfo
 
 from .collector import CollectionResult, UpstoxResearchChainCollector
 from .repository import MarketTrendResearchRepository
 from .service import MarketTrendResearchService
 
+IST = ZoneInfo("Asia/Kolkata")
 T = TypeVar("T")
 
 
@@ -89,7 +91,17 @@ class MarketTrendResearchRuntime:
         )
 
     def run_cycle(self) -> None:
-        result = self.collector.collect_once()
+        now = datetime.now(timezone.utc)
+        self.collector.capture_reference_once(evaluated_at=now)
+        local_time = now.astimezone(IST).time().replace(tzinfo=None)
+        if local_time < self.collector.policy.oi_baseline_start:
+            self.last_success_at = now
+            self.last_failure_at = None
+            self.last_failure_reason = None
+            self.consecutive_failures = 0
+            self._health()
+            return
+        result = self.collector.collect_once(evaluated_at=now)
         self.slot.put(result)
         latest = self.slot.take()
         if latest is None:
