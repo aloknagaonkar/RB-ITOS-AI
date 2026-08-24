@@ -4,6 +4,7 @@ import pytest
 
 from red_bar_lab.services.red_bar_v2_canonical.paper_market_data import (
     PaperMarketDataCorruptionError,
+    PaperMarketDataDiagnosticError,
 )
 from red_bar_lab.services.red_bar_v2_canonical.upstox_paper_market_data import (
     UpstoxPaperCanaryMarketData,
@@ -118,15 +119,19 @@ def test_upstox_contract_and_quote_normalization():
 def test_upstox_documented_response_key_variation_is_normalized():
     provider = _provider({
         "data": {
-            "NSE_FO:NSE_FO%7C987654": _row(),
+            "NSE_FO:NIFTY26AUG25000CE": _row(
+                key="NSE_FO|987654",
+                token="NSE_FO|987654",
+            ),
         }
     })
     _prime(provider)
-    with pytest.raises(PaperMarketDataCorruptionError):
-        provider.quotes(
-            instrument_keys=("NSE_FO|987654",),
-            evaluated_at=NOW,
-        )
+    quotes = provider.quotes(
+        instrument_keys=("NSE_FO|987654",),
+        evaluated_at=NOW,
+    )
+    assert len(quotes) == 1
+    assert quotes[0].instrument_key == "NSE_FO|987654"
 
     provider = _provider({
         "data": {
@@ -152,11 +157,12 @@ def test_upstox_missing_timestamp_is_corruption():
         }
     })
     _prime(provider)
-    with pytest.raises(PaperMarketDataCorruptionError):
+    with pytest.raises(PaperMarketDataDiagnosticError) as captured:
         provider.quotes(
             instrument_keys=("NSE_FO|987654",),
             evaluated_at=NOW,
         )
+    assert captured.value.diagnostic.reason_code == "OPTION_QUOTE_REQUIRED_FIELD_MISSING"
 
 
 def test_upstox_swapped_rows_are_rejected():
@@ -202,11 +208,12 @@ def test_upstox_duplicate_response_identity_is_rejected():
         }
     })
     _prime(provider)
-    with pytest.raises(PaperMarketDataCorruptionError):
+    with pytest.raises(PaperMarketDataDiagnosticError) as captured:
         provider.quotes(
             instrument_keys=("NSE_FO|987654",),
             evaluated_at=NOW,
         )
+    assert captured.value.diagnostic.reason_code == "OPTION_QUOTE_DUPLICATE"
 
 
 def test_upstox_unrequested_or_malformed_rows_are_corruption():
@@ -219,20 +226,23 @@ def test_upstox_unrequested_or_malformed_rows_are_corruption():
         }
     })
     _prime(provider)
-    with pytest.raises(PaperMarketDataCorruptionError):
+    with pytest.raises(PaperMarketDataDiagnosticError) as captured:
         provider.quotes(
             instrument_keys=("NSE_FO|987654",),
             evaluated_at=NOW,
         )
+    assert captured.value.diagnostic.reason_code == "OPTION_QUOTE_IDENTITY_UNREQUESTED"
 
 
-def test_upstox_valid_empty_results_remain_empty():
+def test_upstox_empty_quote_result_is_count_incomplete():
     provider = _provider({"data": {}}, contracts=[])
     assert _prime(provider) == ()
-    assert provider.quotes(
-        instrument_keys=("NSE_FO|987654",),
-        evaluated_at=NOW,
-    ) == ()
+    with pytest.raises(PaperMarketDataDiagnosticError) as captured:
+        provider.quotes(
+            instrument_keys=("NSE_FO|987654",),
+            evaluated_at=NOW,
+        )
+    assert captured.value.diagnostic.reason_code == "OPTION_QUOTE_COUNT_INCOMPLETE"
 
 
 def test_upstox_non_finite_contract_or_quote_is_corruption():
