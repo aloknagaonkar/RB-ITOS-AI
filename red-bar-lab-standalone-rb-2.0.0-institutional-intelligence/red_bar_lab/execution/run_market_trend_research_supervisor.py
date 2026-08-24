@@ -106,7 +106,7 @@ class MarketTrendResearchProcessLock:
             if os.name == "nt":
                 import msvcrt
 
-                handle.seek(0)
+                handle.seek(0, os.SEEK_END)
                 if handle.tell() == 0:
                     handle.write(b"0")
                     handle.flush()
@@ -247,6 +247,7 @@ class MarketTrendResearchSupervisor:
         environment = dict(os.environ)
         environment["MARKET_TREND_RESEARCH_RUNTIME_ENABLED"] = "true"
         environment["MARKET_TREND_RESEARCH_PROVIDER"] = "UPSTOX"
+        environment["MARKET_TREND_RESEARCH_UNATTENDED"] = "true"
         return environment
 
     def _start_child(self) -> ChildProcess:
@@ -288,7 +289,23 @@ class MarketTrendResearchSupervisor:
             self.config.maximum_backoff_seconds,
             self.config.initial_backoff_seconds * (2 ** max(0, rapid_failures - 1)),
         )
-        return min(self.config.maximum_backoff_seconds, base + base * 0.25 * self.random_source())
+        return min(
+            self.config.maximum_backoff_seconds,
+            base + base * 0.25 * self.random_source(),
+        )
+
+    def _wait_with_heartbeat(self, seconds: float, *, state: str) -> bool:
+        deadline = self.monotonic_clock() + max(0.0, seconds)
+        while not self.stop_event.is_set():
+            if self.config.stop_request_path.exists():
+                self.request_stop()
+                return True
+            remaining = deadline - self.monotonic_clock()
+            if remaining <= 0:
+                return False
+            self._publish(state)
+            self.stop_event.wait(min(self.config.heartbeat_seconds, remaining))
+        return True
 
     def run(self) -> int:
         self.config.work_root.mkdir(parents=True, exist_ok=True)
@@ -322,10 +339,11 @@ class MarketTrendResearchSupervisor:
                         self._publish("RUNNING")
                         continue
                     runtime_seconds = self.monotonic_clock() - child_started_mono
-                    if runtime_seconds >= self.config.stable_run_seconds:
-                        rapid_failures = 0
-                    else:
-                        rapid_failures += 1
+                    rapid_failures = (
+                        0
+                        if runtime_seconds >= self.config.stable_run_seconds
+                        else rapid_failures + 1
+                    )
                     restart_count += 1
                     self._publish(
                         "BACKING_OFF",
@@ -343,22 +361,29 @@ class MarketTrendResearchSupervisor:
                 if child.poll() is None:
                     continue
                 if rapid_failures >= self.config.maximum_rapid_failures:
-                    next_restart = self.now() + timedelta(seconds=self.config.circuit_cooldown_seconds)
+                    next_restart = self.now() + timedelta(
+                        seconds=self.config.circuit_cooldown_seconds
+                    )
                     self._publish(
                         "CIRCUIT_OPEN",
                         next_restart_at=next_restart.isoformat(),
                         safe_reason="RAPID_FAILURE_THRESHOLD_REACHED",
                     )
-                    if self.stop_event.wait(self.config.circuit_cooldown_seconds):
+                    if self._wait_with_heartbeat(
+                        self.config.circuit_cooldown_seconds,
+                        state="CIRCUIT_OPEN",
+                    ):
                         break
                     rapid_failures = 0
                 else:
                     delay = self._backoff_seconds(rapid_failures)
                     self._publish(
                         "BACKING_OFF",
-                        next_restart_at=(self.now() + timedelta(seconds=delay)).isoformat(),
+                        next_restart_at=(
+                            self.now() + timedelta(seconds=delay)
+                        ).isoformat(),
                     )
-                    if self.stop_event.wait(delay):
+                    if self._wait_with_heartbeat(delay, state="BACKING_OFF"):
                         break
 
             self._publish("STOPPING", safe_reason="STOP_REQUESTED")
@@ -390,11 +415,21 @@ def supervisor_config() -> SupervisorConfig:
     root = settings.artifacts_root / "market_trend_research"
     return SupervisorConfig(
         work_root=root,
-        initial_backoff_seconds=_float("MARKET_TREND_RESEARCH_SUPERVISOR_INITIAL_BACKOFF_SECONDS", 2.0),
-        maximum_backoff_seconds=_float("MARKET_TREND_RESEARCH_SUPERVISOR_MAX_BACKOFF_SECONDS", 60.0),
-        stable_run_seconds=_float("MARKET_TREND_RESEARCH_SUPERVISOR_STABLE_RUN_SECONDS", 120.0),
-        maximum_rapid_failures=_int("MARKET_TREND_RESEARCH_SUPERVISOR_MAX_RAPID_FAILURES", 5),
-        circuit_cooldown_seconds=_float("MARKET_TREND_RESEARCH_SUPERVISOR_CIRCUIT_COOLDOWN_SECONDS", 300.0),
+        initial_backoff_seconds=_float(
+            "MARKET_TREND_RESEARCH_SUPERVISOR_INITIAL_BACKOFF_SECONDS", 2.0
+        ),
+        maximum_backoff_seconds=_float(
+            "MARKET_TREND_RESEARCH_SUPERVISOR_MAX_BACKOFF_SECONDS", 60.0
+        ),
+        stable_run_seconds=_float(
+            "MARKET_TREND_RESEARCH_SUPERVISOR_STABLE_RUN_SECONDS", 120.0
+        ),
+        maximum_rapid_failures=_int(
+            "MARKET_TREND_RESEARCH_SUPERVISOR_MAX_RAPID_FAILURES", 5
+        ),
+        circuit_cooldown_seconds=_float(
+            "MARKET_TREND_RESEARCH_SUPERVISOR_CIRCUIT_COOLDOWN_SECONDS", 300.0
+        ),
     )
 
 
@@ -408,8 +443,15 @@ def main() -> int:
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, _handle_signal)
     outcome = supervisor.run()
-    label = {0: "STOPPED", 2: "CONFIGURATION_ERROR", 3: "ALREADY_RUNNING"}.get(outcome, "FAILED")
-    print(f"market-trend-research-supervisor outcome={label} authority={AUTHORITY}")
+    label = {
+        0: "STOPPED",
+        2: "CONFIGURATION_ERROR",
+        3: "ALREADY_RUNNING",
+    }.get(outcome, "FAILED")
+    print(
+        f"market-trend-research-supervisor outcome={label} "
+        f"authority={AUTHORITY}"
+    )
     return outcome
 
 
