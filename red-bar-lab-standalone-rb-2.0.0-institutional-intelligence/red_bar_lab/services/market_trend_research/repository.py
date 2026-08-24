@@ -115,9 +115,38 @@ class MarketTrendResearchRepository:
         dropped_obsolete_tasks: int = 0,
         consecutive_failures: int = 0,
     ) -> DualPcrResearchSnapshot:
+        """Publish one externally visible record through one SQLite commit.
+
+        A staging row may be inserted inside the uncommitted transaction so the
+        complete persistence work can be timed. No provisional row is visible.
+        """
         persistence_started = monotonic()
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                """INSERT OR REPLACE INTO market_trend_research_snapshots
+                   (snapshot_id, underlying, trading_date, source_timestamp,
+                    evaluated_at, state, payload_json)
+                   VALUES (?,?,?,?,?,?,?)""",
+                (
+                    snapshot.snapshot_id,
+                    snapshot.underlying,
+                    snapshot.trading_date.isoformat(),
+                    snapshot.source_timestamp.isoformat(),
+                    snapshot.evaluated_at.isoformat(),
+                    snapshot.quality.state.value,
+                    _payload(snapshot),
+                ),
+            )
+            connection.execute(
+                """DELETE FROM market_trend_research_snapshots
+                   WHERE snapshot_id IN (
+                     SELECT snapshot_id FROM market_trend_research_snapshots
+                     WHERE underlying=? ORDER BY evaluated_at DESC
+                     LIMIT -1 OFFSET ?
+                   )""",
+                (snapshot.underlying, self.retention),
+            )
             persistence_ms = (monotonic() - persistence_started) * 1000.0
             end_to_end_ms = (monotonic() - evaluation_started) * 1000.0
             final_state = (
@@ -149,28 +178,13 @@ class MarketTrendResearchRepository:
                 ),
             )
             connection.execute(
-                """INSERT OR REPLACE INTO market_trend_research_snapshots
-                   (snapshot_id, underlying, trading_date, source_timestamp,
-                    evaluated_at, state, payload_json)
-                   VALUES (?,?,?,?,?,?,?)""",
+                """UPDATE market_trend_research_snapshots
+                   SET state=?, payload_json=? WHERE snapshot_id=?""",
                 (
-                    final_snapshot.snapshot_id,
-                    final_snapshot.underlying,
-                    final_snapshot.trading_date.isoformat(),
-                    final_snapshot.source_timestamp.isoformat(),
-                    final_snapshot.evaluated_at.isoformat(),
                     final_snapshot.quality.state.value,
                     _payload(final_snapshot),
+                    final_snapshot.snapshot_id,
                 ),
-            )
-            connection.execute(
-                """DELETE FROM market_trend_research_snapshots
-                   WHERE snapshot_id IN (
-                     SELECT snapshot_id FROM market_trend_research_snapshots
-                     WHERE underlying=? ORDER BY evaluated_at DESC
-                     LIMIT -1 OFFSET ?
-                   )""",
-                (final_snapshot.underlying, self.retention),
             )
             connection.commit()
         return final_snapshot
@@ -405,7 +419,6 @@ class MarketTrendResearchRepository:
             raise
         return None if row is None else json.loads(row[0])
 
-    # Change 10A compatibility aliases.
     def create_anchor(self, **_: object) -> bool:
         raise ValueError("MORNING_ANCHOR_REPLACED_BY_SPLIT_LIFECYCLE")
 
