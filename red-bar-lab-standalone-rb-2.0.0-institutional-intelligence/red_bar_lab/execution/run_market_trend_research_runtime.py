@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import time
+from datetime import datetime, time
 import os
 
 from red_bar_lab.brokers.upstox_client import UpstoxClient
@@ -16,7 +16,27 @@ from red_bar_lab.services.market_trend_research import (
     ResearchRuntimeConfig,
     UpstoxResearchChainCollector,
 )
+from red_bar_lab.services.red_bar_v2_canonical.upstox_paper_market_data import (
+    UpstoxPaperCanaryMarketData,
+)
 from red_bar_lab.services.upstox_service import RedBarUpstoxService, resolve_access_token
+
+
+class _UnderlyingSpotAdapter:
+    def __init__(self, market: UpstoxPaperCanaryMarketData) -> None:
+        self.market = market
+
+    def spot(
+        self,
+        *,
+        underlying: str,
+        evaluated_at: datetime,
+    ) -> tuple[float, datetime]:
+        quote = self.market.underlying_quote(
+            underlying=underlying,
+            evaluated_at=evaluated_at,
+        )
+        return quote.last_price, quote.quote_timestamp
 
 
 def _bool(name: str, default: bool = False) -> bool:
@@ -67,20 +87,37 @@ def main() -> int:
         hard_deadline_seconds=_float(
             "MARKET_TREND_RESEARCH_HARD_DEADLINE_SECONDS", 2.0
         ),
-        reference_start=_clock("MARKET_TREND_RESEARCH_REFERENCE_START", "09:08:00"),
-        reference_cutoff=_clock("MARKET_TREND_RESEARCH_REFERENCE_CUTOFF", "09:14:59"),
-        oi_baseline_start=_clock("MARKET_TREND_RESEARCH_OI_BASELINE_START", "09:15:00"),
+        reference_start=_clock(
+            "MARKET_TREND_RESEARCH_REFERENCE_START", "09:08:00"
+        ),
+        reference_cutoff=_clock(
+            "MARKET_TREND_RESEARCH_REFERENCE_CUTOFF", "09:14:59"
+        ),
+        oi_baseline_start=_clock(
+            "MARKET_TREND_RESEARCH_OI_BASELINE_START", "09:15:00"
+        ),
     )
     repository = MarketTrendResearchRepository(settings.database_path)
-    provider_name = os.getenv("MARKET_TREND_RESEARCH_PROVIDER", "UPSTOX").strip().upper()
+    provider_name = os.getenv(
+        "MARKET_TREND_RESEARCH_PROVIDER", "UPSTOX"
+    ).strip().upper()
     if provider_name != "UPSTOX":
         raise ValueError("MARKET_TREND_RESEARCH_PROVIDER_UNSUPPORTED")
-    request_timeout = _int("MARKET_TREND_RESEARCH_REQUEST_TIMEOUT_SECONDS", 10)
+    request_timeout = _int(
+        "MARKET_TREND_RESEARCH_REQUEST_TIMEOUT_SECONDS", 10
+    )
     if not 1 <= request_timeout <= 60:
         raise ValueError("MARKET_TREND_RESEARCH_REQUEST_TIMEOUT_INVALID")
+    token = resolve_access_token()
+    client = UpstoxClient(token, timeout=request_timeout)
     provider = RedBarUpstoxService(
-        resolve_access_token(),
-        client_factory=lambda token: UpstoxClient(token, timeout=request_timeout),
+        token,
+        client_factory=lambda _token: client,
+    )
+    spot_market = UpstoxPaperCanaryMarketData(
+        client,
+        underlying_keys={settings.default_underlying: "NSE_INDEX|Nifty 50"},
+        maximum_quote_age_seconds=policy.maximum_source_age_seconds,
     )
     collector = UpstoxResearchChainCollector(
         provider=provider,
@@ -89,6 +126,7 @@ def main() -> int:
         calendar=calendar,
         underlying=settings.default_underlying,
         instrument_key="NSE_INDEX|Nifty 50",
+        spot_provider=_UnderlyingSpotAdapter(spot_market),
     )
     service = MarketTrendResearchService(
         source=OptionParticipationSnapshotSource(settings.database_path),
@@ -103,7 +141,9 @@ def main() -> int:
         repository=repository,
         config=ResearchRuntimeConfig(
             enabled=True,
-            refresh_seconds=_float("MARKET_TREND_RESEARCH_REFRESH_SECONDS", 5.0),
+            refresh_seconds=_float(
+                "MARKET_TREND_RESEARCH_REFRESH_SECONDS", 5.0
+            ),
             maximum_backoff_seconds=_float(
                 "MARKET_TREND_RESEARCH_MAX_BACKOFF_SECONDS", 60.0
             ),
