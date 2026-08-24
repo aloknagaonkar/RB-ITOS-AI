@@ -6,7 +6,7 @@ from enum import Enum
 from hashlib import sha256
 from math import isfinite
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
 AUTHORITY = "OBSERVATIONAL_ONLY"
 
 
@@ -38,11 +38,7 @@ def _text(name: str, value: object) -> str:
 
 
 def _aware(name: str, value: object) -> datetime:
-    if (
-        type(value) is not datetime
-        or value.tzinfo is None
-        or value.utcoffset() is None
-    ):
+    if type(value) is not datetime or value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{name} must be timezone-aware")
     return value
 
@@ -158,12 +154,24 @@ class PcrResearchPanel:
 
 @dataclass(frozen=True, slots=True)
 class ResearchLatencyEvidence:
-    source_ms: float
+    database_read_ms: float
     normalization_ms: float
     calculation_ms: float
     persistence_ms: float
     end_to_end_ms: float
     dropped_obsolete_tasks: int = 0
+
+    def __post_init__(self) -> None:
+        for name in (
+            "database_read_ms",
+            "normalization_ms",
+            "calculation_ms",
+            "persistence_ms",
+            "end_to_end_ms",
+        ):
+            value = _number(name, getattr(self, name))
+            if value < 0:
+                raise ValueError(f"{name} cannot be negative")
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,6 +195,9 @@ class DualPcrResearchSnapshot:
     latency: ResearchLatencyEvidence
     agreement_state: str
     explanation: tuple[str, ...]
+    calendar_source: str
+    runtime_mode: str = "ONE_SHOT"
+    automatic_refresh: str = "NOT_CONNECTED"
     authority: str = AUTHORITY
     schema_version: str = SCHEMA_VERSION
 
@@ -194,8 +205,13 @@ class DualPcrResearchSnapshot:
         _text("snapshot_id", self.snapshot_id)
         _text("underlying", self.underlying)
         _text("provider", self.provider)
+        _text("calendar_source", self.calendar_source)
         _aware("source_timestamp", self.source_timestamp)
         _aware("evaluated_at", self.evaluated_at)
+        if self.runtime_mode != "ONE_SHOT":
+            raise ValueError("runtime_mode invalid")
+        if self.automatic_refresh != "NOT_CONNECTED":
+            raise ValueError("automatic_refresh invalid")
         if self.authority != AUTHORITY:
             raise ValueError("research authority invalid")
         if self.schema_version != SCHEMA_VERSION:
