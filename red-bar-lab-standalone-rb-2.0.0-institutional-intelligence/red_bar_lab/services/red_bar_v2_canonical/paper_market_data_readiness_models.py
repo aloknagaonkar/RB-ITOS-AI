@@ -68,8 +68,9 @@ ALLOWED_DIAGNOSTIC_REASONS = frozenset({
     "OPTION_QUOTE_IDENTITY_UNREQUESTED", "OPTION_QUOTE_IDENTITY_AMBIGUOUS",
     "OPTION_QUOTE_IDENTITY_CONFLICT", "OPTION_QUOTE_DUPLICATE",
     "OPTION_QUOTE_REQUIRED_FIELD_MISSING", "OPTION_QUOTE_COUNT_INCOMPLETE",
-    "OPTION_QUOTE_TIMESTAMP_INVALID", "OPTION_QUOTE_STALE",
-    "OPTION_QUOTE_PRICE_INVALID", "BID_ASK_INVALID",
+    "OPTION_QUOTE_TIMESTAMP_INVALID", "OPTION_QUOTE_DEPTH_MALFORMED",
+    "OPTION_QUOTE_PRICE_INVALID", "OPTION_QUOTE_TOKEN_MISSING",
+    "OPTION_QUOTE_STALE", "BID_ASK_INVALID",
     "AUTHENTICATION_FAILED", "RATE_LIMITED", "UNKNOWN_SANITIZED_FAILURE",
 })
 ALLOWED_REJECTED_FIELDS = frozenset({
@@ -114,9 +115,24 @@ def _count(name: str, value: object | None) -> int | None:
     return value
 
 
-def build_probe_id(*, provider: str, underlying: str, evaluated_at: datetime, expiry: date | None, atm_strike: float | None, schema_version: str = SCHEMA_VERSION) -> str:
+def build_probe_id(
+    *,
+    provider: str,
+    underlying: str,
+    evaluated_at: datetime,
+    expiry: date | None,
+    atm_strike: float | None,
+    schema_version: str = SCHEMA_VERSION,
+) -> str:
     evaluated = _aware("evaluated_at", evaluated_at).astimezone(timezone.utc).isoformat()
-    payload = "|".join((provider, underlying, evaluated, expiry.isoformat() if expiry else "", "" if atm_strike is None else f"{float(atm_strike):.10g}", schema_version))
+    payload = "|".join((
+        provider,
+        underlying,
+        evaluated,
+        expiry.isoformat() if expiry else "",
+        "" if atm_strike is None else f"{float(atm_strike):.10g}",
+        schema_version,
+    ))
     return "MDR-" + sha256(payload.encode("utf-8")).hexdigest()[:32]
 
 
@@ -140,7 +156,10 @@ class MarketDataReadinessDiagnostic:
         if self.reason_code not in ALLOWED_DIAGNOSTIC_REASONS:
             raise ValueError("diagnostic reason_code is not allowlisted")
         _text("source_component", self.source_component, maximum=64)
-        for name in ("received_count", "normalized_count", "rejected_count", "ce_count", "pe_count", "common_expiry_count", "unique_strike_count"):
+        for name in (
+            "received_count", "normalized_count", "rejected_count",
+            "ce_count", "pe_count", "common_expiry_count", "unique_strike_count",
+        ):
             _count(name, getattr(self, name))
         if self.received_count is not None:
             for name in ("normalized_count", "rejected_count"):
@@ -165,7 +184,11 @@ class MarketDataReadinessPolicy:
 
     def __post_init__(self) -> None:
         _finite_optional("max_quote_age_seconds", self.max_quote_age_seconds)
-        _finite_optional("maximum_spread_percentage", self.maximum_spread_percentage, positive=False)
+        _finite_optional(
+            "maximum_spread_percentage",
+            self.maximum_spread_percentage,
+            positive=False,
+        )
         for name in ("strike_steps", "min_ce_coverage", "min_pe_coverage"):
             value = getattr(self, name)
             if type(value) is not int or value <= 0:
@@ -191,16 +214,26 @@ class ContractReadinessEvidence:
     reason_code: str
 
     def __post_init__(self) -> None:
-        _text("instrument_key", self.instrument_key); _text("trading_symbol", self.trading_symbol); _text("moneyness", self.moneyness); _text("reason_code", self.reason_code)
-        if type(self.option_side) is not OptionSide: raise ValueError("option_side invalid")
+        _text("instrument_key", self.instrument_key)
+        _text("trading_symbol", self.trading_symbol)
+        _text("moneyness", self.moneyness)
+        _text("reason_code", self.reason_code)
+        if type(self.option_side) is not OptionSide:
+            raise ValueError("option_side invalid")
         _finite_optional("strike", self.strike)
-        if type(self.expiry) is not date: raise ValueError("expiry invalid")
-        if type(self.distance_steps) is not int: raise ValueError("distance_steps invalid")
-        if type(self.lot_size) is not int or self.lot_size <= 0: raise ValueError("lot_size invalid")
-        for name in ("last_price", "bid_price", "ask_price"): _finite_optional(name, getattr(self, name))
+        if type(self.expiry) is not date:
+            raise ValueError("expiry invalid")
+        if type(self.distance_steps) is not int:
+            raise ValueError("distance_steps invalid")
+        if type(self.lot_size) is not int or self.lot_size <= 0:
+            raise ValueError("lot_size invalid")
+        for name in ("last_price", "bid_price", "ask_price"):
+            _finite_optional(name, getattr(self, name))
         _finite_optional("spread_percentage", self.spread_percentage, positive=False)
-        if self.quote_timestamp is not None: _aware("quote_timestamp", self.quote_timestamp)
-        if type(self.status) is not ContractReadinessStatus: raise ValueError("status invalid")
+        if self.quote_timestamp is not None:
+            _aware("quote_timestamp", self.quote_timestamp)
+        if type(self.status) is not ContractReadinessStatus:
+            raise ValueError("status invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,25 +261,64 @@ class MarketDataReadinessReport:
     schema_version: str = SCHEMA_VERSION
 
     def __post_init__(self) -> None:
-        _text("provider", self.provider); _text("underlying", self.underlying); _text("reason_code", self.reason_code)
-        if self.underlying_instrument_key is not None: _text("underlying_instrument_key", self.underlying_instrument_key)
+        _text("provider", self.provider)
+        _text("underlying", self.underlying)
+        _text("reason_code", self.reason_code)
+        if self.underlying_instrument_key is not None:
+            _text("underlying_instrument_key", self.underlying_instrument_key)
         _aware("evaluated_at", self.evaluated_at)
-        for name in ("spot_price", "strike_interval", "atm_strike"): _finite_optional(name, getattr(self, name))
-        if self.spot_timestamp is not None: _aware("spot_timestamp", self.spot_timestamp)
-        if self.expiry is not None and type(self.expiry) is not date: raise ValueError("expiry invalid")
-        for name in ("expected_contract_count", "observed_contract_count", "ready_contract_count", "ce_coverage", "pe_coverage"):
+        for name in ("spot_price", "strike_interval", "atm_strike"):
+            _finite_optional(name, getattr(self, name))
+        if self.spot_timestamp is not None:
+            _aware("spot_timestamp", self.spot_timestamp)
+        if self.expiry is not None and type(self.expiry) is not date:
+            raise ValueError("expiry invalid")
+        for name in (
+            "expected_contract_count", "observed_contract_count",
+            "ready_contract_count", "ce_coverage", "pe_coverage",
+        ):
             value = getattr(self, name)
-            if type(value) is not int or value < 0: raise ValueError(f"{name} invalid")
-        if self.observed_contract_count > self.expected_contract_count or self.ready_contract_count > self.observed_contract_count: raise ValueError("count ordering invalid")
-        if len(self.contracts) > 18: raise ValueError("contracts exceeds 18")
-        if type(self.status) is not MarketDataReadinessStatus: raise ValueError("status invalid")
-        if type(self.failure_stage) is not MarketDataReadinessStage: raise ValueError("failure_stage invalid")
-        if self.diagnostic is not None and type(self.diagnostic) is not MarketDataReadinessDiagnostic: raise ValueError("diagnostic invalid")
-        if self.status in {MarketDataReadinessStatus.READY, MarketDataReadinessStatus.QUOTE_QUALITY_PARTIAL}:
-            if self.failure_stage is not MarketDataReadinessStage.COMPLETED: raise ValueError("successful report must be COMPLETED")
+            if type(value) is not int or value < 0:
+                raise ValueError(f"{name} invalid")
+        if (
+            self.observed_contract_count > self.expected_contract_count
+            or self.ready_contract_count > self.observed_contract_count
+        ):
+            raise ValueError("count ordering invalid")
+        if len(self.contracts) > 18:
+            raise ValueError("contracts exceeds 18")
+        if type(self.status) is not MarketDataReadinessStatus:
+            raise ValueError("status invalid")
+        if type(self.failure_stage) is not MarketDataReadinessStage:
+            raise ValueError("failure_stage invalid")
+        if (
+            self.diagnostic is not None
+            and type(self.diagnostic) is not MarketDataReadinessDiagnostic
+        ):
+            raise ValueError("diagnostic invalid")
+        if self.status in {
+            MarketDataReadinessStatus.READY,
+            MarketDataReadinessStatus.QUOTE_QUALITY_PARTIAL,
+        }:
+            if self.failure_stage is not MarketDataReadinessStage.COMPLETED:
+                raise ValueError("successful report must be COMPLETED")
         elif self.failure_stage is MarketDataReadinessStage.COMPLETED:
             raise ValueError("failed report cannot be COMPLETED")
-        expected_id = build_probe_id(provider=self.provider, underlying=self.underlying, evaluated_at=self.evaluated_at, expiry=self.expiry, atm_strike=self.atm_strike, schema_version=self.schema_version)
-        if self.probe_id != expected_id: raise ValueError("probe_id invalid")
+        expected_id = build_probe_id(
+            provider=self.provider,
+            underlying=self.underlying,
+            evaluated_at=self.evaluated_at,
+            expiry=self.expiry,
+            atm_strike=self.atm_strike,
+            schema_version=self.schema_version,
+        )
+        if self.probe_id != expected_id:
+            raise ValueError("probe_id invalid")
         if self.status is MarketDataReadinessStatus.READY:
-            if self.expected_contract_count != self.observed_contract_count or self.ready_contract_count != self.expected_contract_count or self.spot_price is None or self.spot_timestamp is None: raise ValueError("READY evidence incomplete")
+            if (
+                self.expected_contract_count != self.observed_contract_count
+                or self.ready_contract_count != self.expected_contract_count
+                or self.spot_price is None
+                or self.spot_timestamp is None
+            ):
+                raise ValueError("READY evidence incomplete")
