@@ -4,7 +4,11 @@ from dataclasses import dataclass
 from datetime import date, time, timedelta
 from typing import Protocol
 
-from .models import PcrBias
+from .models import (
+    PcrBias,
+    PcrDirectionEvidence,
+    PcrMarketDirection,
+)
 
 
 class ExchangeSessionCalendar(Protocol):
@@ -69,6 +73,59 @@ class MarketTrendResearchPolicy:
         if pcr <= self.strongly_bullish_above:
             return PcrBias.BULLISH
         return PcrBias.STRONGLY_BULLISH
+
+    @staticmethod
+    def direction_for_bias(classification: PcrBias) -> PcrMarketDirection:
+        return {
+            PcrBias.BEARISH: PcrMarketDirection.BEARISH,
+            PcrBias.NEUTRAL: PcrMarketDirection.NEUTRAL,
+            PcrBias.BULLISH: PcrMarketDirection.BULLISH,
+            PcrBias.STRONGLY_BULLISH: PcrMarketDirection.BULLISH,
+            PcrBias.UNAVAILABLE: PcrMarketDirection.UNAVAILABLE,
+        }[classification]
+
+    def direction_evidence(
+        self,
+        pcr: float | None,
+        *,
+        classification: PcrBias | None = None,
+    ) -> PcrDirectionEvidence:
+        if pcr is None:
+            bias = PcrBias.UNAVAILABLE
+            return PcrDirectionEvidence(
+                direction=PcrMarketDirection.UNAVAILABLE,
+                classification=bias,
+                pcr=None,
+                lower_bound=None,
+                upper_bound=None,
+                reason_code="PCR_UNAVAILABLE",
+                explanation="PCR could not be calculated.",
+            )
+        bias = classification or self.classify(pcr)
+        direction = self.direction_for_bias(bias)
+        if bias is PcrBias.BEARISH:
+            return PcrDirectionEvidence(
+                direction, bias, pcr, None, self.bearish_below,
+                "PCR_BELOW_BEARISH_THRESHOLD",
+                f"PCR {pcr:.3f} is below {self.bearish_below:.2f}.",
+            )
+        if bias is PcrBias.NEUTRAL:
+            return PcrDirectionEvidence(
+                direction, bias, pcr, self.bearish_below, self.bullish_from,
+                "PCR_WITHIN_NEUTRAL_RANGE",
+                f"PCR {pcr:.3f} is between {self.bearish_below:.2f} and {self.bullish_from:.2f}.",
+            )
+        if bias is PcrBias.BULLISH:
+            return PcrDirectionEvidence(
+                direction, bias, pcr, self.bullish_from, self.strongly_bullish_above,
+                "PCR_WITHIN_BULLISH_RANGE",
+                f"PCR {pcr:.3f} is between {self.bullish_from:.2f} and {self.strongly_bullish_above:.2f}.",
+            )
+        return PcrDirectionEvidence(
+            direction, bias, pcr, self.strongly_bullish_above, None,
+            "PCR_ABOVE_STRONG_BULLISH_THRESHOLD",
+            f"PCR {pcr:.3f} is above {self.strongly_bullish_above:.2f}.",
+        )
 
     @staticmethod
     def calendar_source(calendar: ExchangeSessionCalendar) -> str:
