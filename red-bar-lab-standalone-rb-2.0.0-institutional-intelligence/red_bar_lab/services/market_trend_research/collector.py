@@ -9,7 +9,7 @@ from typing import Protocol
 from zoneinfo import ZoneInfo
 
 from .calculator import DualPcrCalculator
-from .models import OptionOiCell
+from .models import MorningReference, OptionOiCell
 from .policy import ExchangeSessionCalendar, MarketTrendResearchPolicy
 from .repository import MarketTrendResearchRepository
 from .source import NormalizedChainSnapshot
@@ -19,7 +19,21 @@ IST = ZoneInfo("Asia/Kolkata")
 
 class ResearchOptionChainProvider(Protocol):
     def option_expiries(self, instrument_key: str) -> list[str]: ...
+    def option_contracts(
+        self,
+        instrument_key: str,
+        expiry_date: str | None = None,
+    ) -> list[dict[str, object]]: ...
     def option_chain(self, instrument_key: str, expiry_date: str) -> list[dict[str, object]]: ...
+
+
+class ResearchSpotProvider(Protocol):
+    def spot(
+        self,
+        *,
+        underlying: str,
+        evaluated_at: datetime,
+    ) -> tuple[float, datetime]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,7 +58,7 @@ def _number(value: object, *, required: bool = True) -> float | None:
 
 
 class UpstoxResearchChainCollector:
-    """One full-chain request, one normalization pass, no order endpoints."""
+    """Independent spot/reference and full-chain/OI research collector."""
 
     def __init__(
         self,
@@ -55,6 +69,7 @@ class UpstoxResearchChainCollector:
         calendar: ExchangeSessionCalendar,
         underlying: str = "NIFTY 50",
         instrument_key: str = "NSE_INDEX|Nifty 50",
+        spot_provider: ResearchSpotProvider | None = None,
     ) -> None:
         self.provider = provider
         self.repository = repository
@@ -62,6 +77,7 @@ class UpstoxResearchChainCollector:
         self.calendar = calendar
         self.underlying = underlying
         self.instrument_key = instrument_key
+        self.spot_provider = spot_provider
         self._expiry_by_date: dict[date, date] = {}
         self.calculator = DualPcrCalculator(policy)
 
@@ -70,14 +86,125 @@ class UpstoxResearchChainCollector:
         if cached is not None:
             return cached
         expiries = sorted(
-            date.fromisoformat(value)
-            for value in self.provider.option_expiries(self.instrument_key)
-            if date.fromisoformat(value) >= trading_date
+            parsed
+            for parsed in (
+                date.fromisoformat(value)
+                for value in self.provider.option_expiries(self.instrument_key)
+            )
+            if parsed >= trading_date
         )
         if not expiries:
             raise ValueError("EXPIRY_UNAVAILABLE")
         self._expiry_by_date[trading_date] = expiries[0]
         return expiries[0]
+
+    @staticmethod
+    def _contract_cells(
+        rows: list[dict[str, object]],
+        *,
+        expiry: date,
+        timestamp: datetime,
+    ) -> tuple[OptionOiCell, ...]:
+        cells: list[OptionOiCell] = []
+        seen: set[str] = set()
+        for row in rows:
+            if type(row) is not dict:
+                raise ValueError("RESEARCH_CONTRACT_ROW_MALFORMED")
+            row_expiry = date.fromisoformat(str(row.get("expiry")))
+            if row_expiry != expiry:
+                continue
+            side = str(
+                row.get("instrument_type")
+                or row.get("option_type")
+                or row.get("option_side")
+                or ""
+            ).upper()
+            if side not in {"CE", "PE"}:
+                continue
+            key = str(row.get("instrument_key") or "").strip()
+            if not key or key in seen:
+                raise ValueError("RESEARCH_CONTRACT_IDENTITY_INVALID")
+            seen.add(key)
+            strike = _number(row.get("strike_price") or row.get("strike"))
+            cells.append(
+                OptionOiCell(
+                    instrument_key=key,
+                    option_side=side,
+                    strike=float(strike),
+                    expiry=expiry,
+                    current_oi=0.0,
+                    provider_prev_oi=None,
+                    source_timestamp=timestamp,
+                )
+            )
+        if not cells:
+            raise ValueError("RESEARCH_CONTRACTS_UNAVAILABLE")
+        return tuple(cells)
+
+    def capture_reference_once(
+        self,
+        *,
+        evaluated_at: datetime | None = None,
+    ) -> MorningReference | None:
+        """Fix the 09:08 spot independently of option-OI availability."""
+        now = evaluated_at or datetime.now(timezone.utc)
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("EVALUATED_AT_NAIVE")
+        trading_date = now.astimezone(IST).date()
+        raw = self.repository.load_reference(
+            underlying=self.underlying,
+            trading_date=trading_date,
+        )
+        if raw is not None:
+            return None
+        local_time = now.astimezone(IST).time().replace(tzinfo=None)
+        if not self.policy.reference_start <= local_time <= self.policy.reference_cutoff:
+            return None
+        if self.spot_provider is None:
+            return None
+        spot, spot_timestamp = self.spot_provider.spot(
+            underlying=self.underlying,
+            evaluated_at=now,
+        )
+        if spot_timestamp.tzinfo is None or spot_timestamp.utcoffset() is None:
+            raise ValueError("REFERENCE_TIMESTAMP_NAIVE")
+        age = (now - spot_timestamp).total_seconds()
+        if age < 0:
+            raise ValueError("REFERENCE_TIMESTAMP_FUTURE")
+        if age > self.policy.maximum_source_age_seconds:
+            raise ValueError("REFERENCE_SPOT_STALE")
+        expiry = self._expiry(trading_date)
+        steps = self.policy.window_steps(trading_date, expiry, self.calendar)
+        contracts = self.provider.option_contracts(
+            self.instrument_key,
+            expiry.isoformat(),
+        )
+        contract_cells = self._contract_cells(
+            contracts,
+            expiry=expiry,
+            timestamp=spot_timestamp,
+        )
+        window = self.calculator.define_window(
+            contract_cells,
+            spot=spot,
+            window_steps=steps,
+        )
+        reference = MorningReference(
+            trading_date=trading_date,
+            underlying=self.underlying,
+            reference_spot=spot,
+            reference_timestamp=spot_timestamp,
+            expiry=expiry,
+            strike_interval=window.strike_interval,
+            fixed_atm=window.atm,
+            window_steps=steps,
+            fixed_strikes=window.strikes,
+            source="UPSTOX_UNDERLYING_QUOTE",
+            source_age_seconds=age,
+            status="REFERENCE_FIXED",
+        )
+        self.repository.create_reference(reference)
+        return reference
 
     @staticmethod
     def _normalized_cells(
@@ -118,7 +245,9 @@ class UpstoxResearchChainCollector:
                         strike=float(strike),
                         expiry=expiry,
                         current_oi=float(_number(market.get("oi"))),
-                        provider_prev_oi=_number(market.get("prev_oi"), required=False),
+                        provider_prev_oi=_number(
+                            market.get("prev_oi"), required=False
+                        ),
                         source_timestamp=source_timestamp,
                     )
                 )
@@ -133,9 +262,12 @@ class UpstoxResearchChainCollector:
         trading_date = now.astimezone(IST).date()
         expiry = self._expiry(trading_date)
         request_started = monotonic()
-        records = self.provider.option_chain(self.instrument_key, expiry.isoformat())
+        records = self.provider.option_chain(
+            self.instrument_key,
+            expiry.isoformat(),
+        )
         request_ms = (monotonic() - request_started) * 1000.0
-        source_timestamp = datetime.now(timezone.utc)
+        source_timestamp = now
         normalization_started = monotonic()
         spot, all_cells = self._normalized_cells(
             records,
@@ -152,12 +284,21 @@ class UpstoxResearchChainCollector:
             underlying=self.underlying,
             trading_date=trading_date,
         )
-        if reference is not None and date.fromisoformat(str(reference["expiry"])) == expiry:
-            fixed_strikes = {float(value) for value in reference["fixed_strikes"]}
+        if (
+            reference is not None
+            and date.fromisoformat(str(reference["expiry"])) == expiry
+        ):
+            fixed_strikes = {
+                float(value) for value in reference["fixed_strikes"]
+            }
             retained_keys.update(
-                cell.instrument_key for cell in all_cells if cell.strike in fixed_strikes
+                cell.instrument_key
+                for cell in all_cells
+                if cell.strike in fixed_strikes
             )
-        retained = tuple(cell for cell in all_cells if cell.instrument_key in retained_keys)
+        retained = tuple(
+            cell for cell in all_cells if cell.instrument_key in retained_keys
+        )
         if len({cell.instrument_key for cell in retained}) != len(retained):
             raise ValueError("RESEARCH_CHAIN_DUPLICATE_IDENTITY")
         normalization_ms = (monotonic() - normalization_started) * 1000.0
@@ -186,4 +327,9 @@ class UpstoxResearchChainCollector:
             request_ms=request_ms,
             normalization_ms=normalization_ms,
         )
-        return CollectionResult(snapshot, request_ms, normalization_ms, len(retained))
+        return CollectionResult(
+            snapshot,
+            request_ms,
+            normalization_ms,
+            len(retained),
+        )
