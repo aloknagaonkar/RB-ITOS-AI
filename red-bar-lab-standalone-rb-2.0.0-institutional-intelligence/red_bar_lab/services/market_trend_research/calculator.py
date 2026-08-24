@@ -75,10 +75,13 @@ def _put_change(
     prefix: str,
     evidence: OiChangeEvidence,
 ) -> None:
+    change_prefix = prefix.replace("_previous_day", "_day").replace(
+        "_previous_refresh", "_refresh"
+    )
     row[f"{prefix}_oi"] = evidence.baseline
-    row[f"{prefix}_change"] = evidence.absolute_change
-    row[f"{prefix}_change_pct"] = evidence.percentage_change
-    row[f"{prefix}_change_reason"] = evidence.reason
+    row[f"{change_prefix}_change"] = evidence.absolute_change
+    row[f"{change_prefix}_change_pct"] = evidence.percentage_change
+    row[f"{change_prefix}_change_reason"] = evidence.reason
 
 
 class DualPcrCalculator:
@@ -318,8 +321,16 @@ class DualPcrCalculator:
             _put_change(row, prefix="pe_previous_day", evidence=pe_day)
             _put_change(row, prefix="ce_opening", evidence=ce_opening)
             _put_change(row, prefix="pe_opening", evidence=pe_opening)
-            _put_change(row, prefix="ce_previous_refresh", evidence=ce_refresh_change)
-            _put_change(row, prefix="pe_previous_refresh", evidence=pe_refresh_change)
+            _put_change(
+                row,
+                prefix="ce_previous_refresh",
+                evidence=ce_refresh_change,
+            )
+            _put_change(
+                row,
+                prefix="pe_previous_refresh",
+                evidence=pe_refresh_change,
+            )
             rows.append(row)
 
         ce_day_total = _aggregate_change(ce_total, tuple(ce_day_baselines))
