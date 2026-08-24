@@ -17,8 +17,12 @@ from red_bar_lab.services.market_trend_research.policy import (
 
 
 def _calendar() -> StaticExchangeSessionCalendar:
+    verified = os.getenv(
+        "MARKET_TREND_RESEARCH_CALENDAR_VERIFIED",
+        "false",
+    ).strip().lower() in {"1", "true", "yes", "on"}
     raw = os.getenv("MARKET_TREND_RESEARCH_HOLIDAYS")
-    if raw is None:
+    if not verified or raw is None:
         return StaticExchangeSessionCalendar(
             holidays=frozenset(),
             source_name="UNVERIFIED_WEEKDAY_ONLY",
@@ -28,7 +32,7 @@ def _calendar() -> StaticExchangeSessionCalendar:
     holidays = frozenset(date.fromisoformat(value) for value in values)
     return StaticExchangeSessionCalendar(
         holidays=holidays,
-        source_name="MARKET_TREND_RESEARCH_HOLIDAYS",
+        source_name="MARKET_TREND_RESEARCH_HOLIDAYS_VERIFIED",
         verified=True,
     )
 
