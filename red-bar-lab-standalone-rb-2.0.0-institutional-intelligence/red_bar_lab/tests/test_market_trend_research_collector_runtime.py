@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -16,6 +16,7 @@ from red_bar_lab.services.market_trend_research.runtime import (
 )
 
 NOW = datetime(2026, 8, 24, 4, 0, tzinfo=timezone.utc)
+REFERENCE_NOW = datetime(2026, 8, 24, 3, 38, 3, tzinfo=timezone.utc)
 EXPIRY = date(2026, 8, 25)
 
 
@@ -23,12 +24,27 @@ class Provider:
     def __init__(self, *, spot=24500.0):
         self.spot = spot
         self.expiry_calls = 0
+        self.contract_calls = 0
         self.chain_calls = 0
 
     def option_expiries(self, instrument_key):
         self.expiry_calls += 1
         assert instrument_key == "NSE_INDEX|Nifty 50"
         return [EXPIRY.isoformat()]
+
+    def option_contracts(self, instrument_key, expiry_date=None):
+        self.contract_calls += 1
+        assert instrument_key == "NSE_INDEX|Nifty 50"
+        rows = []
+        for strike in range(23800, 25001, 50):
+            for side in ("CE", "PE"):
+                rows.append({
+                    "expiry": EXPIRY.isoformat(),
+                    "instrument_type": side,
+                    "instrument_key": f"{side}-{strike}",
+                    "strike_price": float(strike),
+                })
+        return rows
 
     def option_chain(self, instrument_key, expiry_date):
         self.chain_calls += 1
@@ -51,7 +67,19 @@ class Provider:
         return rows
 
 
-def _collector(tmp_path, provider):
+class SpotProvider:
+    def __init__(self, spot=24272.5, timestamp=REFERENCE_NOW):
+        self.value = spot
+        self.timestamp = timestamp
+        self.calls = 0
+
+    def spot(self, *, underlying, evaluated_at):
+        self.calls += 1
+        assert underlying == "NIFTY 50"
+        return self.value, self.timestamp
+
+
+def _collector(tmp_path, provider, *, spot_provider=None):
     repository = MarketTrendResearchRepository(tmp_path / "research.db")
     policy = MarketTrendResearchPolicy()
     return UpstoxResearchChainCollector(
@@ -59,7 +87,49 @@ def _collector(tmp_path, provider):
         repository=repository,
         policy=policy,
         calendar=StaticExchangeSessionCalendar(),
+        spot_provider=spot_provider,
     ), repository
+
+
+def test_reference_capture_uses_spot_and_contract_metadata_not_option_chain(tmp_path):
+    provider = Provider()
+    spot = SpotProvider()
+    collector, repository = _collector(tmp_path, provider, spot_provider=spot)
+    reference = collector.capture_reference_once(evaluated_at=REFERENCE_NOW)
+    assert reference is not None
+    assert reference.reference_spot == 24272.5
+    assert reference.reference_timestamp == REFERENCE_NOW
+    assert reference.fixed_atm == 24250.0
+    assert reference.window_steps == 2
+    assert len(reference.fixed_strikes) == 5
+    assert spot.calls == 1
+    assert provider.contract_calls == 1
+    assert provider.chain_calls == 0
+    assert repository.load_reference(
+        underlying="NIFTY 50", trading_date=REFERENCE_NOW.date()
+    )["reference_spot"] == 24272.5
+    assert collector.capture_reference_once(evaluated_at=REFERENCE_NOW) is None
+    assert spot.calls == 1
+
+
+@pytest.mark.parametrize(
+    ("timestamp", "reason"),
+    [
+        (REFERENCE_NOW.replace(tzinfo=None), "REFERENCE_TIMESTAMP_NAIVE"),
+        (REFERENCE_NOW + timedelta(seconds=1), "REFERENCE_TIMESTAMP_FUTURE"),
+        (REFERENCE_NOW - timedelta(seconds=31), "REFERENCE_SPOT_STALE"),
+    ],
+)
+def test_reference_timestamp_validation_fails_closed(tmp_path, timestamp, reason):
+    provider = Provider()
+    collector, _ = _collector(
+        tmp_path,
+        provider,
+        spot_provider=SpotProvider(timestamp=timestamp),
+    )
+    with pytest.raises(ValueError, match=reason):
+        collector.capture_reference_once(evaluated_at=REFERENCE_NOW)
+    assert provider.chain_calls == 0
 
 
 def test_one_option_chain_request_per_refresh_and_expiry_is_cached(tmp_path):
