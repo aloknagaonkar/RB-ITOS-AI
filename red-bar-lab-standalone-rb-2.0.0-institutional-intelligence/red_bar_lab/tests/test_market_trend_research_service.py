@@ -23,9 +23,24 @@ def _chain(*, timestamp=ANCHOR_TIME, spot=24250.0, ce=100.0, pe=125.0):
     cells = []
     for offset in range(-5, 6):
         strike = 24250.0 + offset * 50.0
-        cells.append(OptionOiCell(f"CE-{strike}", "CE", strike, EXPIRY, ce, 90.0, timestamp))
-        cells.append(OptionOiCell(f"PE-{strike}", "PE", strike, EXPIRY, pe, 100.0, timestamp))
-    return NormalizedChainSnapshot("NIFTY 50", "UPSTOX", timestamp, spot, EXPIRY, tuple(cells))
+        cells.append(
+            OptionOiCell(
+                f"CE-{strike}", "CE", strike, EXPIRY, ce, 90.0, timestamp
+            )
+        )
+        cells.append(
+            OptionOiCell(
+                f"PE-{strike}", "PE", strike, EXPIRY, pe, 100.0, timestamp
+            )
+        )
+    return NormalizedChainSnapshot(
+        "NIFTY 50",
+        "UPSTOX",
+        timestamp,
+        spot,
+        EXPIRY,
+        tuple(cells),
+    )
 
 
 class Source:
@@ -60,7 +75,8 @@ def test_first_complete_post_0916_snapshot_creates_fixed_anchor(tmp_path):
     assert snapshot.current_panel.expected_contract_count == 10
     assert snapshot.morning_panel is not None
     assert snapshot.morning_panel.anchor_status == "ON_TIME_ANCHOR"
-    assert snapshot.morning_panel.instrument_keys if False else True
+    assert snapshot.morning_panel.expected_contract_count == 10
+    assert snapshot.morning_panel.rows[-1]["strike"] == "OVERALL TOTAL"
     assert snapshot.authority == "OBSERVATIONAL_ONLY"
 
 
@@ -78,7 +94,10 @@ def test_anchor_is_idempotent_and_does_not_move(tmp_path):
     )
     assert first.morning_panel is not None
     assert second.morning_panel is not None
-    assert second.morning_panel.anchor_timestamp == first.morning_panel.anchor_timestamp
+    assert (
+        second.morning_panel.anchor_timestamp
+        == first.morning_panel.anchor_timestamp
+    )
     assert second.morning_panel.anchor_spot == first.morning_panel.anchor_spot
     assert second.current_panel.atm != second.morning_panel.atm
 
@@ -95,7 +114,12 @@ def test_late_snapshot_does_not_retroactively_invent_anchor(tmp_path):
 
 def test_current_window_transition_blocks_unlike_pcr_comparison(tmp_path):
     current_time = ANCHOR_TIME + timedelta(minutes=1)
-    current = _chain(timestamp=current_time, spot=24300.0, ce=110.0, pe=130.0)
+    current = _chain(
+        timestamp=current_time,
+        spot=24300.0,
+        ce=110.0,
+        pe=130.0,
+    )
     previous = _chain(timestamp=ANCHOR_TIME, spot=24250.0)
     snapshot = _service(tmp_path, Source((current, previous))).evaluate(
         underlying="NIFTY 50",
