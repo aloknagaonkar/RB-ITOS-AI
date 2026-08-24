@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 from threading import Event
 from time import monotonic
-from typing import Generic, TypeVar
+from typing import Callable, Generic, TypeVar
 from zoneinfo import ZoneInfo
 
 from .collector import CollectionResult, UpstoxResearchChainCollector
@@ -38,7 +38,11 @@ class ResearchRuntimeConfig:
     enabled: bool = False
     refresh_seconds: float = 5.0
     maximum_backoff_seconds: float = 60.0
-    maximum_consecutive_failures: int = 100
+    maximum_consecutive_failures: int = 5
+    failure_cooldown_seconds: float = 60.0
+    session_start: time = time(9, 8)
+    session_end: time = time(15, 30)
+    unattended: bool = False
 
     def __post_init__(self) -> None:
         if not 2.0 <= self.refresh_seconds <= 60.0:
@@ -47,10 +51,14 @@ class ResearchRuntimeConfig:
             raise ValueError("maximum_backoff_seconds invalid")
         if self.maximum_consecutive_failures < 1:
             raise ValueError("maximum_consecutive_failures invalid")
+        if self.failure_cooldown_seconds < self.refresh_seconds:
+            raise ValueError("failure_cooldown_seconds invalid")
+        if self.session_end <= self.session_start:
+            raise ValueError("session window invalid")
 
 
 class MarketTrendResearchRuntime:
-    """Single observational worker with bounded backoff and no order surface."""
+    """Single observational worker with session guard and provider-cycle circuit."""
 
     def __init__(
         self,
@@ -59,17 +67,23 @@ class MarketTrendResearchRuntime:
         service: MarketTrendResearchService,
         repository: MarketTrendResearchRepository,
         config: ResearchRuntimeConfig,
+        now: Callable[[], datetime] | None = None,
+        monotonic_clock: Callable[[], float] = monotonic,
     ) -> None:
         self.collector = collector
         self.service = service
         self.repository = repository
         self.config = config
+        self.now = now or (lambda: datetime.now(timezone.utc))
+        self.monotonic_clock = monotonic_clock
         self.slot: LatestValueSlot[CollectionResult] = LatestValueSlot()
         self.stop_event = Event()
         self.last_success_at: datetime | None = None
         self.last_failure_at: datetime | None = None
         self.last_failure_reason: str | None = None
         self.consecutive_failures = 0
+        self.suspended_until_monotonic: float | None = None
+        self.half_open = False
 
     @staticmethod
     def _safe_reason(exc: Exception) -> str:
@@ -79,19 +93,58 @@ class MarketTrendResearchRuntime:
     def stop(self) -> None:
         self.stop_event.set()
 
-    def _health(self) -> None:
+    def _health(self, lifecycle: str | None = None) -> None:
         self.repository.persist_runtime_health(
             runtime_name="MARKET_TREND_RESEARCH",
-            heartbeat_at=datetime.now(timezone.utc),
+            heartbeat_at=self.now(),
             last_success_at=self.last_success_at,
             last_failure_at=self.last_failure_at,
-            last_failure_reason=self.last_failure_reason,
+            last_failure_reason=lifecycle or self.last_failure_reason,
             consecutive_failures=self.consecutive_failures,
             dropped_obsolete_tasks=self.slot.dropped,
         )
 
+    def _session_lifecycle(self, now: datetime) -> str:
+        calendar = self.collector.calendar
+        if self.config.unattended and not getattr(calendar, "verified", False):
+            return "CALENDAR_UNVERIFIED"
+        local = now.astimezone(IST)
+        if local.weekday() >= 5:
+            return "HOLIDAY"
+        if getattr(calendar, "verified", False):
+            sessions = calendar.sessions_between(local.date(), local.date())
+            if not sessions:
+                return "HOLIDAY"
+        local_time = local.time().replace(tzinfo=None)
+        if local_time < self.config.session_start:
+            return "WAITING_FOR_SESSION"
+        if local_time > self.config.session_end:
+            return "SESSION_CLOSED"
+        return "COLLECTING"
+
+    def _outside_session(self, now: datetime) -> bool:
+        lifecycle = self._session_lifecycle(now)
+        if lifecycle == "CALENDAR_UNVERIFIED":
+            self.last_failure_at = now
+            self.last_failure_reason = lifecycle
+            self._health(lifecycle)
+            return True
+        if lifecycle != "COLLECTING":
+            self._health(lifecycle)
+            return True
+        return False
+
     def run_cycle(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = self.now()
+        if self._outside_session(now):
+            return
+        if self.suspended_until_monotonic is not None:
+            if self.monotonic_clock() < self.suspended_until_monotonic:
+                self._health("PROVIDER_CIRCUIT_OPEN")
+                return
+            self.half_open = True
+            self.suspended_until_monotonic = None
+
         self.collector.capture_reference_once(evaluated_at=now)
         local_time = now.astimezone(IST).time().replace(tzinfo=None)
         if local_time < self.collector.policy.oi_baseline_start:
@@ -99,7 +152,8 @@ class MarketTrendResearchRuntime:
             self.last_failure_at = None
             self.last_failure_reason = None
             self.consecutive_failures = 0
-            self._health()
+            self.half_open = False
+            self._health("COLLECTING")
             return
         result = self.collector.collect_once(evaluated_at=now)
         self.slot.put(result)
@@ -108,35 +162,49 @@ class MarketTrendResearchRuntime:
             return
         self.service.evaluate(
             underlying=latest.snapshot.underlying,
-            evaluated_at=datetime.now(timezone.utc),
+            evaluated_at=self.now(),
             runtime_mode="CONTINUOUS",
             automatic_refresh="CONNECTED",
             dropped_obsolete_tasks=self.slot.dropped,
             consecutive_failures=self.consecutive_failures,
         )
-        self.last_success_at = datetime.now(timezone.utc)
+        self.last_success_at = self.now()
         self.last_failure_at = None
         self.last_failure_reason = None
         self.consecutive_failures = 0
+        self.half_open = False
+        self._health("COLLECTING")
+
+    def _record_failure(self, exc: Exception) -> float:
+        self.consecutive_failures += 1
+        self.last_failure_at = self.now()
+        self.last_failure_reason = self._safe_reason(exc)
+        exponent = min(self.consecutive_failures - 1, 6)
+        delay = min(
+            self.config.maximum_backoff_seconds,
+            self.config.refresh_seconds * (2 ** exponent),
+        )
+        if self.consecutive_failures >= self.config.maximum_consecutive_failures:
+            self.suspended_until_monotonic = (
+                self.monotonic_clock() + self.config.failure_cooldown_seconds
+            )
+            self._health("PROVIDER_CIRCUIT_OPEN")
+            return self.config.failure_cooldown_seconds
         self._health()
+        return delay
 
     def run_forever(self) -> None:
         if not self.config.enabled:
             raise ValueError("MARKET_TREND_RESEARCH_RUNTIME_DISABLED")
-        while not self.stop_event.is_set():
-            cycle_started = monotonic()
-            delay = self.config.refresh_seconds
-            try:
-                self.run_cycle()
-            except Exception as exc:
-                self.consecutive_failures += 1
-                self.last_failure_at = datetime.now(timezone.utc)
-                self.last_failure_reason = self._safe_reason(exc)
-                self._health()
-                exponent = min(self.consecutive_failures - 1, 6)
-                delay = min(
-                    self.config.maximum_backoff_seconds,
-                    self.config.refresh_seconds * (2 ** exponent),
-                )
-            elapsed = monotonic() - cycle_started
-            self.stop_event.wait(max(0.0, delay - elapsed))
+        try:
+            while not self.stop_event.is_set():
+                cycle_started = self.monotonic_clock()
+                delay = self.config.refresh_seconds
+                try:
+                    self.run_cycle()
+                except Exception as exc:
+                    delay = self._record_failure(exc)
+                elapsed = self.monotonic_clock() - cycle_started
+                self.stop_event.wait(max(0.0, delay - elapsed))
+        finally:
+            self._health("STOPPED")
