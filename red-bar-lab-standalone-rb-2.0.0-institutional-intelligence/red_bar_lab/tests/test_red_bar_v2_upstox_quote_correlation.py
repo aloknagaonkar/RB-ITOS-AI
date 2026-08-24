@@ -143,7 +143,7 @@ def test_non_mapping_response_row_is_rejected_safely():
     assert "secret-payload" not in str(error)
 
 
-def test_missing_required_quote_field_is_rejected():
+def test_correlation_does_not_validate_non_identity_quote_fields():
     provider = _provider()
     requested = ("NSE_FO|51834",)
     _prime_tokens(provider, requested)
@@ -153,10 +153,8 @@ def test_missing_required_quote_field_is_rejected():
             "timestamp": NOW.isoformat(),
         }
     }
-    with pytest.raises(PaperMarketDataDiagnosticError) as captured:
-        _correlate(provider, payload, requested)
-    assert captured.value.diagnostic.reason_code == "OPTION_QUOTE_REQUIRED_FIELD_MISSING"
-    assert captured.value.diagnostic.rejected_field == "quote_price"
+    correlated = _correlate(provider, payload, requested)
+    assert tuple(correlated) == requested
 
 
 def test_partial_seventeen_of_eighteen_is_count_incomplete():
