@@ -47,8 +47,10 @@ function Invoke-WorkerControl {
     )
     $scriptPath = Join-Path $projectRoot $ScriptName
     if (-not (Test-Path $scriptPath)) { return 1 }
-    & powershell -NoProfile -ExecutionPolicy Bypass -File $scriptPath @Arguments
-    return $LASTEXITCODE
+    $output = & powershell -NoProfile -ExecutionPolicy Bypass -File $scriptPath @Arguments 2>&1
+    $exitCode = $LASTEXITCODE
+    foreach ($line in $output) { Write-Host $line }
+    return [int]$exitCode
 }
 
 function Stop-ProcessTree {
