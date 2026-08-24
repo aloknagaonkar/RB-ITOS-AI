@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, replace
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from enum import Enum
 import json
 from pathlib import Path
@@ -90,6 +90,12 @@ def _payload(snapshot: DualPcrResearchSnapshot) -> str:
     return _json(asdict(snapshot))
 
 
+def _utc_iso(value: datetime, *, field_name: str) -> str:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError(f"{field_name} must be timezone-aware")
+    return value.astimezone(timezone.utc).isoformat()
+
+
 class MarketTrendResearchRepository:
     def __init__(self, database_path: str | Path, *, retention: int = 500) -> None:
         self.path = Path(database_path)
@@ -115,11 +121,12 @@ class MarketTrendResearchRepository:
         dropped_obsolete_tasks: int = 0,
         consecutive_failures: int = 0,
     ) -> DualPcrResearchSnapshot:
-        """Publish one externally visible record through one SQLite commit.
-
-        A staging row may be inserted inside the uncommitted transaction so the
-        complete persistence work can be timed. No provisional row is visible.
-        """
+        """Publish one externally visible record through one SQLite commit."""
+        source_timestamp = _utc_iso(
+            snapshot.source_timestamp,
+            field_name="source_timestamp",
+        )
+        evaluated_at = _utc_iso(snapshot.evaluated_at, field_name="evaluated_at")
         persistence_started = monotonic()
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -132,8 +139,8 @@ class MarketTrendResearchRepository:
                     snapshot.snapshot_id,
                     snapshot.underlying,
                     snapshot.trading_date.isoformat(),
-                    snapshot.source_timestamp.isoformat(),
-                    snapshot.evaluated_at.isoformat(),
+                    source_timestamp,
+                    evaluated_at,
                     snapshot.quality.state.value,
                     _payload(snapshot),
                 ),
@@ -142,7 +149,8 @@ class MarketTrendResearchRepository:
                 """DELETE FROM market_trend_research_snapshots
                    WHERE snapshot_id IN (
                      SELECT snapshot_id FROM market_trend_research_snapshots
-                     WHERE underlying=? ORDER BY evaluated_at DESC
+                     WHERE underlying=?
+                     ORDER BY julianday(evaluated_at) DESC, evaluated_at DESC
                      LIMIT -1 OFFSET ?
                    )""",
                 (snapshot.underlying, self.retention),
@@ -190,6 +198,11 @@ class MarketTrendResearchRepository:
         return final_snapshot
 
     def persist(self, snapshot: DualPcrResearchSnapshot) -> None:
+        source_timestamp = _utc_iso(
+            snapshot.source_timestamp,
+            field_name="source_timestamp",
+        )
+        evaluated_at = _utc_iso(snapshot.evaluated_at, field_name="evaluated_at")
         with self._connect() as connection:
             connection.execute(
                 """INSERT OR REPLACE INTO market_trend_research_snapshots
@@ -200,8 +213,8 @@ class MarketTrendResearchRepository:
                     snapshot.snapshot_id,
                     snapshot.underlying,
                     snapshot.trading_date.isoformat(),
-                    snapshot.source_timestamp.isoformat(),
-                    snapshot.evaluated_at.isoformat(),
+                    source_timestamp,
+                    evaluated_at,
                     snapshot.quality.state.value,
                     _payload(snapshot),
                 ),
@@ -215,7 +228,9 @@ class MarketTrendResearchRepository:
             with sqlite3.connect(self.path) as connection:
                 row = connection.execute(
                     """SELECT payload_json FROM market_trend_research_snapshots
-                       WHERE underlying=? ORDER BY evaluated_at DESC LIMIT 1""",
+                       WHERE underlying=?
+                       ORDER BY julianday(evaluated_at) DESC, evaluated_at DESC
+                       LIMIT 1""",
                     (underlying,),
                 ).fetchone()
         except sqlite3.OperationalError as exc:
