@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import os
 from pathlib import Path
@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 import streamlit as st
 
+from red_bar_lab.services.market_trend_research.models import PcrBias
 from red_bar_lab.services.market_trend_research.policy import MarketTrendResearchPolicy
 from red_bar_lab.services.market_trend_research.repository import MarketTrendResearchRepository
 from red_bar_lab.ui._shared import _arrow_safe_rows
@@ -23,8 +24,8 @@ MORNING_COLUMNS = (
 )
 CURRENT_COLUMNS = (
     "Strike", "Position", "CE current OI", "CE previous-day OI",
-    "CE day ΔOI", "CE day ΔOI%", "PE current OI",
-    "PE previous-day OI", "PE day ΔOI", "PE day ΔOI%",
+    "CE OI change today", "CE OI change %", "PE current OI",
+    "PE previous-day OI", "PE OI change today", "PE OI change %",
 )
 
 
@@ -247,12 +248,12 @@ def _current_rows(panel: dict[str, Any]) -> list[dict[str, str]]:
         "Position": _position(row.get("position")),
         "CE current OI": _indian(_field(row, "ce_current_oi")),
         "CE previous-day OI": _indian(_field(row, "ce_previous_day_oi")),
-        "CE day ΔOI": _signed(_field(row, "ce_previous_day_change")),
-        "CE day ΔOI%": _percent(_field(row, "ce_previous_day_change_pct")),
+        "CE OI change today": _signed(_field(row, "ce_previous_day_change")),
+        "CE OI change %": _percent(_field(row, "ce_previous_day_change_pct")),
         "PE current OI": _indian(_field(row, "pe_current_oi")),
         "PE previous-day OI": _indian(_field(row, "pe_previous_day_oi")),
-        "PE day ΔOI": _signed(_field(row, "pe_previous_day_change")),
-        "PE day ΔOI%": _percent(_field(row, "pe_previous_day_change_pct")),
+        "PE OI change today": _signed(_field(row, "pe_previous_day_change")),
+        "PE OI change %": _percent(_field(row, "pe_previous_day_change_pct")),
     } for row in panel.get("rows") or []]
 
 
@@ -276,13 +277,46 @@ def _range(panel: dict[str, Any]) -> str:
 
 
 def _total(panel: dict[str, Any]) -> dict[str, Any]:
-    return next((row for row in panel.get("rows") or []
-                 if row.get("position") == "TOTAL"), {})
+    return next((row for row in panel.get("rows") or [] if row.get("position") == "TOTAL"), {})
 
 
-def _render_morning(
-    projection: dict[str, Any], *, stale: bool, live_source_age: float | None
-) -> None:
+def _direction_evidence(aggregate: Mapping[str, object]) -> dict[str, object]:
+    persisted = aggregate.get("direction_evidence")
+    if isinstance(persisted, dict):
+        return persisted
+    raw = aggregate.get("classification", "UNAVAILABLE")
+    try:
+        classification = PcrBias(str(raw))
+    except ValueError:
+        classification = PcrBias.UNAVAILABLE
+    evidence = MarketTrendResearchPolicy().direction_evidence(
+        aggregate.get("pcr") if isinstance(aggregate.get("pcr"), (int, float)) else None,
+        classification=classification,
+    )
+    return asdict(evidence)
+
+
+def _render_market_direction_research(projection: dict[str, Any], *, stale: bool) -> None:
+    aggregate = (projection.get("current_panel") or {}).get("aggregate") or {}
+    evidence = _direction_evidence(aggregate)
+    direction = str(evidence.get("direction", "UNAVAILABLE"))
+    displayed_direction = f"{direction} — STALE" if stale else direction
+    st.markdown("### Market Direction Research")
+    st.dataframe(_arrow_safe_rows([{
+        "PCR market direction": displayed_direction,
+        "Current PCR": _number(evidence.get("pcr")),
+        "Final combined direction": "NOT YET CALCULATED",
+    }]), width="stretch", hide_index=True)
+    st.write(f"Detailed PCR classification: {evidence.get('classification', 'UNAVAILABLE')}")
+    st.write(f"Reason: {evidence.get('explanation') or 'PCR could not be calculated.'}")
+    st.write("Authority: OBSERVATIONAL ONLY")
+    st.caption(
+        "PCR direction is independent options-positioning evidence. Final combined "
+        "direction will require price structure, momentum, futures and other approved evidence."
+    )
+
+
+def _render_morning(projection: dict[str, Any], *, stale: bool, live_source_age: float | None) -> None:
     st.markdown("## Morning Fixed-Level PCR")
     panel = projection.get("morning_panel")
     reference = projection.get("morning_reference") or {}
@@ -344,9 +378,7 @@ def _render_refresh_diagnostics(panel: dict[str, Any]) -> None:
         st.dataframe(_arrow_safe_rows(_refresh_rows(panel)), width="stretch", hide_index=True)
 
 
-def _render_current(
-    projection: dict[str, Any], *, stale: bool, live_source_age: float | None
-) -> None:
+def _render_current(projection: dict[str, Any], *, stale: bool, live_source_age: float | None) -> None:
     st.markdown("## Current/Overall PCR")
     panel = projection.get("current_panel") or {}
     aggregate = panel.get("aggregate") or {}
@@ -364,10 +396,10 @@ def _render_current(
         {"Field": "PCR directional evidence", "Value": _bias(aggregate.get("classification"), stale=stale)},
     ]
     st.dataframe(_arrow_safe_rows(summary), width="stretch", hide_index=True)
-    st.dataframe(_arrow_safe_rows(_current_rows(panel)), width="stretch", hide_index=True)
     total = _total(panel)
-    st.write(f"Overall CE day change: {_signed(total.get('ce_previous_day_change'))} ({_percent(total.get('ce_previous_day_change_pct'))})")
-    st.write(f"Overall PE day change: {_signed(total.get('pe_previous_day_change'))} ({_percent(total.get('pe_previous_day_change_pct'))})")
+    st.write(f"Total CE OI change: {_signed(total.get('ce_previous_day_change'))} ({_percent(total.get('ce_previous_day_change_pct'))})")
+    st.write(f"Total PE OI change: {_signed(total.get('pe_previous_day_change'))} ({_percent(total.get('pe_previous_day_change_pct'))})")
+    st.dataframe(_arrow_safe_rows(_current_rows(panel)), width="stretch", hide_index=True)
     st.write(f"Current/Overall PCR: Total current PE OI ÷ Total current CE OI = {_number(aggregate.get('pcr'))}")
     st.write(f"PCR directional evidence: {_bias(aggregate.get('classification'), stale=stale)}")
     _render_refresh_diagnostics(panel)
@@ -445,8 +477,10 @@ def _render_projection_cycle(
         f"Calendar source: {projection.get('calendar_source', 'Not available')}"
     )
     _render_morning(projection, stale=stale, live_source_age=live_source_age)
+    _render_market_direction_research(projection, stale=stale)
     _render_current(projection, stale=stale, live_source_age=live_source_age)
     with st.expander("Internal diagnostics", expanded=False):
+        aggregate = (projection.get("current_panel") or {}).get("aggregate") or {}
         st.write({
             "raw_projection_source_timestamp": projection.get("source_timestamp"),
             "raw_runtime_health": health,
@@ -455,6 +489,7 @@ def _render_projection_cycle(
             "live_source_age_seconds": live_source_age,
             "freshness_threshold_seconds": threshold,
             "runtime_health_state": health_view.state,
+            "pcr_direction_reason_code": _direction_evidence(aggregate).get("reason_code"),
             "latency": projection.get("latency"),
             "lifecycle_state": projection.get("lifecycle_state"),
             "agreement_state": projection.get("agreement_state"),
@@ -468,16 +503,12 @@ def _render_projection_cycle(
 
 @_fragment(run_every=f"{MARKET_TREND_RESEARCH_UI_REFRESH_SECONDS:g}s")
 def _market_trend_research_fragment(database_path: str | Path, underlying: str) -> None:
-    _render_projection_cycle(
-        MarketTrendResearchRepository(database_path), underlying=underlying
-    )
+    _render_projection_cycle(MarketTrendResearchRepository(database_path), underlying=underlying)
 
 
-def render_market_trend_research_panel(
-    database_path: str | Path, *, underlying: str
-) -> None:
+def render_market_trend_research_panel(database_path: str | Path, *, underlying: str) -> None:
     st.error("OBSERVATIONAL ONLY")
-    st.write("Final market direction: NOT YET CALCULATED")
+    st.write("Final Combined Market Direction: NOT YET CALCULATED")
     st.write("Signal generated: NO")
     st.write("Canonical bundle created: NO")
     st.write("Opportunity queued: NO")
