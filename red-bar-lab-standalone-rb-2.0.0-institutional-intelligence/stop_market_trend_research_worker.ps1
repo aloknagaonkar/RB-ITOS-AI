@@ -2,8 +2,13 @@ param([int]$TimeoutSeconds = 20)
 
 $ErrorActionPreference = "Stop"
 $projectRoot = $PSScriptRoot
-$artifactsRoot = if ($env:RED_BAR_ARTIFACTS_ROOT) { $env:RED_BAR_ARTIFACTS_ROOT } else { "artifacts/red_bar" }
-$workerRoot = Join-Path $projectRoot (Join-Path $artifactsRoot "market_trend_research")
+$artifactsSetting = if ($env:RED_BAR_ARTIFACTS_ROOT) { $env:RED_BAR_ARTIFACTS_ROOT } else { "artifacts/red_bar" }
+$artifactsRoot = if ([System.IO.Path]::IsPathRooted($artifactsSetting)) {
+    $artifactsSetting
+} else {
+    Join-Path $projectRoot $artifactsSetting
+}
+$workerRoot = Join-Path $artifactsRoot "market_trend_research"
 $statusPath = Join-Path $workerRoot "supervisor_state.json"
 $stopPath = Join-Path $workerRoot "stop.request"
 New-Item -ItemType Directory -Path $workerRoot -Force | Out-Null
@@ -32,6 +37,7 @@ do {
         try {
             $status = Get-Content $statusPath -Raw | ConvertFrom-Json
             if ($status.supervisor_state -eq "STOPPED") {
+                Remove-Item $stopPath -Force -ErrorAction SilentlyContinue
                 Write-Host "STOPPED" -ForegroundColor Green
                 exit 0
             }
@@ -49,6 +55,7 @@ try {
         if ($status.supervisor_pid) {
             Stop-ValidatedProcess -ProcessId ([int]$status.supervisor_pid) -RequiredMarker "run_market_trend_research_supervisor" | Out-Null
         }
+        Remove-Item $stopPath -Force -ErrorAction SilentlyContinue
         Write-Host "STOPPED_BY_TARGETED_FALLBACK" -ForegroundColor Yellow
         exit 0
     }
