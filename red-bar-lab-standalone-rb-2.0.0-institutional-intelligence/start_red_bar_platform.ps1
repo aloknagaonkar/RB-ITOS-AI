@@ -146,7 +146,6 @@ if (-not $env:UPSTOX_ACCESS_TOKEN) {
 
 New-Item -ItemType Directory -Path $runtimeDirectory -Force | Out-Null
 $escapedRoot = $projectRoot.Replace("'", "''")
-$escapedToken = $env:UPSTOX_ACCESS_TOKEN.Replace("'", "''")
 $escapedUnderlying = $Underlying.Replace("'", "''")
 $processes = @()
 
@@ -158,28 +157,24 @@ try {
 
     $collectorCommand = @"
 Set-Location '$escapedRoot'
-`$env:UPSTOX_ACCESS_TOKEN='$escapedToken'
 .\run_market_collector.ps1 -Underlying '$escapedUnderlying' -IntervalSeconds $CollectorIntervalSeconds -Mode auto
 "@
     $processes += Start-TrackedPowerShellProcess -Name "Dual Market Collector" -Command $collectorCommand
 
     $paperCommand = @"
 Set-Location '$escapedRoot'
-`$env:UPSTOX_ACCESS_TOKEN='$escapedToken'
 .\run_paper_monitor.ps1 -IntervalSeconds 5 -Underlying '$escapedUnderlying'
 "@
     $processes += Start-TrackedPowerShellProcess -Name "Upstox Paper Monitor" -Command $paperCommand
 
     $positionMonitorCommand = @"
 Set-Location '$escapedRoot'
-`$env:UPSTOX_ACCESS_TOKEN='$escapedToken'
 .\run_position_monitor.ps1 -IntervalSeconds 5 -Underlying '$escapedUnderlying'
 "@
     $processes += Start-TrackedPowerShellProcess -Name "Paper Position Monitor" -Command $positionMonitorCommand
 
     $uiCommand = @"
 Set-Location '$escapedRoot'
-`$env:UPSTOX_ACCESS_TOKEN='$escapedToken'
 .\run_red_bar.ps1
 "@
     $processes += Start-TrackedPowerShellProcess -Name "Red Bar Lab UI" -Command $uiCommand
