@@ -10,7 +10,7 @@ from red_bar_lab.services.market_trend_research.policy import (
 )
 
 NOW = datetime(2026, 8, 24, 4, 0, tzinfo=timezone.utc)
-EXPIRY = date(2026, 8, 28)
+EXPIRY = date(2026, 8, 25)
 
 
 def cells(*, steps=5, ce_oi=100.0, pe_oi=125.0):
@@ -25,11 +25,11 @@ def cells(*, steps=5, ce_oi=100.0, pe_oi=125.0):
 @pytest.mark.parametrize(
     ("trading_date", "expected"),
     [
-        (date(2026, 8, 24), 5),
-        (date(2026, 8, 25), 4),
-        (date(2026, 8, 26), 3),
-        (date(2026, 8, 27), 2),
-        (date(2026, 8, 28), 1),
+        (date(2026, 8, 19), 5),
+        (date(2026, 8, 20), 4),
+        (date(2026, 8, 21), 3),
+        (date(2026, 8, 24), 2),
+        (date(2026, 8, 25), 1),
     ],
 )
 def test_expiry_window_uses_sessions_remaining(trading_date, expected):
@@ -40,14 +40,14 @@ def test_expiry_window_uses_sessions_remaining(trading_date, expected):
 
 def test_holiday_adjusts_session_window():
     policy = MarketTrendResearchPolicy()
-    calendar = StaticExchangeSessionCalendar(frozenset({date(2026, 8, 26)}))
-    assert policy.window_steps(date(2026, 8, 24), EXPIRY, calendar) == 4
+    calendar = StaticExchangeSessionCalendar(frozenset({date(2026, 8, 20)}))
+    assert policy.window_steps(date(2026, 8, 19), EXPIRY, calendar) == 4
 
 
 def test_missing_session_position_fails_explicitly():
     policy = MarketTrendResearchPolicy()
     with pytest.raises(ValueError, match="SESSION_POSITION_UNAVAILABLE"):
-        policy.window_steps(date(2026, 8, 29), EXPIRY, StaticExchangeSessionCalendar())
+        policy.window_steps(date(2026, 8, 26), EXPIRY, StaticExchangeSessionCalendar())
 
 
 @pytest.mark.parametrize(
