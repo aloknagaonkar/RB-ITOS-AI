@@ -46,6 +46,11 @@ def test_workspace_page_renders_windows_before_promotion(monkeypatch):
     monkeypatch.setattr(red_bar_v2_validation, "st", stub)
     monkeypatch.setattr(
         red_bar_v2_validation,
+        "_render_shadow_observability",
+        lambda settings, instrument_key: calls.append(("observability", instrument_key)),
+    )
+    monkeypatch.setattr(
+        red_bar_v2_validation,
         "_render_window_panel",
         lambda **kwargs: calls.append(("windows", kwargs["instrument_key"])),
     )
