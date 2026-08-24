@@ -14,6 +14,7 @@ class ExchangeSessionCalendar(Protocol):
 @dataclass(frozen=True, slots=True)
 class StaticExchangeSessionCalendar:
     """Explicit weekday calendar with injected exchange holidays."""
+
     holidays: frozenset[date] = frozenset()
 
     def sessions_between(self, start: date, end: date) -> tuple[date, ...]:
@@ -37,8 +38,21 @@ class MarketTrendResearchPolicy:
     hard_deadline_seconds: float = 2.0
     anchor_hour: int = 9
     anchor_minute: int = 16
+    maximum_anchor_delay_seconds: int = 300
     minimum_window_steps: int = 1
     maximum_window_steps: int = 5
+
+    def __post_init__(self) -> None:
+        if not 0 < self.bearish_below < self.bullish_from:
+            raise ValueError("PCR thresholds invalid")
+        if self.strongly_bullish_above < self.bullish_from:
+            raise ValueError("PCR thresholds invalid")
+        if self.maximum_source_age_seconds <= 0:
+            raise ValueError("maximum_source_age_seconds invalid")
+        if self.hard_deadline_seconds <= 0:
+            raise ValueError("hard_deadline_seconds invalid")
+        if self.maximum_anchor_delay_seconds < 0:
+            raise ValueError("maximum_anchor_delay_seconds invalid")
 
     def classify(self, pcr: float) -> PcrBias:
         if pcr < self.bearish_below:
@@ -49,13 +63,23 @@ class MarketTrendResearchPolicy:
             return PcrBias.BULLISH
         return PcrBias.STRONGLY_BULLISH
 
-    def sessions_to_expiry(self, trading_date: date, expiry: date, calendar: ExchangeSessionCalendar) -> int:
+    def sessions_to_expiry(
+        self,
+        trading_date: date,
+        expiry: date,
+        calendar: ExchangeSessionCalendar,
+    ) -> int:
         sessions = calendar.sessions_between(trading_date, expiry)
         if not sessions or sessions[0] != trading_date or sessions[-1] != expiry:
             raise ValueError("SESSION_POSITION_UNAVAILABLE")
         return len(sessions) - 1
 
-    def window_steps(self, trading_date: date, expiry: date, calendar: ExchangeSessionCalendar) -> int:
+    def window_steps(
+        self,
+        trading_date: date,
+        expiry: date,
+        calendar: ExchangeSessionCalendar,
+    ) -> int:
         remaining = self.sessions_to_expiry(trading_date, expiry, calendar)
         steps = remaining + 1
         if steps < self.minimum_window_steps or steps > self.maximum_window_steps:
