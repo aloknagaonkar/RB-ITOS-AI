@@ -202,7 +202,10 @@ def test_duplicate_option_cell_is_data_corrupt(side):
     report = service(provider).evaluate(underlying="NIFTY 50")
     assert report.status is MarketDataReadinessStatus.DATA_CORRUPT
     assert report.reason_code == "DUPLICATE_OPTION_CELL"
-    assert report.failure_stage is MarketDataReadinessStage.ATM_WINDOW_CONSTRUCTION
+    assert (
+        report.failure_stage
+        is MarketDataReadinessStage.OPTION_CONTRACT_NORMALIZATION
+    )
     assert provider.quote_calls == 0
 
 
