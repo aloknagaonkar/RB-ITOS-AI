@@ -82,6 +82,10 @@ def _put_change(
     row[f"{change_prefix}_change"] = evidence.absolute_change
     row[f"{change_prefix}_change_pct"] = evidence.percentage_change
     row[f"{change_prefix}_change_reason"] = evidence.reason
+    if change_prefix != prefix:
+        row[f"{prefix}_change"] = evidence.absolute_change
+        row[f"{prefix}_change_pct"] = evidence.percentage_change
+        row[f"{prefix}_change_reason"] = evidence.reason
 
 
 class DualPcrCalculator:
