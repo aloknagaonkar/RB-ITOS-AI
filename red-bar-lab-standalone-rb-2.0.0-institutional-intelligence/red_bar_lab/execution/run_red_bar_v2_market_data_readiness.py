@@ -23,8 +23,16 @@ from red_bar_lab.services.red_bar_v2_canonical.paper_market_data_readiness_store
 )
 
 
-def _emit(outcome: str, reason: str, *, provider: str | None = None, ready: int | None = None) -> None:
+def _emit(
+    outcome: str,
+    reason: str,
+    *,
+    stage: str | None = None,
+    provider: str | None = None,
+    ready: int | None = None,
+) -> None:
     parts = [f"readiness outcome={outcome}", f"reason={reason}"]
+    if stage is not None: parts.append(f"stage={stage}")
     if provider is not None: parts.append(f"provider={provider}")
     if ready is not None: parts.append(f"ready={ready}")
     print(" ".join(parts))
@@ -33,14 +41,14 @@ def _emit(outcome: str, reason: str, *, provider: str | None = None, ready: int 
 def main(argv: list[str] | None = None) -> int:
     settings = RedBarSettings.from_env()
     if not settings.red_bar_v2_market_data_readiness_enabled:
-        _emit("DISABLED", "READINESS_DISABLED")
+        _emit("DISABLED", "READINESS_DISABLED", stage="STARTUP")
         return 0
     provider = settings.red_bar_v2_market_data_readiness_provider
     if provider == "UNCONFIGURED":
-        _emit("CONFIGURATION_INVALID", "MARKET_DATA_PROVIDER_UNCONFIGURED")
+        _emit("CONFIGURATION_INVALID", "MARKET_DATA_PROVIDER_UNCONFIGURED", stage="STARTUP")
         return 2
     if provider == "INVALID":
-        _emit("CONFIGURATION_INVALID", "MARKET_DATA_PROVIDER_INVALID")
+        _emit("CONFIGURATION_INVALID", "MARKET_DATA_PROVIDER_INVALID", stage="STARTUP")
         return 2
     try:
         market_data = build_paper_canary_market_data(
@@ -49,8 +57,9 @@ def main(argv: list[str] | None = None) -> int:
             provider=provider,
             maximum_quote_age_seconds=settings.red_bar_v2_market_data_readiness_max_quote_age_seconds,
         )
-    except PaperMarketDataConfigurationError as exc:
-        _emit("CONFIGURATION_INVALID", str(exc))
+    except PaperMarketDataConfigurationError:
+        reason = "UPSTOX_CONFIGURATION_MISSING" if provider == "UPSTOX" else "ZERODHA_CONFIGURATION_MISSING"
+        _emit("CONFIGURATION_INVALID", reason, stage="STARTUP", provider=provider)
         return 2
     service = PaperMarketDataReadinessService(
         market_data=market_data,
@@ -66,9 +75,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         AtomicJsonMarketDataReadinessStore(settings.market_data_readiness_state_path).save(report)
     except ReadinessStatePersistenceError:
-        _emit("PERSISTENCE_FAILED", "READINESS_STATE_PERSISTENCE_FAILED", provider=report.provider)
+        _emit("PERSISTENCE_FAILED", "READINESS_STATE_PERSISTENCE_FAILED", stage=report.failure_stage.value, provider=report.provider)
         return 7
-    _emit(report.status.value, report.reason_code, provider=report.provider, ready=report.ready_contract_count)
+    _emit(report.status.value, report.reason_code, stage=report.failure_stage.value, provider=report.provider, ready=report.ready_contract_count)
     if report.status in {MarketDataReadinessStatus.READY, MarketDataReadinessStatus.QUOTE_QUALITY_PARTIAL}:
         return 0
     return {
