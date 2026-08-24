@@ -6,7 +6,7 @@ from enum import Enum
 from hashlib import sha256
 from math import isfinite
 
-SCHEMA_VERSION = "1.1"
+SCHEMA_VERSION = "2.0"
 AUTHORITY = "OBSERVATIONAL_ONLY"
 
 
@@ -17,10 +17,18 @@ class ResearchState(str, Enum):
     TIMEOUT = "TIMEOUT"
     INCOMPLETE = "INCOMPLETE"
     DATA_INVALID = "DATA_INVALID"
-    MORNING_ANCHOR_UNAVAILABLE = "MORNING_ANCHOR_UNAVAILABLE"
+    MORNING_REFERENCE_UNAVAILABLE = "MORNING_REFERENCE_UNAVAILABLE"
+    MORNING_OI_BASELINE_UNAVAILABLE = "MORNING_OI_BASELINE_UNAVAILABLE"
     EXPIRY_MISMATCH = "EXPIRY_MISMATCH"
     WINDOW_TRANSITION = "WINDOW_TRANSITION"
     PCR_UNAVAILABLE_ZERO_DENOMINATOR = "PCR_UNAVAILABLE_ZERO_DENOMINATOR"
+
+
+class MorningLifecycleState(str, Enum):
+    WAITING_FOR_REFERENCE = "WAITING_FOR_REFERENCE"
+    REFERENCE_FIXED = "REFERENCE_FIXED"
+    WAITING_FOR_OI_BASELINE = "WAITING_FOR_OI_BASELINE"
+    MORNING_RESEARCH_READY = "MORNING_RESEARCH_READY"
 
 
 class PcrBias(str, Enum):
@@ -31,8 +39,8 @@ class PcrBias(str, Enum):
     UNAVAILABLE = "UNAVAILABLE"
 
 
-def _text(name: str, value: object) -> str:
-    if type(value) is not str or not value.strip() or len(value) > 128:
+def _text(name: str, value: object, *, maximum: int = 128) -> str:
+    if type(value) is not str or not value.strip() or len(value) > maximum:
         raise ValueError(f"{name} must be bounded text")
     return value.strip()
 
@@ -106,7 +114,7 @@ class PcrWindowDefinition:
             raise ValueError("window_steps invalid")
         if len(self.strikes) != (2 * self.window_steps) + 1:
             raise ValueError("strike population invalid")
-        if len(self.instrument_keys) != self.expected_contract_count:
+        if self.instrument_keys and len(self.instrument_keys) != self.expected_contract_count:
             raise ValueError("instrument population invalid")
         if len(set(self.instrument_keys)) != len(self.instrument_keys):
             raise ValueError("duplicate instrument identity")
@@ -114,6 +122,32 @@ class PcrWindowDefinition:
     @property
     def expected_contract_count(self) -> int:
         return ((2 * self.window_steps) + 1) * 2
+
+
+@dataclass(frozen=True, slots=True)
+class MorningReference:
+    trading_date: date
+    underlying: str
+    reference_spot: float
+    reference_timestamp: datetime
+    expiry: date
+    strike_interval: float
+    fixed_atm: float
+    window_steps: int
+    fixed_strikes: tuple[float, ...]
+    source: str
+    source_age_seconds: float
+    status: str
+
+
+@dataclass(frozen=True, slots=True)
+class OpeningOiBaseline:
+    trading_date: date
+    underlying: str
+    baseline_timestamp: datetime
+    expiry: date
+    cells: tuple[OptionOiCell, ...]
+    status: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,11 +179,13 @@ class PcrResearchPanel:
     source_timestamp: datetime
     aggregate: PcrAggregate
     rows: tuple[dict[str, object], ...]
-    anchor_timestamp: datetime | None = None
-    anchor_status: str | None = None
-    anchor_spot: float | None = None
-    anchor_atm: float | None = None
-    anchor_relevance: str | None = None
+    previous_timestamp: datetime | None = None
+    reference_timestamp: datetime | None = None
+    reference_status: str | None = None
+    reference_spot: float | None = None
+    baseline_timestamp: datetime | None = None
+    baseline_status: str | None = None
+    data_status: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,10 +195,13 @@ class ResearchLatencyEvidence:
     calculation_ms: float
     persistence_ms: float
     end_to_end_ms: float
+    provider_request_ms: float = 0.0
     dropped_obsolete_tasks: int = 0
+    consecutive_failures: int = 0
 
     def __post_init__(self) -> None:
         for name in (
+            "provider_request_ms",
             "database_read_ms",
             "normalization_ms",
             "calculation_ms",
@@ -196,6 +235,9 @@ class DualPcrResearchSnapshot:
     agreement_state: str
     explanation: tuple[str, ...]
     calendar_source: str
+    lifecycle_state: MorningLifecycleState = MorningLifecycleState.WAITING_FOR_REFERENCE
+    morning_reference: MorningReference | None = None
+    opening_oi_baseline: OpeningOiBaseline | None = None
     runtime_mode: str = "ONE_SHOT"
     automatic_refresh: str = "NOT_CONNECTED"
     authority: str = AUTHORITY
@@ -208,9 +250,9 @@ class DualPcrResearchSnapshot:
         _text("calendar_source", self.calendar_source)
         _aware("source_timestamp", self.source_timestamp)
         _aware("evaluated_at", self.evaluated_at)
-        if self.runtime_mode != "ONE_SHOT":
+        if self.runtime_mode not in {"ONE_SHOT", "CONTINUOUS"}:
             raise ValueError("runtime_mode invalid")
-        if self.automatic_refresh != "NOT_CONNECTED":
+        if self.automatic_refresh not in {"NOT_CONNECTED", "CONNECTED"}:
             raise ValueError("automatic_refresh invalid")
         if self.authority != AUTHORITY:
             raise ValueError("research authority invalid")
