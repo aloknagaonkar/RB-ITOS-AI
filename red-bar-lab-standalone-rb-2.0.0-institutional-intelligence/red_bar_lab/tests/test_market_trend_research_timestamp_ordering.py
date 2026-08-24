@@ -13,6 +13,7 @@ from red_bar_lab.services.market_trend_research.models import (
 )
 from red_bar_lab.services.market_trend_research.repository import (
     MarketTrendResearchRepository,
+    _utc_iso,
 )
 from red_bar_lab.tests.test_market_trend_research_repository_and_performance import (
     _snapshot,
@@ -142,10 +143,12 @@ def test_new_projection_ordering_columns_are_normalized_to_utc(tmp_path):
     assert evaluated_at == "2026-08-24T06:58:11+00:00"
 
 
-def test_new_projection_rejects_naive_ordering_timestamps(tmp_path):
-    snapshot = _snapshot_at(datetime(2026, 8, 24, 6, 58, 11))
+def test_utc_normalization_rejects_naive_timestamp():
     with pytest.raises(ValueError, match="source_timestamp must be timezone-aware"):
-        MarketTrendResearchRepository(tmp_path / "research.db").persist(snapshot)
+        _utc_iso(
+            datetime(2026, 8, 24, 6, 58, 11),
+            field_name="source_timestamp",
+        )
 
 
 def test_live_source_age_uses_render_clock_not_persisted_age():
