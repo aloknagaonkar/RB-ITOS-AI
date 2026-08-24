@@ -93,6 +93,7 @@ class MarketTrendResearchService:
         self,
         *,
         previous: NormalizedChainSnapshot | None,
+        current: NormalizedChainSnapshot,
         current_window: PcrWindowDefinition,
         steps: int,
     ) -> tuple[
@@ -100,11 +101,22 @@ class MarketTrendResearchService:
         float | None,
         datetime | None,
         ResearchState | None,
+        str,
     ]:
         if previous is None:
-            return {}, None, None, None
+            return {}, None, None, None, "INSUFFICIENT_HISTORY"
+        current_date = current.source_timestamp.astimezone(IST).date()
+        previous_date = previous.source_timestamp.astimezone(IST).date()
+        if previous_date != current_date:
+            return {}, None, None, None, "INSUFFICIENT_HISTORY"
         if previous.expiry != current_window.expiry:
-            return {}, None, None, ResearchState.WINDOW_TRANSITION
+            return (
+                {},
+                None,
+                None,
+                ResearchState.WINDOW_TRANSITION,
+                "WINDOW_TRANSITION",
+            )
         previous_window = self.calculator.define_window(
             previous.cells,
             spot=previous.spot,
@@ -115,7 +127,13 @@ class MarketTrendResearchService:
             or previous_window.atm != current_window.atm
             or previous_window.instrument_keys != current_window.instrument_keys
         ):
-            return {}, None, None, ResearchState.WINDOW_TRANSITION
+            return (
+                {},
+                None,
+                None,
+                ResearchState.WINDOW_TRANSITION,
+                "WINDOW_TRANSITION",
+            )
         selected = self._selected_cells(previous, previous_window)
         ce_total = sum(
             cell.current_oi for cell in selected if cell.option_side == "CE"
@@ -129,6 +147,7 @@ class MarketTrendResearchService:
             previous_pcr,
             previous.source_timestamp,
             None,
+            "COMPARABLE",
         )
 
     def evaluate(
@@ -141,18 +160,30 @@ class MarketTrendResearchService:
         if evaluated_at.tzinfo is None or evaluated_at.utcoffset() is None:
             raise ValueError("EVALUATED_AT_NAIVE")
 
-        source_started = monotonic()
-        recent = self.source.recent(underlying=underlying, limit=2)
-        source_ms = (monotonic() - source_started) * 1000.0
+        if hasattr(self.source, "recent_with_timings"):
+            source_result = self.source.recent_with_timings(
+                underlying=underlying,
+                limit=2,
+            )
+            recent = source_result.snapshots
+            database_read_ms = source_result.database_read_ms
+            normalization_ms = source_result.normalization_ms
+        else:
+            source_started = monotonic()
+            recent = self.source.recent(underlying=underlying, limit=2)
+            database_read_ms = (monotonic() - source_started) * 1000.0
+            normalization_ms = 0.0
         if not recent:
             raise ValueError("SOURCE_UNAVAILABLE")
+
         chain = recent[0]
         previous = recent[1] if len(recent) > 1 else None
         age = (evaluated_at - chain.source_timestamp).total_seconds()
         if age < 0:
             raise ValueError("SOURCE_TIMESTAMP_FUTURE")
 
-        trading_date = evaluated_at.astimezone(IST).date()
+        trading_date = chain.source_timestamp.astimezone(IST).date()
+        calendar_source = self.policy.calendar_source(self.calendar)
         sessions = self.policy.sessions_to_expiry(
             trading_date,
             chain.expiry,
@@ -175,8 +206,10 @@ class MarketTrendResearchService:
             previous_pcr,
             previous_timestamp,
             transition_state,
+            persistence_state,
         ) = self._previous_evidence(
             previous=previous,
+            current=chain,
             current_window=current_window,
             steps=steps,
         )
@@ -189,6 +222,9 @@ class MarketTrendResearchService:
             trading_date,
             time(self.policy.anchor_hour, self.policy.anchor_minute),
             IST,
+        )
+        anchor_on_time_deadline = anchor_cutoff + timedelta(
+            seconds=self.policy.anchor_on_time_tolerance_seconds
         )
         anchor_deadline = anchor_cutoff + timedelta(
             seconds=self.policy.maximum_anchor_delay_seconds
@@ -225,6 +261,7 @@ class MarketTrendResearchService:
             previous_pcr=previous_pcr,
             previous_timestamp=previous_timestamp,
             panel_state=transition_state,
+            persistence_state=persistence_state,
         )
 
         morning_panel = None
@@ -237,7 +274,16 @@ class MarketTrendResearchService:
             previous_fixed: dict[str, OptionOiCell] = {}
             previous_fixed_pcr = None
             previous_fixed_timestamp = None
-            if previous is not None and previous.expiry == anchor_window.expiry:
+            same_session_previous = (
+                previous is not None
+                and previous.source_timestamp.astimezone(IST).date()
+                == chain.source_timestamp.astimezone(IST).date()
+            )
+            if (
+                same_session_previous
+                and previous is not None
+                and previous.expiry == anchor_window.expiry
+            ):
                 previous_map = self._cells_by_key(previous)
                 if all(key in previous_map for key in anchor_window.instrument_keys):
                     previous_fixed = {
@@ -263,7 +309,9 @@ class MarketTrendResearchService:
             )
             anchor_status = (
                 "ON_TIME_ANCHOR"
-                if anchor_timestamp.astimezone(IST) == anchor_cutoff
+                if anchor_cutoff
+                <= anchor_timestamp.astimezone(IST)
+                <= anchor_on_time_deadline
                 else "DELAYED_ANCHOR"
             )
             morning_panel = self.calculator.panel(
@@ -277,6 +325,11 @@ class MarketTrendResearchService:
                 previous_by_key=previous_fixed,
                 previous_pcr=previous_fixed_pcr,
                 previous_timestamp=previous_fixed_timestamp,
+                persistence_state=(
+                    "COMPARABLE"
+                    if previous_fixed_timestamp is not None
+                    else "INSUFFICIENT_HISTORY"
+                ),
                 anchor_by_key={
                     cell.instrument_key: cell for cell in anchor_cells
                 },
@@ -295,6 +348,11 @@ class MarketTrendResearchService:
             state = ResearchState.WINDOW_TRANSITION
         elif morning_panel is None and state is ResearchState.READY:
             state = ResearchState.MORNING_ANCHOR_UNAVAILABLE
+        if (
+            (monotonic() - started) * 1000.0
+            > self.policy.hard_deadline_seconds * 1000.0
+        ):
+            state = ResearchState.TIMEOUT
 
         agreement = "UNAVAILABLE"
         if (
@@ -312,7 +370,7 @@ class MarketTrendResearchService:
         explanation = (
             f"NIFTY spot was {chain.spot:.2f}.",
             f"The nearest ATM was {current_window.atm:.0f}.",
-            f"The expiry policy selected ATM ±{steps}.",
+            f"The expiry policy selected ATM ±{steps} using {calendar_source}.",
             f"{current_window.expected_contract_count} contracts were complete.",
             (
                 f"PCR was {current_panel.aggregate.pcr:.3f} and classified as "
@@ -322,12 +380,12 @@ class MarketTrendResearchService:
             ),
             "Final market direction has not yet been calculated.",
         )
-        provisional_latency = ResearchLatencyEvidence(
-            source_ms=source_ms,
-            normalization_ms=0.0,
-            calculation_ms=calculation_ms,
-            persistence_ms=0.0,
-            end_to_end_ms=(monotonic() - started) * 1000.0,
+        reason_codes = (
+            ("DEADLINE_EXCEEDED",)
+            if state is ResearchState.TIMEOUT
+            else ()
+            if state is ResearchState.READY
+            else (state.value,)
         )
         snapshot = DualPcrResearchSnapshot(
             snapshot_id=DualPcrResearchSnapshot.build_id(
@@ -342,52 +400,23 @@ class MarketTrendResearchService:
             evaluated_at=evaluated_at,
             current_panel=current_panel,
             morning_panel=morning_panel,
-            quality=ResearchDataQuality(
-                state,
-                age,
-                () if state is ResearchState.READY else (state.value,),
+            quality=ResearchDataQuality(state, age, reason_codes),
+            latency=ResearchLatencyEvidence(
+                database_read_ms=database_read_ms,
+                normalization_ms=normalization_ms,
+                calculation_ms=calculation_ms,
+                persistence_ms=0.0,
+                end_to_end_ms=(monotonic() - started) * 1000.0,
             ),
-            latency=provisional_latency,
             agreement_state=agreement,
             explanation=explanation,
+            calendar_source=calendar_source,
         )
-
-        persistence_started = monotonic()
-        self.repository.persist(snapshot)
-        persistence_ms = (monotonic() - persistence_started) * 1000.0
-        end_to_end_ms = (monotonic() - started) * 1000.0
-        final_state = (
-            ResearchState.TIMEOUT
-            if end_to_end_ms > self.policy.hard_deadline_seconds * 1000.0
-            else state
+        return self.repository.persist_once(
+            snapshot,
+            evaluation_started=started,
+            database_read_ms=database_read_ms,
+            normalization_ms=normalization_ms,
+            calculation_ms=calculation_ms,
+            hard_deadline_ms=self.policy.hard_deadline_seconds * 1000.0,
         )
-        final_snapshot = DualPcrResearchSnapshot(
-            snapshot_id=snapshot.snapshot_id,
-            trading_date=snapshot.trading_date,
-            underlying=snapshot.underlying,
-            provider=snapshot.provider,
-            source_timestamp=snapshot.source_timestamp,
-            evaluated_at=snapshot.evaluated_at,
-            current_panel=snapshot.current_panel,
-            morning_panel=snapshot.morning_panel,
-            quality=ResearchDataQuality(
-                final_state,
-                age,
-                (
-                    ("DEADLINE_EXCEEDED",)
-                    if final_state is ResearchState.TIMEOUT
-                    else snapshot.quality.reason_codes
-                ),
-            ),
-            latency=ResearchLatencyEvidence(
-                source_ms=source_ms,
-                normalization_ms=0.0,
-                calculation_ms=calculation_ms,
-                persistence_ms=persistence_ms,
-                end_to_end_ms=end_to_end_ms,
-            ),
-            agreement_state=snapshot.agreement_state,
-            explanation=snapshot.explanation,
-        )
-        self.repository.persist(final_snapshot)
-        return final_snapshot
