@@ -48,6 +48,8 @@ class SupervisorConfig:
             raise ValueError("restart policy invalid")
         if self.circuit_cooldown_seconds <= 0 or self.heartbeat_seconds <= 0:
             raise ValueError("supervisor timing invalid")
+        if self.graceful_stop_seconds <= 0:
+            raise ValueError("graceful_stop_seconds invalid")
 
     @property
     def lock_path(self) -> Path:
@@ -87,6 +89,7 @@ class ChildProcess(Protocol):
     pid: int
 
     def poll(self) -> int | None: ...
+    def send_signal(self, signal_number: int) -> None: ...
     def terminate(self) -> None: ...
     def kill(self) -> None: ...
     def wait(self, timeout: float | None = None) -> int: ...
@@ -176,7 +179,9 @@ def read_supervisor_state(path: Path) -> dict[str, object] | None:
 def _logger(config: SupervisorConfig) -> logging.Logger:
     config.log_path.parent.mkdir(parents=True, exist_ok=True)
     logger = logging.getLogger("market_trend_research_supervisor")
-    logger.handlers.clear()
+    for existing in tuple(logger.handlers):
+        existing.close()
+        logger.removeHandler(existing)
     logger.setLevel(logging.INFO)
     handler = RotatingFileHandler(
         config.log_path,
@@ -248,6 +253,8 @@ class MarketTrendResearchSupervisor:
         environment["MARKET_TREND_RESEARCH_RUNTIME_ENABLED"] = "true"
         environment["MARKET_TREND_RESEARCH_PROVIDER"] = "UPSTOX"
         environment["MARKET_TREND_RESEARCH_UNATTENDED"] = "true"
+        environment.pop("PYTHONINSPECT", None)
+        environment.pop("PYTHONSTARTUP", None)
         return environment
 
     def _start_child(self) -> ChildProcess:
@@ -256,12 +263,18 @@ class MarketTrendResearchSupervisor:
             "-m",
             "red_bar_lab.execution.run_market_trend_research_runtime",
         ]
-        child = self.process_factory(
-            command,
-            env=self._child_environment(),
-            shell=False,
-            cwd=str(Path.cwd()),
-        )
+        options: dict[str, object] = {
+            "env": self._child_environment(),
+            "shell": False,
+            "cwd": str(Path.cwd()),
+        }
+        if os.name == "nt":
+            options["creationflags"] = getattr(
+                subprocess,
+                "CREATE_NEW_PROCESS_GROUP",
+                0,
+            )
+        child = self.process_factory(command, **options)
         self.child = child
         started = self.now().isoformat()
         self._publish(
@@ -277,9 +290,24 @@ class MarketTrendResearchSupervisor:
         child = self.child
         if child is None or child.poll() is not None:
             return
-        child.terminate()
+        graceful_signal_sent = False
+        if os.name == "nt" and hasattr(signal, "CTRL_BREAK_EVENT"):
+            sender = getattr(child, "send_signal", None)
+            if callable(sender):
+                try:
+                    sender(signal.CTRL_BREAK_EVENT)
+                    graceful_signal_sent = True
+                except OSError:
+                    graceful_signal_sent = False
+        if not graceful_signal_sent:
+            child.terminate()
         try:
             child.wait(timeout=self.config.graceful_stop_seconds)
+            return
+        except subprocess.TimeoutExpired:
+            child.terminate()
+        try:
+            child.wait(timeout=2.0)
         except subprocess.TimeoutExpired:
             child.kill()
             child.wait(timeout=5.0)
@@ -307,6 +335,27 @@ class MarketTrendResearchSupervisor:
             self.stop_event.wait(min(self.config.heartbeat_seconds, remaining))
         return True
 
+    def _restart_wait(self, rapid_failures: int) -> bool:
+        if rapid_failures >= self.config.maximum_rapid_failures:
+            next_restart = self.now() + timedelta(
+                seconds=self.config.circuit_cooldown_seconds
+            )
+            self._publish(
+                "CIRCUIT_OPEN",
+                next_restart_at=next_restart.isoformat(),
+                safe_reason="RAPID_FAILURE_THRESHOLD_REACHED",
+            )
+            return self._wait_with_heartbeat(
+                self.config.circuit_cooldown_seconds,
+                state="CIRCUIT_OPEN",
+            )
+        delay = self._backoff_seconds(rapid_failures)
+        self._publish(
+            "BACKING_OFF",
+            next_restart_at=(self.now() + timedelta(seconds=delay)).isoformat(),
+        )
+        return self._wait_with_heartbeat(delay, state="BACKING_OFF")
+
     def run(self) -> int:
         self.config.work_root.mkdir(parents=True, exist_ok=True)
         lock = MarketTrendResearchProcessLock(self.config.lock_path)
@@ -316,6 +365,7 @@ class MarketTrendResearchSupervisor:
             return 3
         try:
             self.config.stop_request_path.unlink(missing_ok=True)
+            self._publish("STARTING")
             try:
                 self._validate()
             except SupervisorConfigurationError as exc:
@@ -328,7 +378,26 @@ class MarketTrendResearchSupervisor:
                 if self.config.stop_request_path.exists():
                     self.request_stop()
                     break
-                child = self._start_child()
+                try:
+                    child = self._start_child()
+                except (OSError, subprocess.SubprocessError):
+                    rapid_failures += 1
+                    restart_count += 1
+                    self._publish(
+                        "BACKING_OFF",
+                        child_pid=None,
+                        last_child_exit_at=self.now().isoformat(),
+                        last_child_exit_code=None,
+                        restart_count=restart_count,
+                        consecutive_rapid_failures=rapid_failures,
+                        safe_reason="CHILD_START_FAILED",
+                    )
+                    if self._restart_wait(rapid_failures):
+                        break
+                    if rapid_failures >= self.config.maximum_rapid_failures:
+                        rapid_failures = 0
+                    continue
+
                 child_started_mono = self.monotonic_clock()
                 while not self.stop_event.wait(self.config.heartbeat_seconds):
                     if self.config.stop_request_path.exists():
@@ -360,36 +429,21 @@ class MarketTrendResearchSupervisor:
                     break
                 if child.poll() is None:
                     continue
-                if rapid_failures >= self.config.maximum_rapid_failures:
-                    next_restart = self.now() + timedelta(
-                        seconds=self.config.circuit_cooldown_seconds
-                    )
-                    self._publish(
-                        "CIRCUIT_OPEN",
-                        next_restart_at=next_restart.isoformat(),
-                        safe_reason="RAPID_FAILURE_THRESHOLD_REACHED",
-                    )
-                    if self._wait_with_heartbeat(
-                        self.config.circuit_cooldown_seconds,
-                        state="CIRCUIT_OPEN",
-                    ):
-                        break
+                reached_circuit = rapid_failures >= self.config.maximum_rapid_failures
+                if self._restart_wait(rapid_failures):
+                    break
+                if reached_circuit:
                     rapid_failures = 0
-                else:
-                    delay = self._backoff_seconds(rapid_failures)
-                    self._publish(
-                        "BACKING_OFF",
-                        next_restart_at=(
-                            self.now() + timedelta(seconds=delay)
-                        ).isoformat(),
-                    )
-                    if self._wait_with_heartbeat(delay, state="BACKING_OFF"):
-                        break
 
             self._publish("STOPPING", safe_reason="STOP_REQUESTED")
             self._stop_child()
             self.child = None
-            self._publish("STOPPED", child_pid=None, next_restart_at=None)
+            self._publish(
+                "STOPPED",
+                child_pid=None,
+                next_restart_at=None,
+                safe_reason=None,
+            )
             return 0
         finally:
             self.config.stop_request_path.unlink(missing_ok=True)
@@ -434,7 +488,16 @@ def supervisor_config() -> SupervisorConfig:
 
 
 def main() -> int:
-    supervisor = MarketTrendResearchSupervisor(config=supervisor_config())
+    try:
+        config = supervisor_config()
+    except (TypeError, ValueError):
+        print(
+            "market-trend-research-supervisor outcome=CONFIGURATION_ERROR "
+            "reason=SUPERVISOR_CONFIGURATION_INVALID "
+            f"authority={AUTHORITY}"
+        )
+        return 2
+    supervisor = MarketTrendResearchSupervisor(config=config)
 
     def _handle_signal(_signum, _frame) -> None:
         supervisor.request_stop()
