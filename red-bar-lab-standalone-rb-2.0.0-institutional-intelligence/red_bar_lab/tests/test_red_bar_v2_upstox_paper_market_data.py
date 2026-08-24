@@ -162,7 +162,7 @@ def test_upstox_missing_timestamp_is_corruption():
             instrument_keys=("NSE_FO|987654",),
             evaluated_at=NOW,
         )
-    assert captured.value.diagnostic.reason_code == "OPTION_QUOTE_REQUIRED_FIELD_MISSING"
+    assert captured.value.diagnostic.reason_code == "OPTION_QUOTE_TIMESTAMP_INVALID"
 
 
 def test_upstox_swapped_rows_are_rejected():
