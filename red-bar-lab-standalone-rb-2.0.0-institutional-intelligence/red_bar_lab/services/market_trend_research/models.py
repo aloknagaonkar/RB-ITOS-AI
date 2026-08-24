@@ -38,12 +38,18 @@ class PcrBias(str, Enum):
     STRONGLY_BULLISH = "STRONGLY_BULLISH"
     UNAVAILABLE = "UNAVAILABLE"
 
+    def __str__(self) -> str:
+        return self.value
+
 
 class PcrMarketDirection(str, Enum):
     BULLISH = "BULLISH"
     BEARISH = "BEARISH"
     NEUTRAL = "NEUTRAL"
     UNAVAILABLE = "UNAVAILABLE"
+
+    def __str__(self) -> str:
+        return self.value
 
 
 @dataclass(frozen=True, slots=True)
