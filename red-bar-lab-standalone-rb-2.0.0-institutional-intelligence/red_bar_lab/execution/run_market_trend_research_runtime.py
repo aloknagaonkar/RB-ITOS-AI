@@ -170,6 +170,19 @@ def build_runtime() -> tuple[MarketTrendResearchRuntime, int]:
     return runtime, request_timeout
 
 
+def _install_signal_handlers(runtime: MarketTrendResearchRuntime) -> None:
+    """Route supported process-stop signals through the runtime stop event."""
+
+    def _stop(_signum, _frame) -> None:
+        runtime.stop()
+
+    signal.signal(signal.SIGINT, _stop)
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, _stop)
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, _stop)
+
+
 def main() -> int:
     settings = RedBarSettings.from_env()
     logger = _worker_logger(settings)
@@ -188,12 +201,7 @@ def main() -> int:
         )
         return 2
 
-    def _stop(_signum, _frame) -> None:
-        runtime.stop()
-
-    signal.signal(signal.SIGINT, _stop)
-    if hasattr(signal, "SIGTERM"):
-        signal.signal(signal.SIGTERM, _stop)
+    _install_signal_handlers(runtime)
     _log(
         logger,
         "RUNTIME_STARTED",
