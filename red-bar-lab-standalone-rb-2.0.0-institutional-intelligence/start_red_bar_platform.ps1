@@ -6,7 +6,9 @@ param(
     [string]$Underlying = "NIFTY 50",
 
     [ValidateRange(60, 3600)]
-    [int]$CollectorIntervalSeconds = 60
+    [int]$CollectorIntervalSeconds = 60,
+
+    [bool]$StartMarketTrendResearchWorker = $true
 )
 
 $ErrorActionPreference = "Stop"
@@ -40,11 +42,7 @@ function Get-RunningPlatformProcesses {
 
 function Stop-ProcessTree {
     param([Parameter(Mandatory = $true)][int]$ProcessId)
-
-    if ($null -eq (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) {
-        return $false
-    }
-
+    if ($null -eq (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) { return $false }
     & taskkill.exe /PID $ProcessId /T /F 2>$null | Out-Null
     Start-Sleep -Milliseconds 300
     return ($null -eq (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue))
@@ -52,16 +50,11 @@ function Stop-ProcessTree {
 
 function Stop-OrphanedRedBarProcesses {
     $markers = @(
-        "run_market_collector.ps1",
-        "run_paper_monitor.ps1",
-        "run_position_monitor.ps1",
-        "run_red_bar.ps1",
-        "red_bar_lab.collector.runner",
-        "red_bar_lab.execution.paper_monitor",
-        "red_bar_lab.execution.position_monitor",
-        "streamlit run"
+        "run_market_collector.ps1", "run_paper_monitor.ps1",
+        "run_position_monitor.ps1", "run_red_bar.ps1",
+        "red_bar_lab.collector.runner", "red_bar_lab.execution.paper_monitor",
+        "red_bar_lab.execution.position_monitor", "streamlit run"
     )
-
     $orphans = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
         if (-not $_.CommandLine) { return $false }
         foreach ($marker in $markers) {
@@ -69,7 +62,6 @@ function Stop-OrphanedRedBarProcesses {
         }
         return $false
     }
-
     foreach ($process in $orphans) {
         if ([int]$process.ProcessId -eq $PID) { continue }
         try {
@@ -86,32 +78,33 @@ function Show-PlatformStatus {
     $running = @(Get-RunningPlatformProcesses)
     if ($running.Count -eq 0) {
         Write-Host "No tracked Red Bar platform CLI processes are running." -ForegroundColor Yellow
-        return
     }
-
-    Write-Host "Red Bar platform CLI processes:" -ForegroundColor Cyan
-    foreach ($entry in $running) {
-        Write-Host ("  {0,-24} PID {1}" -f $entry.Name, $entry.ProcessId) -ForegroundColor Green
+    else {
+        Write-Host "Red Bar platform CLI processes:" -ForegroundColor Cyan
+        foreach ($entry in $running) {
+            Write-Host ("  {0,-24} PID {1}" -f $entry.Name, $entry.ProcessId) -ForegroundColor Green
+        }
+    }
+    if (Test-Path (Join-Path $projectRoot "status_market_trend_research_worker.ps1")) {
+        & (Join-Path $projectRoot "status_market_trend_research_worker.ps1")
     }
 }
 
 function Stop-RedBarPlatform {
+    if (Test-Path (Join-Path $projectRoot "stop_market_trend_research_worker.ps1")) {
+        & (Join-Path $projectRoot "stop_market_trend_research_worker.ps1") -TimeoutSeconds 20
+    }
     $running = @(Get-RunningPlatformProcesses)
-
     foreach ($entry in ($running | Sort-Object { if ($_.Name -eq "Red Bar Lab UI") { 0 } else { 1 } })) {
         try {
             if (Stop-ProcessTree -ProcessId $entry.ProcessId) {
                 Write-Host ("Stopped {0} process tree (PID {1})." -f $entry.Name, $entry.ProcessId) -ForegroundColor Green
-            }
-            else {
-                Write-Host ("Process tree for {0} was already stopped (PID {1})." -f $entry.Name, $entry.ProcessId) -ForegroundColor Yellow
             }
         }
         catch {
             Write-Host ("Unable to stop {0} process tree (PID {1}): {2}" -f $entry.Name, $entry.ProcessId, $_.Exception.Message) -ForegroundColor Yellow
         }
     }
-
     Stop-OrphanedRedBarProcesses
     Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
     Write-Host "Red Bar platform stop command completed." -ForegroundColor Green
@@ -122,18 +115,13 @@ function Start-TrackedPowerShellProcess {
         [Parameter(Mandatory = $true)][string]$Name,
         [Parameter(Mandatory = $true)][string]$Command
     )
-
     $windowTitle = "Red Bar - $Name"
     $wrappedCommand = "`$host.UI.RawUI.WindowTitle='$windowTitle'; $Command"
     $process = Start-Process powershell -ArgumentList @(
-        "-NoExit",
-        "-NoProfile",
-        "-Command",
-        $wrappedCommand
+        "-NoExit", "-NoProfile", "-Command", $wrappedCommand
     ) -PassThru
-
     return [PSCustomObject]@{
-        Name      = $Name
+        Name = $Name
         ProcessId = $process.Id
         StartedAt = (Get-Date).ToString("o")
     }
@@ -163,6 +151,11 @@ $escapedUnderlying = $Underlying.Replace("'", "''")
 $processes = @()
 
 try {
+    if ($StartMarketTrendResearchWorker) {
+        & (Join-Path $projectRoot "start_market_trend_research_worker.ps1")
+        if ($LASTEXITCODE -ne 0) { throw "Market Trend Research worker startup failed." }
+    }
+
     $collectorCommand = @"
 Set-Location '$escapedRoot'
 `$env:UPSTOX_ACCESS_TOKEN='$escapedToken'
@@ -193,12 +186,14 @@ Set-Location '$escapedRoot'
 
     $processes | ConvertTo-Json | Set-Content -Path $pidFile -Encoding UTF8
     Write-Host "Red Bar platform started successfully." -ForegroundColor Green
+    Write-Host "Market Trend Research worker is supervised separately." -ForegroundColor Cyan
     Write-Host "Stop it with: .\start_red_bar_platform.ps1 -Action Stop" -ForegroundColor Cyan
 }
 catch {
     Write-Host "Platform startup failed: $($_.Exception.Message)" -ForegroundColor Red
-    foreach ($entry in $processes) {
-        Stop-ProcessTree -ProcessId $entry.ProcessId | Out-Null
+    foreach ($entry in $processes) { Stop-ProcessTree -ProcessId $entry.ProcessId | Out-Null }
+    if ($StartMarketTrendResearchWorker) {
+        & (Join-Path $projectRoot "stop_market_trend_research_worker.ps1") -TimeoutSeconds 10
     }
     Stop-OrphanedRedBarProcesses
     Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
