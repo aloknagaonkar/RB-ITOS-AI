@@ -4,7 +4,9 @@ from datetime import datetime, timezone
 from red_bar_lab.config import RedBarSettings
 from red_bar_lab.execution import run_red_bar_v2_market_data_readiness as runner
 from red_bar_lab.services.red_bar_v2_canonical.paper_market_data_readiness_models import (
+    MarketDataReadinessDiagnostic,
     MarketDataReadinessReport,
+    MarketDataReadinessStage,
     MarketDataReadinessStatus,
     build_probe_id,
 )
@@ -20,7 +22,12 @@ def _report():
         strike_interval=None, atm_strike=None, expected_contract_count=0,
         observed_contract_count=0, ready_contract_count=0, ce_coverage=0, pe_coverage=0,
         status=MarketDataReadinessStatus.PROVIDER_UNAVAILABLE,
-        reason_code="PROVIDER_UNAVAILABLE", contracts=(),
+        reason_code="OPTION_CONTRACT_REQUEST_FAILED", contracts=(),
+        failure_stage=MarketDataReadinessStage.OPTION_CONTRACT_COLLECTION,
+        diagnostic=MarketDataReadinessDiagnostic(
+            reason_code="OPTION_CONTRACT_REQUEST_FAILED",
+            source_component="option_contracts",
+        ),
     )
 
 
@@ -28,7 +35,8 @@ def test_disabled_runner_performs_no_provider_construction(monkeypatch, capsys):
     monkeypatch.setattr(runner.RedBarSettings, "from_env", classmethod(lambda cls: RedBarSettings()))
     monkeypatch.setattr(runner, "build_paper_canary_market_data", lambda **kwargs: (_ for _ in ()).throw(AssertionError("provider built")))
     assert runner.main([]) == 0
-    assert "READINESS_DISABLED" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "READINESS_DISABLED" in output and "stage=STARTUP" in output
 
 
 def test_invalid_provider_does_not_build_provider(monkeypatch):
@@ -38,7 +46,7 @@ def test_invalid_provider_does_not_build_provider(monkeypatch):
     assert runner.main([]) == 2
 
 
-def test_enabled_runner_evaluates_once_and_persists(monkeypatch, tmp_path):
+def test_enabled_runner_evaluates_once_persists_and_bounds_output(monkeypatch, tmp_path, capsys):
     settings = replace(RedBarSettings(), artifacts_root=tmp_path, red_bar_v2_market_data_readiness_enabled=True, red_bar_v2_market_data_readiness_provider="UPSTOX")
     calls = {"factory": 0, "evaluate": 0}
     monkeypatch.setattr(runner.RedBarSettings, "from_env", classmethod(lambda cls: settings))
@@ -50,3 +58,6 @@ def test_enabled_runner_evaluates_once_and_persists(monkeypatch, tmp_path):
     assert runner.main([]) == 5
     assert calls == {"factory": 1, "evaluate": 1}
     assert settings.market_data_readiness_state_path.exists()
+    output = capsys.readouterr().out
+    assert "stage=OPTION_CONTRACT_COLLECTION" in output
+    assert "Bearer" not in output and "token" not in output.lower()
