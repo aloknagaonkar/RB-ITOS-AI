@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 import sqlite3
+from time import monotonic
 
 from .models import OptionOiCell
 
@@ -16,6 +17,13 @@ class NormalizedChainSnapshot:
     spot: float
     expiry: date
     cells: tuple[OptionOiCell, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class SourceReadResult:
+    snapshots: tuple[NormalizedChainSnapshot, ...]
+    database_read_ms: float
+    normalization_ms: float
 
 
 class OptionParticipationSnapshotSource:
@@ -60,16 +68,19 @@ class OptionParticipationSnapshotSource:
             cells=tuple(cells),
         )
 
-    def recent(
+    def recent_with_timings(
         self,
         *,
         underlying: str,
         limit: int = 2,
-    ) -> tuple[NormalizedChainSnapshot, ...]:
+    ) -> SourceReadResult:
         if type(limit) is not int or limit < 1 or limit > 10:
             raise ValueError("limit invalid")
         if not self.database_path.exists():
-            return ()
+            return SourceReadResult((), 0.0, 0.0)
+
+        database_started = monotonic()
+        raw_batches: list[list[sqlite3.Row]] = []
         try:
             with sqlite3.connect(self.database_path) as connection:
                 connection.row_factory = sqlite3.Row
@@ -81,7 +92,6 @@ class OptionParticipationSnapshotSource:
                        LIMIT ?""",
                     (underlying, limit),
                 ).fetchall()
-                snapshots: list[NormalizedChainSnapshot] = []
                 for stamp in stamps:
                     rows = connection.execute(
                         """SELECT observed_at, underlying_name, spot_price, expiry,
@@ -92,12 +102,28 @@ class OptionParticipationSnapshotSource:
                         (underlying, stamp["observed_at"]),
                     ).fetchall()
                     if rows:
-                        snapshots.append(self._snapshot(rows))
+                        raw_batches.append(list(rows))
         except sqlite3.OperationalError as exc:
             if "no such table" in str(exc).lower():
-                return ()
+                return SourceReadResult((), 0.0, 0.0)
             raise
-        return tuple(snapshots)
+        database_read_ms = (monotonic() - database_started) * 1000.0
+
+        normalization_started = monotonic()
+        snapshots = tuple(self._snapshot(rows) for rows in raw_batches)
+        normalization_ms = (monotonic() - normalization_started) * 1000.0
+        return SourceReadResult(snapshots, database_read_ms, normalization_ms)
+
+    def recent(
+        self,
+        *,
+        underlying: str,
+        limit: int = 2,
+    ) -> tuple[NormalizedChainSnapshot, ...]:
+        return self.recent_with_timings(
+            underlying=underlying,
+            limit=limit,
+        ).snapshots
 
     def latest(self, *, underlying: str) -> NormalizedChainSnapshot | None:
         snapshots = self.recent(underlying=underlying, limit=1)
