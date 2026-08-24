@@ -307,13 +307,6 @@ def _render_market_direction_research(projection: dict[str, Any], *, stale: bool
         "Current PCR": _number(evidence.get("pcr")),
         "Final combined direction": "NOT YET CALCULATED",
     }]), width="stretch", hide_index=True)
-    st.write(f"Detailed PCR classification: {evidence.get('classification', 'UNAVAILABLE')}")
-    st.write(f"Reason: {evidence.get('explanation') or 'PCR could not be calculated.'}")
-    st.write("Authority: OBSERVATIONAL ONLY")
-    st.caption(
-        "PCR direction is independent options-positioning evidence. Final combined "
-        "direction will require price structure, momentum, futures and other approved evidence."
-    )
 
 
 def _render_morning(projection: dict[str, Any], *, stale: bool, live_source_age: float | None) -> None:
@@ -345,13 +338,14 @@ def _render_morning(projection: dict[str, Any], *, stale: bool, live_source_age:
         {"Field": "PCR", "Value": _number(aggregate.get("pcr"))},
         {"Field": "PCR directional evidence", "Value": _bias(aggregate.get("classification"), stale=stale)},
     ]
-    st.dataframe(_arrow_safe_rows(summary), width="stretch", hide_index=True)
     st.dataframe(_arrow_safe_rows(_morning_rows(panel)), width="stretch", hide_index=True)
-    total = _total(panel)
-    st.write(f"Overall CE change since open: {_signed(total.get('ce_opening_change'))} ({_percent(total.get('ce_opening_change_pct'))})")
-    st.write(f"Overall PE change since open: {_signed(total.get('pe_opening_change'))} ({_percent(total.get('pe_opening_change_pct'))})")
-    st.write(f"Morning fixed-level PCR: Total current PE OI ÷ Total current CE OI = {_number(aggregate.get('pcr'))}")
-    st.write(f"PCR directional evidence: {_bias(aggregate.get('classification'), stale=stale)}")
+    with st.expander("Morning Fixed-Level PCR details", expanded=False):
+        st.dataframe(_arrow_safe_rows(summary), width="stretch", hide_index=True)
+        total = _total(panel)
+        st.write(f"Overall CE change since open: {_signed(total.get('ce_opening_change'))} ({_percent(total.get('ce_opening_change_pct'))})")
+        st.write(f"Overall PE change since open: {_signed(total.get('pe_opening_change'))} ({_percent(total.get('pe_opening_change_pct'))})")
+        st.write(f"Morning fixed-level PCR: Total current PE OI ÷ Total current CE OI = {_number(aggregate.get('pcr'))}")
+        st.write(f"PCR directional evidence: {_bias(aggregate.get('classification'), stale=stale)}")
 
 
 def _render_refresh_diagnostics(panel: dict[str, Any]) -> None:
@@ -395,13 +389,20 @@ def _render_current(projection: dict[str, Any], *, stale: bool, live_source_age:
         {"Field": "PCR", "Value": _number(aggregate.get("pcr"))},
         {"Field": "PCR directional evidence", "Value": _bias(aggregate.get("classification"), stale=stale)},
     ]
-    st.dataframe(_arrow_safe_rows(summary), width="stretch", hide_index=True)
     total = _total(panel)
-    st.write(f"Total CE OI change: {_signed(total.get('ce_previous_day_change'))} ({_percent(total.get('ce_previous_day_change_pct'))})")
-    st.write(f"Total PE OI change: {_signed(total.get('pe_previous_day_change'))} ({_percent(total.get('pe_previous_day_change_pct'))})")
-    st.dataframe(_arrow_safe_rows(_current_rows(panel)), width="stretch", hide_index=True)
-    st.write(f"Current/Overall PCR: Total current PE OI ÷ Total current CE OI = {_number(aggregate.get('pcr'))}")
-    st.write(f"PCR directional evidence: {_bias(aggregate.get('classification'), stale=stale)}")
+    total_panel = {"rows": [total]} if total else {"rows": []}
+    st.dataframe(
+        _arrow_safe_rows(_current_rows(total_panel)),
+        width="stretch",
+        hide_index=True,
+    )
+    with st.expander("Current/Overall PCR details", expanded=False):
+        st.dataframe(_arrow_safe_rows(summary), width="stretch", hide_index=True)
+        st.write(f"Total CE OI change: {_signed(total.get('ce_previous_day_change'))} ({_percent(total.get('ce_previous_day_change_pct'))})")
+        st.write(f"Total PE OI change: {_signed(total.get('pe_previous_day_change'))} ({_percent(total.get('pe_previous_day_change_pct'))})")
+        st.dataframe(_arrow_safe_rows(_current_rows(panel)), width="stretch", hide_index=True)
+        st.write(f"Current/Overall PCR: Total current PE OI ÷ Total current CE OI = {_number(aggregate.get('pcr'))}")
+        st.write(f"PCR directional evidence: {_bias(aggregate.get('classification'), stale=stale)}")
     _render_refresh_diagnostics(panel)
 
 
@@ -419,17 +420,18 @@ def _render_operational_status(
         "Source age": _source_age_text(projection_age),
         "UI refresh": f"Every {MARKET_TREND_RESEARCH_UI_REFRESH_SECONDS:g}s",
     }]), width="stretch", hide_index=True)
-    st.write(f"Collector status: {health_view.state}")
-    st.write(f"Heartbeat: {health_view.heartbeat}")
-    st.write(f"Heartbeat age: {_source_age_text(health_view.heartbeat_age_seconds)}")
-    st.write(f"Last success: {health_view.last_success}")
-    if health_view.last_failure != "Not available":
-        st.write(f"Last failure: {health_view.last_failure}")
-    st.write(f"Consecutive failures: {health_view.consecutive_failures}")
-    st.write(f"Collection cadence: {MARKET_TREND_RESEARCH_UI_REFRESH_SECONDS:g} seconds")
-    st.caption(f"Last UI refresh: {_format_ist_timestamp(now)}")
-    st.caption(f"UI refresh: every {MARKET_TREND_RESEARCH_UI_REFRESH_SECONDS:g} seconds · Read-only projection")
-    st.caption("The collector runs as a separate observational process. This page does not start, stop or control it.")
+    with st.expander("Market Trend Research runtime details", expanded=False):
+        st.write(f"Collector status: {health_view.state}")
+        st.write(f"Heartbeat: {health_view.heartbeat}")
+        st.write(f"Heartbeat age: {_source_age_text(health_view.heartbeat_age_seconds)}")
+        st.write(f"Last success: {health_view.last_success}")
+        if health_view.last_failure != "Not available":
+            st.write(f"Last failure: {health_view.last_failure}")
+        st.write(f"Consecutive failures: {health_view.consecutive_failures}")
+        st.write(f"Collection cadence: {MARKET_TREND_RESEARCH_UI_REFRESH_SECONDS:g} seconds")
+        st.caption(f"Last UI refresh: {_format_ist_timestamp(now)}")
+        st.caption(f"UI refresh: every {MARKET_TREND_RESEARCH_UI_REFRESH_SECONDS:g} seconds · Read-only projection")
+        st.caption("The collector runs as a separate observational process. This page does not start, stop or control it.")
     if health_view.state == "STOPPED":
         st.warning("No fresh data is being collected. Values below are retained for diagnosis.")
     elif health_view.state == "DEGRADED":
@@ -507,10 +509,11 @@ def _market_trend_research_fragment(database_path: str | Path, underlying: str) 
 
 
 def render_market_trend_research_panel(database_path: str | Path, *, underlying: str) -> None:
-    st.error("OBSERVATIONAL ONLY")
-    st.write("Final Combined Market Direction: NOT YET CALCULATED")
-    st.write("Signal generated: NO")
-    st.write("Canonical bundle created: NO")
-    st.write("Opportunity queued: NO")
-    st.write("Paper trade created: NO")
+    with st.expander("Market Trend Research architecture boundary", expanded=False):
+        st.error("OBSERVATIONAL ONLY")
+        st.write("Final Combined Market Direction: NOT YET CALCULATED")
+        st.write("Signal generated: NO")
+        st.write("Canonical bundle created: NO")
+        st.write("Opportunity queued: NO")
+        st.write("Paper trade created: NO")
     _market_trend_research_fragment(database_path, underlying)

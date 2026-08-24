@@ -147,9 +147,8 @@ def test_direction_and_final_combined_direction_are_separate(monkeypatch):
     text = "\n".join(str(value) for _, value in stub.calls)
     assert "PCR market direction': 'BULLISH" in text
     assert "Final combined direction': 'NOT YET CALCULATED" in text
-    assert "Detailed PCR classification: BULLISH" in text
-    assert "Authority: OBSERVATIONAL ONLY" in text
-    assert "independent options-positioning evidence" in text
+    assert sum(kind == "dataframe" for kind, _ in stub.calls) == 1
+    assert not any(kind in {"write", "caption"} for kind, _ in stub.calls)
 
 
 def test_stale_projection_marks_pcr_direction_stale(monkeypatch):
@@ -158,6 +157,25 @@ def test_stale_projection_marks_pcr_direction_stale(monkeypatch):
     panel._render_market_direction_research(_projection(), stale=True)
     text = "\n".join(str(value) for _, value in stub.calls)
     assert "BULLISH — STALE" in text
+
+
+def test_current_panel_shows_only_overall_total_before_expanded_details(monkeypatch):
+    stub = StreamlitStub()
+    monkeypatch.setattr(panel, "st", stub)
+    projection = _projection()
+    strike_row = dict(projection["current_panel"]["rows"][0])
+    strike_row.update({"strike": 24200.0, "position": "ATM"})
+    projection["current_panel"]["rows"].insert(0, strike_row)
+
+    panel._render_current(projection, stale=False, live_source_age=3.0)
+
+    first_table = next(value for kind, value in stub.calls if kind == "dataframe")
+    assert len(first_table) == 1
+    assert first_table[0]["Position"] == "Overall total"
+    assert any(
+        kind == "expander" and value == "Current/Overall PCR details"
+        for kind, value in stub.calls
+    )
 
 
 def test_full_cycle_keeps_one_projection_and_health_read(monkeypatch):
