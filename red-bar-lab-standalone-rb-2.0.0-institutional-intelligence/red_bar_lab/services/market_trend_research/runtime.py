@@ -13,6 +13,11 @@ from .service import MarketTrendResearchService
 
 IST = ZoneInfo("Asia/Kolkata")
 T = TypeVar("T")
+_SAFE_REASON_PREFIXES = (
+    "BASELINE_", "CALENDAR_", "CURRENT_", "EXPIRY_", "MARKET_",
+    "OI_", "PARTIAL_", "PCR_", "PROVIDER_", "REFERENCE_",
+    "SESSION_", "SOURCE_", "UPSTOX_",
+)
 
 
 class LatestValueSlot(Generic[T]):
@@ -87,8 +92,15 @@ class MarketTrendResearchRuntime:
 
     @staticmethod
     def _safe_reason(exc: Exception) -> str:
-        text = str(exc).strip()
-        return text if text.isupper() and len(text) <= 64 else type(exc).__name__.upper()[:64]
+        text = str(exc).strip().upper()
+        if (
+            text
+            and len(text) <= 64
+            and all(character.isalnum() or character in "_-" for character in text)
+            and text.startswith(_SAFE_REASON_PREFIXES)
+        ):
+            return text
+        return type(exc).__name__.upper()[:64]
 
     def stop(self) -> None:
         self.stop_event.set()
