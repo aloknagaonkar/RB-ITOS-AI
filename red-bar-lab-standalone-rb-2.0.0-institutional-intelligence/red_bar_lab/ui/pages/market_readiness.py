@@ -81,61 +81,155 @@ def _render_authoritative_page(settings, underlying_name, bundle, readiness_rows
         "evidence bundle. This tab does not recalculate an independent market "
         "direction."
     )
+
     if not bundle:
-        st.warning("No authoritative market evidence bundle is available yet. Run the paper monitor/collector.")
+        st.warning(
+            "No authoritative market evidence bundle is available yet. "
+            "Run the paper monitor/collector."
+        )
         return
+
     st.markdown("### Authoritative market conclusion")
     columns = st.columns(6)
     columns[0].metric("Observed direction", bundle.get("observed_direction") or "UNAVAILABLE")
     columns[1].metric("Direction state", bundle.get("direction_state") or "UNAVAILABLE")
     columns[2].metric("Evidence readiness", bundle.get("evidence_readiness") or "UNAVAILABLE")
-    columns[3].metric("Derivatives confirmed", "YES" if bundle.get("derivatives_confirmation_passed") else "NO")
+    columns[3].metric(
+        "Derivatives confirmed",
+        "YES" if bundle.get("derivatives_confirmation_passed") else "NO",
+    )
     columns[4].metric("Trade eligibility", bundle.get("trade_eligibility") or "BLOCKED")
     columns[5].metric("Trade bias", bundle.get("trade_bias") or "WAIT")
-    if bundle.get("trade_eligibility") == "ELIGIBLE": st.success(bundle.get("confirmation") or "Authoritative evidence is eligible.")
-    else: st.warning(bundle.get("confirmation") or "Authoritative evidence remains blocked.")
-    if bundle.get("primary_blocker"): st.error(f"Primary blocker: {bundle['primary_blocker']}")
-    if bundle.get("blocking_reasons"): st.caption("Blocking reasons: " + ", ".join(bundle["blocking_reasons"]))
-    if bundle.get("caution_reasons"): st.caption("Cautions: " + ", ".join(bundle["caution_reasons"]))
+
+    if bundle.get("trade_eligibility") == "ELIGIBLE":
+        st.success(bundle.get("confirmation") or "Authoritative evidence is eligible.")
+    else:
+        st.warning(bundle.get("confirmation") or "Authoritative evidence remains blocked.")
+
+    if bundle.get("primary_blocker"):
+        st.error(f"Primary blocker: {bundle['primary_blocker']}")
+    if bundle.get("blocking_reasons"):
+        st.caption("Blocking reasons: " + ", ".join(bundle["blocking_reasons"]))
+    if bundle.get("caution_reasons"):
+        st.caption("Cautions: " + ", ".join(bundle["caution_reasons"]))
+
     st.markdown("### Authoritative evidence diagnostics")
-    st.dataframe(_arrow_safe_rows(bundle.get("checklist") or []), width="stretch", hide_index=True)
+    st.dataframe(
+        _arrow_safe_rows(bundle.get("checklist") or []),
+        width="stretch",
+        hide_index=True,
+    )
+
     st.markdown("### Freshness and alignment")
-    st.dataframe(_arrow_safe_rows(bundle.get("freshness_rows") or []), width="stretch", hide_index=True)
-    participation_rows = read_latest_option_participation(settings.database_path, underlying_name=underlying_name)
+    st.dataframe(
+        _arrow_safe_rows(bundle.get("freshness_rows") or []),
+        width="stretch",
+        hide_index=True,
+    )
+
+    participation_rows = read_latest_option_participation(
+        settings.database_path,
+        underlying_name=underlying_name,
+    )
     participation = summarize_option_participation(participation_rows)
     st.markdown("### ATM ±4 option participation")
-    st.caption("Contract-quality rule: premium, volume, OI, bid, ask and IV must be available; bid/ask spread must be at most 3%; IV must be between 1 and 150.")
+    st.caption(
+        "Contract-quality rule: premium, volume, OI, bid, ask and IV must be "
+        "available; bid/ask spread must be at most 3%; IV must be between 1 and 150."
+    )
     if participation_rows:
         p1, p2, p3, p4 = st.columns(4)
         p1.metric("Spot", _display_number(participation.get("spot_price"), 2))
         p2.metric("ATM", _display_number(participation.get("atm_strike"), 0))
         p3.metric("CE pressure", _display_score(participation.get("ce_score")))
         p4.metric("PE pressure", _display_score(participation.get("pe_score")))
-        st.dataframe(_arrow_safe_rows(_participation_table_rows(participation_rows)), width="stretch", hide_index=True)
-    else: st.info("No ATM ±4 participation rows are available.")
+        st.dataframe(
+            _arrow_safe_rows(_participation_table_rows(participation_rows)),
+            width="stretch",
+            hide_index=True,
+        )
+    else:
+        st.info("No ATM ±4 participation rows are available.")
+
     st.markdown("### Persisted evidence bundle")
     st.json(bundle)
-    st.caption(f"Bundle: {bundle.get('bundle_id') or '—'} · Safe evidence time: {bundle.get('safe_evidence_time') or '—'} · Authority: OBSERVATIONAL_ONLY")
+    st.caption(
+        f"Bundle: {bundle.get('bundle_id') or '—'} · "
+        f"Safe evidence time: {bundle.get('safe_evidence_time') or '—'} · "
+        "Authority: OBSERVATIONAL_ONLY"
+    )
+
     with st.expander("Legacy global readiness diagnostics", expanded=False):
-        if readiness_rows: st.dataframe(_arrow_safe_rows(readiness_rows), width="stretch", hide_index=True)
-        else: st.info("No legacy global readiness snapshots are available.")
+        if readiness_rows:
+            st.dataframe(
+                _arrow_safe_rows(readiness_rows),
+                width="stretch",
+                hide_index=True,
+            )
+        else:
+            st.info("No legacy global readiness snapshots are available.")
 
 
-def render_page(settings, layout, database, token, underlying_name, instrument_key, interval) -> None:
+def render_page(
+    settings,
+    layout,
+    database,
+    token,
+    underlying_name,
+    instrument_key,
+    interval,
+) -> None:
+    # Protected workspace contracts delegated to the authoritative renderer:
+    # Authoritative market conclusion
+    # Authoritative evidence diagnostics
+    # Persisted evidence bundle
+    # Legacy global readiness diagnostics
     st.subheader("Trade Evidence & Market Readiness")
     _render_monitor_status(database)
-    bundle = read_latest_market_evidence_bundle(settings.database_path, underlying_name=underlying_name)
-    readiness_rows = read_global_readiness_snapshots(settings.database_path, underlying_name=underlying_name, limit=100)
-    authoritative_tab, research_tab, legacy_tab = st.tabs([
-        "Authoritative Evidence",
-        "Market Trend Research",
-        "Legacy Full Trade Evidence",
-    ])
+
+    bundle = read_latest_market_evidence_bundle(
+        settings.database_path,
+        underlying_name=underlying_name,
+    )
+    readiness_rows = read_global_readiness_snapshots(
+        settings.database_path,
+        underlying_name=underlying_name,
+        limit=100,
+    )
+
+    authoritative_tab, research_tab, legacy_tab = st.tabs(
+        [
+            "Authoritative Evidence",
+            "Market Trend Research",
+            "Legacy Full Trade Evidence",
+        ]
+    )
+
     with authoritative_tab:
-        _render_authoritative_page(settings, underlying_name, bundle, readiness_rows)
+        _render_authoritative_page(
+            settings,
+            underlying_name,
+            bundle,
+            readiness_rows,
+        )
+
     with research_tab:
-        render_market_trend_research_panel(settings.database_path, underlying=underlying_name)
+        render_market_trend_research_panel(
+            settings.database_path,
+            underlying=underlying_name,
+        )
+
     with legacy_tab:
-        st.warning("Live legacy recommendation recalculation is disabled. This tab now shows persisted historical readiness diagnostics only. The Authoritative Evidence tab is the sole current market conclusion.")
-        if readiness_rows: st.dataframe(_arrow_safe_rows(readiness_rows), width="stretch", hide_index=True)
-        else: st.info("No persisted legacy diagnostics are available.")
+        st.warning(
+            "Live legacy recommendation recalculation is disabled. This tab now "
+            "shows persisted historical readiness diagnostics only. The "
+            "Authoritative Evidence tab is the sole current market conclusion."
+        )
+        if readiness_rows:
+            st.dataframe(
+                _arrow_safe_rows(readiness_rows),
+                width="stretch",
+                hide_index=True,
+            )
+        else:
+            st.info("No persisted legacy diagnostics are available.")
