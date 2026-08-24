@@ -193,6 +193,11 @@ class DualPcrCalculator:
             if absolute < 0
             else "FLAT"
         )
+        effective_persistence = (
+            derived_persistence
+            if persistence_state in {None, "COMPARABLE"}
+            else persistence_state
+        )
         aggregate = PcrAggregate(
             ce_total,
             pe_total,
@@ -202,7 +207,7 @@ class DualPcrCalculator:
             absolute,
             percentage,
             slope,
-            persistence_state or derived_persistence,
+            effective_persistence,
             consecutive_count,
         )
         previous_by_key = previous_by_key or {}
