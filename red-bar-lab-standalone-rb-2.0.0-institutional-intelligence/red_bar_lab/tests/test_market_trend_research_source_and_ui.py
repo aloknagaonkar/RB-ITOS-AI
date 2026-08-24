@@ -68,12 +68,26 @@ def test_existing_tabs_are_preserved():
 def test_research_ui_has_exact_two_primary_tables_in_required_order():
     source = Path("red_bar_lab/ui/market_trend_research_panel.py").read_text(encoding="utf-8")
     assert source.index('"## Morning Fixed-Level PCR"') < source.index('"## Current/Overall PCR"')
-    assert "COLUMNS =" in source
+    assert "MORNING_COLUMNS =" in source
+    assert "CURRENT_COLUMNS =" in source
     for label in (
-        "CE current OI", "CE previous OI", "CE ΔOI", "CE ΔOI%",
-        "PE current OI", "PE previous OI", "PE ΔOI", "PE ΔOI%",
+        "CE current OI",
+        "CE opening OI",
+        "CE since-open ΔOI",
+        "CE since-open ΔOI%",
+        "PE current OI",
+        "PE opening OI",
+        "PE since-open ΔOI",
+        "PE since-open ΔOI%",
+        "CE previous-day OI",
+        "CE day ΔOI",
+        "CE day ΔOI%",
+        "PE previous-day OI",
+        "PE day ΔOI",
+        "PE day ΔOI%",
     ):
         assert label in source
+    assert "Short-term OI movement since previous refresh" in source
     assert "OBSERVATIONAL ONLY" in source
     assert "Signal generated: NO" in source
     assert "Canonical bundle created: NO" in source
