@@ -12,6 +12,9 @@ from red_bar_lab.services.option_participation_store import (
 from red_bar_lab.ui.market_trend_research_panel import (
     render_market_trend_research_panel,
 )
+from red_bar_lab.ui.market_direction_validation_panel import (
+    render_market_direction_validation_panel,
+)
 
 
 def _display_number(value, digits=3):
@@ -197,10 +200,11 @@ def render_page(
         limit=100,
     )
 
-    authoritative_tab, research_tab, legacy_tab = st.tabs(
+    authoritative_tab, research_tab, direction_validation_tab, legacy_tab = st.tabs(
         [
             "Authoritative Evidence",
             "Market Trend Research",
+            "Market Direction Validation",
             "Legacy Full Trade Evidence",
         ]
     )
@@ -215,6 +219,12 @@ def render_page(
 
     with research_tab:
         render_market_trend_research_panel(
+            settings.database_path,
+            underlying=underlying_name,
+        )
+
+    with direction_validation_tab:
+        render_market_direction_validation_panel(
             settings.database_path,
             underlying=underlying_name,
         )

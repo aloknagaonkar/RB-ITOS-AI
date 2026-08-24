@@ -36,6 +36,7 @@ def _rows(multiplier: float):
                 "distance_rank": rank,
                 "tradingsymbol": f"{side}-{rank}",
                 "strike": 24000 + rank * 50,
+                "current_price": 50.0 * multiplier,
                 "volume": 100.0 * multiplier,
                 "contract_volume": 10.0 * multiplier,
                 "oi": 200.0 * multiplier,
@@ -55,11 +56,15 @@ def test_latest_summary_contains_total_changes_vs_previous_snapshot(tmp_path: Pa
         Summary(observed_at="2026-08-21T10:05:00+05:30", rows=_rows(1.5)),
     )
 
-    summary = summarize_option_participation(
-        read_latest_option_participation(database)
-    )
+    latest = read_latest_option_participation(database)
+    summary = summarize_option_participation(latest)
     assert summary["ce_volume_change_pct"] == 50.0
     assert summary["pe_volume_change_pct"] == 50.0
     assert summary["ce_contracts_change_pct"] == 50.0
     assert summary["pe_oi_change_pct"] == 50.0
     assert summary["ce_oi_change_change_pct"] == 50.0
+    assert latest[0]["previous_refresh_price"] == 50.0
+    assert latest[0]["premium_change_from_previous_refresh_pct"] == 50.0
+    assert latest[0]["previous_refresh_oi"] == 200.0
+    assert latest[0]["oi_change_from_previous_refresh"] == 100.0
+    assert latest[0]["volume_change_from_previous_refresh_pct"] == 50.0

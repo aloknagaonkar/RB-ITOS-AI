@@ -145,6 +145,12 @@ def _pct_change(current: float, previous: float) -> float | None:
     return (current - previous) / abs(previous) * 100.0
 
 
+def _number_or_none(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
 def read_latest_option_participation(
     database_path: str | Path,
     *,
@@ -191,6 +197,11 @@ def read_latest_option_participation(
             previous_rows[0].get("observed_at") if previous_rows else None
         )
     }
+    previous_by_identity = {
+        str(row.get("instrument_key") or row.get("tradingsymbol") or ""): row
+        for row in previous_rows
+        if row.get("instrument_key") or row.get("tradingsymbol")
+    }
     for side in ("CE", "PE"):
         current = _side_totals(latest_rows, side)
         previous = _side_totals(previous_rows, side)
@@ -203,6 +214,32 @@ def read_latest_option_participation(
             )
     for row in latest_rows:
         row.update(changes)
+        identity = str(row.get("instrument_key") or row.get("tradingsymbol") or "")
+        previous = previous_by_identity.get(identity)
+        previous_price = _number_or_none(previous.get("current_price")) if previous else None
+        previous_oi = _number_or_none(previous.get("oi")) if previous else None
+        previous_volume = _number_or_none(previous.get("volume")) if previous else None
+        current_price = _number_or_none(row.get("current_price"))
+        current_oi = _number_or_none(row.get("oi"))
+        current_volume = _number_or_none(row.get("volume"))
+        row["previous_refresh_price"] = previous_price
+        row["premium_change_from_previous_refresh_pct"] = (
+            _pct_change(current_price, previous_price)
+            if current_price is not None and previous_price is not None
+            else None
+        )
+        row["previous_refresh_oi"] = previous_oi
+        row["oi_change_from_previous_refresh"] = (
+            current_oi - previous_oi
+            if current_oi is not None and previous_oi is not None
+            else None
+        )
+        row["previous_refresh_volume"] = previous_volume
+        row["volume_change_from_previous_refresh_pct"] = (
+            _pct_change(current_volume, previous_volume)
+            if current_volume is not None and previous_volume is not None
+            else None
+        )
     return latest_rows
 
 
