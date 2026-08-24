@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any
 from urllib.parse import unquote
 
@@ -16,6 +16,7 @@ from .paper_market_data import (
     PaperMarketDataCorruptionError,
     PaperMarketDataDiagnosticError,
     PaperMarketDataRateLimitError,
+    PaperMarketDataStaleError,
     PaperMarketDataUnavailableError,
     PaperMarketQuote,
     PaperOptionInstrument,
@@ -27,20 +28,39 @@ from .paper_market_data import (
 from .paper_market_data_readiness_models import MarketDataReadinessStage
 
 
+_MIN_QUOTE_EPOCH_MS = int(datetime(2000, 1, 1, tzinfo=timezone.utc).timestamp() * 1000)
+_MAX_QUOTE_EPOCH_MS = int(datetime(2100, 1, 1, tzinfo=timezone.utc).timestamp() * 1000)
+
+
 class UpstoxPaperCanaryMarketData:
     provider_name = "UPSTOX"
 
-    def __init__(self, client: UpstoxClient, *, underlying_keys: dict[str, str], maximum_quote_age_seconds: float) -> None:
+    def __init__(
+        self,
+        client: UpstoxClient,
+        *,
+        underlying_keys: dict[str, str],
+        maximum_quote_age_seconds: float,
+    ) -> None:
         self._client = client
         self._underlying_keys = dict(underlying_keys)
-        self._maximum_quote_age_seconds = finite_positive_number("maximum_quote_age_seconds", maximum_quote_age_seconds)
+        self._maximum_quote_age_seconds = finite_positive_number(
+            "maximum_quote_age_seconds",
+            maximum_quote_age_seconds,
+        )
         self._expected_tokens: dict[str, int | str] = {}
 
     @staticmethod
     def _map_error(exc: Exception) -> Exception:
         status = getattr(exc, "status_code", None)
         text = str(exc).lower()
-        if status in (401, 403) or "http 401" in text or "http 403" in text or "authentication" in text or "unauthorized" in text:
+        if (
+            status in (401, 403)
+            or "http 401" in text
+            or "http 403" in text
+            or "authentication" in text
+            or "unauthorized" in text
+        ):
             return PaperMarketDataAuthenticationError("Upstox authentication failed")
         if status == 429 or "http 429" in text or "rate limit" in text:
             return PaperMarketDataRateLimitError("Upstox rate limit reached")
@@ -67,7 +87,9 @@ class UpstoxPaperCanaryMarketData:
 
     @classmethod
     def _token(cls, row: dict[str, Any], instrument_key: str) -> int | str:
-        normalized = cls._normalize_token(row.get("instrument_token") or row.get("exchange_token"))
+        normalized = cls._normalize_token(
+            row.get("instrument_token") or row.get("exchange_token")
+        )
         if normalized is not None:
             return normalized
         suffix = instrument_key.rsplit("|", 1)[-1]
@@ -90,6 +112,70 @@ class UpstoxPaperCanaryMarketData:
             raise PaperMarketDataCorruptionError("Upstox quote timestamp is naive")
         return result
 
+    @staticmethod
+    def _quote_timestamp(value: object) -> datetime:
+        if type(value) is datetime:
+            if value.tzinfo is None or value.utcoffset() is None:
+                raise ValueError("quote timestamp must be timezone-aware")
+            return value
+
+        epoch_ms: int | None = None
+        if type(value) is int:
+            epoch_ms = value
+        elif type(value) is str:
+            text = value.strip()
+            if not text:
+                raise ValueError("quote timestamp is empty")
+            if text.isdigit():
+                epoch_ms = int(text)
+            else:
+                normalized = text[:-1] + "+00:00" if text.endswith("Z") else text
+                try:
+                    parsed = datetime.fromisoformat(normalized)
+                except ValueError as exc:
+                    raise ValueError("quote timestamp is invalid") from exc
+                if parsed.tzinfo is None or parsed.utcoffset() is None:
+                    raise ValueError("quote timestamp must be timezone-aware")
+                return parsed
+        else:
+            raise ValueError("quote timestamp type is unsupported")
+
+        if not (_MIN_QUOTE_EPOCH_MS <= epoch_ms <= _MAX_QUOTE_EPOCH_MS):
+            raise ValueError("quote timestamp is not a supported epoch-millisecond value")
+        try:
+            return datetime.fromtimestamp(epoch_ms / 1000.0, tz=timezone.utc)
+        except (OverflowError, OSError, ValueError) as exc:
+            raise ValueError("quote timestamp is out of range") from exc
+
+    @staticmethod
+    def _first_present(row: Mapping[str, Any], names: tuple[str, ...]) -> object | None:
+        for name in names:
+            if name in row and row[name] is not None:
+                return row[name]
+        return None
+
+    def _provider_diagnostic(
+        self,
+        *,
+        reason_code: str,
+        stage: MarketDataReadinessStage,
+        received_count: int | None = None,
+        normalized_count: int | None = None,
+        rejected_count: int | None = None,
+        rejected_field: str,
+        rejected_type: str | None = None,
+    ) -> PaperMarketDataDiagnosticError:
+        return PaperMarketDataDiagnosticError(
+            stage=stage,
+            reason_code=reason_code,
+            source_component="upstox_full_quotes",
+            received_count=received_count,
+            normalized_count=normalized_count,
+            rejected_count=rejected_count,
+            rejected_field=rejected_field,
+            rejected_type=rejected_type,
+        )
+
     def _full_quotes(self, instrument_keys: tuple[str, ...]) -> dict[str, Any]:
         try:
             response = self._client.session.get(
@@ -104,25 +190,61 @@ class UpstoxPaperCanaryMarketData:
             raise self._map_error(exc) from exc
         except (requests.RequestException, ValueError, TypeError) as exc:
             raise PaperMarketDataUnavailableError("Upstox quotes unavailable") from exc
-        data = payload.get("data") if isinstance(payload, dict) else None
-        if not isinstance(data, dict):
-            raise PaperMarketDataCorruptionError("malformed Upstox quote response")
-        return data
 
-    def underlying_quote(self, *, underlying: str, evaluated_at: datetime) -> PaperUnderlyingQuote:
+        if not isinstance(payload, Mapping):
+            raise self._provider_diagnostic(
+                reason_code="OPTION_QUOTE_RESPONSE_MALFORMED",
+                stage=MarketDataReadinessStage.OPTION_QUOTE_COLLECTION,
+                rejected_field="response_shape",
+                rejected_type=type(payload).__name__,
+            )
+        data = payload.get("data")
+        if not isinstance(data, Mapping):
+            raise self._provider_diagnostic(
+                reason_code="OPTION_QUOTE_RESPONSE_MALFORMED",
+                stage=MarketDataReadinessStage.OPTION_QUOTE_COLLECTION,
+                rejected_field="response_shape",
+                rejected_type=type(data).__name__,
+            )
+        return dict(data)
+
+    def underlying_quote(
+        self,
+        *,
+        underlying: str,
+        evaluated_at: datetime,
+    ) -> PaperUnderlyingQuote:
         key = self._underlying_keys.get(underlying)
         if not key:
             raise PaperMarketDataCorruptionError("unsupported Upstox underlying")
         payload = self._full_quotes((key,))
-        rows = self._correlate_quote_rows(payload=payload, requested_keys=(key,), require_known_token=False)
+        rows = self._correlate_quote_rows(
+            payload=payload,
+            requested_keys=(key,),
+            require_known_token=False,
+        )
         row = rows.get(key)
         if row is None:
-            raise PaperMarketDataUnavailableError("Upstox underlying quote unavailable")
-        timestamp = self._timestamp(row.get("timestamp") or row.get("last_trade_time") or row.get("exchange_timestamp"))
+            raise PaperMarketDataUnavailableError(
+                "Upstox underlying quote unavailable"
+            )
+        timestamp = self._timestamp(
+            row.get("timestamp")
+            or row.get("last_trade_time")
+            or row.get("exchange_timestamp")
+        )
         try:
-            quote = PaperUnderlyingQuote(key, underlying, row.get("last_price") or row.get("ltp"), timestamp, self.provider_name)
+            quote = PaperUnderlyingQuote(
+                key,
+                underlying,
+                row.get("last_price") or row.get("ltp"),
+                timestamp,
+                self.provider_name,
+            )
         except (TypeError, ValueError) as exc:
-            raise PaperMarketDataCorruptionError("malformed Upstox underlying quote") from exc
+            raise PaperMarketDataCorruptionError(
+                "malformed Upstox underlying quote"
+            ) from exc
         verify_timestamp_freshness(
             timestamp=quote.quote_timestamp,
             evaluated_at=evaluated_at,
@@ -130,7 +252,12 @@ class UpstoxPaperCanaryMarketData:
         )
         return quote
 
-    def option_instruments(self, *, underlying: str, evaluated_at: datetime) -> tuple[PaperOptionInstrument, ...]:
+    def option_instruments(
+        self,
+        *,
+        underlying: str,
+        evaluated_at: datetime,
+    ) -> tuple[PaperOptionInstrument, ...]:
         underlying_key = self._underlying_keys.get(underlying)
         if not underlying_key:
             raise PaperMarketDataCorruptionError("unsupported Upstox underlying")
@@ -140,25 +267,43 @@ class UpstoxPaperCanaryMarketData:
             raise self._map_error(exc) from exc
         if not rows:
             return ()
+
         output: list[PaperOptionInstrument] = []
         seen_keys: set[str] = set()
         token_owners: dict[str, str] = {}
         for row in rows:
             if not isinstance(row, dict):
-                raise PaperMarketDataCorruptionError("malformed Upstox option contract")
+                raise PaperMarketDataCorruptionError(
+                    "malformed Upstox option contract"
+                )
             try:
                 key = self._normalize_key(row.get("instrument_key"))
-                side = OptionSide(str(row.get("instrument_type") or row.get("option_type") or row.get("option_side") or "").upper())
+                side = OptionSide(
+                    str(
+                        row.get("instrument_type")
+                        or row.get("option_type")
+                        or row.get("option_side")
+                        or ""
+                    ).upper()
+                )
                 expiry = self._expiry(row.get("expiry"))
                 if expiry < evaluated_at.date():
                     continue
-                symbol = str(row.get("trading_symbol") or row.get("tradingsymbol") or "").strip()
+                symbol = str(
+                    row.get("trading_symbol")
+                    or row.get("tradingsymbol")
+                    or ""
+                ).strip()
                 if not key or not symbol or key in seen_keys:
-                    raise PaperMarketDataCorruptionError("Upstox contract identity missing or duplicated")
+                    raise PaperMarketDataCorruptionError(
+                        "Upstox contract identity missing or duplicated"
+                    )
                 token = self._token(row, key)
                 owner = token_owners.get(str(token))
                 if owner is not None and owner != key:
-                    raise PaperMarketDataCorruptionError("Upstox contract token is ambiguous")
+                    raise PaperMarketDataCorruptionError(
+                        "Upstox contract token is ambiguous"
+                    )
                 seen_keys.add(key)
                 token_owners[str(token)] = key
                 instrument = PaperOptionInstrument(
@@ -167,7 +312,10 @@ class UpstoxPaperCanaryMarketData:
                     symbol,
                     underlying,
                     expiry,
-                    finite_positive_number("strike", row.get("strike_price") or row.get("strike")),
+                    finite_positive_number(
+                        "strike",
+                        row.get("strike_price") or row.get("strike"),
+                    ),
                     side,
                     int(row.get("lot_size")),
                     self.provider_name,
@@ -177,11 +325,26 @@ class UpstoxPaperCanaryMarketData:
             except PaperMarketDataCorruptionError:
                 raise
             except (TypeError, ValueError) as exc:
-                raise PaperMarketDataCorruptionError("malformed Upstox option contract") from exc
-        return tuple(sorted(output, key=lambda item: (item.expiry, item.strike, item.option_side.value)))
+                raise PaperMarketDataCorruptionError(
+                    "malformed Upstox option contract"
+                ) from exc
+        return tuple(
+            sorted(
+                output,
+                key=lambda item: (
+                    item.expiry,
+                    item.strike,
+                    item.option_side.value,
+                ),
+            )
+        )
 
     @staticmethod
-    def _add_index(index: dict[str, set[str]], identity: str | None, requested_key: str) -> None:
+    def _add_index(
+        index: dict[str, set[str]],
+        identity: str | None,
+        requested_key: str,
+    ) -> None:
         if identity is not None:
             index.setdefault(identity, set()).add(requested_key)
 
@@ -196,31 +359,37 @@ class UpstoxPaperCanaryMarketData:
         tokens: dict[str, set[str]] = {}
         for requested_key in requested_keys:
             if requested_key in exact:
-                raise PaperMarketDataDiagnosticError(
-                    stage=MarketDataReadinessStage.OPTION_QUOTE_CORRELATION,
+                raise self._provider_diagnostic(
                     reason_code="OPTION_QUOTE_IDENTITY_AMBIGUOUS",
-                    source_component="upstox_quote_correlation",
-                    rejected_field="quote_identity",
+                    stage=MarketDataReadinessStage.OPTION_QUOTE_CORRELATION,
                     received_count=len(requested_keys),
                     normalized_count=0,
                     rejected_count=1,
+                    rejected_field="quote_identity",
                 )
             exact[requested_key] = requested_key
-            self._add_index(normalized, self._normalize_key(requested_key), requested_key)
+            self._add_index(
+                normalized,
+                self._normalize_key(requested_key),
+                requested_key,
+            )
             expected_token = self._expected_tokens.get(requested_key)
             if require_known_token and expected_token is None:
-                raise PaperMarketDataDiagnosticError(
-                    stage=MarketDataReadinessStage.OPTION_QUOTE_CORRELATION,
+                raise self._provider_diagnostic(
                     reason_code="OPTION_QUOTE_IDENTITY_MISSING",
-                    source_component="upstox_quote_correlation",
-                    rejected_field="instrument_token",
+                    stage=MarketDataReadinessStage.OPTION_QUOTE_CORRELATION,
                     received_count=len(requested_keys),
                     normalized_count=0,
                     rejected_count=1,
+                    rejected_field="instrument_token",
                 )
             if expected_token is not None:
                 tokens.setdefault(str(expected_token), set()).add(requested_key)
-                self._add_index(normalized, self._normalize_key(expected_token), requested_key)
+                self._add_index(
+                    normalized,
+                    self._normalize_key(expected_token),
+                    requested_key,
+                )
         return exact, normalized, tokens
 
     def _identity_matches(
@@ -256,10 +425,9 @@ class UpstoxPaperCanaryMarketData:
         rejected_field: str,
         rejected_type: str | None = None,
     ) -> PaperMarketDataDiagnosticError:
-        return PaperMarketDataDiagnosticError(
-            stage=MarketDataReadinessStage.OPTION_QUOTE_CORRELATION,
+        return self._provider_diagnostic(
             reason_code=reason_code,
-            source_component="upstox_quote_correlation",
+            stage=MarketDataReadinessStage.OPTION_QUOTE_CORRELATION,
             received_count=payload_count,
             normalized_count=correlated_count,
             rejected_count=rejected_count,
@@ -374,7 +542,11 @@ class UpstoxPaperCanaryMarketData:
                     )
 
             for field_name, value, permit_token_lookup in embedded_fields:
-                if field_name == primary_field or value is None or (type(value) is str and not value.strip()):
+                if (
+                    field_name == primary_field
+                    or value is None
+                    or (type(value) is str and not value.strip())
+                ):
                     continue
                 candidates = self._identity_matches(
                     value,
@@ -415,22 +587,6 @@ class UpstoxPaperCanaryMarketData:
                     rejected_count=1,
                     rejected_field="duplicate_identity",
                 )
-            if raw_row.get("last_price") is None and raw_row.get("ltp") is None:
-                raise self._quote_diagnostic(
-                    reason_code="OPTION_QUOTE_REQUIRED_FIELD_MISSING",
-                    payload_count=payload_count,
-                    correlated_count=len(matched),
-                    rejected_count=1,
-                    rejected_field="quote_price",
-                )
-            if raw_row.get("timestamp") is None and raw_row.get("last_trade_time") is None and raw_row.get("exchange_timestamp") is None:
-                raise self._quote_diagnostic(
-                    reason_code="OPTION_QUOTE_REQUIRED_FIELD_MISSING",
-                    payload_count=payload_count,
-                    correlated_count=len(matched),
-                    rejected_count=1,
-                    rejected_field="quote_timestamp",
-                )
             matched[requested_key] = dict(raw_row)
 
         missing_count = len(requested_keys) - len(matched)
@@ -444,46 +600,191 @@ class UpstoxPaperCanaryMarketData:
             )
         return matched
 
-    def quotes(self, *, instrument_keys: tuple[str, ...], evaluated_at: datetime) -> tuple[PaperMarketQuote, ...]:
+    def _normalize_option_quote(
+        self,
+        *,
+        key: str,
+        row: Mapping[str, Any],
+        evaluated_at: datetime,
+        received_count: int,
+        normalized_count: int,
+    ) -> PaperMarketQuote:
+        token_value = self._first_present(
+            row,
+            ("instrument_token", "exchange_token"),
+        )
+        token = self._normalize_token(token_value)
+        if token is None:
+            raise self._provider_diagnostic(
+                reason_code="OPTION_QUOTE_TOKEN_MISSING",
+                stage=MarketDataReadinessStage.OPTION_QUOTE_CORRELATION,
+                received_count=received_count,
+                normalized_count=normalized_count,
+                rejected_count=1,
+                rejected_field="instrument_token",
+                rejected_type=type(token_value).__name__ if token_value is not None else None,
+            )
+
+        timestamp_value = self._first_present(
+            row,
+            ("timestamp", "last_trade_time", "exchange_timestamp"),
+        )
+        try:
+            timestamp = self._quote_timestamp(timestamp_value)
+        except (ValueError, OverflowError, OSError) as exc:
+            raise self._provider_diagnostic(
+                reason_code="OPTION_QUOTE_TIMESTAMP_INVALID",
+                stage=MarketDataReadinessStage.QUOTE_FRESHNESS_VALIDATION,
+                received_count=received_count,
+                normalized_count=normalized_count,
+                rejected_count=1,
+                rejected_field="quote_timestamp",
+                rejected_type=type(timestamp_value).__name__
+                if timestamp_value is not None
+                else None,
+            ) from exc
+
+        depth_value = self._first_present(row, ("market_depth", "depth"))
+        depth: Mapping[str, Any]
+        if depth_value is None:
+            depth = {}
+        elif isinstance(depth_value, Mapping):
+            depth = depth_value
+        else:
+            raise self._provider_diagnostic(
+                reason_code="OPTION_QUOTE_DEPTH_MALFORMED",
+                stage=MarketDataReadinessStage.QUOTE_QUALITY_VALIDATION,
+                received_count=received_count,
+                normalized_count=normalized_count,
+                rejected_count=1,
+                rejected_field="bid_ask",
+                rejected_type=type(depth_value).__name__,
+            )
+
+        buy_value = self._first_present(depth, ("buy", "bids"))
+        sell_value = self._first_present(depth, ("sell", "asks"))
+        buy = [] if buy_value is None else buy_value
+        sell = [] if sell_value is None else sell_value
+        if not isinstance(buy, list) or not isinstance(sell, list):
+            bad = buy if not isinstance(buy, list) else sell
+            raise self._provider_diagnostic(
+                reason_code="OPTION_QUOTE_DEPTH_MALFORMED",
+                stage=MarketDataReadinessStage.QUOTE_QUALITY_VALIDATION,
+                received_count=received_count,
+                normalized_count=normalized_count,
+                rejected_count=1,
+                rejected_field="bid_ask",
+                rejected_type=type(bad).__name__,
+            )
+        if buy and not isinstance(buy[0], Mapping):
+            raise self._provider_diagnostic(
+                reason_code="OPTION_QUOTE_DEPTH_MALFORMED",
+                stage=MarketDataReadinessStage.QUOTE_QUALITY_VALIDATION,
+                received_count=received_count,
+                normalized_count=normalized_count,
+                rejected_count=1,
+                rejected_field="bid_ask",
+                rejected_type=type(buy[0]).__name__,
+            )
+        if sell and not isinstance(sell[0], Mapping):
+            raise self._provider_diagnostic(
+                reason_code="OPTION_QUOTE_DEPTH_MALFORMED",
+                stage=MarketDataReadinessStage.QUOTE_QUALITY_VALIDATION,
+                received_count=received_count,
+                normalized_count=normalized_count,
+                rejected_count=1,
+                rejected_field="bid_ask",
+                rejected_type=type(sell[0]).__name__,
+            )
+
+        last_price = self._first_present(row, ("last_price", "ltp"))
+        bid_price = (
+            buy[0].get("price")
+            if buy
+            else self._first_present(row, ("bid_price",))
+        )
+        ask_price = (
+            sell[0].get("price")
+            if sell
+            else self._first_present(row, ("ask_price",))
+        )
+        try:
+            quote = PaperMarketQuote(
+                key,
+                token,
+                last_price,
+                bid_price,
+                ask_price,
+                timestamp,
+                self.provider_name,
+            )
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise self._provider_diagnostic(
+                reason_code="OPTION_QUOTE_PRICE_INVALID",
+                stage=MarketDataReadinessStage.QUOTE_QUALITY_VALIDATION,
+                received_count=received_count,
+                normalized_count=normalized_count,
+                rejected_count=1,
+                rejected_field="quote_price",
+                rejected_type=type(last_price).__name__
+                if last_price is not None
+                else None,
+            ) from exc
+
+        try:
+            verify_quote_freshness(
+                quote,
+                evaluated_at=evaluated_at,
+                maximum_age_seconds=self._maximum_quote_age_seconds,
+            )
+        except PaperMarketDataStaleError as exc:
+            raise self._provider_diagnostic(
+                reason_code="OPTION_QUOTE_STALE",
+                stage=MarketDataReadinessStage.QUOTE_FRESHNESS_VALIDATION,
+                received_count=received_count,
+                normalized_count=normalized_count,
+                rejected_count=1,
+                rejected_field="quote_timestamp",
+            ) from exc
+        except PaperMarketDataCorruptionError as exc:
+            raise self._provider_diagnostic(
+                reason_code="OPTION_QUOTE_TIMESTAMP_INVALID",
+                stage=MarketDataReadinessStage.QUOTE_FRESHNESS_VALIDATION,
+                received_count=received_count,
+                normalized_count=normalized_count,
+                rejected_count=1,
+                rejected_field="quote_timestamp",
+            ) from exc
+        return quote
+
+    def quotes(
+        self,
+        *,
+        instrument_keys: tuple[str, ...],
+        evaluated_at: datetime,
+    ) -> tuple[PaperMarketQuote, ...]:
         if not instrument_keys:
             return ()
-        requested_keys = tuple(self._normalize_key(key) or "" for key in instrument_keys)
+        requested_keys = tuple(
+            self._normalize_key(key) or "" for key in instrument_keys
+        )
         if any(not key for key in requested_keys):
-            raise PaperMarketDataCorruptionError("invalid requested Upstox instrument key")
+            raise PaperMarketDataCorruptionError(
+                "invalid requested Upstox instrument key"
+            )
         rows = self._correlate_quote_rows(
             payload=self._full_quotes(requested_keys),
             requested_keys=requested_keys,
         )
         output: list[PaperMarketQuote] = []
         for key in requested_keys:
-            row = rows[key]
-            depth = row.get("market_depth") or row.get("depth") or {}
-            if not isinstance(depth, dict):
-                raise PaperMarketDataCorruptionError("malformed Upstox market depth")
-            buy = depth.get("buy") or depth.get("bids") or []
-            sell = depth.get("sell") or depth.get("asks") or []
-            if not isinstance(buy, list) or not isinstance(sell, list):
-                raise PaperMarketDataCorruptionError("malformed Upstox market depth")
-            timestamp = self._timestamp(row.get("timestamp") or row.get("last_trade_time") or row.get("exchange_timestamp"))
-            token = self._normalize_token(row.get("instrument_token") or row.get("exchange_token")) or self._expected_tokens.get(key)
-            if token is None:
-                raise PaperMarketDataCorruptionError("Upstox quote token identity is missing")
-            try:
-                quote = PaperMarketQuote(
-                    key,
-                    token,
-                    row.get("last_price") or row.get("ltp"),
-                    buy[0].get("price") if buy else row.get("bid_price"),
-                    sell[0].get("price") if sell else row.get("ask_price"),
-                    timestamp,
-                    self.provider_name,
+            output.append(
+                self._normalize_option_quote(
+                    key=key,
+                    row=rows[key],
+                    evaluated_at=evaluated_at,
+                    received_count=len(rows),
+                    normalized_count=len(output),
                 )
-            except (AttributeError, TypeError, ValueError) as exc:
-                raise PaperMarketDataCorruptionError("malformed Upstox quote values") from exc
-            verify_quote_freshness(
-                quote,
-                evaluated_at=evaluated_at,
-                maximum_age_seconds=self._maximum_quote_age_seconds,
             )
-            output.append(quote)
         return tuple(output)
