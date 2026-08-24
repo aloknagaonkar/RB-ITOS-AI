@@ -26,6 +26,24 @@ function Stop-ValidatedProcess {
     return $true
 }
 
+if (-not (Test-Path $statusPath)) {
+    Remove-Item $stopPath -Force -ErrorAction SilentlyContinue
+    Write-Host "ALREADY_STOPPED" -ForegroundColor Yellow
+    exit 0
+}
+
+try {
+    $initialStatus = Get-Content $statusPath -Raw | ConvertFrom-Json
+    if ($initialStatus.supervisor_state -eq "STOPPED") {
+        Remove-Item $stopPath -Force -ErrorAction SilentlyContinue
+        Write-Host "ALREADY_STOPPED" -ForegroundColor Yellow
+        exit 0
+    }
+}
+catch {
+    Write-Host "STATUS_UNAVAILABLE: attempting only validated recorded PIDs." -ForegroundColor Yellow
+}
+
 $tempPath = "$stopPath.$PID.tmp"
 Set-Content -Path $tempPath -Value ((Get-Date).ToUniversalTime().ToString("o")) -Encoding UTF8
 Move-Item -Path $tempPath -Destination $stopPath -Force
@@ -46,23 +64,28 @@ do {
 } while ((Get-Date) -lt $deadline)
 
 Write-Host "Graceful stop timed out; attempting only validated recorded PIDs." -ForegroundColor Yellow
+$stoppedAny = $false
 try {
     if (Test-Path $statusPath) {
         $status = Get-Content $statusPath -Raw | ConvertFrom-Json
         if ($status.child_pid) {
-            Stop-ValidatedProcess -ProcessId ([int]$status.child_pid) -RequiredMarker "run_market_trend_research_runtime" | Out-Null
+            $stoppedAny = (Stop-ValidatedProcess -ProcessId ([int]$status.child_pid) -RequiredMarker "run_market_trend_research_runtime") -or $stoppedAny
         }
         if ($status.supervisor_pid) {
-            Stop-ValidatedProcess -ProcessId ([int]$status.supervisor_pid) -RequiredMarker "run_market_trend_research_supervisor" | Out-Null
+            $stoppedAny = (Stop-ValidatedProcess -ProcessId ([int]$status.supervisor_pid) -RequiredMarker "run_market_trend_research_supervisor") -or $stoppedAny
         }
-        Remove-Item $stopPath -Force -ErrorAction SilentlyContinue
-        Write-Host "STOPPED_BY_TARGETED_FALLBACK" -ForegroundColor Yellow
-        exit 0
     }
 }
 catch {
     Write-Host "TARGETED_STOP_FAILED: $($_.Exception.Message)" -ForegroundColor Red
 }
+finally {
+    Remove-Item $stopPath -Force -ErrorAction SilentlyContinue
+}
 
+if ($stoppedAny) {
+    Write-Host "STOPPED_BY_TARGETED_FALLBACK" -ForegroundColor Yellow
+    exit 0
+}
 Write-Host "STOP_REQUESTED: no validated Market Trend Research PID could be stopped." -ForegroundColor Yellow
 exit 1
