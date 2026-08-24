@@ -8,6 +8,19 @@ $statusPath = Join-Path $workerRoot "supervisor_state.json"
 $stopPath = Join-Path $workerRoot "stop.request"
 New-Item -ItemType Directory -Path $workerRoot -Force | Out-Null
 
+function Stop-ValidatedProcess {
+    param(
+        [Parameter(Mandatory = $true)][int]$ProcessId,
+        [Parameter(Mandatory = $true)][string]$RequiredMarker
+    )
+    if ($ProcessId -le 0) { return $false }
+    $candidate = Get-CimInstance Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction SilentlyContinue
+    if ($null -eq $candidate -or -not $candidate.CommandLine) { return $false }
+    if ($candidate.CommandLine -notlike "*$RequiredMarker*") { return $false }
+    Stop-Process -Id $ProcessId -Force -ErrorAction Stop
+    return $true
+}
+
 $tempPath = "$stopPath.$PID.tmp"
 Set-Content -Path $tempPath -Value ((Get-Date).ToUniversalTime().ToString("o")) -Encoding UTF8
 Move-Item -Path $tempPath -Destination $stopPath -Force
@@ -26,6 +39,23 @@ do {
     }
 } while ((Get-Date) -lt $deadline)
 
-Write-Host "STOP_REQUESTED: supervisor did not confirm STOPPED within timeout." -ForegroundColor Yellow
-Write-Host "No broad Python process termination was attempted."
+Write-Host "Graceful stop timed out; attempting only validated recorded PIDs." -ForegroundColor Yellow
+try {
+    if (Test-Path $statusPath) {
+        $status = Get-Content $statusPath -Raw | ConvertFrom-Json
+        if ($status.child_pid) {
+            Stop-ValidatedProcess -ProcessId ([int]$status.child_pid) -RequiredMarker "run_market_trend_research_runtime" | Out-Null
+        }
+        if ($status.supervisor_pid) {
+            Stop-ValidatedProcess -ProcessId ([int]$status.supervisor_pid) -RequiredMarker "run_market_trend_research_supervisor" | Out-Null
+        }
+        Write-Host "STOPPED_BY_TARGETED_FALLBACK" -ForegroundColor Yellow
+        exit 0
+    }
+}
+catch {
+    Write-Host "TARGETED_STOP_FAILED: $($_.Exception.Message)" -ForegroundColor Red
+}
+
+Write-Host "STOP_REQUESTED: no validated Market Trend Research PID could be stopped." -ForegroundColor Yellow
 exit 1
