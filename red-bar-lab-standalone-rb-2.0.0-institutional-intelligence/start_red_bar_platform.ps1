@@ -40,6 +40,17 @@ function Get-RunningPlatformProcesses {
     return $running
 }
 
+function Invoke-WorkerControl {
+    param(
+        [Parameter(Mandatory = $true)][string]$ScriptName,
+        [string[]]$Arguments = @()
+    )
+    $scriptPath = Join-Path $projectRoot $ScriptName
+    if (-not (Test-Path $scriptPath)) { return 1 }
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $scriptPath @Arguments
+    return $LASTEXITCODE
+}
+
 function Stop-ProcessTree {
     param([Parameter(Mandatory = $true)][int]$ProcessId)
     if ($null -eq (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) { return $false }
@@ -85,15 +96,11 @@ function Show-PlatformStatus {
             Write-Host ("  {0,-24} PID {1}" -f $entry.Name, $entry.ProcessId) -ForegroundColor Green
         }
     }
-    if (Test-Path (Join-Path $projectRoot "status_market_trend_research_worker.ps1")) {
-        & (Join-Path $projectRoot "status_market_trend_research_worker.ps1")
-    }
+    Invoke-WorkerControl -ScriptName "status_market_trend_research_worker.ps1" | Out-Null
 }
 
 function Stop-RedBarPlatform {
-    if (Test-Path (Join-Path $projectRoot "stop_market_trend_research_worker.ps1")) {
-        & (Join-Path $projectRoot "stop_market_trend_research_worker.ps1") -TimeoutSeconds 20
-    }
+    Invoke-WorkerControl -ScriptName "stop_market_trend_research_worker.ps1" -Arguments @("-TimeoutSeconds", "20") | Out-Null
     $running = @(Get-RunningPlatformProcesses)
     foreach ($entry in ($running | Sort-Object { if ($_.Name -eq "Red Bar Lab UI") { 0 } else { 1 } })) {
         try {
@@ -151,8 +158,8 @@ $processes = @()
 
 try {
     if ($StartMarketTrendResearchWorker) {
-        & (Join-Path $projectRoot "start_market_trend_research_worker.ps1")
-        if ($LASTEXITCODE -ne 0) { throw "Market Trend Research worker startup failed." }
+        $workerExitCode = Invoke-WorkerControl -ScriptName "start_market_trend_research_worker.ps1"
+        if ($workerExitCode -ne 0) { throw "Market Trend Research worker startup failed." }
     }
 
     $collectorCommand = @"
@@ -188,7 +195,7 @@ catch {
     Write-Host "Platform startup failed: $($_.Exception.Message)" -ForegroundColor Red
     foreach ($entry in $processes) { Stop-ProcessTree -ProcessId $entry.ProcessId | Out-Null }
     if ($StartMarketTrendResearchWorker) {
-        & (Join-Path $projectRoot "stop_market_trend_research_worker.ps1") -TimeoutSeconds 10
+        Invoke-WorkerControl -ScriptName "stop_market_trend_research_worker.ps1" -Arguments @("-TimeoutSeconds", "10") | Out-Null
     }
     Stop-OrphanedRedBarProcesses
     Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
