@@ -280,7 +280,7 @@ class UpstoxPaperCanaryMarketData:
                 reason_code="OPTION_QUOTE_COUNT_INCOMPLETE",
                 payload_count=0,
                 correlated_count=0,
-                rejected_count=len(requested_keys),
+                rejected_count=0,
                 rejected_field="quote_identity",
             )
         exact, normalized, tokens = self._requested_indexes(
