@@ -25,6 +25,60 @@ def test_naive_missing_and_malformed_timestamps_are_unavailable(value):
     assert panel._format_ist_timestamp(value) == "Not available"
 
 
+def test_selected_pcr_strikes_correlate_delta_vwap_and_iv_by_side():
+    pcr_panel = {
+        "expiry": "2026-08-25",
+        "rows": [
+            {"strike": 24150.0, "position": "BELOW_ATM"},
+            {"strike": 24200.0, "position": "ATM"},
+            {"strike": "OVERALL TOTAL", "position": "TOTAL"},
+        ]
+    }
+    option_rows = [
+        {
+            "strike": 24200.0,
+            "expiry": "2026-08-25",
+            "option_type": "PE",
+            "current_price": 57.25,
+            "delta": -0.46,
+            "vwap": 51.91,
+            "iv": 12.4,
+            "oi_change_pct": -16.98,
+            "observed_at": SOURCE,
+        },
+        {
+            "strike": 24200.0,
+            "expiry": "2026-08-25",
+            "option_type": "CE",
+            "current_price": 74.50,
+            "delta": 0.54,
+            "vwap": 74.16,
+            "iv": 11.8,
+            "oi_change_pct": 91.66,
+            "observed_at": SOURCE,
+        },
+    ]
+
+    rows = panel._option_metric_rows(pcr_panel, option_rows)
+
+    assert len(rows) == 2
+    assert rows[0]["CE Delta"] == "Not available"
+    assert rows[1]["Strike"] == "24200"
+    assert "Position" not in rows[1]
+    assert rows[1]["CE current price"] == "74.50"
+    assert rows[1]["CE Delta"] == "0.5400"
+    assert rows[1]["CE VWAP"] == "74.16"
+    assert rows[1]["CE IV"] == "11.80"
+    assert rows[1]["CE OI change %"] == "+91.66%"
+    assert rows[1]["PE Delta"] == "-0.4600"
+    assert rows[1]["PE current price"] == "57.25"
+    assert rows[1]["PE VWAP"] == "51.91"
+    assert rows[1]["PE IV"] == "12.40"
+    assert rows[1]["PE OI change %"].endswith("16.98%")
+    assert not rows[1]["PE OI change %"].startswith("+")
+    assert panel._option_metrics_source_time(pcr_panel, option_rows) == EXPECTED_IST
+
+
 def _health(*, age: float, failures: int = 0, reason: str | None = None):
     heartbeat = NOW - timedelta(seconds=age)
     return {

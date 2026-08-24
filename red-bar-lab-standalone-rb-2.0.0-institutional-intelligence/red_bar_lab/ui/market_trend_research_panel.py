@@ -12,6 +12,9 @@ import streamlit as st
 from red_bar_lab.services.market_trend_research.models import PcrBias
 from red_bar_lab.services.market_trend_research.policy import MarketTrendResearchPolicy
 from red_bar_lab.services.market_trend_research.repository import MarketTrendResearchRepository
+from red_bar_lab.services.option_participation_store import (
+    read_latest_option_participation,
+)
 from red_bar_lab.ui._shared import _arrow_safe_rows
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -257,6 +260,78 @@ def _current_rows(panel: dict[str, Any]) -> list[dict[str, str]]:
     } for row in panel.get("rows") or []]
 
 
+def _option_metric_rows(
+    panel: Mapping[str, Any],
+    option_rows: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    """Correlate persisted option metrics to the exact PCR strike window."""
+
+    selected_expiry = str(panel.get("expiry") or "")
+    by_expiry_strike_side = {
+        (
+            str(row.get("expiry") or ""),
+            float(row["strike"]),
+            str(row.get("option_type") or "").upper(),
+        ): row
+        for row in option_rows
+        if isinstance(row.get("strike"), (int, float))
+        and str(row.get("option_type") or "").upper() in {"CE", "PE"}
+    }
+    result: list[dict[str, str]] = []
+    for pcr_row in panel.get("rows") or []:
+        strike = pcr_row.get("strike")
+        if not isinstance(strike, (int, float)):
+            continue
+        ce = by_expiry_strike_side.get(
+            (selected_expiry, float(strike), "CE"), {}
+        )
+        pe = by_expiry_strike_side.get(
+            (selected_expiry, float(strike), "PE"), {}
+        )
+        result.append(
+            {
+                "Strike": f"{float(strike):.0f}",
+                "CE current price": _number(ce.get("current_price"), 2),
+                "CE Delta": _number(ce.get("delta"), 4),
+                "CE VWAP": _number(ce.get("vwap"), 2),
+                "CE IV": _number(ce.get("iv"), 2),
+                "CE OI change %": _percent(ce.get("oi_change_pct")),
+                "PE current price": _number(pe.get("current_price"), 2),
+                "PE Delta": _number(pe.get("delta"), 4),
+                "PE VWAP": _number(pe.get("vwap"), 2),
+                "PE IV": _number(pe.get("iv"), 2),
+                "PE OI change %": _percent(pe.get("oi_change_pct")),
+            }
+        )
+    return result
+
+
+def _option_metrics_source_time(
+    panel: Mapping[str, Any],
+    option_rows: list[dict[str, Any]],
+) -> str:
+    selected_expiry = str(panel.get("expiry") or "")
+    selected_strikes = {
+        float(row["strike"])
+        for row in panel.get("rows") or []
+        if isinstance(row.get("strike"), (int, float))
+    }
+    timestamps = {
+        str(row.get("observed_at"))
+        for row in option_rows
+        if str(row.get("expiry") or "") == selected_expiry
+        and isinstance(row.get("strike"), (int, float))
+        and float(row["strike"]) in selected_strikes
+        and str(row.get("option_type") or "").upper() in {"CE", "PE"}
+        and row.get("observed_at")
+    }
+    return (
+        _format_ist_timestamp(next(iter(timestamps)))
+        if len(timestamps) == 1
+        else "Not available"
+    )
+
+
 def _refresh_rows(panel: dict[str, Any]) -> list[dict[str, str]]:
     return [{
         "Strike": str(row.get("strike", "Not available")),
@@ -372,7 +447,13 @@ def _render_refresh_diagnostics(panel: dict[str, Any]) -> None:
         st.dataframe(_arrow_safe_rows(_refresh_rows(panel)), width="stretch", hide_index=True)
 
 
-def _render_current(projection: dict[str, Any], *, stale: bool, live_source_age: float | None) -> None:
+def _render_current(
+    projection: dict[str, Any],
+    *,
+    stale: bool,
+    live_source_age: float | None,
+    option_rows: list[dict[str, Any]] | None = None,
+) -> None:
     st.markdown("## Current/Overall PCR")
     panel = projection.get("current_panel") or {}
     aggregate = panel.get("aggregate") or {}
@@ -397,12 +478,48 @@ def _render_current(projection: dict[str, Any], *, stale: bool, live_source_age:
         hide_index=True,
     )
     with st.expander("Current/Overall PCR details", expanded=False):
-        st.dataframe(_arrow_safe_rows(summary), width="stretch", hide_index=True)
         st.write(f"Total CE OI change: {_signed(total.get('ce_previous_day_change'))} ({_percent(total.get('ce_previous_day_change_pct'))})")
         st.write(f"Total PE OI change: {_signed(total.get('pe_previous_day_change'))} ({_percent(total.get('pe_previous_day_change_pct'))})")
         st.dataframe(_arrow_safe_rows(_current_rows(panel)), width="stretch", hide_index=True)
+        st.markdown("#### Selected-strike Delta, VWAP and IV")
+        st.caption(
+            "Metrics are correlated by exact strike and CE/PE side from the "
+            "latest persisted option-participation snapshot. They do not change "
+            "the Current/Overall PCR calculation."
+        )
+        metric_rows = _option_metric_rows(panel, option_rows or [])
+        metric_fields = (
+            "CE current price", "CE Delta", "CE VWAP", "CE IV",
+            "CE OI change %", "PE current price", "PE Delta", "PE VWAP",
+            "PE IV", "PE OI change %",
+        )
+        if any(
+            row.get(field) != "Not available"
+            for row in metric_rows
+            for field in metric_fields
+        ):
+            st.dataframe(
+                _arrow_safe_rows(metric_rows),
+                width="stretch",
+                hide_index=True,
+            )
+            st.caption(
+                "Option metrics source time: "
+                + _option_metrics_source_time(panel, option_rows or [])
+            )
+        else:
+            st.info(
+                "Delta, VWAP and IV are not available for the selected PCR "
+                "strikes in the latest persisted option snapshot."
+            )
         st.write(f"Current/Overall PCR: Total current PE OI ÷ Total current CE OI = {_number(aggregate.get('pcr'))}")
         st.write(f"PCR directional evidence: {_bias(aggregate.get('classification'), stale=stale)}")
+        st.markdown("#### Current/Overall PCR snapshot details")
+        st.dataframe(
+            _arrow_safe_rows(summary),
+            width="stretch",
+            hide_index=True,
+        )
     _render_refresh_diagnostics(panel)
 
 
@@ -443,6 +560,7 @@ def _render_projection_cycle(
     repository: MarketTrendResearchRepository,
     *, underlying: str,
     now: datetime | None = None,
+    option_rows: list[dict[str, Any]] | None = None,
 ) -> None:
     current = now or datetime.now(timezone.utc)
     if current.tzinfo is None or current.utcoffset() is None:
@@ -480,7 +598,12 @@ def _render_projection_cycle(
     )
     _render_morning(projection, stale=stale, live_source_age=live_source_age)
     _render_market_direction_research(projection, stale=stale)
-    _render_current(projection, stale=stale, live_source_age=live_source_age)
+    _render_current(
+        projection,
+        stale=stale,
+        live_source_age=live_source_age,
+        option_rows=option_rows,
+    )
     with st.expander("Internal diagnostics", expanded=False):
         aggregate = (projection.get("current_panel") or {}).get("aggregate") or {}
         st.write({
@@ -505,7 +628,15 @@ def _render_projection_cycle(
 
 @_fragment(run_every=f"{MARKET_TREND_RESEARCH_UI_REFRESH_SECONDS:g}s")
 def _market_trend_research_fragment(database_path: str | Path, underlying: str) -> None:
-    _render_projection_cycle(MarketTrendResearchRepository(database_path), underlying=underlying)
+    option_rows = read_latest_option_participation(
+        database_path,
+        underlying_name=underlying,
+    )
+    _render_projection_cycle(
+        MarketTrendResearchRepository(database_path),
+        underlying=underlying,
+        option_rows=option_rows,
+    )
 
 
 def render_market_trend_research_panel(database_path: str | Path, *, underlying: str) -> None:
