@@ -9,7 +9,11 @@ from red_bar_lab.services.market_trend_research.policy import (
     StaticExchangeSessionCalendar,
 )
 from red_bar_lab.services.market_trend_research.repository import MarketTrendResearchRepository
-from red_bar_lab.services.market_trend_research.runtime import LatestValueSlot, ResearchRuntimeConfig
+from red_bar_lab.services.market_trend_research.runtime import (
+    LatestValueSlot,
+    MarketTrendResearchRuntime,
+    ResearchRuntimeConfig,
+)
 
 NOW = datetime(2026, 8, 24, 4, 0, tzinfo=timezone.utc)
 EXPIRY = date(2026, 8, 25)
@@ -95,14 +99,13 @@ def test_union_retains_fixed_morning_contracts_and_deduplicates(tmp_path):
     assert "PE-24750" in keys
 
 
-def test_partial_chain_fails_closed(tmp_path):
+def test_partial_current_window_fails_closed(tmp_path):
     provider = Provider()
     original = provider.option_chain
 
     def partial(instrument_key, expiry_date):
         rows = original(instrument_key, expiry_date)
-        rows.pop()
-        return rows
+        return [row for row in rows if row["strike_price"] != 24750.0]
 
     provider.option_chain = partial
     collector, _ = _collector(tmp_path, provider)
@@ -126,3 +129,15 @@ def test_runtime_is_disabled_by_default_and_cadence_is_bounded():
     assert config.refresh_seconds == 5.0
     with pytest.raises(ValueError, match="refresh_seconds invalid"):
         ResearchRuntimeConfig(refresh_seconds=0.5)
+
+
+def test_runtime_stop_is_idempotent(tmp_path):
+    runtime = MarketTrendResearchRuntime(
+        collector=None,
+        service=None,
+        repository=MarketTrendResearchRepository(tmp_path / "runtime.db"),
+        config=ResearchRuntimeConfig(),
+    )
+    runtime.stop()
+    runtime.stop()
+    assert runtime.stop_event.is_set()
