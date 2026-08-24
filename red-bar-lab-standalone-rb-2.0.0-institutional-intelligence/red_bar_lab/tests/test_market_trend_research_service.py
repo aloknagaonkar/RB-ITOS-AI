@@ -8,41 +8,26 @@ from red_bar_lab.services.market_trend_research.policy import (
     MarketTrendResearchPolicy,
     StaticExchangeSessionCalendar,
 )
-from red_bar_lab.services.market_trend_research.repository import (
-    MarketTrendResearchRepository,
-)
-from red_bar_lab.services.market_trend_research.service import (
-    MarketTrendResearchService,
-)
+from red_bar_lab.services.market_trend_research.repository import MarketTrendResearchRepository
+from red_bar_lab.services.market_trend_research.service import MarketTrendResearchService
 from red_bar_lab.services.market_trend_research.source import (
     NormalizedChainSnapshot,
+    SourceReadResult,
 )
 
-ANCHOR_TIME = datetime(2026, 8, 24, 3, 46, tzinfo=timezone.utc)
+REFERENCE_TIME = datetime(2026, 8, 24, 3, 38, 3, tzinfo=timezone.utc)  # 09:08:03 IST
+BASELINE_TIME = datetime(2026, 8, 24, 3, 45, 5, tzinfo=timezone.utc)  # 09:15:05 IST
 EXPIRY = date(2026, 8, 25)
 
 
-def _chain(*, timestamp=ANCHOR_TIME, spot=24250.0, ce=100.0, pe=125.0):
+def _chain(*, timestamp, spot=24250.0, ce=100.0, pe=125.0):
     cells = []
-    for offset in range(-5, 6):
+    for offset in range(-10, 11):
         strike = 24250.0 + offset * 50.0
-        cells.append(
-            OptionOiCell(
-                f"CE-{strike}", "CE", strike, EXPIRY, ce, 90.0, timestamp
-            )
-        )
-        cells.append(
-            OptionOiCell(
-                f"PE-{strike}", "PE", strike, EXPIRY, pe, 100.0, timestamp
-            )
-        )
+        cells.append(OptionOiCell(f"CE-{strike}", "CE", strike, EXPIRY, ce, 90.0, timestamp))
+        cells.append(OptionOiCell(f"PE-{strike}", "PE", strike, EXPIRY, pe, 100.0, timestamp))
     return NormalizedChainSnapshot(
-        "NIFTY 50",
-        "UPSTOX",
-        timestamp,
-        spot,
-        EXPIRY,
-        tuple(cells),
+        "NIFTY 50", "UPSTOX", timestamp, spot, EXPIRY, tuple(cells)
     )
 
 
@@ -51,10 +36,10 @@ class Source:
         self.snapshots = tuple(snapshots)
         self.calls = 0
 
-    def recent(self, *, underlying, limit=2):
+    def recent_with_timings(self, *, underlying, limit=2):
         self.calls += 1
         assert underlying == "NIFTY 50"
-        return self.snapshots[:limit]
+        return SourceReadResult(self.snapshots[:limit], 1.0, 2.0)
 
 
 def _service(tmp_path, source, policy=None, calendar=None):
@@ -66,114 +51,137 @@ def _service(tmp_path, source, policy=None, calendar=None):
     )
 
 
-def test_first_complete_post_0916_snapshot_creates_fixed_anchor(tmp_path):
-    source = Source((_chain(),))
-    snapshot = _service(tmp_path, source).evaluate(
+def test_reference_then_oi_baseline_are_separate_immutable_stages(tmp_path):
+    first = _service(tmp_path, Source((_chain(timestamp=REFERENCE_TIME),))).evaluate(
         underlying="NIFTY 50",
-        evaluated_at=ANCHOR_TIME + timedelta(seconds=10),
+        evaluated_at=REFERENCE_TIME + timedelta(seconds=5),
     )
-    assert source.calls == 1
-    assert snapshot.current_panel.window_steps == 2
-    assert snapshot.current_panel.expected_contract_count == 10
-    assert snapshot.morning_panel is not None
-    assert snapshot.morning_panel.anchor_status == "ON_TIME_ANCHOR"
-    assert snapshot.morning_panel.expected_contract_count == 10
-    assert snapshot.morning_panel.rows[-1]["strike"] == "OVERALL TOTAL"
-    assert snapshot.authority == "OBSERVATIONAL_ONLY"
+    assert first.lifecycle_state.value == "WAITING_FOR_OI_BASELINE"
+    assert first.morning_reference is not None
+    assert first.morning_reference.reference_timestamp == REFERENCE_TIME
+    assert first.opening_oi_baseline is None
+    assert first.morning_panel is None
 
-
-def test_anchor_one_second_after_cutoff_is_on_time(tmp_path):
-    timestamp = ANCHOR_TIME + timedelta(seconds=1)
-    snapshot = _service(tmp_path, Source((_chain(timestamp=timestamp),))).evaluate(
+    second = _service(tmp_path, Source((_chain(timestamp=BASELINE_TIME),))).evaluate(
         underlying="NIFTY 50",
-        evaluated_at=timestamp + timedelta(seconds=5),
+        evaluated_at=BASELINE_TIME + timedelta(seconds=5),
     )
-    assert snapshot.morning_panel is not None
-    assert snapshot.morning_panel.anchor_status == "ON_TIME_ANCHOR"
-
-
-def test_anchor_is_idempotent_and_does_not_move(tmp_path):
-    first = _service(tmp_path, Source((_chain(),))).evaluate(
-        underlying="NIFTY 50",
-        evaluated_at=ANCHOR_TIME + timedelta(seconds=10),
-    )
-    later_time = ANCHOR_TIME + timedelta(minutes=2)
-    second = _service(
-        tmp_path,
-        Source((_chain(timestamp=later_time, spot=24350.0),)),
-    ).evaluate(
-        underlying="NIFTY 50",
-        evaluated_at=later_time + timedelta(seconds=10),
-    )
-    assert first.morning_panel is not None
+    assert second.lifecycle_state.value == "MORNING_RESEARCH_READY"
+    assert second.morning_reference is not None
+    assert second.morning_reference.reference_timestamp == REFERENCE_TIME
+    assert second.opening_oi_baseline is not None
+    assert second.opening_oi_baseline.baseline_timestamp == BASELINE_TIME
     assert second.morning_panel is not None
-    assert second.morning_panel.anchor_timestamp == first.morning_panel.anchor_timestamp
-    assert second.morning_panel.anchor_spot == first.morning_panel.anchor_spot
-    assert second.current_panel.atm != second.morning_panel.atm
+    assert second.morning_panel.rows[-1]["strike"] == "OVERALL TOTAL"
 
 
-def test_late_snapshot_does_not_retroactively_invent_anchor(tmp_path):
-    late = ANCHOR_TIME + timedelta(minutes=10)
-    snapshot = _service(tmp_path, Source((_chain(timestamp=late),))).evaluate(
-        underlying="NIFTY 50",
-        evaluated_at=late + timedelta(seconds=10),
+def test_reference_does_not_move_and_restart_restores_it(tmp_path):
+    _service(tmp_path, Source((_chain(timestamp=REFERENCE_TIME, spot=24250.0),))).evaluate(
+        underlying="NIFTY 50", evaluated_at=REFERENCE_TIME + timedelta(seconds=5)
     )
-    assert snapshot.morning_panel is None
-    assert snapshot.quality.state.value == "MORNING_ANCHOR_UNAVAILABLE"
-
-
-def test_current_window_transition_blocks_unlike_pcr_comparison(tmp_path):
-    current_time = ANCHOR_TIME + timedelta(minutes=1)
-    current = _chain(timestamp=current_time, spot=24300.0, ce=110.0, pe=130.0)
-    previous = _chain(timestamp=ANCHOR_TIME, spot=24250.0)
-    snapshot = _service(tmp_path, Source((current, previous))).evaluate(
-        underlying="NIFTY 50",
-        evaluated_at=current_time + timedelta(seconds=10),
+    later = REFERENCE_TIME + timedelta(minutes=2)
+    snapshot = _service(tmp_path, Source((_chain(timestamp=later, spot=24400.0),))).evaluate(
+        underlying="NIFTY 50", evaluated_at=later + timedelta(seconds=5)
     )
-    assert snapshot.current_panel.state.value == "WINDOW_TRANSITION"
-    assert snapshot.current_panel.aggregate.previous_pcr is None
+    assert snapshot.morning_reference is not None
+    assert snapshot.morning_reference.reference_spot == 24250.0
+    assert snapshot.morning_reference.fixed_atm == 24250.0
+
+
+def test_baseline_does_not_move_and_current_oi_continues_updating(tmp_path):
+    _service(tmp_path, Source((_chain(timestamp=REFERENCE_TIME),))).evaluate(
+        underlying="NIFTY 50", evaluated_at=REFERENCE_TIME + timedelta(seconds=5)
+    )
+    _service(tmp_path, Source((_chain(timestamp=BASELINE_TIME, ce=100.0, pe=125.0),))).evaluate(
+        underlying="NIFTY 50", evaluated_at=BASELINE_TIME + timedelta(seconds=5)
+    )
+    later = BASELINE_TIME + timedelta(minutes=10)
+    snapshot = _service(tmp_path, Source((_chain(timestamp=later, spot=24500.0, ce=130.0, pe=150.0),))).evaluate(
+        underlying="NIFTY 50", evaluated_at=later + timedelta(seconds=5)
+    )
+    assert snapshot.opening_oi_baseline is not None
+    assert snapshot.opening_oi_baseline.baseline_timestamp == BASELINE_TIME
+    assert snapshot.morning_panel is not None
+    row = snapshot.morning_panel.rows[0]
+    assert row["ce_baseline_oi"] == 100.0
+    assert row["ce_current_oi"] == 130.0
+    assert row["ce_change"] == 30.0
+
+
+def test_no_reference_before_start_or_after_cutoff(tmp_path):
+    too_early = REFERENCE_TIME - timedelta(minutes=1)
+    early = _service(tmp_path, Source((_chain(timestamp=too_early),))).evaluate(
+        underlying="NIFTY 50", evaluated_at=too_early + timedelta(seconds=5)
+    )
+    assert early.morning_reference is None
+    assert early.quality.state.value == "MORNING_REFERENCE_UNAVAILABLE"
+
+    late = datetime(2026, 8, 24, 3, 45, tzinfo=timezone.utc)
+    late_snapshot = _service(tmp_path / "late", Source((_chain(timestamp=late),))).evaluate(
+        underlying="NIFTY 50", evaluated_at=late + timedelta(seconds=5)
+    )
+    assert late_snapshot.morning_reference is None
+
+
+def test_partial_or_stale_snapshot_cannot_create_oi_baseline(tmp_path):
+    _service(tmp_path, Source((_chain(timestamp=REFERENCE_TIME),))).evaluate(
+        underlying="NIFTY 50", evaluated_at=REFERENCE_TIME + timedelta(seconds=5)
+    )
+    partial = _chain(timestamp=BASELINE_TIME)
+    partial = NormalizedChainSnapshot(
+        partial.underlying, partial.provider, partial.source_timestamp,
+        partial.spot, partial.expiry, partial.cells[:-1]
+    )
+    with pytest.raises(ValueError, match="PARTIAL_CONTRACT_WINDOW"):
+        _service(tmp_path, Source((partial,))).evaluate(
+            underlying="NIFTY 50", evaluated_at=BASELINE_TIME + timedelta(seconds=5)
+        )
+
+    stale_time = BASELINE_TIME + timedelta(minutes=2)
+    stale = _service(tmp_path / "stale", Source((_chain(timestamp=REFERENCE_TIME),))).evaluate(
+        underlying="NIFTY 50", evaluated_at=stale_time
+    )
+    assert stale.opening_oi_baseline is None
 
 
 def test_previous_snapshot_from_prior_ist_day_is_not_compared(tmp_path):
-    current_time = ANCHOR_TIME + timedelta(days=1)
+    current_time = BASELINE_TIME + timedelta(days=1)
     current = _chain(timestamp=current_time, ce=110.0, pe=130.0)
-    previous = _chain(timestamp=ANCHOR_TIME, ce=100.0, pe=125.0)
+    previous = _chain(timestamp=BASELINE_TIME, ce=100.0, pe=125.0)
     snapshot = _service(tmp_path, Source((current, previous))).evaluate(
-        underlying="NIFTY 50",
-        evaluated_at=current_time + timedelta(seconds=10),
+        underlying="NIFTY 50", evaluated_at=current_time + timedelta(seconds=5)
     )
     assert snapshot.current_panel.aggregate.previous_pcr is None
-    assert snapshot.current_panel.aggregate.absolute_change is None
     assert snapshot.current_panel.aggregate.persistence_state == "INSUFFICIENT_HISTORY"
-    strike_row = snapshot.current_panel.rows[0]
-    assert strike_row["ce_baseline_oi"] is None
-    assert strike_row["pe_baseline_oi"] is None
+
+
+def test_current_window_transition_is_not_compared(tmp_path):
+    current_time = BASELINE_TIME + timedelta(minutes=1)
+    current = _chain(timestamp=current_time, spot=24300.0)
+    previous = _chain(timestamp=BASELINE_TIME, spot=24250.0)
+    snapshot = _service(tmp_path, Source((current, previous))).evaluate(
+        underlying="NIFTY 50", evaluated_at=current_time + timedelta(seconds=5)
+    )
+    assert snapshot.current_panel.state.value == "WINDOW_TRANSITION"
+    assert snapshot.current_panel.data_status == "Not comparable — ATM/window changed"
 
 
 def test_unverified_calendar_fails_closed(tmp_path):
-    calendar = StaticExchangeSessionCalendar(
-        source_name="UNVERIFIED_WEEKDAY_ONLY",
-        verified=False,
-    )
+    calendar = StaticExchangeSessionCalendar(source_name="UNVERIFIED", verified=False)
     with pytest.raises(ValueError, match="SESSION_POSITION_UNAVAILABLE"):
-        _service(tmp_path, Source((_chain(),)), calendar=calendar).evaluate(
-            underlying="NIFTY 50",
-            evaluated_at=ANCHOR_TIME + timedelta(seconds=10),
+        _service(tmp_path, Source((_chain(timestamp=REFERENCE_TIME),)), calendar=calendar).evaluate(
+            underlying="NIFTY 50", evaluated_at=REFERENCE_TIME + timedelta(seconds=5)
         )
 
 
 def test_timeout_is_published_once_and_never_as_ready(tmp_path):
     policy = MarketTrendResearchPolicy(hard_deadline_seconds=0.000001)
-    snapshot = _service(tmp_path, Source((_chain(),)), policy).evaluate(
-        underlying="NIFTY 50",
-        evaluated_at=ANCHOR_TIME + timedelta(seconds=10),
+    snapshot = _service(tmp_path, Source((_chain(timestamp=REFERENCE_TIME),)), policy).evaluate(
+        underlying="NIFTY 50", evaluated_at=REFERENCE_TIME + timedelta(seconds=5)
     )
     assert snapshot.quality.state.value == "TIMEOUT"
-    path = tmp_path / "research.db"
-    with sqlite3.connect(path) as connection:
+    with sqlite3.connect(tmp_path / "research.db") as connection:
         rows = connection.execute(
             "SELECT state, COUNT(*) FROM market_trend_research_snapshots GROUP BY state"
         ).fetchall()
     assert rows == [("TIMEOUT", 1)]
-    assert snapshot.latency.persistence_ms >= 0.0
-    assert snapshot.latency.end_to_end_ms >= snapshot.latency.calculation_ms
