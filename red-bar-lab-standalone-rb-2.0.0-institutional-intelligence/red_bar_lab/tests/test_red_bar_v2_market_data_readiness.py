@@ -16,6 +16,7 @@ from red_bar_lab.services.red_bar_v2_canonical.paper_market_data_readiness impor
 from red_bar_lab.services.red_bar_v2_canonical.paper_market_data_readiness_models import (
     ContractReadinessStatus,
     MarketDataReadinessPolicy,
+    MarketDataReadinessStage,
     MarketDataReadinessStatus,
     build_probe_id,
 )
@@ -200,7 +201,8 @@ def test_duplicate_option_cell_is_data_corrupt(side):
     provider = Provider(duplicate=(24250, side))
     report = service(provider).evaluate(underlying="NIFTY 50")
     assert report.status is MarketDataReadinessStatus.DATA_CORRUPT
-    assert report.reason_code == "DATA_CORRUPT"
+    assert report.reason_code == "DUPLICATE_OPTION_CELL"
+    assert report.failure_stage is MarketDataReadinessStage.ATM_WINDOW_CONSTRUCTION
     assert provider.quote_calls == 0
 
 
