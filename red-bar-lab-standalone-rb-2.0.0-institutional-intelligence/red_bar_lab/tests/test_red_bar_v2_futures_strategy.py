@@ -50,6 +50,7 @@ def _snapshot(*, index_close, futures_close, vwap, rsi):
         vwap_comparison_price=futures_close,
         vwap_source_instrument_key="NSE_FO|58072",
         vwap_source_timestamp=stamp,
+        vwap_source_volume=1000.0,
     )
 
 
