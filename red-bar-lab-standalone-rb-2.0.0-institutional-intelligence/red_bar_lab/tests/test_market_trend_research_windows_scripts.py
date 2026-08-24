@@ -25,13 +25,15 @@ def test_stop_script_uses_worker_owned_request_and_no_broad_kill():
     assert "taskkill /IM" not in source
     assert "Stop-Process -Name" not in source
     assert "python.exe" not in source
+    assert "RequiredMarker" in source
 
 
-def test_status_script_handles_unavailable_status():
+def test_status_script_handles_unavailable_or_stale_status():
     source = _text("status_market_trend_research_worker.ps1")
     assert "STATUS_UNAVAILABLE" in source
     assert "India Standard Time" in source
     assert "Heartbeat age" in source
+    assert "SUPERVISOR_STATUS_MAX_AGE_SECONDS" in source
     assert "Authority" in source
 
 
@@ -41,6 +43,8 @@ def test_platform_launcher_integrates_explicit_worker_controls():
     assert "start_market_trend_research_worker.ps1" in source
     assert "stop_market_trend_research_worker.ps1" in source
     assert "status_market_trend_research_worker.ps1" in source
+    assert "$escapedToken" not in source
+    assert "`$env:UPSTOX_ACCESS_TOKEN=" not in source
 
 
 def test_streamlit_does_not_start_or_control_supervisor():
