@@ -21,13 +21,7 @@ def _change(current: float, baseline: float | None) -> OiChangeEvidence:
     absolute = current - baseline
     if baseline == 0:
         return OiChangeEvidence(current, baseline, absolute, None, "ZERO_BASELINE")
-    return OiChangeEvidence(
-        current,
-        baseline,
-        absolute,
-        absolute / baseline * 100.0,
-        "AVAILABLE",
-    )
+    return OiChangeEvidence(current, baseline, absolute, absolute / baseline * 100.0, "AVAILABLE")
 
 
 def _nearest_atm(strikes: tuple[float, ...], spot: float) -> float:
@@ -38,10 +32,7 @@ def _nearest_atm(strikes: tuple[float, ...], spot: float) -> float:
 
 def _interval(strikes: tuple[float, ...]) -> float:
     unique = sorted(set(strikes))
-    differences = [
-        round(unique[index + 1] - unique[index], 8)
-        for index in range(len(unique) - 1)
-    ]
+    differences = [round(unique[index + 1] - unique[index], 8) for index in range(len(unique) - 1)]
     positive = [value for value in differences if value > 0]
     if not positive:
         raise ValueError("STRIKE_INTERVAL_UNAVAILABLE")
@@ -55,14 +46,10 @@ def _interval(strikes: tuple[float, ...]) -> float:
     return modes[0]
 
 
-def _aggregate_change(
-    current: float,
-    baselines: tuple[float | None, ...],
-) -> OiChangeEvidence:
+def _aggregate_change(current: float, baselines: tuple[float | None, ...]) -> OiChangeEvidence:
     if any(value is None for value in baselines):
         return OiChangeEvidence(current, None, None, None, "BASELINE_MISSING")
-    baseline = sum(float(value) for value in baselines if value is not None)
-    return _change(current, baseline)
+    return _change(current, sum(float(value) for value in baselines if value is not None))
 
 
 class DualPcrCalculator:
@@ -70,9 +57,7 @@ class DualPcrCalculator:
         self.policy = policy
 
     @staticmethod
-    def index(
-        cells: tuple[OptionOiCell, ...],
-    ) -> dict[tuple[float, str], OptionOiCell]:
+    def index(cells: tuple[OptionOiCell, ...]) -> dict[tuple[float, str], OptionOiCell]:
         result: dict[tuple[float, str], OptionOiCell] = {}
         for cell in cells:
             key = (float(cell.strike), cell.option_side)
@@ -94,18 +79,13 @@ class DualPcrCalculator:
         if len(expiries) != 1:
             raise ValueError("EXPIRY_MISMATCH")
         expiry = next(iter(expiries))
-        common = tuple(
-            sorted(
-                {cell.strike for cell in cells if cell.option_side == "CE"}
-                & {cell.strike for cell in cells if cell.option_side == "PE"}
-            )
-        )
+        common = tuple(sorted(
+            {cell.strike for cell in cells if cell.option_side == "CE"}
+            & {cell.strike for cell in cells if cell.option_side == "PE"}
+        ))
         interval = _interval(common)
         atm = _nearest_atm(common, spot)
-        strikes = tuple(
-            atm + interval * offset
-            for offset in range(-window_steps, window_steps + 1)
-        )
+        strikes = tuple(atm + interval * offset for offset in range(-window_steps, window_steps + 1))
         index = self.index(cells)
         keys: list[str] = []
         for strike in strikes:
@@ -114,14 +94,27 @@ class DualPcrCalculator:
                 if cell is None:
                     raise ValueError("PARTIAL_CONTRACT_WINDOW")
                 keys.append(cell.instrument_key)
-        return PcrWindowDefinition(
-            expiry,
-            atm,
-            interval,
-            window_steps,
-            strikes,
-            tuple(keys),
-        )
+        return PcrWindowDefinition(expiry, atm, interval, window_steps, strikes, tuple(keys))
+
+    def window_for_fixed_strikes(
+        self,
+        cells: tuple[OptionOiCell, ...],
+        *,
+        expiry,
+        atm: float,
+        strike_interval: float,
+        window_steps: int,
+        strikes: tuple[float, ...],
+    ) -> PcrWindowDefinition:
+        index = self.index(cells)
+        keys: list[str] = []
+        for strike in strikes:
+            for side in ("CE", "PE"):
+                cell = index.get((float(strike), side))
+                if cell is None:
+                    raise ValueError("PARTIAL_CONTRACT_WINDOW")
+                keys.append(cell.instrument_key)
+        return PcrWindowDefinition(expiry, atm, strike_interval, window_steps, strikes, tuple(keys))
 
     def panel(
         self,
@@ -134,69 +127,40 @@ class DualPcrCalculator:
         source_timestamp: datetime,
         evaluated_at: datetime,
         previous_by_key: dict[str, OptionOiCell] | None = None,
-        anchor_by_key: dict[str, OptionOiCell] | None = None,
         previous_pcr: float | None = None,
         previous_timestamp: datetime | None = None,
         persistence_state: str | None = None,
         consecutive_count: int = 0,
         panel_state: ResearchState | None = None,
-        anchor_timestamp: datetime | None = None,
-        anchor_status: str | None = None,
-        anchor_spot: float | None = None,
+        reference_timestamp: datetime | None = None,
+        reference_status: str | None = None,
+        reference_spot: float | None = None,
+        baseline_timestamp: datetime | None = None,
+        baseline_status: str | None = None,
+        data_status: str | None = None,
+        **_: object,
     ) -> PcrResearchPanel:
         del evaluated_at
         by_key = {cell.instrument_key: cell for cell in cells}
         selected = [by_key[key] for key in window.instrument_keys if key in by_key]
         if len(selected) != window.expected_contract_count:
             raise ValueError("PARTIAL_CONTRACT_WINDOW")
-        ce_total = sum(
-            cell.current_oi for cell in selected if cell.option_side == "CE"
-        )
-        pe_total = sum(
-            cell.current_oi for cell in selected if cell.option_side == "PE"
-        )
+        ce_total = sum(cell.current_oi for cell in selected if cell.option_side == "CE")
+        pe_total = sum(cell.current_oi for cell in selected if cell.option_side == "PE")
         pcr = None if ce_total == 0 else pe_total / ce_total
         state = panel_state or (
-            ResearchState.PCR_UNAVAILABLE_ZERO_DENOMINATOR
-            if pcr is None
-            else ResearchState.READY
+            ResearchState.PCR_UNAVAILABLE_ZERO_DENOMINATOR if pcr is None else ResearchState.READY
         )
-        classification = (
-            PcrBias.UNAVAILABLE if pcr is None else self.policy.classify(pcr)
-        )
-        elapsed_seconds = (
-            None
-            if previous_timestamp is None
-            else (source_timestamp - previous_timestamp).total_seconds()
-        )
-        absolute = (
-            None if pcr is None or previous_pcr is None else pcr - previous_pcr
-        )
-        percentage = (
-            None
-            if absolute is None or previous_pcr == 0
-            else absolute / previous_pcr * 100.0
-        )
-        slope = (
-            None
-            if absolute is None
-            or elapsed_seconds is None
-            or elapsed_seconds <= 0
-            else absolute / (elapsed_seconds / 60.0)
-        )
+        classification = PcrBias.UNAVAILABLE if pcr is None else self.policy.classify(pcr)
+        elapsed_seconds = None if previous_timestamp is None else (
+            source_timestamp - previous_timestamp
+        ).total_seconds()
+        absolute = None if pcr is None or previous_pcr is None else pcr - previous_pcr
+        percentage = None if absolute is None or previous_pcr == 0 else absolute / previous_pcr * 100.0
+        slope = None if absolute is None or not elapsed_seconds or elapsed_seconds <= 0 else absolute / (elapsed_seconds / 60.0)
         derived_persistence = (
-            "UNAVAILABLE"
-            if absolute is None
-            else "RISING"
-            if absolute > 0
-            else "FALLING"
-            if absolute < 0
-            else "FLAT"
-        )
-        effective_persistence = (
-            derived_persistence
-            if persistence_state in {None, "COMPARABLE"}
-            else persistence_state
+            "INSUFFICIENT_HISTORY" if absolute is None else
+            "RISING" if absolute > 0 else "FALLING" if absolute < 0 else "FLAT"
         )
         aggregate = PcrAggregate(
             ce_total,
@@ -207,11 +171,10 @@ class DualPcrCalculator:
             absolute,
             percentage,
             slope,
-            effective_persistence,
+            persistence_state or derived_persistence,
             consecutive_count,
         )
-        previous_by_key = previous_by_key or {}
-        anchor_by_key = anchor_by_key or {}
+        baselines = previous_by_key or {}
         grouped: dict[float, dict[str, OptionOiCell]] = defaultdict(dict)
         for cell in selected:
             grouped[cell.strike][cell.option_side] = cell
@@ -221,88 +184,44 @@ class DualPcrCalculator:
         for strike in window.strikes:
             ce_cell = grouped[strike]["CE"]
             pe_cell = grouped[strike]["PE"]
-            ce_previous = previous_by_key.get(ce_cell.instrument_key)
-            pe_previous = previous_by_key.get(pe_cell.instrument_key)
-            ce_change = _change(
-                ce_cell.current_oi,
-                ce_previous.current_oi if ce_previous else None,
-            )
-            pe_change = _change(
-                pe_cell.current_oi,
-                pe_previous.current_oi if pe_previous else None,
-            )
-            ce_anchor = anchor_by_key.get(ce_cell.instrument_key)
-            pe_anchor = anchor_by_key.get(pe_cell.instrument_key)
-            ce_anchor_change = _change(
-                ce_cell.current_oi,
-                ce_anchor.current_oi if ce_anchor else None,
-            )
-            pe_anchor_change = _change(
-                pe_cell.current_oi,
-                pe_anchor.current_oi if pe_anchor else None,
-            )
-            ce_day_change = _change(ce_cell.current_oi, ce_cell.provider_prev_oi)
-            pe_day_change = _change(pe_cell.current_oi, pe_cell.provider_prev_oi)
+            ce_previous = baselines.get(ce_cell.instrument_key)
+            pe_previous = baselines.get(pe_cell.instrument_key)
+            ce_change = _change(ce_cell.current_oi, None if ce_previous is None else ce_previous.current_oi)
+            pe_change = _change(pe_cell.current_oi, None if pe_previous is None else pe_previous.current_oi)
             ce_baselines.append(ce_change.baseline)
             pe_baselines.append(pe_change.baseline)
-            rows.append(
-                {
-                    "strike": strike,
-                    "position": (
-                        "ATM"
-                        if strike == window.atm
-                        else "BELOW_ATM"
-                        if strike < window.atm
-                        else "ABOVE_ATM"
-                    ),
-                    "ce_current_oi": ce_cell.current_oi,
-                    "ce_baseline_oi": ce_change.baseline,
-                    "ce_change": ce_change.absolute_change,
-                    "ce_change_pct": ce_change.percentage_change,
-                    "ce_change_reason": ce_change.reason,
-                    "pe_current_oi": pe_cell.current_oi,
-                    "pe_baseline_oi": pe_change.baseline,
-                    "pe_change": pe_change.absolute_change,
-                    "pe_change_pct": pe_change.percentage_change,
-                    "pe_change_reason": pe_change.reason,
-                    "ce_day_change": ce_day_change.absolute_change,
-                    "ce_day_change_pct": ce_day_change.percentage_change,
-                    "pe_day_change": pe_day_change.absolute_change,
-                    "pe_day_change_pct": pe_day_change.percentage_change,
-                    "ce_anchor_change": ce_anchor_change.absolute_change,
-                    "ce_anchor_change_pct": ce_anchor_change.percentage_change,
-                    "pe_anchor_change": pe_anchor_change.absolute_change,
-                    "pe_anchor_change_pct": pe_anchor_change.percentage_change,
-                }
-            )
-        ce_aggregate_change = _aggregate_change(ce_total, tuple(ce_baselines))
-        pe_aggregate_change = _aggregate_change(pe_total, tuple(pe_baselines))
-        rows.append(
-            {
-                "strike": "OVERALL TOTAL",
-                "position": "TOTAL",
-                "ce_current_oi": ce_total,
-                "ce_baseline_oi": ce_aggregate_change.baseline,
-                "ce_change": ce_aggregate_change.absolute_change,
-                "ce_change_pct": ce_aggregate_change.percentage_change,
-                "ce_change_reason": ce_aggregate_change.reason,
-                "pe_current_oi": pe_total,
-                "pe_baseline_oi": pe_aggregate_change.baseline,
-                "pe_change": pe_aggregate_change.absolute_change,
-                "pe_change_pct": pe_aggregate_change.percentage_change,
-                "pe_change_reason": pe_aggregate_change.reason,
-            }
-        )
-        relevance = None
-        if anchor_spot is not None:
-            distance_steps = abs(spot - window.atm) / window.strike_interval
-            relevance = (
-                "ACTIVE"
-                if distance_steps < window.window_steps - 1
-                else "NEAR_EDGE"
-                if distance_steps <= window.window_steps
-                else "OUTSIDE_RANGE"
-            )
+            rows.append({
+                "strike": strike,
+                "position": "ATM" if strike == window.atm else "BELOW ATM" if strike < window.atm else "ABOVE ATM",
+                "ce_current_oi": ce_cell.current_oi,
+                "ce_baseline_oi": ce_change.baseline,
+                "ce_change": ce_change.absolute_change,
+                "ce_change_pct": ce_change.percentage_change,
+                "ce_change_reason": ce_change.reason,
+                "pe_current_oi": pe_cell.current_oi,
+                "pe_baseline_oi": pe_change.baseline,
+                "pe_change": pe_change.absolute_change,
+                "pe_change_pct": pe_change.percentage_change,
+                "pe_change_reason": pe_change.reason,
+                "ce_day_change": _change(ce_cell.current_oi, ce_cell.provider_prev_oi).absolute_change,
+                "pe_day_change": _change(pe_cell.current_oi, pe_cell.provider_prev_oi).absolute_change,
+            })
+        ce_total_change = _aggregate_change(ce_total, tuple(ce_baselines))
+        pe_total_change = _aggregate_change(pe_total, tuple(pe_baselines))
+        rows.append({
+            "strike": "OVERALL TOTAL",
+            "position": "TOTAL",
+            "ce_current_oi": ce_total,
+            "ce_baseline_oi": ce_total_change.baseline,
+            "ce_change": ce_total_change.absolute_change,
+            "ce_change_pct": ce_total_change.percentage_change,
+            "ce_change_reason": ce_total_change.reason,
+            "pe_current_oi": pe_total,
+            "pe_baseline_oi": pe_total_change.baseline,
+            "pe_change": pe_total_change.absolute_change,
+            "pe_change_pct": pe_total_change.percentage_change,
+            "pe_change_reason": pe_total_change.reason,
+        })
         return PcrResearchPanel(
             name=name,
             state=state,
@@ -317,9 +236,11 @@ class DualPcrCalculator:
             source_timestamp=source_timestamp,
             aggregate=aggregate,
             rows=tuple(rows),
-            anchor_timestamp=anchor_timestamp,
-            anchor_status=anchor_status,
-            anchor_spot=anchor_spot,
-            anchor_atm=window.atm if anchor_timestamp else None,
-            anchor_relevance=relevance,
+            previous_timestamp=previous_timestamp,
+            reference_timestamp=reference_timestamp,
+            reference_status=reference_status,
+            reference_spot=reference_spot,
+            baseline_timestamp=baseline_timestamp,
+            baseline_status=baseline_status,
+            data_status=data_status or state.value,
         )
