@@ -46,6 +46,7 @@ from red_bar_lab.services.red_bar_v2_paper_signal_bridge import (
     publish_v2_snapshot_to_paper_signals,
 )
 from red_bar_lab.services.red_bar_v2_rsi_exit import execute_rsi_threshold_exits
+from red_bar_lab.services.red_bar_v2_structural_exit import execute_structural_stop_exits
 from red_bar_lab.services.upstox_instrument_search import UpstoxInstrumentSearchTransport
 from red_bar_lab.services.upstox_service import RedBarUpstoxService
 from red_bar_lab.storage.database import RedBarDatabase
@@ -229,6 +230,20 @@ def main() -> int:
                 instrument_key=UNDERLYINGS[args.underlying],
             )
 
+            structural_exit = execute_structural_stop_exits(
+                snapshot=read_red_bar_v2_ui_snapshot(settings.artifacts_root),
+                completed_1m_close=live_v2.completed_1m_close,
+                completed_1m_timestamp=live_v2.completed_1m_timestamp,
+                open_orders=database.read_open_paper_execution_orders("PAPER-STD"),
+                close_position=lambda order_id, reason: automation.engine.close_position(
+                    zerodha=adapter,
+                    order_id=order_id,
+                    exit_reason=reason,
+                ),
+            )
+            if structural_exit.exited_orders:
+                totals["orders_closed"] += int(structural_exit.exited_orders)
+
             rsi_exit = execute_rsi_threshold_exits(
                 completed_1m_rsi=live_v2.completed_1m_rsi,
                 completed_1m_timestamp=live_v2.completed_1m_timestamp,
@@ -241,6 +256,8 @@ def main() -> int:
             )
             if rsi_exit.exited_orders:
                 totals["orders_closed"] += int(rsi_exit.exited_orders)
+
+            if structural_exit.exited_orders or rsi_exit.exited_orders:
                 live_v2 = evaluate_current_session_red_bar_v2(
                     upstox=upstox,
                     database=database,
@@ -389,7 +406,7 @@ def main() -> int:
             heartbeat = datetime.now(ist).isoformat()
             cycle_errors, cycle_warnings = _partition_cycle_messages(
                 report.errors,
-                rsi_exit.errors,
+                tuple(structural_exit.errors) + tuple(rsi_exit.errors),
             )
             database.upsert_paper_monitor_status(
                 {
