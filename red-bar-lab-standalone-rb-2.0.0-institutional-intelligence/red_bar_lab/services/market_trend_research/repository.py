@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, replace
 from datetime import date, datetime, timezone
 from enum import Enum
+from hashlib import sha256
 import json
 from pathlib import Path
 import sqlite3
@@ -19,7 +20,10 @@ from .models import (
     ResearchLatencyEvidence,
     ResearchState,
 )
+from .five_minute_history import FiveMinutePcrObservation, IST
+from .strike_pcr_tracker import StrikePcrRecommendationObservation
 from .policy import MarketTrendResearchPolicy
+from .preopen_spot import PreOpenSpotObservation
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS market_trend_research_snapshots (
@@ -63,6 +67,20 @@ CREATE TABLE IF NOT EXISTS market_trend_research_source_snapshots (
 );
 CREATE INDEX IF NOT EXISTS idx_market_trend_research_source_latest
 ON market_trend_research_source_snapshots(underlying, trading_date, source_timestamp DESC);
+CREATE TABLE IF NOT EXISTS market_trend_preopen_spot_observations (
+ underlying TEXT NOT NULL,
+ trading_date TEXT NOT NULL,
+ provider TEXT NOT NULL,
+ source_timestamp TEXT NOT NULL,
+ captured_at TEXT NOT NULL,
+ spot REAL NOT NULL,
+ status TEXT NOT NULL,
+ PRIMARY KEY(underlying, trading_date, provider, source_timestamp)
+);
+CREATE INDEX IF NOT EXISTS idx_market_trend_preopen_spot_latest
+ON market_trend_preopen_spot_observations(
+ underlying, trading_date, provider, source_timestamp DESC
+);
 CREATE TABLE IF NOT EXISTS market_trend_research_runtime_health (
  runtime_name TEXT PRIMARY KEY,
  heartbeat_at TEXT NOT NULL,
@@ -72,6 +90,53 @@ CREATE TABLE IF NOT EXISTS market_trend_research_runtime_health (
  consecutive_failures INTEGER NOT NULL,
  dropped_obsolete_tasks INTEGER NOT NULL,
  payload_json TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS market_trend_research_pcr_5m_history (
+ underlying TEXT NOT NULL,
+ trading_date TEXT NOT NULL,
+ candle_close_timestamp TEXT NOT NULL,
+ source_timestamp TEXT NOT NULL,
+ overall_pcr REAL NOT NULL,
+ overall_direction TEXT NOT NULL,
+ quality_state TEXT NOT NULL,
+ payload_json TEXT NOT NULL,
+ created_at TEXT NOT NULL,
+ PRIMARY KEY(underlying, candle_close_timestamp)
+);
+CREATE INDEX IF NOT EXISTS idx_market_trend_research_pcr_5m_latest
+ON market_trend_research_pcr_5m_history(
+ underlying, trading_date, candle_close_timestamp DESC
+);
+CREATE TABLE IF NOT EXISTS market_trend_strike_pcr_recommendations (
+ recommendation_id TEXT PRIMARY KEY,
+ underlying TEXT NOT NULL,
+ trading_date TEXT NOT NULL,
+ expiry TEXT NOT NULL,
+ strike REAL NOT NULL,
+ side TEXT NOT NULL,
+ status TEXT NOT NULL,
+ opened_at TEXT NOT NULL,
+ closed_at TEXT,
+ entry_strike_pcr REAL NOT NULL,
+ entry_overall_pcr REAL,
+ entry_price REAL NOT NULL,
+ current_price REAL NOT NULL,
+ peak_price REAL NOT NULL,
+ peak_at TEXT NOT NULL,
+ last_strike_pcr REAL NOT NULL,
+ strike_signal TEXT NOT NULL,
+ overall_pcr REAL,
+ overall_signal TEXT NOT NULL,
+ symbol TEXT,
+ last_observed_at TEXT NOT NULL,
+ authority TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_strike_pcr_one_active
+ON market_trend_strike_pcr_recommendations(underlying, trading_date, expiry, strike)
+WHERE status='ACTIVE';
+CREATE INDEX IF NOT EXISTS idx_strike_pcr_recommendations_latest
+ON market_trend_strike_pcr_recommendations(
+ underlying, trading_date, last_observed_at DESC
 );
 """
 
@@ -252,6 +317,217 @@ class MarketTrendResearchRepository:
             raise
         return None if row is None else json.loads(row[0])
 
+    def latest_projections(
+        self,
+        *,
+        underlyings: tuple[str, ...],
+    ) -> dict[str, dict[str, Any]]:
+        """Read the newest projection for several underlyings in one query."""
+        if not self.path.exists() or not underlyings:
+            return {}
+        placeholders = ",".join("?" for _ in underlyings)
+        try:
+            with sqlite3.connect(self.path) as connection:
+                rows = connection.execute(
+                    f"""SELECT underlying, payload_json FROM (
+                          SELECT underlying, payload_json,
+                                 ROW_NUMBER() OVER (
+                                   PARTITION BY underlying
+                                   ORDER BY julianday(evaluated_at) DESC,
+                                            evaluated_at DESC
+                                 ) AS row_number
+                          FROM market_trend_research_snapshots
+                          WHERE underlying IN ({placeholders})
+                        ) WHERE row_number=1""",
+                    underlyings,
+                ).fetchall()
+        except sqlite3.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                return {}
+            raise
+        return {str(underlying): json.loads(payload) for underlying, payload in rows}
+
+    def persist_five_minute_pcr_observation(
+        self,
+        observation: FiveMinutePcrObservation,
+    ) -> bool:
+        """Persist exactly one immutable PCR record per completed 5m candle."""
+        candle_close = _utc_iso(
+            observation.candle_close_timestamp,
+            field_name="candle_close_timestamp",
+        )
+        source_timestamp = _utc_iso(
+            observation.source_timestamp,
+            field_name="source_timestamp",
+        )
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """INSERT OR IGNORE INTO market_trend_research_pcr_5m_history
+                   (underlying, trading_date, candle_close_timestamp,
+                    source_timestamp, overall_pcr, overall_direction,
+                    quality_state, payload_json, created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                (
+                    observation.underlying,
+                    observation.candle_close_timestamp.astimezone(IST).date().isoformat(),
+                    candle_close,
+                    source_timestamp,
+                    observation.overall_pcr,
+                    observation.overall_direction,
+                    observation.quality_state,
+                    _json(observation.payload()),
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+            connection.commit()
+            return cursor.rowcount == 1
+
+    def five_minute_pcr_history(
+        self,
+        *,
+        underlying: str,
+        trading_date: date,
+        limit: int = 75,
+    ) -> list[dict[str, Any]]:
+        """Read completed-candle PCR history newest first."""
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        if not self.path.exists():
+            return []
+        try:
+            with sqlite3.connect(self.path) as connection:
+                rows = connection.execute(
+                    """SELECT payload_json
+                       FROM market_trend_research_pcr_5m_history
+                       WHERE underlying=? AND trading_date=?
+                       ORDER BY candle_close_timestamp DESC
+                       LIMIT ?""",
+                    (underlying, trading_date.isoformat(), limit),
+                ).fetchall()
+        except sqlite3.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                return []
+            raise
+        return [json.loads(row[0]) for row in rows]
+
+    def apply_strike_pcr_recommendations(
+        self,
+        observations: tuple[StrikePcrRecommendationObservation, ...],
+    ) -> None:
+        """Advance per-strike observational recommendation lifecycles atomically."""
+        if not observations:
+            return
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            for item in observations:
+                observed_at = _utc_iso(item.observed_at, field_name="observed_at")
+                trading_date = item.observed_at.astimezone(IST).date().isoformat()
+                active = connection.execute(
+                    """SELECT recommendation_id, side, peak_price, peak_at
+                       FROM market_trend_strike_pcr_recommendations
+                       WHERE underlying=? AND trading_date=? AND expiry=?
+                         AND strike=? AND status='ACTIVE'""",
+                    (item.underlying, trading_date, item.expiry, item.strike),
+                ).fetchone()
+                desired_side = (
+                    "CE" if item.recommendation == "BUY_CE"
+                    else "PE" if item.recommendation == "BUY_PE"
+                    else None
+                )
+                if active is not None and str(active[1]) != desired_side:
+                    connection.execute(
+                        """UPDATE market_trend_strike_pcr_recommendations
+                           SET status='CLOSED', closed_at=?, last_observed_at=?,
+                               last_strike_pcr=COALESCE(?, last_strike_pcr),
+                               strike_signal=?, overall_pcr=?,
+                               overall_signal=? WHERE recommendation_id=?""",
+                        (
+                            observed_at, observed_at, item.strike_pcr,
+                            item.strike_signal, item.overall_pcr,
+                            item.overall_signal, active[0],
+                        ),
+                    )
+                    active = None
+                if desired_side is None or item.strike_pcr is None:
+                    continue
+                bid = item.executable_bid
+                ask = item.entry_ask
+                if active is not None:
+                    if bid is None or bid <= 0:
+                        continue
+                    old_peak = float(active[2])
+                    peak = max(old_peak, bid)
+                    peak_at = observed_at if bid > old_peak else str(active[3])
+                    connection.execute(
+                        """UPDATE market_trend_strike_pcr_recommendations
+                           SET current_price=?, peak_price=?, peak_at=?,
+                               last_strike_pcr=?, strike_signal=?, overall_pcr=?,
+                               overall_signal=?, last_observed_at=?
+                           WHERE recommendation_id=?""",
+                        (
+                            bid, peak, peak_at, item.strike_pcr,
+                            item.strike_signal, item.overall_pcr,
+                            item.overall_signal, observed_at, active[0],
+                        ),
+                    )
+                    continue
+                if bid is None or ask is None or bid <= 0 or ask <= 0 or ask < bid:
+                    continue
+                identity = "|".join((
+                    item.underlying, trading_date, item.expiry,
+                    f"{item.strike:.4f}", desired_side, observed_at,
+                ))
+                recommendation_id = "PCR-" + sha256(identity.encode()).hexdigest()[:24]
+                connection.execute(
+                    """INSERT INTO market_trend_strike_pcr_recommendations
+                       (recommendation_id, underlying, trading_date, expiry,
+                        strike, side, status, opened_at, closed_at,
+                        entry_strike_pcr, entry_overall_pcr, entry_price,
+                        current_price, peak_price, peak_at, last_strike_pcr,
+                        strike_signal, overall_pcr, overall_signal, symbol,
+                        last_observed_at, authority)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        recommendation_id, item.underlying, trading_date,
+                        item.expiry, item.strike, desired_side, "ACTIVE",
+                        observed_at, None, item.strike_pcr, item.overall_pcr,
+                        ask, bid, bid, observed_at, item.strike_pcr,
+                        item.strike_signal, item.overall_pcr,
+                        item.overall_signal, item.symbol, observed_at,
+                        item.authority,
+                    ),
+                )
+            connection.commit()
+
+    def strike_pcr_recommendations(
+        self,
+        *,
+        underlying: str,
+        trading_date: date,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Read active recommendations first, followed by recent closed episodes."""
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        if not self.path.exists():
+            return []
+        try:
+            with sqlite3.connect(self.path) as connection:
+                connection.row_factory = sqlite3.Row
+                rows = connection.execute(
+                    """SELECT * FROM market_trend_strike_pcr_recommendations
+                       WHERE underlying=? AND trading_date=?
+                       ORDER BY CASE status WHEN 'ACTIVE' THEN 0 ELSE 1 END,
+                                julianday(last_observed_at) DESC,
+                                last_observed_at DESC LIMIT ?""",
+                    (underlying, trading_date.isoformat(), limit),
+                ).fetchall()
+        except sqlite3.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                return []
+            raise
+        return [dict(row) for row in rows]
+
     def create_reference(self, reference: MorningReference) -> bool:
         with self._connect() as connection:
             cursor = connection.execute(
@@ -268,6 +544,70 @@ class MarketTrendResearchRepository:
             )
             connection.commit()
             return cursor.rowcount == 1
+
+    def persist_preopen_spot(self, observation: PreOpenSpotObservation) -> bool:
+        """Persist immutable provider evidence; duplicate samples are harmless."""
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """INSERT OR IGNORE INTO market_trend_preopen_spot_observations
+                   (underlying, trading_date, provider, source_timestamp,
+                    captured_at, spot, status)
+                   VALUES (?,?,?,?,?,?,?)""",
+                (
+                    observation.underlying,
+                    observation.trading_date.isoformat(),
+                    observation.provider,
+                    _utc_iso(observation.source_timestamp, field_name="source_timestamp"),
+                    _utc_iso(observation.captured_at, field_name="captured_at"),
+                    observation.spot,
+                    observation.status,
+                ),
+            )
+            connection.commit()
+            return cursor.rowcount == 1
+
+    def latest_preopen_spots(
+        self,
+        *,
+        underlying: str,
+        trading_date: date,
+    ) -> tuple[PreOpenSpotObservation, ...]:
+        if not self.path.exists():
+            return ()
+        try:
+            with sqlite3.connect(self.path) as connection:
+                connection.row_factory = sqlite3.Row
+                rows = connection.execute(
+                    """SELECT underlying, trading_date, provider, source_timestamp,
+                              captured_at, spot, status
+                       FROM (
+                         SELECT *, ROW_NUMBER() OVER (
+                           PARTITION BY provider
+                           ORDER BY julianday(source_timestamp) DESC,
+                                    source_timestamp DESC
+                         ) AS row_number
+                         FROM market_trend_preopen_spot_observations
+                         WHERE underlying=? AND trading_date=?
+                       ) WHERE row_number=1
+                       ORDER BY provider""",
+                    (underlying, trading_date.isoformat()),
+                ).fetchall()
+        except sqlite3.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                return ()
+            raise
+        return tuple(
+            PreOpenSpotObservation(
+                underlying=str(row["underlying"]),
+                trading_date=date.fromisoformat(str(row["trading_date"])),
+                provider=str(row["provider"]),
+                source_timestamp=datetime.fromisoformat(str(row["source_timestamp"])),
+                captured_at=datetime.fromisoformat(str(row["captured_at"])),
+                spot=float(row["spot"]),
+                status=str(row["status"]),
+            )
+            for row in rows
+        )
 
     def load_reference(self, *, underlying: str, trading_date: date) -> dict[str, Any] | None:
         return self._load_daily(table="market_trend_research_references", underlying=underlying, trading_date=trading_date)

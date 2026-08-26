@@ -10,6 +10,19 @@ from zoneinfo import ZoneInfo
 import streamlit as st
 
 from red_bar_lab.services.market_trend_research.models import PcrBias
+from red_bar_lab.services.market_trend_research.combined_pcr import (
+    CombinedMarketPcr,
+    CombinedMarketPcrCalculator,
+    TOP_TEN_WEIGHTS,
+)
+from red_bar_lab.services.market_trend_research.contract_selection import (
+    ContractSelection,
+    _activity,
+    _activity_interpretation,
+    pcr_research_preference,
+    research_direction,
+    select_best_contracts,
+)
 from red_bar_lab.services.market_trend_research.policy import MarketTrendResearchPolicy
 from red_bar_lab.services.market_trend_research.repository import MarketTrendResearchRepository
 from red_bar_lab.services.option_participation_store import (
@@ -29,6 +42,9 @@ CURRENT_COLUMNS = (
     "Strike", "Position", "CE current OI", "CE previous-day OI",
     "CE OI change today", "CE OI change %", "PE current OI",
     "PE previous-day OI", "PE OI change today", "PE OI change %",
+    "Strike PCR", "PCR direction", "Previous refresh PCR",
+    "PCR change vs refresh", "Opening PCR", "PCR change vs opening",
+    "Overall PCR", "Overall PCR signal", "Recommendation",
 )
 
 
@@ -194,6 +210,15 @@ def _signed(value: object) -> str:
     return ("+" if number > 0 else "−") + _indian(abs(number))
 
 
+def _signed_decimal(value: object, digits: int = 3) -> str:
+    if value is None:
+        return "Not available"
+    number = float(value)
+    if number == 0:
+        return f"{number:.{digits}f}"
+    return ("+" if number > 0 else "-") + f"{abs(number):.{digits}f}"
+
+
 def _percent(value: object) -> str:
     if value is None:
         return "Not available"
@@ -203,8 +228,91 @@ def _percent(value: object) -> str:
     return ("+" if number > 0 else "−") + f"{abs(number):.2f}%"
 
 
+def _history_change_pct(
+    persisted_pct: object,
+    *,
+    current_oi: object,
+    absolute_change: object,
+) -> float | None:
+    """Recover legacy change percentage from persisted totals when possible."""
+
+    if isinstance(persisted_pct, (int, float)) and not isinstance(
+        persisted_pct, bool
+    ):
+        return float(persisted_pct)
+    if (
+        not isinstance(current_oi, (int, float))
+        or isinstance(current_oi, bool)
+        or not isinstance(absolute_change, (int, float))
+        or isinstance(absolute_change, bool)
+    ):
+        return None
+    previous_day_oi = float(current_oi) - float(absolute_change)
+    if previous_day_oi <= 0:
+        return None
+    return float(absolute_change) / previous_day_oi * 100.0
+
+
+def _movement(value: float | None, *, threshold: float) -> str:
+    if value is None:
+        return "UNAVAILABLE"
+    if value >= threshold:
+        return "RISING"
+    if value <= -threshold:
+        return "FALLING"
+    return "FLAT"
+
+
+def _price_pcr_relationship(price_trend: str, pcr_trend: str) -> str:
+    if "UNAVAILABLE" in {price_trend, pcr_trend}:
+        return "INSUFFICIENT_HISTORY"
+    if price_trend == pcr_trend == "RISING":
+        return "BULLISH_CONFIRMATION"
+    if price_trend == pcr_trend == "FALLING":
+        return "BEARISH_CONFIRMATION"
+    if price_trend == "FALLING" and pcr_trend == "RISING":
+        return "BULLISH_DIVERGENCE"
+    if price_trend == "RISING" and pcr_trend == "FALLING":
+        return "BEARISH_DIVERGENCE"
+    if price_trend == "FLAT" and pcr_trend != "FLAT":
+        return "POSITIONING_LEADS_PRICE"
+    if pcr_trend == "FLAT" and price_trend != "FLAT":
+        return "PRICE_UNCONFIRMED"
+    return "FLAT"
+
+
+def _incremental_oi_driver(
+    ce_change: float | None,
+    pe_change: float | None,
+) -> str:
+    if ce_change is None or pe_change is None:
+        return "UNAVAILABLE"
+    side, value = (
+        ("CE", ce_change)
+        if abs(ce_change) >= abs(pe_change)
+        else ("PE", pe_change)
+    )
+    if value == 0:
+        return "FLAT"
+    return f"{side}_{'ADDITION' if value > 0 else 'REDUCTION'}"
+
+
 def _number(value: object, digits: int = 3) -> str:
     return "Not available" if value is None else f"{float(value):.{digits}f}"
+
+
+def _oi_shares(aggregate: Mapping[str, object]) -> tuple[float | None, float | None]:
+    ce = aggregate.get("total_ce_oi")
+    pe = aggregate.get("total_pe_oi")
+    if (
+        not isinstance(ce, (int, float)) or isinstance(ce, bool)
+        or not isinstance(pe, (int, float)) or isinstance(pe, bool)
+    ):
+        return None, None
+    total = float(ce) + float(pe)
+    if total <= 0:
+        return None, None
+    return float(ce) / total * 100.0, float(pe) / total * 100.0
 
 
 def _bias(value: object, *, stale: bool = False) -> str:
@@ -245,8 +353,55 @@ def _morning_rows(panel: dict[str, Any]) -> list[dict[str, str]]:
     } for row in panel.get("rows") or []]
 
 
+def _strike_pcr(pe_oi: object, ce_oi: object) -> float | None:
+    if not isinstance(pe_oi, (int, float)) or isinstance(pe_oi, bool):
+        return None
+    if not isinstance(ce_oi, (int, float)) or isinstance(ce_oi, bool) or ce_oi <= 0:
+        return None
+    return float(pe_oi) / float(ce_oi)
+
+
+def _strike_pcr_direction(pcr: float | None) -> str:
+    if pcr is None:
+        return "UNAVAILABLE"
+    return MarketTrendResearchPolicy().classify(pcr).value
+
+
+def _strike_recommendation(signal: str, *, total: bool = False) -> str:
+    if total:
+        return "OBSERVATION"
+    if signal == "BEARISH":
+        return "BUY PE"
+    if signal in {"BULLISH", "STRONGLY_BULLISH"}:
+        return "BUY CE"
+    return "WAIT"
+
+
 def _current_rows(panel: dict[str, Any]) -> list[dict[str, str]]:
-    return [{
+    rendered: list[dict[str, str]] = []
+    aggregate = panel.get("aggregate") or {}
+    overall_pcr = (
+        float(aggregate["pcr"])
+        if isinstance(aggregate, Mapping)
+        and isinstance(aggregate.get("pcr"), (int, float))
+        else None
+    )
+    overall_signal = _strike_pcr_direction(overall_pcr)
+    for row in panel.get("rows") or []:
+        current_pcr = _strike_pcr(
+            _field(row, "pe_current_oi"),
+            _field(row, "ce_current_oi"),
+        )
+        refresh_pcr = _strike_pcr(
+            _field(row, "pe_previous_refresh_oi"),
+            _field(row, "ce_previous_refresh_oi"),
+        )
+        opening_pcr = _strike_pcr(
+            _field(row, "pe_opening_oi"),
+            _field(row, "ce_opening_oi"),
+        )
+        strike_signal = _strike_pcr_direction(current_pcr)
+        rendered.append({
         "Strike": str(row.get("strike", "Not available")),
         "Position": _position(row.get("position")),
         "CE current OI": _indian(_field(row, "ce_current_oi")),
@@ -257,7 +412,24 @@ def _current_rows(panel: dict[str, Any]) -> list[dict[str, str]]:
         "PE previous-day OI": _indian(_field(row, "pe_previous_day_oi")),
         "PE OI change today": _signed(_field(row, "pe_previous_day_change")),
         "PE OI change %": _percent(_field(row, "pe_previous_day_change_pct")),
-    } for row in panel.get("rows") or []]
+        "Strike PCR": _number(current_pcr),
+        "PCR direction": strike_signal,
+        "Previous refresh PCR": _number(refresh_pcr),
+        "PCR change vs refresh": _signed_decimal(
+            None if current_pcr is None or refresh_pcr is None else current_pcr - refresh_pcr
+        ),
+        "Opening PCR": _number(opening_pcr),
+        "PCR change vs opening": _signed_decimal(
+            None if current_pcr is None or opening_pcr is None else current_pcr - opening_pcr
+        ),
+        "Overall PCR": _number(overall_pcr),
+        "Overall PCR signal": overall_signal,
+        "Recommendation": _strike_recommendation(
+            strike_signal,
+            total=str(row.get("position") or "").upper() == "TOTAL",
+        ),
+        })
+    return rendered
 
 
 def _option_metric_rows(
@@ -371,17 +543,364 @@ def _direction_evidence(aggregate: Mapping[str, object]) -> dict[str, object]:
     return asdict(evidence)
 
 
-def _render_market_direction_research(projection: dict[str, Any], *, stale: bool) -> None:
-    aggregate = (projection.get("current_panel") or {}).get("aggregate") or {}
-    evidence = _direction_evidence(aggregate)
-    direction = str(evidence.get("direction", "UNAVAILABLE"))
-    displayed_direction = f"{direction} — STALE" if stale else direction
-    st.markdown("### Market Direction Research")
+def _render_combined_market_pcr(
+    repository: MarketTrendResearchRepository,
+    *,
+    nifty_projection: dict[str, Any],
+    now: datetime,
+) -> CombinedMarketPcr:
+    snapshots: dict[str, dict[str, Any]] = {"NIFTY 50": nifty_projection}
+    batch_reader = getattr(repository, "latest_projections", None)
+    if callable(batch_reader):
+        snapshots.update(batch_reader(
+            underlyings=("NIFTY BANK", "SENSEX", *TOP_TEN_WEIGHTS),
+        ))
+    result = CombinedMarketPcrCalculator(
+        maximum_age_seconds=_freshness_threshold_seconds(),
+        accept_same_day_close=True,
+    ).calculate(snapshots, now=now)
+    st.markdown("## Combined Index PCR — NIFTY, Bank NIFTY and SENSEX")
     st.dataframe(_arrow_safe_rows([{
-        "PCR market direction": displayed_direction,
-        "Current PCR": _number(evidence.get("pcr")),
-        "Final combined direction": "NOT YET CALCULATED",
+        "Combined PCR": (
+            "Not available" if result.index_pcr is None else f"{result.index_pcr:.3f}"
+        ),
+        "Direction": result.direction,
+        "Coverage": f"{result.coverage:.0%}",
+        "Status": "FRESH" if result.index_pcr is not None else "INCOMPLETE",
     }]), width="stretch", hide_index=True)
+    if result.score is None:
+        st.info(
+            "Combined Index PCR is withheld until NIFTY 50, Bank NIFTY and "
+            "SENSEX all have usable PCR evidence."
+        )
+    with st.expander("Combined Index PCR component details", expanded=False):
+        st.write(f"Index agreement: {result.agreement}")
+        st.dataframe(_arrow_safe_rows([{
+            "Component": component.name,
+            "Weight": f"{component.weight:.0%}",
+            "PCR": _number(component.pcr),
+            "Direction": component.direction,
+            "Fresh": "YES" if component.fresh else "NO",
+            "Source time": _format_ist_timestamp(component.source_timestamp),
+            "Coverage detail": component.detail,
+        } for component in result.components if component.name != "NIFTY TOP 10"]), width="stretch", hide_index=True)
+        st.caption(
+            "Observational only. The score combines normalized directional "
+            "evidence; it is not an arithmetic average of PCR ratios and has "
+            "no signal, bundle, queue or execution authority."
+        )
+    direction_labels = {
+        "BULLISH": "🟢 BULLISH",
+        "BEARISH": "🔴 BEARISH",
+        "NEUTRAL": "🟡 NEUTRAL",
+        "UNAVAILABLE": "⚪ UNAVAILABLE",
+    }
+    top_ten_rows: list[dict[str, object]] = []
+    for symbol, weight in TOP_TEN_WEIGHTS.items():
+        snapshot = snapshots.get(symbol) or {}
+        panel = snapshot.get("current_panel")
+        aggregate = panel.get("aggregate") if isinstance(panel, Mapping) else {}
+        aggregate = aggregate if isinstance(aggregate, Mapping) else {}
+        evidence = _direction_evidence(aggregate)
+        direction = str(evidence.get("direction") or "UNAVAILABLE").upper()
+        top_ten_rows.append({
+            "Stock": symbol,
+            "NIFTY weight": f"{weight:.2f}%",
+            "PCR": _number(aggregate.get("pcr")),
+            "Direction": direction_labels.get(direction, f"⚪ {direction}"),
+            "Source time": _format_ist_timestamp(snapshot.get("source_timestamp")),
+        })
+    top_ten_component = next(
+        component for component in result.components
+        if component.name == "NIFTY TOP 10"
+    )
+    st.markdown("## NIFTY Top-10 PCR Breadth")
+    st.dataframe(_arrow_safe_rows([{
+        "Breadth direction": direction_labels.get(
+            top_ten_component.direction,
+            top_ten_component.direction,
+        ),
+        "Weighted Top-10 PCR": _number(top_ten_component.pcr),
+        "Coverage": top_ten_component.detail,
+    }]), width="stretch", hide_index=True)
+    with st.expander("NIFTY Top-10 stock directions", expanded=True):
+        st.dataframe(
+            _arrow_safe_rows(top_ten_rows),
+            width="stretch",
+            hide_index=True,
+        )
+    return result
+
+
+def _contract_selection_for_cycle(
+    repository: MarketTrendResearchRepository,
+    *,
+    projection: dict[str, Any],
+    combined: CombinedMarketPcr,
+    option_rows: list[dict[str, Any]],
+    underlying: str,
+    now: datetime,
+    pcr_stale: bool,
+) -> ContractSelection:
+    path = getattr(repository, "path", None)
+    if path is None:
+        return ContractSelection("NONE", "INCOMPLETE", "Repository source unavailable", ())
+    current_panel = projection.get("current_panel") or {}
+    current_aggregate = current_panel.get("aggregate") or {}
+    morning_aggregate = (projection.get("morning_panel") or {}).get("aggregate") or {}
+    current_direction = str(_direction_evidence(current_aggregate).get("direction") or "UNAVAILABLE")
+    morning_direction = str(_direction_evidence(morning_aggregate).get("direction") or "UNAVAILABLE")
+    trend_direction, _ = research_direction(
+        combined_direction=combined.direction,
+        combined_ready=combined.score is not None,
+        current_direction=current_direction,
+        current_ready=bool(current_aggregate) and not pcr_stale,
+        morning_direction=morning_direction,
+    )
+    side, status, reason = pcr_research_preference(trend_direction)
+    rows = current_panel.get("rows") or []
+    selected_strikes = frozenset(
+        float(row["strike"])
+        for row in rows
+        if isinstance(row, Mapping)
+        and isinstance(row.get("strike"), (int, float))
+        and row.get("position") != "TOTAL"
+    )
+    candidates = select_best_contracts(
+        option_rows,
+        preferred_side=side,
+        selected_expiry=str(current_panel.get("expiry") or ""),
+        selected_strikes=selected_strikes,
+        limit=4,
+    ) if status == "PASSED" else ()
+    return ContractSelection(side, status, reason, candidates)
+
+
+def _render_best_contracts(selection: ContractSelection) -> None:
+    st.markdown("#### Best four contracts from PCR research")
+    if not selection.candidates:
+        st.info(f"No contracts selected. {selection.reason}")
+        return
+    st.dataframe(_arrow_safe_rows([{
+        "Rank": item.rank, "Contract": item.symbol, "Side": item.side,
+        "Strike": f"{item.strike:.0f}", "Expiry": item.expiry,
+        "Price": f"{item.current_price:.2f}", "Delta": f"{item.delta:.4f}",
+        "VWAP": f"{item.vwap:.2f}", "IV": f"{item.iv:.2f}",
+        "OI change %": _percent(item.oi_change_pct),
+        "Premium change %": _percent(item.premium_change_pct),
+        "Activity": item.activity,
+        "Buildup interpretation": item.interpretation,
+        "Bid / Ask": f"{item.bid:.2f} / {item.ask:.2f}",
+        "Spread %": f"{item.spread_pct:.2f}%", "Score": f"{item.score:.1f}",
+        "Reason": item.reason,
+    } for item in selection.candidates]), width="stretch", hide_index=True)
+    st.caption("Observational selection only. It creates no signal, opportunity or order.")
+
+
+def _render_five_minute_pcr_history(
+    repository: MarketTrendResearchRepository,
+    *,
+    underlying: str,
+    now: datetime,
+) -> None:
+    reader = getattr(repository, "five_minute_pcr_history", None)
+    rows = (
+        reader(
+            underlying=underlying,
+            trading_date=now.astimezone(IST).date(),
+        )
+        if callable(reader)
+        else []
+    )
+    with st.expander("5-Minute Overall PCR History", expanded=False):
+        if not rows:
+            st.info(
+                "Waiting for the first completed 5-minute candle with a "
+                "contemporaneous Overall PCR snapshot."
+            )
+            return
+        rendered: list[dict[str, object]] = []
+        previous_spot: float | None = None
+        previous_pcr: float | None = None
+        previous_ce_day_change: float | None = None
+        previous_pe_day_change: float | None = None
+        for row in reversed(rows):
+            spot = row.get("nifty_spot")
+            spot = float(spot) if isinstance(spot, (int, float)) else None
+            pcr = row.get("overall_pcr")
+            pcr = float(pcr) if isinstance(pcr, (int, float)) else None
+            price_change = (
+                spot - previous_spot
+                if spot is not None and previous_spot is not None
+                else None
+            )
+            price_change_pct = (
+                price_change / previous_spot * 100.0
+                if price_change is not None and previous_spot not in {None, 0}
+                else None
+            )
+            pcr_change = (
+                pcr - previous_pcr
+                if pcr is not None and previous_pcr is not None
+                else None
+            )
+            price_trend = _movement(price_change_pct, threshold=0.05)
+            pcr_trend = _movement(pcr_change, threshold=0.02)
+            ce_day_change = row.get("ce_day_oi_change")
+            ce_day_change = float(ce_day_change) if isinstance(ce_day_change, (int, float)) else None
+            pe_day_change = row.get("pe_day_oi_change")
+            pe_day_change = float(pe_day_change) if isinstance(pe_day_change, (int, float)) else None
+            ce_increment = (
+                ce_day_change - previous_ce_day_change
+                if ce_day_change is not None and previous_ce_day_change is not None
+                else None
+            )
+            pe_increment = (
+                pe_day_change - previous_pe_day_change
+                if pe_day_change is not None and previous_pe_day_change is not None
+                else None
+            )
+            ce_change_pct = _history_change_pct(
+                row.get("ce_day_oi_change_pct"),
+                current_oi=row.get("total_ce_oi"),
+                absolute_change=row.get("ce_day_oi_change"),
+            )
+            pe_change_pct = _history_change_pct(
+                row.get("pe_day_oi_change_pct"),
+                current_oi=row.get("total_pe_oi"),
+                absolute_change=row.get("pe_day_oi_change"),
+            )
+            rendered.append({
+                "Time": _format_ist_timestamp(row.get("candle_close_timestamp")),
+                "NIFTY spot": _number(row.get("nifty_spot"), 2),
+                "NIFTY change": _signed_decimal(price_change, 2),
+                "NIFTY change %": _percent(price_change_pct),
+                "RSI": _number(row.get("rsi"), 2),
+                "VWAP": _number(row.get("vwap"), 2),
+                "Fixed Morning PCR": _number(row.get("morning_pcr")),
+                "NIFTY Strike PCR": _number(row.get("overall_pcr")),
+                "PCR change": _signed_decimal(pcr_change),
+                "Price trend": price_trend,
+                "PCR trend": pcr_trend,
+                "Price–PCR relationship": _price_pcr_relationship(
+                    price_trend,
+                    pcr_trend,
+                ),
+                "OI driver": _incremental_oi_driver(ce_increment, pe_increment),
+                "Combined Index PCR": _number(row.get("combined_index_pcr")),
+                "NIFTY Top-10 PCR": _number(row.get("top_ten_pcr")),
+                "Overall Direction": row.get("research_direction", "Not available"),
+                "CE day OI change %": _percent(ce_change_pct),
+                "PE day OI change %": _percent(pe_change_pct),
+                "CE day OI change": _signed(row.get("ce_day_oi_change")),
+                "PE day OI change": _signed(row.get("pe_day_oi_change")),
+            })
+            previous_spot = spot if spot is not None else previous_spot
+            previous_pcr = pcr if pcr is not None else previous_pcr
+            previous_ce_day_change = (
+                ce_day_change
+                if ce_day_change is not None
+                else previous_ce_day_change
+            )
+            previous_pe_day_change = (
+                pe_day_change
+                if pe_day_change is not None
+                else previous_pe_day_change
+            )
+        st.dataframe(
+            _arrow_safe_rows(list(reversed(rendered))),
+            width="stretch",
+            hide_index=True,
+        )
+        st.caption(
+            "One immutable observation per completed NIFTY five-minute candle. "
+            "This history is observational and has no signal or execution authority."
+        )
+
+
+def _render_strike_pcr_recommendation_tracker(
+    repository: MarketTrendResearchRepository,
+    *,
+    underlying: str,
+    now: datetime,
+    option_rows: list[dict[str, Any]] | None = None,
+) -> None:
+    reader = getattr(repository, "strike_pcr_recommendations", None)
+    rows = (
+        reader(
+            underlying=underlying,
+            trading_date=now.astimezone(IST).date(),
+        )
+        if callable(reader)
+        else []
+    )
+    option_evidence = {
+        (float(item["strike"]), str(item.get("option_type") or "").upper()): item
+        for item in (option_rows or [])
+        if isinstance(item.get("strike"), (int, float))
+    }
+    with st.expander("Strike PCR Buy Recommendation Tracker", expanded=False):
+        if not rows:
+            st.info(
+                "No persisted strike-PCR recommendation is available yet. "
+                "A recommendation opens only with a valid two-sided quote."
+            )
+            return
+
+        def gain(current: object, entry: object) -> float | None:
+            if not isinstance(current, (int, float)) or not isinstance(entry, (int, float)) or entry <= 0:
+                return None
+            return (float(current) - float(entry)) / float(entry) * 100.0
+
+        rendered_rows: list[dict[str, object]] = []
+        for row in rows:
+            evidence = option_evidence.get(
+                (float(row.get("strike", 0)), str(row.get("side") or "").upper()),
+                {},
+            )
+            premium_change = evidence.get("premium_change_from_previous_refresh_pct")
+            oi_change = evidence.get("oi_change_from_previous_refresh")
+            activity = (
+                _activity(float(premium_change), float(oi_change))
+                if isinstance(premium_change, (int, float))
+                and isinstance(oi_change, (int, float))
+                else "UNAVAILABLE"
+            )
+            interpretation = (
+                _activity_interpretation(str(row.get("side") or "").upper(), activity)
+                if activity != "UNAVAILABLE"
+                else "Not available"
+            )
+            rendered_rows.append({
+            "State": row.get("status"),
+            "Recommendation": f"BUY {row.get('side')}",
+            "Contract": row.get("symbol") or f"{float(row.get('strike', 0)):.0f} {row.get('side')}",
+            "Strike": _number(row.get("strike"), 0),
+            "Entry strike PCR": _number(row.get("entry_strike_pcr")),
+            "Current strike PCR": _number(row.get("last_strike_pcr")),
+            "Strike signal": row.get("strike_signal"),
+            "Entry Overall PCR": _number(row.get("entry_overall_pcr")),
+            "Current Overall PCR": _number(row.get("overall_pcr")),
+            "Overall PCR signal": row.get("overall_signal"),
+            "Premium change %": _percent(premium_change),
+            "OI change": _signed(oi_change),
+            "Activity": activity,
+            "Buildup interpretation": interpretation,
+            "Entry ask (frozen)": _number(row.get("entry_price"), 2),
+            "Current bid": _number(row.get("current_price"), 2),
+            "Peak bid": _number(row.get("peak_price"), 2),
+            "Current gain": _percent(gain(row.get("current_price"), row.get("entry_price"))),
+            "Peak gain": _percent(gain(row.get("peak_price"), row.get("entry_price"))),
+            "Opened": _format_ist_timestamp(row.get("opened_at")),
+            "Peak time": _format_ist_timestamp(row.get("peak_at")),
+            "Last update": _format_ist_timestamp(row.get("last_observed_at")),
+            })
+        st.dataframe(_arrow_safe_rows(rendered_rows), width="stretch", hide_index=True)
+        st.caption(
+            "PCR-only observational tracking. Entry uses the first valid ask; "
+            "current and peak values use executable bid. No signal, opportunity "
+            "or order is created."
+        )
 
 
 def _render_morning(projection: dict[str, Any], *, stale: bool, live_source_age: float | None) -> None:
@@ -397,6 +916,7 @@ def _render_morning(projection: dict[str, Any], *, stale: bool, live_source_age:
         st.write(f"OI-baseline status: {baseline.get('status') or 'Not available'}")
         return
     aggregate = panel.get("aggregate") or {}
+    ce_share, pe_share = _oi_shares(aggregate)
     summary = [
         {"Field": "Reference-level status", "Value": reference.get("status") or "Not available"},
         {"Field": "Reference NIFTY level", "Value": _number(reference.get("reference_spot"), 2)},
@@ -410,17 +930,21 @@ def _render_morning(projection: dict[str, Any], *, stale: bool, live_source_age:
         {"Field": "Opening OI baseline timestamp", "Value": _format_ist_timestamp(baseline.get("baseline_timestamp"))},
         {"Field": "Current snapshot timestamp", "Value": _format_ist_timestamp(panel.get("source_timestamp"))},
         {"Field": "Source age", "Value": _source_age_text(live_source_age)},
-        {"Field": "PCR", "Value": _number(aggregate.get("pcr"))},
-        {"Field": "PCR directional evidence", "Value": _bias(aggregate.get("classification"), stale=stale)},
     ]
-    st.dataframe(_arrow_safe_rows(_morning_rows(panel)), width="stretch", hide_index=True)
+    st.dataframe(_arrow_safe_rows([{
+        "Fixed PCR": _number(aggregate.get("pcr")),
+        "CE OI share": _percent(ce_share),
+        "PE OI share": _percent(pe_share),
+        "Direction": _bias(aggregate.get("classification"), stale=stale),
+        "Status": "STALE" if stale else "FRESH",
+    }]), width="stretch", hide_index=True)
     with st.expander("Morning Fixed-Level PCR details", expanded=False):
+        st.dataframe(_arrow_safe_rows(_morning_rows(panel)), width="stretch", hide_index=True)
         st.dataframe(_arrow_safe_rows(summary), width="stretch", hide_index=True)
         total = _total(panel)
         st.write(f"Overall CE change since open: {_signed(total.get('ce_opening_change'))} ({_percent(total.get('ce_opening_change_pct'))})")
         st.write(f"Overall PE change since open: {_signed(total.get('pe_opening_change'))} ({_percent(total.get('pe_opening_change_pct'))})")
-        st.write(f"Morning fixed-level PCR: Total current PE OI ÷ Total current CE OI = {_number(aggregate.get('pcr'))}")
-        st.write(f"PCR directional evidence: {_bias(aggregate.get('classification'), stale=stale)}")
+        st.caption("Fixed PCR = total current PE OI ÷ total current CE OI.")
 
 
 def _render_refresh_diagnostics(panel: dict[str, Any]) -> None:
@@ -453,10 +977,17 @@ def _render_current(
     stale: bool,
     live_source_age: float | None,
     option_rows: list[dict[str, Any]] | None = None,
+    contract_selection: ContractSelection | None = None,
 ) -> None:
     st.markdown("## Current/Overall PCR")
     panel = projection.get("current_panel") or {}
     aggregate = panel.get("aggregate") or {}
+    total = _total(panel)
+    shares_source = aggregate if aggregate.get("total_ce_oi") is not None else {
+        "total_ce_oi": total.get("ce_current_oi"),
+        "total_pe_oi": total.get("pe_current_oi"),
+    }
+    ce_share, pe_share = _oi_shares(shares_source)
     summary = [
         {"Field": "Current NIFTY level", "Value": _number(panel.get("spot"), 2)},
         {"Field": "Current ATM", "Value": _number(panel.get("atm"), 0)},
@@ -467,16 +998,14 @@ def _render_current(
         {"Field": "Expected/observed contracts", "Value": f"{panel.get('expected_contract_count', 0)}/{panel.get('observed_contract_count', 0)}"},
         {"Field": "Source timestamp", "Value": _format_ist_timestamp(panel.get("source_timestamp"))},
         {"Field": "Source age", "Value": _source_age_text(live_source_age)},
-        {"Field": "PCR", "Value": _number(aggregate.get("pcr"))},
-        {"Field": "PCR directional evidence", "Value": _bias(aggregate.get("classification"), stale=stale)},
     ]
-    total = _total(panel)
-    total_panel = {"rows": [total]} if total else {"rows": []}
-    st.dataframe(
-        _arrow_safe_rows(_current_rows(total_panel)),
-        width="stretch",
-        hide_index=True,
-    )
+    st.dataframe(_arrow_safe_rows([{
+        "Strike PCR": _number(aggregate.get("pcr")),
+        "CE OI share": _percent(ce_share),
+        "PE OI share": _percent(pe_share),
+        "Direction": _bias(aggregate.get("classification"), stale=stale),
+        "Status": "STALE" if stale else "FRESH",
+    }]), width="stretch", hide_index=True)
     with st.expander("Current/Overall PCR details", expanded=False):
         st.write(f"Total CE OI change: {_signed(total.get('ce_previous_day_change'))} ({_percent(total.get('ce_previous_day_change_pct'))})")
         st.write(f"Total PE OI change: {_signed(total.get('pe_previous_day_change'))} ({_percent(total.get('pe_previous_day_change_pct'))})")
@@ -512,8 +1041,9 @@ def _render_current(
                 "Delta, VWAP and IV are not available for the selected PCR "
                 "strikes in the latest persisted option snapshot."
             )
-        st.write(f"Current/Overall PCR: Total current PE OI ÷ Total current CE OI = {_number(aggregate.get('pcr'))}")
-        st.write(f"PCR directional evidence: {_bias(aggregate.get('classification'), stale=stale)}")
+        if contract_selection is not None:
+            _render_best_contracts(contract_selection)
+        st.caption("Strike PCR = total current PE OI ÷ total current CE OI.")
         st.markdown("#### Current/Overall PCR snapshot details")
         st.dataframe(
             _arrow_safe_rows(summary),
@@ -597,12 +1127,33 @@ def _render_projection_cycle(
         f"Calendar source: {projection.get('calendar_source', 'Not available')}"
     )
     _render_morning(projection, stale=stale, live_source_age=live_source_age)
-    _render_market_direction_research(projection, stale=stale)
+    combined = _render_combined_market_pcr(repository, nifty_projection=projection, now=current)
+    contract_selection = _contract_selection_for_cycle(
+        repository,
+        projection=projection,
+        combined=combined,
+        option_rows=option_rows or [],
+        underlying=underlying,
+        now=current,
+        pcr_stale=stale,
+    )
     _render_current(
         projection,
         stale=stale,
         live_source_age=live_source_age,
         option_rows=option_rows,
+        contract_selection=contract_selection,
+    )
+    _render_strike_pcr_recommendation_tracker(
+        repository,
+        underlying=underlying,
+        now=current,
+        option_rows=option_rows,
+    )
+    _render_five_minute_pcr_history(
+        repository,
+        underlying=underlying,
+        now=current,
     )
     with st.expander("Internal diagnostics", expanded=False):
         aggregate = (projection.get("current_panel") or {}).get("aggregate") or {}

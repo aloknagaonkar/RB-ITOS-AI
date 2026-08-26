@@ -59,10 +59,12 @@ def test_unverified_calendar_remains_fail_closed(monkeypatch):
     assert calendar.verified is False
 
 
-def test_existing_tabs_are_preserved():
+def test_summary_precedes_the_two_research_tabs():
     source = Path("red_bar_lab/ui/pages/market_readiness.py").read_text(encoding="utf-8")
-    assert source.index('"Authoritative Evidence"') < source.index('"Market Trend Research"')
-    assert source.index('"Market Trend Research"') < source.index('"Legacy Full Trade Evidence"')
+    assert source.index("render_market_direction_summary(") < source.index('"Market Trend Research"')
+    assert source.index('"Market Trend Research"') < source.index('"Market Direction Validation"')
+    assert '"Authoritative Evidence"' not in source
+    assert '"Legacy Full Trade Evidence"' not in source
 
 
 def test_research_ui_has_exact_two_primary_tables_in_required_order():

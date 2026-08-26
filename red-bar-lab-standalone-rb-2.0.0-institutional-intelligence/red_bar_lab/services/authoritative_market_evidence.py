@@ -40,6 +40,23 @@ def _timestamp(value: object) -> datetime | None:
     return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
 
 
+def _authoritative_evaluation_time(
+    cycle_started_at: datetime,
+    *,
+    evaluated_at: datetime | None = None,
+) -> datetime:
+    """Use bundle-build time, never an older long-running cycle timestamp."""
+    if cycle_started_at.tzinfo is None or cycle_started_at.utcoffset() is None:
+        raise ValueError("cycle_started_at must be timezone-aware")
+    current = evaluated_at or datetime.now(timezone.utc)
+    if current.tzinfo is None or current.utcoffset() is None:
+        raise ValueError("evaluated_at must be timezone-aware")
+    return max(
+        cycle_started_at.astimezone(timezone.utc),
+        current.astimezone(timezone.utc),
+    )
+
+
 def completed_bar_timestamps(
     evidence: Mapping[str, Any] | None,
     *,
@@ -167,6 +184,7 @@ def build_and_persist_authoritative_market_evidence(
     database_path,
     underlying_name: str,
     observed_at: datetime,
+    evaluated_at: datetime | None = None,
 ) -> dict[str, Any] | None:
     """Collector-side authoritative bundle creation; never an execution action."""
     from red_bar_lab.ui.market_at_a_glance import build_market_at_a_glance
@@ -180,6 +198,10 @@ def build_and_persist_authoritative_market_evidence(
     )
     if not rows:
         return None
+    bundle_evaluated_at = _authoritative_evaluation_time(
+        observed_at,
+        evaluated_at=evaluated_at,
+    )
     summary = corrected_option_summary(rows)
     summary["observed_at"] = rows[0].get("observed_at")
     history = read_option_score_history(
@@ -217,18 +239,21 @@ def build_and_persist_authoritative_market_evidence(
     )
     live_path = layout.live_session_path("upstox", instrument_key, 1)
     underlying = completed_bar_timestamps(
-        read_underlying_evidence(live_path, as_of_timestamp=observed_at)
+        read_underlying_evidence(
+            live_path,
+            as_of_timestamp=bundle_evaluated_at,
+        )
     )
     intraday = read_intraday_acceptance(
         live_path,
-        as_of_timestamp=observed_at,
+        as_of_timestamp=bundle_evaluated_at,
     )
 
     view = build_market_at_a_glance(
         summary,
         futures,
         underlying,
-        now=observed_at,
+        now=bundle_evaluated_at,
         early_1m=intraday["early_1m"],
         spot_vwap=intraday["spot_vwap"],
         futures_vwap=futures_vwap,
@@ -252,6 +277,8 @@ def build_and_persist_authoritative_market_evidence(
     )
     view["safe_evidence_time"] = _safe_evidence_time(view)
     view["latest_complete_evidence_time"] = view["safe_evidence_time"]
+    view["cycle_started_at"] = observed_at.isoformat()
+    view["bundle_evaluated_at"] = bundle_evaluated_at.isoformat()
     view["authority"] = "OBSERVATIONAL_ONLY"
     view["bundle_id"] = persist_market_evidence_bundle(
         database_path,

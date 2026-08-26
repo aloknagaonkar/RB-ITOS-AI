@@ -77,6 +77,13 @@ class MarketTrendResearchService:
             source=str(raw["source"]),
             source_age_seconds=float(raw["source_age_seconds"]),
             status=str(raw["status"]),
+            reference_candle_number=(None if raw.get("reference_candle_number") is None else int(raw["reference_candle_number"])),
+            reference_candle_start=(None if raw.get("reference_candle_start") is None else cls._aware(raw["reference_candle_start"])),
+            reference_candle_end=(None if raw.get("reference_candle_end") is None else cls._aware(raw["reference_candle_end"])),
+            reference_candle_open=(None if raw.get("reference_candle_open") is None else float(raw["reference_candle_open"])),
+            reference_candle_high=(None if raw.get("reference_candle_high") is None else float(raw["reference_candle_high"])),
+            reference_candle_low=(None if raw.get("reference_candle_low") is None else float(raw["reference_candle_low"])),
+            reference_candle_close=(None if raw.get("reference_candle_close") is None else float(raw["reference_candle_close"])),
         )
 
     @classmethod

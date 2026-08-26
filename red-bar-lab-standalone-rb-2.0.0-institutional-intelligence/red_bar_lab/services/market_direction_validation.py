@@ -8,6 +8,8 @@ from typing import Any, Mapping, Sequence
 _DIRECTIONS = {"BULLISH", "BEARISH"}
 _BULLISH_FUTURES = {"LONG_BUILDUP", "SHORT_COVERING"}
 _BEARISH_FUTURES = {"SHORT_BUILDUP", "LONG_UNWINDING"}
+_VALID_STRUCTURE_DIRECTIONS = _DIRECTIONS | {"NEUTRAL"}
+_READY_FRESHNESS_STATES = {"PASS", "WARNING"}
 
 
 def _number(value: object) -> float | None:
@@ -20,6 +22,26 @@ def _number(value: object) -> float | None:
 def _text(value: object, default: str = "UNAVAILABLE") -> str:
     text = str(value or "").strip().upper()
     return text or default
+
+
+def _underlying_freshness(bundle: Mapping[str, object]) -> tuple[str, bool]:
+    """Return underlying-specific freshness without borrowing derivative health."""
+
+    diagnostics = bundle.get("freshness_diagnostics")
+    if isinstance(diagnostics, Sequence) and not isinstance(
+        diagnostics, (str, bytes)
+    ):
+        for item in diagnostics:
+            if not isinstance(item, Mapping):
+                continue
+            if _text(item.get("source")) != "UNDERLYING CANDLE":
+                continue
+            status = _text(item.get("status"))
+            return status, status in _READY_FRESHNESS_STATES
+
+    # Backward compatibility for bundles persisted before per-source diagnostics.
+    readiness = _text(bundle.get("evidence_readiness"))
+    return readiness, readiness == "READY"
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +81,7 @@ def _structure_component(bundle: Mapping[str, object]) -> DirectionComponent:
     early_direction = _text(bundle.get("early_1m_direction"))
     early_state = _text(bundle.get("early_1m_state"))
     readiness = _text(bundle.get("evidence_readiness"))
+    underlying_freshness, underlying_is_fresh = _underlying_freshness(bundle)
     bullish = bearish = 0.0
     if early_direction in _DIRECTIONS:
         if early_direction == "BULLISH":
@@ -80,13 +103,20 @@ def _structure_component(bundle: Mapping[str, object]) -> DirectionComponent:
         if direction == "NEUTRAL"
         else "UNAVAILABLE"
     )
-    quality = "READY" if readiness == "READY" and direction in _DIRECTIONS else "PARTIAL" if bundle else "UNAVAILABLE"
+    quality = (
+        "READY"
+        if underlying_is_fresh and direction in _VALID_STRUCTURE_DIRECTIONS
+        else "PARTIAL"
+        if bundle
+        else "UNAVAILABLE"
+    )
     return DirectionComponent(
         "Completed NIFTY 1m/5m structure", 40.0, min(bullish, 40.0), min(bearish, 40.0), conclusion, quality,
         (
             {"Check": "Completed 1m early state", "Observed": early_state, "Direction": early_direction, "Rule": "Completed 1m break; early evidence only"},
             {"Check": "Completed 5m structure", "Observed": state, "Direction": direction, "Rule": "Completed breakout plus hold owns confirmation"},
-            {"Check": "Evidence readiness", "Observed": readiness, "Direction": "NEUTRAL", "Rule": "Persisted evidence must be ready"},
+            {"Check": "Underlying candle freshness", "Observed": underlying_freshness, "Direction": "NEUTRAL", "Rule": "Underlying completed candle must be fresh"},
+            {"Check": "Cross-source readiness", "Observed": readiness, "Direction": "NEUTRAL", "Rule": "Reported separately; derivative components own their readiness"},
             {"Check": "Underlying evidence time", "Observed": bundle.get("underlying_timestamp"), "Direction": "NEUTRAL", "Rule": "Completed-candle exchange time"},
         ),
     )

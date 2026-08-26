@@ -218,61 +218,7 @@ def _decision_rows(
 
 
 def render_score_explanation(settings, underlying_name: str) -> None:
-    rows = list(
-        read_latest_option_participation(
-            settings.database_path,
-            underlying_name=underlying_name,
-        )
-        or []
-    )
-    if not rows:
-        return
-
-    summary = summarize_option_participation(rows)
-    futures_rows = read_nifty_futures_snapshots(
-        settings.database_path,
-        underlying_name=underlying_name,
-        limit=1,
-    )
-    futures = futures_rows[0] if futures_rows else {}
-
-    st.markdown("### E. How the Independent Bullish / Bearish Score Is Calculated")
-    st.caption(
-        "Bullish score is the CE ATM ±4 weighted pressure score. Bearish score is the PE ATM ±4 weighted pressure score. "
-        "These are deterministic heuristic evidence scores, not probabilities of profit."
-    )
-
-    bullish = _number(summary.get("ce_score"))
-    bearish = _number(summary.get("pe_score"))
-    gap = (
-        abs(bullish - bearish)
-        if bullish is not None and bearish is not None
-        else None
-    )
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Bullish score (CE)", _score(bullish))
-    c2.metric("Bearish score (PE)", _score(bearish))
-    c3.metric("Score gap", _score(gap))
-    c4.metric("Final view", summary.get("recommended_direction") or "NEUTRAL")
-
-    st.markdown("#### CE/PE decision explanation")
-    st.dataframe(
-        _arrow_safe_rows(_decision_rows(summary, futures)),
-        width="stretch",
-        hide_index=True,
-    )
-
-    with st.expander("View per-strike score component breakdown", expanded=False):
-        st.dataframe(
-            _arrow_safe_rows(_breakdown_rows(rows)),
-            width="stretch",
-            hide_index=True,
-        )
-        st.caption(
-            "Per-strike maximum: participation state 30, price above VWAP 20, relative volume 15, "
-            "OI behaviour 15, option RSI 10 and delta 10. The CE/PE side score is the current volume-weighted "
-            "average of its strike scores."
-        )
+    del settings, underlying_name
 
 
 def install(page_module: Any) -> None:

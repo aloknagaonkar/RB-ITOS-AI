@@ -6,14 +6,15 @@ CURRENT_PAGE = ROOT / "ui" / "pages" / "market_readiness.py"
 LEGACY_PAGE = ROOT / "ui" / "pages" / "market_readiness_legacy.py"
 
 
-def test_trade_evidence_page_exposes_authoritative_and_legacy_tabs():
+def test_trade_evidence_page_exposes_only_research_and_validation_tabs():
     source = CURRENT_PAGE.read_text(encoding="utf-8")
 
-    assert '"Authoritative Evidence"' in source
-    assert '"Legacy Full Trade Evidence"' in source
+    assert '"Market Trend Research"' in source
+    assert '"Market Direction Validation"' in source
+    assert '"Authoritative Evidence"' not in source
+    assert '"Legacy Full Trade Evidence"' not in source
     assert "render_legacy_page(" not in source
-    assert "No persisted legacy diagnostics are available." in source
-    assert "read_global_readiness_snapshots(" in source
+    assert "render_market_direction_summary(" in source
 
 
 def test_legacy_trade_evidence_sections_are_preserved():

@@ -87,6 +87,9 @@ def test_clear_current_oi_labels_and_morning_labels_unchanged():
         "Strike", "Position", "CE current OI", "CE previous-day OI",
         "CE OI change today", "CE OI change %", "PE current OI",
         "PE previous-day OI", "PE OI change today", "PE OI change %",
+        "Strike PCR", "PCR direction", "Previous refresh PCR",
+        "PCR change vs refresh", "Opening PCR", "PCR change vs opening",
+        "Overall PCR", "Overall PCR signal", "Recommendation",
     )
     assert panel.MORNING_COLUMNS == (
         "Strike", "Position", "CE current OI", "CE opening OI",
@@ -107,12 +110,25 @@ def test_current_rows_use_clear_labels_and_existing_values():
         "pe_previous_day_oi": 100.0,
         "pe_previous_day_change": 50.0,
         "pe_previous_day_change_pct": 50.0,
+        "ce_previous_refresh_oi": 100.0,
+        "pe_previous_refresh_oi": 120.0,
+        "ce_opening_oi": 80.0,
+        "pe_opening_oi": 88.0,
     }
     rendered = panel._current_rows({"rows": [row]})[0]
     assert rendered["CE OI change today"] == "+30"
     assert rendered["CE OI change %"] == "+33.33%"
     assert rendered["PE OI change today"] == "+50"
     assert rendered["PE OI change %"] == "+50.00%"
+    assert rendered["Strike PCR"] == "1.250"
+    assert rendered["PCR direction"] == "BULLISH"
+    assert rendered["Previous refresh PCR"] == "1.200"
+    assert rendered["PCR change vs refresh"] == "+0.050"
+    assert rendered["Opening PCR"] == "1.100"
+    assert rendered["PCR change vs opening"] == "+0.150"
+    assert rendered["Overall PCR"] == "Not available"
+    assert rendered["Overall PCR signal"] == "UNAVAILABLE"
+    assert rendered["Recommendation"] == "BUY CE"
 
 
 def test_overall_oi_summary_uses_total_row_values(monkeypatch):
@@ -140,26 +156,7 @@ def test_missing_and_zero_aggregate_percentages_render_unavailable(monkeypatch):
     assert "Total PE OI change: Not available (Not available)" in text
 
 
-def test_direction_and_final_combined_direction_are_separate(monkeypatch):
-    stub = StreamlitStub()
-    monkeypatch.setattr(panel, "st", stub)
-    panel._render_market_direction_research(_projection(), stale=False)
-    text = "\n".join(str(value) for _, value in stub.calls)
-    assert "PCR market direction': 'BULLISH" in text
-    assert "Final combined direction': 'NOT YET CALCULATED" in text
-    assert sum(kind == "dataframe" for kind, _ in stub.calls) == 1
-    assert not any(kind in {"write", "caption"} for kind, _ in stub.calls)
-
-
-def test_stale_projection_marks_pcr_direction_stale(monkeypatch):
-    stub = StreamlitStub()
-    monkeypatch.setattr(panel, "st", stub)
-    panel._render_market_direction_research(_projection(), stale=True)
-    text = "\n".join(str(value) for _, value in stub.calls)
-    assert "BULLISH — STALE" in text
-
-
-def test_current_panel_shows_only_overall_total_before_expanded_details(monkeypatch):
+def test_current_panel_shows_compact_summary_before_expanded_details(monkeypatch):
     stub = StreamlitStub()
     monkeypatch.setattr(panel, "st", stub)
     projection = _projection()
@@ -171,11 +168,27 @@ def test_current_panel_shows_only_overall_total_before_expanded_details(monkeypa
 
     first_table = next(value for kind, value in stub.calls if kind == "dataframe")
     assert len(first_table) == 1
-    assert first_table[0]["Position"] == "Overall total"
+    assert first_table[0]["Strike PCR"] == "1.250"
+    assert first_table[0]["CE OI share"] == "+44.44%"
+    assert first_table[0]["PE OI share"] == "+55.56%"
+    assert first_table[0]["Status"] == "FRESH"
     assert any(
         kind == "expander" and value == "Current/Overall PCR details"
         for kind, value in stub.calls
     )
+
+
+def test_price_pcr_relationship_classifies_confirmation_and_divergence():
+    assert panel._price_pcr_relationship("RISING", "RISING") == "BULLISH_CONFIRMATION"
+    assert panel._price_pcr_relationship("FALLING", "FALLING") == "BEARISH_CONFIRMATION"
+    assert panel._price_pcr_relationship("FALLING", "RISING") == "BULLISH_DIVERGENCE"
+    assert panel._price_pcr_relationship("RISING", "FALLING") == "BEARISH_DIVERGENCE"
+
+
+def test_price_pcr_movement_thresholds_suppress_noise():
+    assert panel._movement(0.049, threshold=0.05) == "FLAT"
+    assert panel._movement(0.05, threshold=0.05) == "RISING"
+    assert panel._movement(-0.02, threshold=0.02) == "FALLING"
 
 
 def test_full_cycle_keeps_one_projection_and_health_read(monkeypatch):

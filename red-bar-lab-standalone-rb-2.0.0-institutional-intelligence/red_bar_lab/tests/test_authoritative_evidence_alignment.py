@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from red_bar_lab.services.authoritative_market_evidence import (
+    _authoritative_evaluation_time,
     _safe_evidence_time,
     completed_bar_timestamps,
 )
@@ -41,6 +42,26 @@ def test_safe_evidence_time_uses_completed_bar_closes():
     )
 
     assert result == datetime(2026, 8, 21, 9, 20, tzinfo=timezone.utc).isoformat()
+
+
+def test_authoritative_bundle_uses_actual_evaluation_after_long_cycle():
+    cycle_started = datetime(2026, 8, 25, 6, 8, tzinfo=timezone.utc)
+    evaluated = datetime(2026, 8, 25, 6, 14, 45, tzinfo=timezone.utc)
+
+    assert _authoritative_evaluation_time(
+        cycle_started,
+        evaluated_at=evaluated,
+    ) == evaluated
+
+
+def test_authoritative_bundle_never_moves_before_cycle_start():
+    cycle_started = datetime(2026, 8, 25, 6, 15, tzinfo=timezone.utc)
+    stale_clock = datetime(2026, 8, 25, 6, 14, 59, tzinfo=timezone.utc)
+
+    assert _authoritative_evaluation_time(
+        cycle_started,
+        evaluated_at=stale_clock,
+    ) == cycle_started
 
 
 def test_market_readiness_uses_true_participation_scores():

@@ -1,6 +1,7 @@
 from datetime import date, datetime, timedelta, timezone
 
 import pytest
+import pandas as pd
 
 from red_bar_lab.services.market_trend_research.collector import UpstoxResearchChainCollector
 from red_bar_lab.services.market_trend_research.models import MorningReference
@@ -66,6 +67,18 @@ class Provider:
             })
         return rows
 
+    def intraday_candles(self, instrument_key, interval_minutes=1):
+        assert instrument_key == "NSE_INDEX|Nifty 50"
+        assert interval_minutes == 1
+        return pd.DataFrame([{
+            "timestamp": pd.Timestamp("2026-08-25T09:15:00+05:30"),
+            "open": 24205.0,
+            "high": 24238.0,
+            "low": 24198.0,
+            "close": 24226.0,
+            "volume": 0.0,
+        }])
+
 
 class SpotProvider:
     def __init__(self, spot=24272.5, timestamp=REFERENCE_NOW):
@@ -110,6 +123,29 @@ def test_reference_capture_uses_spot_and_contract_metadata_not_option_chain(tmp_
     )["reference_spot"] == 24272.5
     assert collector.capture_reference_once(evaluated_at=REFERENCE_NOW) is None
     assert spot.calls == 1
+
+
+def test_reference_recovers_from_first_completed_one_minute_candle(tmp_path):
+    provider = Provider()
+    collector, repository = _collector(tmp_path, provider)
+    evaluated_at = datetime(2026, 8, 25, 4, 0, tzinfo=timezone.utc)
+
+    reference = collector.capture_reference_once(evaluated_at=evaluated_at)
+
+    assert reference is not None
+    assert reference.reference_spot == 24226.0
+    assert reference.fixed_atm == 24250.0
+    assert reference.reference_candle_number == 1
+    assert reference.reference_candle_start.isoformat() == "2026-08-25T09:15:00+05:30"
+    assert reference.reference_candle_end.isoformat() == "2026-08-25T09:16:00+05:30"
+    assert reference.reference_candle_close == 24226.0
+    assert reference.status == "REFERENCE_FIXED_RECOVERED"
+    stored = repository.load_reference(
+        underlying="NIFTY 50", trading_date=evaluated_at.astimezone().date()
+    )
+    assert stored["reference_candle_number"] == 1
+    assert provider.contract_calls == 1
+    assert provider.chain_calls == 0
 
 
 @pytest.mark.parametrize(

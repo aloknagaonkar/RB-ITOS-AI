@@ -12,6 +12,7 @@ from red_bar_lab.config import RedBarSettings
 from red_bar_lab.execution.run_market_trend_research import verified_calendar
 from red_bar_lab.services.market_trend_research import (
     DualPcrCalculator,
+    CombinedMarketTrendResearchRuntime,
     MarketTrendResearchPolicy,
     MarketTrendResearchRepository,
     MarketTrendResearchRuntime,
@@ -20,6 +21,7 @@ from red_bar_lab.services.market_trend_research import (
     ResearchRuntimeConfig,
     UpstoxResearchChainCollector,
 )
+from red_bar_lab.services.market_trend_research.preopen_spot import NsePreOpenSpotProvider
 from red_bar_lab.services.red_bar_v2_canonical.upstox_paper_market_data import UpstoxPaperCanaryMarketData
 from red_bar_lab.services.upstox_service import RedBarUpstoxService, resolve_access_token
 
@@ -108,6 +110,24 @@ def _log(logger: logging.Logger, event: str, **fields: object) -> None:
     }, sort_keys=True))
 
 
+UNDERLYING_KEYS = {
+    "NIFTY 50": "NSE_INDEX|Nifty 50",
+    "NIFTY BANK": "NSE_INDEX|Nifty Bank",
+    "SENSEX": "BSE_INDEX|SENSEX",
+    "HDFCBANK": "NSE_EQ|INE040A01034",
+    "ICICIBANK": "NSE_EQ|INE090A01021",
+    "RELIANCE": "NSE_EQ|INE002A01018",
+    "BHARTIARTL": "NSE_EQ|INE397D01024",
+    "LT": "NSE_EQ|INE018A01030",
+    "INFY": "NSE_EQ|INE009A01021",
+    "SBIN": "NSE_EQ|INE062A01020",
+    "AXISBANK": "NSE_EQ|INE238A01034",
+    "KOTAKBANK": "NSE_EQ|INE237A01028",
+    "ITC": "NSE_EQ|INE154A01025",
+}
+STOCK_SYMBOLS = tuple(UNDERLYING_KEYS)[3:]
+
+
 def build_runtime() -> tuple[MarketTrendResearchRuntime, int]:
     settings = RedBarSettings.from_env()
     calendar = verified_calendar()
@@ -133,18 +153,28 @@ def build_runtime() -> tuple[MarketTrendResearchRuntime, int]:
     provider = RedBarUpstoxService(token, client_factory=lambda _token: client)
     spot_market = UpstoxPaperCanaryMarketData(
         client,
-        underlying_keys={settings.default_underlying: "NSE_INDEX|Nifty 50"},
+        underlying_keys=UNDERLYING_KEYS,
         maximum_quote_age_seconds=policy.maximum_source_age_seconds,
     )
-    collector = UpstoxResearchChainCollector(
-        provider=provider,
-        repository=repository,
-        policy=policy,
-        calendar=calendar,
-        underlying=settings.default_underlying,
-        instrument_key="NSE_INDEX|Nifty 50",
-        spot_provider=_UnderlyingSpotAdapter(spot_market),
+    spot_provider = _UnderlyingSpotAdapter(spot_market)
+    nse_preopen_provider = NsePreOpenSpotProvider(
+        timeout_seconds=min(float(request_timeout), 5.0),
     )
+    collectors = {
+        underlying: UpstoxResearchChainCollector(
+            provider=provider,
+            repository=repository,
+            policy=policy,
+            calendar=calendar,
+            underlying=underlying,
+            instrument_key=instrument_key,
+            spot_provider=spot_provider,
+            nse_preopen_provider=(
+                nse_preopen_provider if underlying == "NIFTY 50" else None
+            ),
+        )
+        for underlying, instrument_key in UNDERLYING_KEYS.items()
+    }
     service = MarketTrendResearchService(
         source=OptionParticipationSnapshotSource(settings.database_path),
         repository=repository,
@@ -152,8 +182,8 @@ def build_runtime() -> tuple[MarketTrendResearchRuntime, int]:
         calendar=calendar,
         calculator=DualPcrCalculator(policy),
     )
-    runtime = MarketTrendResearchRuntime(
-        collector=collector,
+    runtime = CombinedMarketTrendResearchRuntime(
+        collectors=collectors,
         service=service,
         repository=repository,
         config=ResearchRuntimeConfig(
@@ -162,10 +192,12 @@ def build_runtime() -> tuple[MarketTrendResearchRuntime, int]:
             maximum_backoff_seconds=_float("MARKET_TREND_RESEARCH_MAX_BACKOFF_SECONDS", 60.0),
             maximum_consecutive_failures=_int("MARKET_TREND_RESEARCH_MAX_CONSECUTIVE_FAILURES", 5),
             failure_cooldown_seconds=_float("MARKET_TREND_RESEARCH_FAILURE_COOLDOWN_SECONDS", 60.0),
-            session_start=_clock("MARKET_TREND_RESEARCH_SESSION_START", "09:08:00"),
+            session_start=_clock("MARKET_TREND_RESEARCH_SESSION_START", "09:00:00"),
             session_end=_clock("MARKET_TREND_RESEARCH_SESSION_END", "15:30:00"),
             unattended=unattended,
         ),
+        stock_symbols=STOCK_SYMBOLS,
+        stocks_per_cycle=_int("MARKET_TREND_RESEARCH_STOCKS_PER_CYCLE", 3),
     )
     return runtime, request_timeout
 

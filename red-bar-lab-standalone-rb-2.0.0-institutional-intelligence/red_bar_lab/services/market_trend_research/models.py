@@ -163,6 +163,13 @@ class MorningReference:
     source: str
     source_age_seconds: float
     status: str
+    reference_candle_number: int | None = None
+    reference_candle_start: datetime | None = None
+    reference_candle_end: datetime | None = None
+    reference_candle_open: float | None = None
+    reference_candle_high: float | None = None
+    reference_candle_low: float | None = None
+    reference_candle_close: float | None = None
 
 
 @dataclass(frozen=True, slots=True)

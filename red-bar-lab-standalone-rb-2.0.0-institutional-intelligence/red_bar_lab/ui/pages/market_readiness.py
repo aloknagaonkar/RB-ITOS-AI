@@ -12,6 +12,9 @@ from red_bar_lab.services.option_participation_store import (
 from red_bar_lab.ui.market_trend_research_panel import (
     render_market_trend_research_panel,
 )
+from red_bar_lab.ui.market_direction_summary import (
+    render_market_direction_summary,
+)
 from red_bar_lab.ui.market_direction_validation_panel import (
     render_market_direction_validation_panel,
 )
@@ -190,32 +193,17 @@ def render_page(
     st.subheader("Trade Evidence & Market Readiness")
     _render_monitor_status(database)
 
-    bundle = read_latest_market_evidence_bundle(
+    render_market_direction_summary(
         settings.database_path,
-        underlying_name=underlying_name,
-    )
-    readiness_rows = read_global_readiness_snapshots(
-        settings.database_path,
-        underlying_name=underlying_name,
-        limit=100,
+        underlying=underlying_name,
     )
 
-    authoritative_tab, research_tab, direction_validation_tab, legacy_tab = st.tabs(
+    research_tab, direction_validation_tab = st.tabs(
         [
-            "Authoritative Evidence",
             "Market Trend Research",
             "Market Direction Validation",
-            "Legacy Full Trade Evidence",
         ]
     )
-
-    with authoritative_tab:
-        _render_authoritative_page(
-            settings,
-            underlying_name,
-            bundle,
-            readiness_rows,
-        )
 
     with research_tab:
         render_market_trend_research_panel(
@@ -228,18 +216,3 @@ def render_page(
             settings.database_path,
             underlying=underlying_name,
         )
-
-    with legacy_tab:
-        st.warning(
-            "Live legacy recommendation recalculation is disabled. This tab now "
-            "shows persisted historical readiness diagnostics only. The "
-            "Authoritative Evidence tab is the sole current market conclusion."
-        )
-        if readiness_rows:
-            st.dataframe(
-                _arrow_safe_rows(readiness_rows),
-                width="stretch",
-                hide_index=True,
-            )
-        else:
-            st.info("No persisted legacy diagnostics are available.")

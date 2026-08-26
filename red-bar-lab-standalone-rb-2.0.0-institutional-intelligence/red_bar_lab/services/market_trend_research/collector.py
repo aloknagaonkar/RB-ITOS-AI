@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from hashlib import sha256
 from math import isfinite
 from time import monotonic
@@ -13,6 +13,11 @@ from .models import MorningReference, OptionOiCell
 from .policy import ExchangeSessionCalendar, MarketTrendResearchPolicy
 from .repository import MarketTrendResearchRepository
 from .source import NormalizedChainSnapshot
+from .preopen_spot import (
+    PreOpenSpotObservation,
+    PreOpenSpotProvider,
+    resolve_preopen_spot,
+)
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -25,6 +30,7 @@ class ResearchOptionChainProvider(Protocol):
         expiry_date: str | None = None,
     ) -> list[dict[str, object]]: ...
     def option_chain(self, instrument_key: str, expiry_date: str) -> list[dict[str, object]]: ...
+    def intraday_candles(self, instrument_key: str, interval_minutes: int = 1): ...
 
 
 class ResearchSpotProvider(Protocol):
@@ -70,6 +76,8 @@ class UpstoxResearchChainCollector:
         underlying: str = "NIFTY 50",
         instrument_key: str = "NSE_INDEX|Nifty 50",
         spot_provider: ResearchSpotProvider | None = None,
+        nse_preopen_provider: PreOpenSpotProvider | None = None,
+        preopen_capture_interval_seconds: float = 15.0,
     ) -> None:
         self.provider = provider
         self.repository = repository
@@ -78,8 +86,51 @@ class UpstoxResearchChainCollector:
         self.underlying = underlying
         self.instrument_key = instrument_key
         self.spot_provider = spot_provider
+        self.nse_preopen_provider = nse_preopen_provider
+        self.preopen_capture_interval_seconds = preopen_capture_interval_seconds
+        self._last_preopen_capture_at: datetime | None = None
         self._expiry_by_date: dict[date, date] = {}
         self.calculator = DualPcrCalculator(policy)
+
+    def capture_preopen_evidence(self, *, evaluated_at: datetime) -> None:
+        """Collect NSE and Upstox evidence independently; neither failure propagates."""
+        if self.underlying != "NIFTY 50":
+            return
+        local_time = evaluated_at.astimezone(IST).time().replace(tzinfo=None)
+        if not time(9, 0) <= local_time <= self.policy.reference_cutoff:
+            return
+        if (
+            self._last_preopen_capture_at is not None
+            and (evaluated_at - self._last_preopen_capture_at).total_seconds()
+            < self.preopen_capture_interval_seconds
+        ):
+            return
+        self._last_preopen_capture_at = evaluated_at
+        if self.spot_provider is not None:
+            try:
+                spot, source_timestamp = self.spot_provider.spot(
+                    underlying=self.underlying,
+                    evaluated_at=evaluated_at,
+                )
+                self.repository.persist_preopen_spot(
+                    PreOpenSpotObservation(
+                        underlying=self.underlying,
+                        trading_date=evaluated_at.astimezone(IST).date(),
+                        provider="UPSTOX",
+                        spot=spot,
+                        source_timestamp=source_timestamp,
+                        captured_at=evaluated_at,
+                    )
+                )
+            except Exception:
+                pass
+        if self.nse_preopen_provider is not None:
+            try:
+                self.repository.persist_preopen_spot(
+                    self.nse_preopen_provider.observe(captured_at=evaluated_at)
+                )
+            except Exception:
+                pass
 
     def _expiry(self, trading_date: date) -> date:
         cached = self._expiry_by_date.get(trading_date)
@@ -157,21 +208,52 @@ class UpstoxResearchChainCollector:
         )
         if raw is not None:
             return None
-        local_time = now.astimezone(IST).time().replace(tzinfo=None)
-        if not self.policy.reference_start <= local_time <= self.policy.reference_cutoff:
-            return None
-        if self.spot_provider is None:
-            return None
-        spot, spot_timestamp = self.spot_provider.spot(
-            underlying=self.underlying,
+        local_now = now.astimezone(IST)
+        local_time = local_now.time().replace(tzinfo=None)
+        self.capture_preopen_evidence(evaluated_at=now)
+        completed_candle = self._opening_reference_candle(
+            trading_date=trading_date,
             evaluated_at=now,
         )
+        if completed_candle is not None:
+            spot = completed_candle["close"]
+            spot_timestamp = completed_candle["end"]
+            source = "UPSTOX_COMPLETED_1M_CANDLE"
+            status = (
+                "REFERENCE_FIXED"
+                if (now - spot_timestamp).total_seconds() <= 90.0
+                else "REFERENCE_FIXED_RECOVERED"
+            )
+        else:
+            if not self.policy.reference_start <= local_time <= self.policy.reference_cutoff:
+                return None
+            resolution = resolve_preopen_spot(
+                self.repository.latest_preopen_spots(
+                    underlying=self.underlying,
+                    trading_date=trading_date,
+                ),
+                evaluated_at=now,
+                maximum_age_seconds=self.policy.maximum_source_age_seconds,
+            )
+            if resolution.selected is None:
+                if self.spot_provider is None:
+                    return None
+                spot, spot_timestamp = self.spot_provider.spot(
+                    underlying=self.underlying,
+                    evaluated_at=now,
+                )
+                source = "UPSTOX_PREOPEN_DIRECT_FALLBACK"
+            else:
+                spot = resolution.selected.spot
+                spot_timestamp = resolution.selected.source_timestamp
+                source = f"{resolution.selected.provider}_PREOPEN_{resolution.state}"
+            status = "REFERENCE_FIXED"
         if spot_timestamp.tzinfo is None or spot_timestamp.utcoffset() is None:
             raise ValueError("REFERENCE_TIMESTAMP_NAIVE")
         age = (now - spot_timestamp).total_seconds()
         if age < 0:
             raise ValueError("REFERENCE_TIMESTAMP_FUTURE")
-        if age > self.policy.maximum_source_age_seconds:
+        if completed_candle is None and age > self.policy.maximum_source_age_seconds:
             raise ValueError("REFERENCE_SPOT_STALE")
         expiry = self._expiry(trading_date)
         steps = self.policy.window_steps(trading_date, expiry, self.calendar)
@@ -199,12 +281,65 @@ class UpstoxResearchChainCollector:
             fixed_atm=window.atm,
             window_steps=steps,
             fixed_strikes=window.strikes,
-            source="UPSTOX_UNDERLYING_QUOTE",
+            source=source,
             source_age_seconds=age,
-            status="REFERENCE_FIXED",
+            status=status,
+            reference_candle_number=(1 if completed_candle is not None else None),
+            reference_candle_start=(completed_candle["start"] if completed_candle else None),
+            reference_candle_end=(completed_candle["end"] if completed_candle else None),
+            reference_candle_open=(completed_candle["open"] if completed_candle else None),
+            reference_candle_high=(completed_candle["high"] if completed_candle else None),
+            reference_candle_low=(completed_candle["low"] if completed_candle else None),
+            reference_candle_close=(completed_candle["close"] if completed_candle else None),
         )
         self.repository.create_reference(reference)
         return reference
+
+    def _opening_reference_candle(
+        self,
+        *,
+        trading_date: date,
+        evaluated_at: datetime,
+    ) -> dict[str, object] | None:
+        """Return the completed 09:15 one-minute candle, including on restart."""
+        local_now = evaluated_at.astimezone(IST)
+        target_start = datetime.combine(trading_date, time(9, 15), tzinfo=IST)
+        target_end = target_start + timedelta(minutes=1)
+        if local_now < target_end:
+            return None
+        reader = getattr(self.provider, "intraday_candles", None)
+        if not callable(reader):
+            return None
+        frame = reader(self.instrument_key, interval_minutes=1)
+        if frame is None or frame.empty or "timestamp" not in frame.columns:
+            return None
+        for _, row in frame.iterrows():
+            timestamp = row.get("timestamp")
+            parsed = timestamp.to_pydatetime() if hasattr(timestamp, "to_pydatetime") else timestamp
+            if not isinstance(parsed, datetime):
+                continue
+            if parsed.tzinfo is None or parsed.utcoffset() is None:
+                continue
+            if parsed.astimezone(IST).replace(second=0, microsecond=0) != target_start:
+                continue
+            values: dict[str, float] = {}
+            for name in ("open", "high", "low", "close"):
+                raw_value = row.get(name)
+                if isinstance(raw_value, bool):
+                    return None
+                try:
+                    value = float(raw_value)
+                except (TypeError, ValueError):
+                    return None
+                if not isfinite(value) or value <= 0:
+                    return None
+                values[name] = value
+            return {
+                "start": target_start,
+                "end": target_end,
+                **values,
+            }
+        return None
 
     @staticmethod
     def _normalized_cells(

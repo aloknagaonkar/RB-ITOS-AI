@@ -267,4 +267,7 @@ def test_primary_table_order_and_columns_are_preserved_with_clear_current_labels
         "Strike", "Position", "CE current OI", "CE previous-day OI",
         "CE OI change today", "CE OI change %", "PE current OI",
         "PE previous-day OI", "PE OI change today", "PE OI change %",
+        "Strike PCR", "PCR direction", "Previous refresh PCR",
+        "PCR change vs refresh", "Opening PCR", "PCR change vs opening",
+        "Overall PCR", "Overall PCR signal", "Recommendation",
     )

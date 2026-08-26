@@ -172,10 +172,13 @@ def _render_validation_cycle(
         projection=projection or {},
         now=current.astimezone(timezone.utc),
     )
-    stale = any(row["Status"] != "FRESH" for row in source_rows)
-    displayed_conclusion = (
-        f"{result.conclusion} — STALE" if stale else result.conclusion
+    unavailable_sources = tuple(
+        str(row["Source"])
+        for row in source_rows
+        if row["Status"] != "FRESH"
     )
+    stale = bool(unavailable_sources)
+    displayed_conclusion = "WAIT" if stale else result.conclusion
     displayed_quality = "STALE" if stale else result.quality
     st.dataframe(
         _arrow_safe_rows(
@@ -195,10 +198,16 @@ def _render_validation_cycle(
     )
     if stale:
         st.warning(
-            "One or more persisted evidence sources are missing or stale. "
-            "Scores remain visible for diagnosis and have no trading authority."
+            "WAIT: mandatory evidence is missing or stale: "
+            + ", ".join(unavailable_sources)
+            + ". Scores remain visible for diagnosis and have no trading authority."
         )
-    if result.conclusion == "BULLISH":
+    if stale:
+        st.info(
+            "The diagnostic score is not promoted to a current market "
+            "conclusion until every mandatory source is fresh."
+        )
+    elif result.conclusion == "BULLISH":
         st.success(result.reason)
     elif result.conclusion == "BEARISH":
         st.error(result.reason)

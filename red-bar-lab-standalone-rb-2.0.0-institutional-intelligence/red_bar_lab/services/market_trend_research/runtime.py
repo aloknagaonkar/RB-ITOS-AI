@@ -4,10 +4,20 @@ from dataclasses import dataclass
 from datetime import datetime, time, timezone
 from threading import Event
 from time import monotonic
-from typing import Callable, Generic, TypeVar
+from typing import Callable, Generic, Mapping, TypeVar
 from zoneinfo import ZoneInfo
 
 from .collector import CollectionResult, UpstoxResearchChainCollector
+from .combined_pcr import CombinedMarketPcrCalculator, TOP_TEN_WEIGHTS
+from .five_minute_history import (
+    aligned_futures_vwap,
+    build_five_minute_pcr_observation,
+    completed_five_minute_close,
+    completed_five_minute_rsi,
+)
+from ..nifty_futures_snapshot_store import read_nifty_futures_snapshots
+from .strike_pcr_tracker import build_strike_pcr_recommendations
+from ..option_participation_store import read_latest_option_participation
 from .repository import MarketTrendResearchRepository
 from .service import MarketTrendResearchService
 
@@ -242,3 +252,156 @@ class MarketTrendResearchRuntime:
                 )
         finally:
             self._health("STOPPED")
+
+
+class CombinedMarketTrendResearchRuntime(MarketTrendResearchRuntime):
+    """Collect core indices every cycle and rotate stock chains within budget."""
+
+    def __init__(
+        self,
+        *,
+        collectors: Mapping[str, UpstoxResearchChainCollector],
+        service: MarketTrendResearchService,
+        repository: MarketTrendResearchRepository,
+        config: ResearchRuntimeConfig,
+        stock_symbols: tuple[str, ...],
+        stocks_per_cycle: int = 3,
+        now: Callable[[], datetime] | None = None,
+        monotonic_clock: Callable[[], float] = monotonic,
+    ) -> None:
+        if "NIFTY 50" not in collectors:
+            raise ValueError("NIFTY_COLLECTOR_REQUIRED")
+        if stocks_per_cycle < 1:
+            raise ValueError("STOCK_BATCH_INVALID")
+        super().__init__(
+            collector=collectors["NIFTY 50"],
+            service=service,
+            repository=repository,
+            config=config,
+            now=now,
+            monotonic_clock=monotonic_clock,
+        )
+        self.collectors = dict(collectors)
+        self.stock_symbols = stock_symbols
+        self.stocks_per_cycle = stocks_per_cycle
+        self._stock_cursor = 0
+        self._last_history_close: datetime | None = None
+
+    def _cycle_names(self) -> tuple[str, ...]:
+        core = tuple(
+            name for name in ("NIFTY 50", "NIFTY BANK", "SENSEX")
+            if name in self.collectors
+        )
+        if not self.stock_symbols:
+            return core
+        count = min(self.stocks_per_cycle, len(self.stock_symbols))
+        selected = tuple(
+            self.stock_symbols[(self._stock_cursor + offset) % len(self.stock_symbols)]
+            for offset in range(count)
+        )
+        self._stock_cursor = (self._stock_cursor + count) % len(self.stock_symbols)
+        return core + selected
+
+    def run_cycle(self) -> None:
+        now = self.now()
+        if self._outside_session(now):
+            return
+        if self.suspended_until_monotonic is not None:
+            if self.monotonic_clock() < self.suspended_until_monotonic:
+                self._health("PROVIDER_CIRCUIT_OPEN")
+                return
+            self.half_open = True
+            self.suspended_until_monotonic = None
+
+        failures: list[Exception] = []
+        successful_names: set[str] = set()
+        successes = 0
+        for name in self._cycle_names():
+            collector = self.collectors[name]
+            try:
+                if name == "NIFTY 50":
+                    collector.capture_reference_once(evaluated_at=now)
+                local_time = now.astimezone(IST).time().replace(tzinfo=None)
+                if local_time < collector.policy.oi_baseline_start:
+                    successes += 1
+                    continue
+                result = collector.collect_once(evaluated_at=now)
+                self.service.evaluate(
+                    underlying=result.snapshot.underlying,
+                    evaluated_at=self.now(),
+                    runtime_mode="CONTINUOUS",
+                    automatic_refresh="CONNECTED",
+                    dropped_obsolete_tasks=self.slot.dropped,
+                    consecutive_failures=self.consecutive_failures,
+                )
+                successes += 1
+                successful_names.add(name)
+            except Exception as exc:  # isolate one chain from the remaining basket
+                failures.append(exc)
+
+        if "NIFTY 50" in successful_names:
+            try:
+                names = ("NIFTY 50", "NIFTY BANK", "SENSEX", *TOP_TEN_WEIGHTS)
+                projections = self.repository.latest_projections(underlyings=names)
+                nifty = projections.get("NIFTY 50")
+                if nifty:
+                    combined = CombinedMarketPcrCalculator(
+                        maximum_age_seconds=self.service.policy.maximum_source_age_seconds,
+                    ).calculate(projections, now=self.now())
+                    history_now = self.now()
+                    history_close = completed_five_minute_close(history_now)
+                    if history_close is not None and history_close != self._last_history_close:
+                        try:
+                            candles = self.collectors["NIFTY 50"].provider.intraday_candles(
+                                self.collectors["NIFTY 50"].instrument_key,
+                                interval_minutes=5,
+                            )
+                        except Exception:
+                            candles = None
+                        rsi = completed_five_minute_rsi(
+                            candles,
+                            candle_close=history_close,
+                        )
+                        vwap = aligned_futures_vwap(
+                            read_nifty_futures_snapshots(
+                                self.repository.path,
+                                underlying_name="NIFTY 50",
+                                limit=10,
+                            ),
+                            candle_close=history_close,
+                        )
+                        observation = build_five_minute_pcr_observation(
+                            projection=nifty,
+                            combined=combined,
+                            evaluated_at=history_now,
+                            rsi=rsi,
+                            vwap=vwap,
+                        )
+                        if observation is not None:
+                            self.repository.persist_five_minute_pcr_observation(observation)
+                            self._last_history_close = history_close
+                    option_rows = read_latest_option_participation(
+                        self.repository.path,
+                        underlying_name="NIFTY 50",
+                    )
+                    strike_recommendations = build_strike_pcr_recommendations(
+                        projection=nifty,
+                        option_rows=option_rows,
+                    )
+                    self.repository.apply_strike_pcr_recommendations(
+                        strike_recommendations
+                    )
+            except Exception as exc:
+                # History is observational; its failure must not interrupt collection.
+                failures.append(exc)
+
+        if successes == 0 and failures:
+            raise failures[0]
+        self.last_success_at = self.now()
+        self.last_failure_at = self.now() if failures else None
+        self.last_failure_reason = (
+            f"PARTIAL_COMPONENT_FAILURE_{len(failures)}" if failures else None
+        )
+        self.consecutive_failures = 0
+        self.half_open = False
+        self._health(self.last_failure_reason or "COLLECTING")

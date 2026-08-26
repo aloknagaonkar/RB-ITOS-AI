@@ -21,11 +21,11 @@ def test_upstox_get_retry_policy_is_bounded_and_get_only():
     assert policy["observability"] == "broker_get_retry"
 
 
-def test_legacy_tab_no_longer_executes_independent_recommendation():
+def test_removed_tabs_do_not_execute_legacy_or_authoritative_views():
     source = inspect.getsource(market_readiness.render_page)
 
-    assert "Legacy Full Trade Evidence" in source
-    assert "Live legacy recommendation recalculation is disabled" in source
+    assert "Legacy Full Trade Evidence" not in source
+    assert "Authoritative Evidence" not in source
     assert "render_legacy_page(" not in source
 
 
