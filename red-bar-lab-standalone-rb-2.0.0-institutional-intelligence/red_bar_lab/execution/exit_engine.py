@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any
 
 from red_bar_lab.execution.execution_policy import (
+    RED_BAR_V2_STRATEGY_SOURCE,
     RSI_DYNAMIC_PROTECTION_DELAY_SECONDS,
     RSI_EXIT_MODE,
     RSI_STRATEGY_SOURCE,
@@ -118,8 +119,9 @@ class PaperExitEngine:
     """CE/PE paper exit decision engine.
 
     Operational exit authority is deterministic. The fixed profit target is
-    informational-only. Premium protection is immediate for non-RSI strategies
-    and delayed for RSI Extreme Reversal only. OI/PCR/Greeks remain shadow.
+    informational-only. Red Bar V2 initial loss authority is handled by its
+    completed-candle RSI exit; earned premium protection remains here.
+    OI/PCR/Greeks remain shadow.
     """
 
     def __init__(
@@ -247,8 +249,22 @@ class PaperExitEngine:
         if not dynamic_protection_enabled:
             previous_protected_stop = 0.0
 
+        red_bar_v2_external_initial_exit = (
+            strategy_source == RED_BAR_V2_STRATEGY_SOURCE
+        )
+        if red_bar_v2_external_initial_exit and not (
+            bool(position.get("breakeven_armed"))
+            or bool(position.get("trailing_active"))
+            or breakeven_armed
+            or profit_lock_active
+            or trailing_active
+        ):
+            # Existing V2 rows may still contain the retired 7% premium stop.
+            # It is not protection earned from a favourable premium move.
+            previous_protected_stop = 0.0
+
         stop_candidates: list[tuple[str, float, int]] = []
-        if configured_stop > 0:
+        if configured_stop > 0 and not red_bar_v2_external_initial_exit:
             stop_candidates.append(("HARD_STOP", configured_stop, 0))
         if breakeven_price is not None and breakeven_price > 0:
             stop_candidates.append(("BREAKEVEN_STOP", breakeven_price, 1))

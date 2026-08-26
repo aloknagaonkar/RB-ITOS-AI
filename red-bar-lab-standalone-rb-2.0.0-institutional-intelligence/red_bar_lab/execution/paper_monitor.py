@@ -45,7 +45,7 @@ from red_bar_lab.services.red_bar_v2_paper_signal_bridge import (
     RedBarV2PaperSignalPublishResult,
     publish_v2_snapshot_to_paper_signals,
 )
-from red_bar_lab.services.red_bar_v2_reversal_exit import execute_confirmed_reversal_exits
+from red_bar_lab.services.red_bar_v2_rsi_exit import execute_rsi_threshold_exits
 from red_bar_lab.services.upstox_instrument_search import UpstoxInstrumentSearchTransport
 from red_bar_lab.services.upstox_service import RedBarUpstoxService
 from red_bar_lab.storage.database import RedBarDatabase
@@ -229,8 +229,9 @@ def main() -> int:
                 instrument_key=UNDERLYINGS[args.underlying],
             )
 
-            reversal_exit = execute_confirmed_reversal_exits(
-                snapshot=read_red_bar_v2_ui_snapshot(settings.artifacts_root),
+            rsi_exit = execute_rsi_threshold_exits(
+                completed_1m_rsi=live_v2.completed_1m_rsi,
+                completed_1m_timestamp=live_v2.completed_1m_timestamp,
                 open_orders=database.read_open_paper_execution_orders("PAPER-STD"),
                 close_position=lambda order_id, reason: automation.engine.close_position(
                     zerodha=adapter,
@@ -238,8 +239,8 @@ def main() -> int:
                     exit_reason=reason,
                 ),
             )
-            if reversal_exit.exited_orders:
-                totals["orders_closed"] += int(reversal_exit.exited_orders)
+            if rsi_exit.exited_orders:
+                totals["orders_closed"] += int(rsi_exit.exited_orders)
                 live_v2 = evaluate_current_session_red_bar_v2(
                     upstox=upstox,
                     database=database,
@@ -388,7 +389,7 @@ def main() -> int:
             heartbeat = datetime.now(ist).isoformat()
             cycle_errors, cycle_warnings = _partition_cycle_messages(
                 report.errors,
-                reversal_exit.errors,
+                rsi_exit.errors,
             )
             database.upsert_paper_monitor_status(
                 {

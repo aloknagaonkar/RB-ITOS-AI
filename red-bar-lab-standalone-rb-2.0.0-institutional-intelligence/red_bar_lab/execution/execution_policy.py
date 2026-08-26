@@ -9,9 +9,9 @@ DIRECTIONAL_REGIME_STRATEGY_SOURCE = "DIRECTIONAL_REGIME_INTELLIGENCE"
 STANDARD_EXIT_MODE = "STANDARD_MULTI_FACTOR"
 RSI_EXIT_MODE = "RSI_PREMIUM_PROTECTION_ONLY"
 
-# All three active execution strategies use the same premium-protection
-# thresholds. Protection timing remains strategy-owned so RSI-specific entry
-# noise handling is not imposed on Red Bar or Directional Regime trades.
+# Profit-protection thresholds are shared. Red Bar V2 uses completed one-minute
+# RSI recovery for its initial exit; the other strategies retain the
+# option-premium hard stop.
 REVERSAL_STYLE_STOP_LOSS_PCT = 7.0
 REVERSAL_STYLE_TARGET_PCT = None
 IMMEDIATE_DYNAMIC_PROTECTION_DELAY_SECONDS = 0.0
@@ -28,6 +28,7 @@ class ExecutionPolicy:
     dynamic_protection_delay_seconds: float = (
         IMMEDIATE_DYNAMIC_PROTECTION_DELAY_SECONDS
     )
+    initial_premium_stop_enabled: bool = True
 
 
 def execution_strategy_source(signal: Mapping[str, object] | None) -> str:
@@ -75,9 +76,10 @@ def resolve_execution_policy(
     """Resolve premium-protection thresholds and strategy-owned timing.
 
     Red Bar, RSI Extreme Reversal, and Directional Regime Intelligence retain
-    the same protection thresholds:
+    the same profit-protection thresholds:
 
-    - 7% option-premium hard stop
+    - Red Bar V2: no initial option-premium stop; completed 1m RSI owns it
+    - RSI and Directional Regime: 7% option-premium hard stop
     - no fixed target exit
     - breakeven, profit lock, and trailing protection
     - directional conflicts remain observational
@@ -105,4 +107,5 @@ def resolve_execution_policy(
         RSI_EXIT_MODE,
         True,
         delay_seconds,
+        source != RED_BAR_V2_STRATEGY_SOURCE,
     )

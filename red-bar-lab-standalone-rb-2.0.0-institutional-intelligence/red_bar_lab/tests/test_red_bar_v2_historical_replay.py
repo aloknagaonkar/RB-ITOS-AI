@@ -114,6 +114,15 @@ def test_reversal_before_exit_is_blocked_then_admitted_after_close(monkeypatch):
 
     def initial(*args, **kwargs):
         initial_calls["count"] += 1
+        if initial_calls["count"] > 1:
+            return _decision(
+                event=RedBarV2EventType.INITIAL_BULLISH_ALIGNMENT,
+                state=RedBarV2State.CONFIRMED_BULLISH,
+                direction="BULLISH",
+                side="CE",
+                entry_type="INITIAL",
+                timestamp="2026-08-21 09:30",
+            )
         return _decision(
             event=RedBarV2EventType.INITIAL_BEARISH_ALIGNMENT,
             state=RedBarV2State.CONFIRMED_BEARISH,
@@ -160,7 +169,7 @@ def test_reversal_before_exit_is_blocked_then_admitted_after_close(monkeypatch):
     assert admissions[0].candidate_allowed is True
     assert any(event.admission_code == "ACTIVE_TRADE_BLOCK" for event in admissions)
     assert admissions[-1].candidate_allowed is True
-    assert admissions[-1].admission_code == "REVERSAL_CONTEXT_ALIGNED_FLAT"
+    assert admissions[-1].admission_code == "INITIAL_BULLISH_ALIGNMENT"
 
     for event in admissions:
         assert "admission_reason" in event.details
@@ -175,7 +184,7 @@ def test_reversal_before_exit_is_blocked_then_admitted_after_close(monkeypatch):
     assert result.closed_trades == 1
 
 
-def test_exit_before_reversal_admits_opposite_candidate_immediately(monkeypatch):
+def test_exit_does_not_admit_opposite_candidate_without_fresh_rules(monkeypatch):
     _patch_common(monkeypatch)
     monkeypatch.setattr(
         replay,
@@ -209,7 +218,7 @@ def test_exit_before_reversal_admits_opposite_candidate_immediately(monkeypatch)
     )
 
     allowed = [event for event in result.events if event.candidate_allowed]
-    assert [event.option_side for event in allowed] == ["PE", "CE"]
+    assert [event.option_side for event in allowed] == ["PE"]
     assert not any(event.admission_code == "ACTIVE_TRADE_BLOCK" for event in result.events)
 
 
@@ -259,11 +268,9 @@ def test_provisional_midpoint_upgrade_does_not_create_second_candidate(monkeypat
         exit_timestamps=[pd.Timestamp("2026-08-21 09:29", tz=IST)],
     )
 
-    assert result.admitted_candidates == 2
+    assert result.admitted_candidates == 1
     upgrades = [event for event in result.events if event.event_type == "STATE_UPGRADE"]
-    assert len(upgrades) == 1
-    assert upgrades[0].candidate_allowed is False
-    assert upgrades[0].admission_code == "FULL_DIRECTIONAL_ALIGNMENT"
+    assert upgrades == []
 
 
 def test_replay_is_deterministic_and_exports_records(monkeypatch):

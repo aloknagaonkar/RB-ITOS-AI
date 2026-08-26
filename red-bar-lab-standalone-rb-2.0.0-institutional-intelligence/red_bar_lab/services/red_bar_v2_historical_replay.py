@@ -112,8 +112,8 @@ def replay_red_bar_v2_day(
 
     Candidates are treated as immediately active paper trades. Supplied exit
     timestamps are deterministic lifecycle fixtures; they do not replace or
-    reinterpret the production exit policy. A reversal detected while a trade
-    is active remains pending and is re-evaluated after the trade closes.
+    reinterpret the production exit policy. After a close, a later completed
+    one-minute midpoint touch is required before entry rules are re-evaluated.
     """
     frame = _normalise(candles)
     exits = sorted(pd.Timestamp(value) for value in exit_timestamps)
@@ -126,6 +126,7 @@ def replay_red_bar_v2_day(
     pending_reversal: RedBarV2DirectionDecision | None = None
     current_direction: str | None = None
     provisional_state: RedBarV2State | None = None
+    waiting_for_red_bar_touch = False
     reference = None
     exit_index = 0
     admitted = 0
@@ -154,6 +155,10 @@ def replay_red_bar_v2_day(
                         details={"source": "REPLAY_EXIT_FIXTURE"},
                     )
                 )
+                waiting_for_red_bar_touch = True
+                current_direction = None
+                provisional_state = None
+                pending_reversal = None
             exit_index += 1
 
         reference = build_red_bar_v2_reference(
@@ -167,7 +172,23 @@ def replay_red_bar_v2_day(
         trade_state = observe_trade_state(trade_rows, instrument_key=instrument_key)
 
         decision: RedBarV2DirectionDecision | None = None
-        if pending_reversal is not None:
+        if waiting_for_red_bar_touch:
+            row = frame.loc[candle_timestamp]
+            touched_midpoint = (
+                float(row["low"]) <= reference.midpoint <= float(row["high"])
+            )
+            if touched_midpoint:
+                snapshot_1m = build_latest_snapshot(
+                    frame,
+                    instrument_key=instrument_key,
+                    timeframe="1M",
+                    evaluation_time=evaluation_time,
+                    expected_timestamp=candle_timestamp,
+                )
+                reentry = evaluate_initial_direction(reference, snapshot_1m)
+                if _event_is_due(reentry, evaluation_time):
+                    decision = reentry
+        elif pending_reversal is not None:
             decision = pending_reversal
         elif current_direction is None and not initial_processed:
             snapshot_1m = build_latest_snapshot(
@@ -244,6 +265,7 @@ def replay_red_bar_v2_day(
                     else None
                 )
                 pending_reversal = None
+                waiting_for_red_bar_touch = False
             else:
                 blocked += 1
                 trade_id = None

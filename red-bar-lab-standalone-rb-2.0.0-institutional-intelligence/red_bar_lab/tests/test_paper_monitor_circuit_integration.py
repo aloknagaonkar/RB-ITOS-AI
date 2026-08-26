@@ -10,7 +10,7 @@ def test_monitor_wires_entry_circuit_without_disabling_exits():
 
     assert "PaperMonitorCircuitBreaker(" in source
     assert "critical_market_data_failure(" in source
-    assert "execute_confirmed_reversal_exits(" in source
+    assert "execute_rsi_threshold_exits(" in source
     assert "POSITION_MANAGEMENT_ONLY" in source
     assert "ENTRY_SUSPENDED" in source
 

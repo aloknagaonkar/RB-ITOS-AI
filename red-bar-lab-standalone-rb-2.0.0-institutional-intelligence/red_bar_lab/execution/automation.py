@@ -79,6 +79,16 @@ def _num(value, default=0.0):
         return float(default)
 
 
+def _initial_premium_stop(
+    reference_price: float,
+    execution_policy,
+) -> float | None:
+    """Return no initial premium stop when V2 owns structural invalidation."""
+    if not execution_policy.initial_premium_stop_enabled:
+        return None
+    return reference_price * (1.0 - execution_policy.stop_loss_pct / 100.0)
+
+
 def _underlying_quote_key(underlying_name: str) -> str:
     if underlying_name == "NIFTY 50":
         return "NSE:NIFTY 50"
@@ -1211,9 +1221,7 @@ class RedBarPaperAutomationService:
                     if reference <= 0:
                         blocked.append(f"{candidate.contract.tradingsymbol}:NO_PRICE")
                         continue
-                    stop = reference * (
-                        1.0 - execution_policy.stop_loss_pct / 100.0
-                    )
+                    stop = _initial_premium_stop(reference, execution_policy)
                     target = (
                         reference * (
                             1.0 + execution_policy.target_pct / 100.0
@@ -1255,7 +1263,7 @@ class RedBarPaperAutomationService:
                             signal_id=signal_id,
                             underlying_name=self.underlying_name,
                             underlying_price=float(spot),
-                            stop_price=round(stop, 2),
+                            stop_price=(round(stop, 2) if stop is not None else None),
                             target1_price=(
                                 round(target, 2)
                                 if target is not None else None
@@ -1448,9 +1456,7 @@ class RedBarPaperAutomationService:
                 quantity = int(row.get("quantity") or 0)
                 if quantity <= 0:
                     quantity = max(1, int(lots)) * contract.lot_size
-                stop = reference * (
-                    1.0 - execution_policy.stop_loss_pct / 100.0
-                )
+                stop = _initial_premium_stop(reference, execution_policy)
                 target = (
                     reference * (
                         1.0 + execution_policy.target_pct / 100.0
@@ -1478,7 +1484,8 @@ class RedBarPaperAutomationService:
                 opened_row = self.engine.open_long_option(
                     zerodha=self.zerodha, contract=contract, quantity=quantity,
                     signal_id=signal_id, underlying_name=self.underlying_name,
-                    underlying_price=float(spot), stop_price=round(stop, 2),
+                    underlying_price=float(spot),
+                    stop_price=(round(stop, 2) if stop is not None else None),
                     target1_price=(
                         round(target, 2)
                         if target is not None else None
@@ -1566,8 +1573,8 @@ class RedBarPaperAutomationService:
         """Manage open CE/PE paper positions.
 
         Operational hierarchy:
-        hard/effective premium stop -> target -> EOD -> NIFTY thesis
-        invalidation -> opposite Red Bar -> option technical breakdown.
+        earned effective premium stop -> EOD -> observational trade health.
+        Red Bar V2 initial RSI recovery exit is owned by paper_monitor.
 
         Breakeven and trailing protection update the paper stop. OI/PCR/Greeks
         remain shadow-only in RB-0.7.9.

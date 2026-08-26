@@ -40,6 +40,9 @@ class CurrentSessionV2Result:
     futures_instrument_key: str | None = None
     admitted_candidates: int = 0
     closed_trades: int = 0
+    completed_1m_close: float | None = None
+    completed_1m_rsi: float | None = None
+    completed_1m_timestamp: str | None = None
 
 
 def _active_v2_order_exists(rows: list[Mapping[str, Any]]) -> bool:
@@ -85,6 +88,36 @@ def _ordered_candles(frame: pd.DataFrame) -> tuple[pd.DataFrame, str | None]:
         )
         work = work.dropna(subset=[timestamp_column]).sort_values(timestamp_column)
     return work.reset_index(drop=True), timestamp_column
+
+
+def _latest_completed_1m_candle(
+    frame: pd.DataFrame,
+    *,
+    evaluation_time: datetime,
+) -> tuple[float | None, float | None, str | None]:
+    """Return the latest fully completed one-minute underlying close."""
+    work, timestamp_column = _ordered_candles(frame)
+    if work.empty or timestamp_column is None or "close" not in work.columns:
+        return None, None, None
+    timestamps = work[timestamp_column]
+    cutoff = pd.Timestamp(evaluation_time).floor("min") - pd.Timedelta(minutes=1)
+    try:
+        if getattr(timestamps.dt, "tz", None) is not None and cutoff.tzinfo is None:
+            cutoff = cutoff.tz_localize(timestamps.dt.tz)
+        elif getattr(timestamps.dt, "tz", None) is None and cutoff.tzinfo is not None:
+            cutoff = cutoff.tz_localize(None)
+    except (TypeError, AttributeError):
+        return None, None, None
+    completed = work[timestamps <= cutoff]
+    if completed.empty:
+        return None, None, None
+    row = completed.iloc[-1]
+    timestamp = row.get(timestamp_column)
+    return (
+        _num(row.get("close")),
+        _rsi14(completed),
+        timestamp.isoformat() if hasattr(timestamp, "isoformat") else str(timestamp),
+    )
 
 
 def _rsi14(frame: pd.DataFrame) -> float | None:
@@ -319,6 +352,12 @@ def evaluate_current_session_red_bar_v2(
             futures_instrument_key=futures_key,
         )
 
+    evaluated_at = datetime.now().astimezone()
+    completed_close, completed_rsi, completed_timestamp = _latest_completed_1m_candle(
+        index_candles,
+        evaluation_time=evaluated_at,
+    )
+
     order_rows = list(database.read_paper_execution_orders("PAPER-STD"))
     active_v2_order_exists = _active_v2_order_exists(order_rows)
     exit_timestamps = []
@@ -413,4 +452,7 @@ def evaluate_current_session_red_bar_v2(
         futures_instrument_key=futures_key,
         admitted_candidates=monitored.replay.admitted_candidates,
         closed_trades=monitored.replay.closed_trades,
+        completed_1m_close=completed_close,
+        completed_1m_rsi=completed_rsi,
+        completed_1m_timestamp=completed_timestamp,
     )

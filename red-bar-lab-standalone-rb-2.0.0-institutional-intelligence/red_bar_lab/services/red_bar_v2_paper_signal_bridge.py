@@ -125,30 +125,37 @@ def publish_v2_snapshot_to_paper_signals(
     path = Path(database_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(path) as conn:
+        columns = [
+            "signal_id", "run_id", "instrument_key", "trading_date",
+            "level_type", "level_value", "direction", "state",
+            "cross_timestamp", "confirmation_timestamp", "underlying_entry",
+        ]
+        values: list[object] = [
+            result.signal_id,
+            "RBV2-PAPER-RUNTIME",
+            instrument_key,
+            trading_date,
+            "RED_BAR_V2",
+            midpoint,
+            snapshot.direction,
+            "ACTIVE",
+            (reference or evaluation).isoformat(),
+            evaluation.isoformat(),
+            underlying_entry,
+        ]
+        available = {
+            str(row[1]) for row in conn.execute("PRAGMA table_info(signal_attempts)")
+        }
+        if {"confirmation_high", "confirmation_low"}.issubset(available):
+            columns.extend(("confirmation_high", "confirmation_low"))
+            values.extend((snapshot.reference_high, snapshot.reference_low))
+        columns.extend(("confirmation_delay_minutes", "created_at"))
+        values.extend((0, created_at))
+        placeholders = ",".join("?" for _ in columns)
         conn.execute(
-            """
-            INSERT OR IGNORE INTO signal_attempts(
-                signal_id,run_id,instrument_key,trading_date,level_type,
-                level_value,direction,state,cross_timestamp,
-                confirmation_timestamp,underlying_entry,
-                confirmation_delay_minutes,created_at
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
-            """,
-            (
-                result.signal_id,
-                "RBV2-PAPER-RUNTIME",
-                instrument_key,
-                trading_date,
-                "RED_BAR_V2",
-                midpoint,
-                snapshot.direction,
-                "ACTIVE",
-                (reference or evaluation).isoformat(),
-                evaluation.isoformat(),
-                underlying_entry,
-                0,
-                created_at,
-            ),
+            f"INSERT OR IGNORE INTO signal_attempts({','.join(columns)}) "
+            f"VALUES({placeholders})",
+            tuple(values),
         )
         conn.commit()
     return RedBarV2PaperSignalPublishResult(

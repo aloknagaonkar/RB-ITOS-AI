@@ -61,6 +61,7 @@ def replay_red_bar_v2_day_with_futures_vwap(
     pending_reversal_health: RedBarV2VwapSourceHealth | None = None
     current_direction: str | None = None
     provisional_state: RedBarV2State | None = None
+    waiting_for_red_bar_touch = False
     reference = None
     exit_index = 0
     admitted = 0
@@ -88,6 +89,15 @@ def replay_red_bar_v2_day_with_futures_vwap(
                     trade_id=str(active["trade_id"]),
                     details={"source": "REPLAY_EXIT_FIXTURE"},
                 ))
+                # A closed trade must not reverse immediately. A later
+                # completed 1m candle must touch the fixed midpoint before the
+                # normal initial-direction rules can create another entry.
+                waiting_for_red_bar_touch = True
+                current_direction = None
+                provisional_state = None
+                pending_reversal = None
+                pending_reversal_snapshot = None
+                pending_reversal_health = None
             exit_index += 1
 
         reference = build_red_bar_v2_reference(
@@ -103,7 +113,27 @@ def replay_red_bar_v2_day_with_futures_vwap(
         decision_snapshot: RedBarV2FuturesSnapshot | None = None
         decision_health: RedBarV2VwapSourceHealth | None = None
 
-        if pending_reversal is not None:
+        if waiting_for_red_bar_touch:
+            row = frame.loc[candle_timestamp]
+            candle_low = float(row["low"])
+            candle_high = float(row["high"])
+            touched_midpoint = candle_low <= reference.midpoint <= candle_high
+            if touched_midpoint:
+                snapshot, decision_health = build_red_bar_v2_futures_snapshot(
+                    frame,
+                    futures_frame,
+                    instrument_key=instrument_key,
+                    vwap_instrument_key=vwap_instrument_key,
+                    timeframe="1M",
+                    evaluation_time=evaluation_time,
+                    expected_timestamp=candle_timestamp,
+                )
+                latest_health = decision_health
+                reentry = evaluate_initial_direction_futures(reference, snapshot)
+                if _event_is_due(reentry, evaluation_time):
+                    decision = reentry
+                    decision_snapshot = snapshot
+        elif pending_reversal is not None:
             decision = pending_reversal
             decision_snapshot = pending_reversal_snapshot
             decision_health = pending_reversal_health
@@ -187,6 +217,7 @@ def replay_red_bar_v2_day_with_futures_vwap(
                 pending_reversal = None
                 pending_reversal_snapshot = None
                 pending_reversal_health = None
+                waiting_for_red_bar_touch = False
             else:
                 blocked += 1
                 trade_id = None
