@@ -3,6 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, replace
 from datetime import date, datetime, time
+from time import perf_counter
 from zoneinfo import ZoneInfo
 from uuid import uuid4
 
@@ -37,6 +38,10 @@ from red_bar_lab.execution.paper_engine import (
     PaperContract,
     RedBarPaperExecutionEngine,
 )
+from red_bar_lab.services.red_bar_v2_contract_selection_evidence import (
+    ContractCandidateEvidence,
+    ContractSelectionEvidence,
+)
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -68,6 +73,8 @@ class AutomationReport:
     paper_orders_closed: int
     skipped: int
     errors: tuple[str, ...]
+    stage_timings_ms: tuple[tuple[str, float], ...] = ()
+    contract_selection_evidence: tuple[ContractSelectionEvidence, ...] = ()
 
 
 def _num(value, default=0.0):
@@ -95,6 +102,15 @@ def _underlying_quote_key(underlying_name: str) -> str:
     if underlying_name == "BANK NIFTY":
         return "NSE:NIFTY BANK"
     raise ValueError(f"Unsupported Zerodha underlying {underlying_name}")
+
+
+def _count_signal_entries(orders, signal_id: str) -> int:
+    """Count persisted entries for one signal without another database read."""
+    return sum(
+        1
+        for order in orders
+        if str(order.get("signal_id") or "") == str(signal_id)
+    )
 
 
 class RedBarPaperAutomationService:
@@ -142,6 +158,7 @@ class RedBarPaperAutomationService:
         self.zerodha = zerodha
         self.database = database
         self.settings = settings
+        self._contract_selection_evidence: list[ContractSelectionEvidence] = []
         self.underlying_name = underlying_name
         self.enable_directional_regime_reference = bool(
             enable_directional_regime_reference
@@ -504,6 +521,33 @@ class RedBarPaperAutomationService:
                 default_stop_loss_pct=self.stop_loss_pct,
                 default_target_pct=self.target_pct,
             )
+            existing_signal_entries = _count_signal_entries(
+                historical_orders,
+                signal_id,
+            )
+            if (
+                execution_policy.strategy_source == "RED_BAR_V2"
+                and existing_signal_entries >= 2
+            ):
+                reason = (
+                    "MAX_ENTRIES_PER_SIGNAL_REACHED; "
+                    f"existing_entries={existing_signal_entries}; maximum_entries=2"
+                )
+                self.database.expire_execution_queue_for_signal(
+                    signal_id=signal_id,
+                    reason=reason,
+                )
+                self._record_state(
+                    signal_id=signal_id,
+                    state="ENTRY_CAPACITY_REACHED",
+                    detail=(
+                        f"{reason}; candidate_scoring=SKIPPED; "
+                        "committee=SKIPPED; queue_execution=BLOCKED"
+                    ),
+                    score=float(existing_signal_entries),
+                )
+                skipped += 1
+                continue
             source_enabled = getattr(
                 self.database,
                 "execution_source_enabled",
@@ -763,6 +807,7 @@ class RedBarPaperAutomationService:
                         f"age={age_seconds:.0f}s; mode=MULTI_PERFORMANCE"
                     ),
                 )
+                selection_started = perf_counter()
                 scores = self.score_candidates(
                     direction=str(signal["direction"]),
                     spot_price=float(spot),
@@ -793,6 +838,46 @@ class RedBarPaperAutomationService:
                             "score_cap=100"
                         ),
                         score=(scores[0].total_score if scores else None),
+                    )
+                selection_duration_ms = (perf_counter() - selection_started) * 1000.0
+                if execution_policy.strategy_source == "RED_BAR_V2":
+                    correlation_id = str(signal.get("run_id") or signal_id)
+                    self._contract_selection_evidence.append(
+                        ContractSelectionEvidence(
+                            correlation_id=correlation_id,
+                            signal_id=signal_id,
+                            direction=str(signal["direction"]),
+                            evaluated_at=now.isoformat(),
+                            duration_ms=round(selection_duration_ms, 3),
+                            candidates=tuple(
+                                ContractCandidateEvidence(
+                                    rank=rank,
+                                    symbol=item.contract.tradingsymbol,
+                                    instrument_token=item.contract.instrument_token,
+                                    option_type=item.contract.option_type,
+                                    strike=item.contract.strike,
+                                    expiry=str(item.contract.expiry),
+                                    lot_size=item.contract.lot_size,
+                                    total_score=item.total_score,
+                                    minimum_score=self.minimum_candidate_score,
+                                    score_eligible=item.total_score >= self.minimum_candidate_score,
+                                    spread_score=item.spread_score,
+                                    liquidity_score=item.liquidity_score,
+                                    volume_score=item.volume_score,
+                                    oi_score=item.oi_score,
+                                    vwap_score=item.vwap_score,
+                                    ema_score=item.ema_score,
+                                    momentum_score=item.momentum_score,
+                                    momentum_pct=item.momentum_pct,
+                                    candle_count=item.candle_count,
+                                    ltp=item.ltp,
+                                    best_bid=item.best_bid,
+                                    best_ask=item.best_ask,
+                                    evidence_detail=item.reason,
+                                )
+                                for rank, item in enumerate(scores, start=1)
+                            ),
+                        )
                     )
                 if str(
                     signal.get("entry_stage") or ""
@@ -1871,27 +1956,40 @@ class RedBarPaperAutomationService:
         lots: int = 1,
         monitor_positions: bool = True,
     ) -> AutomationReport:
+        self._contract_selection_evidence = []
+        timings: list[tuple[str, float]] = []
+        stage_started = perf_counter()
         # Position monitoring may be owned by the dedicated fast monitor.
         if monitor_positions:
             closed, exit_errors = self.monitor_and_exit()
         else:
             closed, exit_errors = 0, []
+        timings.append(("exit_monitor", (perf_counter() - stage_started) * 1000.0))
 
+        stage_started = perf_counter()
         _, skipped, scored, decision_errors = self.process_new_signals(
             trading_date=trading_date, lots=lots, queue_only=True,
         )
+        timings.append(("opportunity_queue", (perf_counter() - stage_started) * 1000.0))
+        stage_started = perf_counter()
         opened, queue_errors = self.execute_approved_queue(
             trading_date=trading_date, lots=lots,
         )
+        timings.append(("paper_execution", (perf_counter() - stage_started) * 1000.0))
         cycle_now = datetime.now(IST)
+        stage_started = perf_counter()
         checkpoint_result = TradeCheckpointService(
             self.database,
             account_id=self.engine.account_id,
         ).capture_due(now=cycle_now)
+        timings.append(("checkpoint", (perf_counter() - stage_started) * 1000.0))
+        stage_started = perf_counter()
         telemetry_result = OptionExecutionTelemetryService(
             self.database,
             account_id=self.engine.account_id,
         ).capture(market_data=self.zerodha, now=cycle_now)
+        timings.append(("option_telemetry", (perf_counter() - stage_started) * 1000.0))
+        stage_started = perf_counter()
         signal_count = len(
             self.database.read_signal_attempts(
                 (
@@ -1902,6 +2000,7 @@ class RedBarPaperAutomationService:
                 trading_date,
             )
         )
+        timings.append(("signal_count", (perf_counter() - stage_started) * 1000.0))
         return AutomationReport(
             signals_seen=signal_count,
             candidates_scored=scored,
@@ -1915,4 +2014,8 @@ class RedBarPaperAutomationService:
                 + list(checkpoint_result.errors)
                 + list(telemetry_result.errors)
             ),
+            stage_timings_ms=tuple(
+                (name, round(duration, 3)) for name, duration in timings
+            ),
+            contract_selection_evidence=tuple(self._contract_selection_evidence),
         )

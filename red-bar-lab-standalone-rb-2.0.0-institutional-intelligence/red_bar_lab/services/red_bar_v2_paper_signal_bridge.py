@@ -30,7 +30,7 @@ def _signal_id(snapshot: RedBarV2UISnapshot) -> str:
         [
             "RED_BAR_V2",
             str(snapshot.direction or "NONE"),
-            str(snapshot.last_evaluation_timestamp or "NONE"),
+            str(snapshot.admission_timestamp or "NONE"),
             str(snapshot.reference_timestamp or "NONE"),
             str(snapshot.admission_code or "NONE"),
         ]
@@ -75,9 +75,9 @@ def validate_snapshot_for_paper(
         )
     if snapshot.direction not in {"BULLISH", "BEARISH"}:
         return RedBarV2PaperSignalPublishResult("WAITING", "V2_DIRECTION_UNAVAILABLE")
-    evaluation = _timestamp(snapshot.last_evaluation_timestamp)
+    evaluation = _timestamp(snapshot.admission_timestamp)
     if evaluation is None:
-        return RedBarV2PaperSignalPublishResult("BLOCKED", "V2_EVALUATION_TIMESTAMP_INVALID")
+        return RedBarV2PaperSignalPublishResult("BLOCKED", "V2_ADMISSION_TIMESTAMP_INVALID")
     current = pd.Timestamp(now or datetime.now(IST))
     if current.tzinfo is None:
         current = current.tz_localize("Asia/Kolkata")
@@ -110,7 +110,7 @@ def publish_v2_snapshot_to_paper_signals(
     if result.status != "READY" or snapshot is None or result.signal_id is None:
         return result
 
-    evaluation = _timestamp(snapshot.last_evaluation_timestamp)
+    evaluation = _timestamp(snapshot.admission_timestamp)
     reference = _timestamp(snapshot.reference_timestamp)
     assert evaluation is not None
     trading_date = evaluation.date().isoformat()
@@ -132,7 +132,7 @@ def publish_v2_snapshot_to_paper_signals(
         ]
         values: list[object] = [
             result.signal_id,
-            "RBV2-PAPER-RUNTIME",
+            snapshot.correlation_id or "RBV2-PAPER-RUNTIME",
             instrument_key,
             trading_date,
             "RED_BAR_V2",

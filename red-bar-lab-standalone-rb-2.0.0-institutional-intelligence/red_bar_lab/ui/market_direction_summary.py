@@ -23,6 +23,12 @@ from red_bar_lab.services.market_trend_research.contract_selection import (
 from red_bar_lab.services.option_participation_store import (
     read_latest_option_participation,
 )
+from red_bar_lab.services.nifty_futures_snapshot_store import (
+    read_nifty_futures_snapshots,
+)
+from red_bar_lab.services.market_trend_research.volume_confirmation import (
+    compare_volume_confirmation,
+)
 from red_bar_lab.ui._shared import _arrow_safe_rows, st
 from red_bar_lab.ui.market_trend_research_panel import (
     MARKET_TREND_RESEARCH_UI_REFRESH_SECONDS,
@@ -167,12 +173,37 @@ def _render_summary_cycle(database_path: str | Path, underlying: str) -> None:
     preferred_side, preference_status, preference_reason = (
         pcr_research_preference(trend_direction)
     )
+    preference_explanation = (
+        preference_reason if preference_status == "PASSED" else trend_reason
+    )
     current_rows = current_panel.get("rows") if isinstance(current_panel, Mapping) else ()
     selected_strikes = frozenset(
         float(row["strike"])
         for row in (current_rows or ())
         if isinstance(row, Mapping) and isinstance(row.get("strike"), (int, float))
         and row.get("position") != "TOTAL"
+    )
+    futures_rows = read_nifty_futures_snapshots(
+        database_path,
+        underlying_name="NIFTY 50",
+        limit=1,
+    )
+    futures_relative_volume = (
+        futures_rows[0].get("relative_volume") if futures_rows else None
+    )
+    volume_comparison = compare_volume_confirmation(
+        option_rows,
+        selected_expiry=(
+            str(current_panel.get("expiry") or "")
+            if isinstance(current_panel, Mapping) else ""
+        ),
+        selected_strikes=selected_strikes,
+        futures_relative_volume=(
+            float(futures_relative_volume)
+            if isinstance(futures_relative_volume, (int, float))
+            and not isinstance(futures_relative_volume, bool)
+            else None
+        ),
     )
     candidates = select_best_contracts(
         option_rows,
@@ -247,7 +278,17 @@ def _render_summary_cycle(database_path: str | Path, underlying: str) -> None:
             "Live value": f"BUY {preferred_side}" if preferred_side in {"CE", "PE"} else "WAIT",
             "Direction": trend_direction,
             "Status": preference_status,
-            "Interpretation": preference_reason,
+            "Interpretation": preference_explanation,
+        },
+        {
+            "Component": "Volume Confirmation",
+            "Live value": (
+                f"CE {volume_comparison.ce.score:.0f}/20 · "
+                f"PE {volume_comparison.pe.score:.0f}/20"
+            ),
+            "Direction": volume_comparison.direction,
+            "Status": volume_comparison.status,
+            "Interpretation": volume_comparison.interpretation,
         },
         {
             "Component": "Best four contracts",
@@ -278,6 +319,33 @@ def _render_summary_cycle(database_path: str | Path, underlying: str) -> None:
             )
         else:
             st.info("No pre-open NIFTY source observations have been stored for this session.")
+    with st.expander("Volume Confirmation details", expanded=False):
+        volume_checks = tuple(
+            (side, check)
+            for side, confirmation in (
+                ("CE", volume_comparison.ce),
+                ("PE", volume_comparison.pe),
+            )
+            for check in confirmation.checks
+        )
+        if volume_checks:
+            st.dataframe(_arrow_safe_rows([{
+                "Side": side,
+                "Check": check.check,
+                "Live value": check.live_value,
+                "Required": check.required,
+                "Status": check.status,
+                "Points": f"{check.points:.0f}",
+            } for side, check in volume_checks]), width="stretch", hide_index=True)
+        else:
+            st.info(
+                "CE/PE volume comparison is incomplete because current option "
+                "participation rows are unavailable."
+            )
+        st.caption(
+            "Observational only. Volume confirmation does not create, reject, "
+            "bundle, reserve or execute a trade."
+        )
     with st.expander("Best four contract selection details", expanded=False):
         if candidates:
             st.dataframe(_arrow_safe_rows([{

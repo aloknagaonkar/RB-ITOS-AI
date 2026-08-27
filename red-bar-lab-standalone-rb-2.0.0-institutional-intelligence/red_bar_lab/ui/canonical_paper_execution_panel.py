@@ -8,7 +8,7 @@ from red_bar_lab.services.red_bar_v2_canonical.paper_execution_observability imp
 
 
 def render_canonical_paper_execution_panel(st, settings, bundle_id: str | None) -> None:
-    st.markdown("### 9. Controlled canonical paper execution")
+    st.markdown("### 10. Paper Execution")
     st.warning(
         "PAPER ONLY — canonical execution has no live-broker authority. "
         "Legacy paper execution remains available and live execution is unchanged."

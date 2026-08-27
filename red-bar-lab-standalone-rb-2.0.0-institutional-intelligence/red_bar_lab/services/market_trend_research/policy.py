@@ -156,9 +156,12 @@ class MarketTrendResearchPolicy:
     ) -> int:
         remaining = self.sessions_to_expiry(trading_date, expiry, calendar)
         steps = remaining + 1
-        if steps < self.minimum_window_steps or steps > self.maximum_window_steps:
+        if steps < self.minimum_window_steps:
             raise ValueError("SESSION_POSITION_UNAVAILABLE")
-        return steps
+        # Monthly index and stock options can be many sessions from expiry.
+        # Retain bounded ATM coverage instead of rejecting otherwise valid
+        # option-chain evidence merely because the expiry is farther away.
+        return min(steps, self.maximum_window_steps)
 
     @staticmethod
     def expected_contract_count(window_steps: int) -> int:

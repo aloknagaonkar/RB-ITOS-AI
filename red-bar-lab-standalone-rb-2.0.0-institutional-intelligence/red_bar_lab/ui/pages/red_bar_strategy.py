@@ -13,6 +13,9 @@ from red_bar_lab.ui.strategy_section_summary import (
     timing_rows,
 )
 from red_bar_lab.operations.red_bar_v2_ui_snapshot import read_red_bar_v2_ui_snapshot
+from red_bar_lab.services.red_bar_v2_market_data_evidence import (
+    read_market_data_evidence,
+)
 from red_bar_lab.ui.red_bar_v2_live_runtime import resolve_red_bar_v2_live_state
 from red_bar_lab.ui.red_bar_v2_legacy_panel import render_red_bar_v2_legacy_panel
 
@@ -75,7 +78,7 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     )
     section1_ms = elapsed_ms(section1_started)
 
-    st.markdown("### 1. Data & Feature Preparation")
+    st.markdown("### 1. Input Readiness")
     a1, a2, a3, a4 = st.columns(4)
     a1.metric("Detection readiness", readiness)
     a2.metric("Market behaviour", option_context.get("directional_bias") or "UNAVAILABLE")
@@ -119,6 +122,20 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
                 prepared_ms=section1_ms,
             )), width="stretch", hide_index=True,
         )
+    with st.expander("View live candle download evidence"):
+        market_data = read_market_data_evidence(settings.artifacts_root)
+        datasets = market_data.get("datasets") if isinstance(market_data.get("datasets"), list) else []
+        if datasets:
+            st.dataframe(_arrow_safe_rows(datasets), width="stretch", hide_index=True)
+            st.caption(
+                f"Correlation ID: {market_data.get('correlation_id') or 'Not available'}; "
+                f"recorded after execution processing: {market_data.get('recorded_at') or 'Not available'}"
+            )
+        else:
+            st.info(
+                "WAITING: the paper monitor has not yet published live NIFTY and "
+                "futures candle download evidence."
+            )
     with st.expander("View preparation flow"):
         st.code(
             "1-minute candles collected\n"
@@ -157,7 +174,7 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     )
     section2_ms = elapsed_ms(section2_started)
 
-    st.markdown("### 2. Strategy State & Setup Detection")
+    st.markdown("### 2. Strategy Decision")
     st.caption(
         "Read-only trace of Red Bar-owned reference creation, midpoint crossing and confirmation. "
         "RSI and DRI signal attempts are excluded."
@@ -191,7 +208,7 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
     )
     section3_ms = elapsed_ms(section3_started)
 
-    st.markdown("### 3. Red Bar Signal Normalization & Bundle Lifecycle")
+    st.markdown("### 3. Signal Bundle")
     st.caption(
         "The bundle contains only Red Bar reference, midpoint-cross and confirmation evidence. "
         "RSI and DRI signals, cooldowns and consumption states do not affect it."

@@ -24,7 +24,7 @@ def _provider_projection(settings) -> tuple[str, str, str]:
 
 
 def _render_paper_canary_runtime(st, settings) -> None:
-    st.markdown("### 10. Canonical paper-canary runtime")
+    st.markdown("### 11. Runtime Health")
     st.warning("PAPER ONLY — this panel is read-only. It cannot start the worker, run recovery, submit an order, reset the circuit or repair state.")
     provider, provider_status, provider_reason = _provider_projection(settings)
     st.dataframe(pd.DataFrame([

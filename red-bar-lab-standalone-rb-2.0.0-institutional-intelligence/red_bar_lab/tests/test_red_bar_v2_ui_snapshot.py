@@ -53,6 +53,7 @@ class _Streamlit:
 
 def _snapshot() -> RedBarV2UISnapshot:
     return RedBarV2UISnapshot(
+        correlation_id="RBV2-RUNTIME-TEST",
         reference_status="REFERENCE_READY",
         reference_midpoint=24100.0,
         index_close=24080.0,
@@ -81,6 +82,7 @@ def test_ui_snapshot_round_trip(tmp_path):
     restored = read_red_bar_v2_ui_snapshot(tmp_path)
 
     assert restored is not None
+    assert restored.correlation_id == "RBV2-RUNTIME-TEST"
     assert restored.strategy_version == "RED_BAR_V2"
     assert restored.index_rsi == 42.5
     assert restored.futures_vwap == 24120.0

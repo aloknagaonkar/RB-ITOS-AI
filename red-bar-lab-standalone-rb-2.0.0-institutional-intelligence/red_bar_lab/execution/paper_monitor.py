@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import time
+from pathlib import Path
+from time import perf_counter
 from types import SimpleNamespace
 
 from red_bar_lab.config import RedBarSettings, UNDERLYINGS
@@ -41,6 +44,13 @@ from red_bar_lab.services.nifty_futures_readiness import (
     futures_readiness_log_values,
 )
 from red_bar_lab.services.red_bar_v2_current_session import evaluate_current_session_red_bar_v2
+from red_bar_lab.services.red_bar_v2_contract_selection_evidence import (
+    persist_contract_selection_evidence,
+)
+from red_bar_lab.services.red_bar_v2_market_data_evidence import (
+    persist_market_data_evidence,
+    persist_stage_latency,
+)
 from red_bar_lab.services.red_bar_v2_paper_signal_bridge import (
     RedBarV2PaperSignalPublishResult,
     publish_v2_snapshot_to_paper_signals,
@@ -57,9 +67,66 @@ _OPERATIONAL_WARNING_MESSAGES = frozenset(
 )
 
 
-def _partition_cycle_messages(report_errors, reversal_errors):
+def _persist_latency_snapshot(
+    artifacts_root: Path,
+    *,
+    cycle_started_at: str,
+    cycle_completed_at: str,
+    timings_ms: dict[str, float],
+    slowest_stage: str,
+) -> None:
+    """Publish bounded post-cycle timing evidence without affecting execution."""
+    target = artifacts_root / "paper_monitor_latency.json"
+    temporary = target.with_suffix(".tmp")
+    payload = {
+        "schema_version": "RED_BAR_V2_MONITOR_LATENCY_V1",
+        "cycle_started_at": cycle_started_at,
+        "cycle_completed_at": cycle_completed_at,
+        "slowest_stage": slowest_stage,
+        "timings_ms": {key: round(value, 3) for key, value in timings_ms.items()},
+    }
+    try:
+        artifacts_root.mkdir(parents=True, exist_ok=True)
+        temporary.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+        temporary.replace(target)
+    except OSError:
+        logging.warning("paper_monitor_latency_persistence_failed", exc_info=True)
+
+
+def _legacy_stage_latency_rows(cycle_timings_ms, report, live_v2):
+    automation = dict(getattr(report, "stage_timings_ms", ()) or ())
+    pull_ms = sum(item.duration_ms for item in live_v2.market_data_evidence)
+    strategy_ms = max(0.0, cycle_timings_ms["v2_evaluation"] - pull_ms)
+
+    def row(stage_id, status, duration_ms, detail):
+        return {
+            "stage_id": stage_id,
+            "status": status,
+            "duration_ms": (
+                round(float(duration_ms), 3) if duration_ms is not None else None
+            ),
+            "detail": detail,
+        }
+
+    return [
+        row("INPUT_READINESS", "MEASURED", pull_ms, "Existing index and futures candle pulls"),
+        row("STRATEGY_DECISION", "MEASURED", strategy_ms, "V2 evaluation excluding measured provider pull time"),
+        row("SIGNAL_BUNDLE", "MEASURED", cycle_timings_ms["signal_publication"], "Legacy signal publication bridge"),
+        row("ARCHITECTURE_PARITY", "NOT_APPLICABLE", None, "Canonical shadow owns parity"),
+        row("PERSISTENCE_INTEGRITY", "COUPLED", None, "Included in signal publication persistence"),
+        row("RECENT_OBSERVATIONS", "MEASURED", cycle_timings_ms["global_readiness"], "Post-decision readiness projection"),
+        row("PROCESS_EXPLANATION", "UI_ONLY", None, "Read-only UI projection"),
+        row("OPPORTUNITY_QUEUE", "MEASURED", automation.get("opportunity_queue"), "Candidate scoring, committee and queue decision"),
+        row("RESERVATION_BOUNDARY", "COUPLED", None, "Legacy duplicate and entry-cap checks occur inside queue processing"),
+        row("PAPER_EXECUTION", "MEASURED", automation.get("paper_execution"), "Approved queue consumption and paper order creation"),
+        row("RUNTIME_HEALTH", "MEASURED", cycle_timings_ms["total"], "Complete paper-monitor cycle"),
+        row("PROVIDER_READINESS", "MEASURED", cycle_timings_ms["readiness"], "Underlying and futures readiness assessment"),
+    ]
+
+
+def _partition_cycle_messages(report_errors, exit_errors):
     warnings: list[str] = []
-    errors: list[str] = [str(message) for message in reversal_errors]
+    errors: list[str] = [str(message) for message in exit_errors]
     for message in report_errors:
         text = str(message)
         if text in _OPERATIONAL_WARNING_MESSAGES:
@@ -160,6 +227,7 @@ def main() -> int:
         underlying_name=args.underlying,
         initial_capital=args.capital,
         minimum_candidate_score=args.minimum_score,
+        enable_opportunity_extension=False,
     )
     circuit = PaperMonitorCircuitBreaker(
         failure_threshold=args.failure_threshold,
@@ -221,17 +289,41 @@ def main() -> int:
     while True:
         cycle_gate = circuit.begin_cycle()
         try:
+            cycle_perf_started = perf_counter()
+            stage_perf_started = cycle_perf_started
+            cycle_timings_ms: dict[str, float] = {}
             cycle_started = datetime.now(ist)
             trading_date = cycle_started.date().isoformat()
+            futures_applicable = args.underlying == "NIFTY 50"
+            if futures_applicable:
+                futures_result = futures_monitor.resolve(as_of_date=cycle_started.date())
+            else:
+                futures_result = NiftyFuturesMonitorResult(
+                    status="NOT_APPLICABLE",
+                    reason="NIFTY futures discovery is only used for NIFTY 50.",
+                )
+            cycle_timings_ms["futures_resolution"] = (
+                perf_counter() - stage_perf_started
+            ) * 1000.0
+            stage_perf_started = perf_counter()
             live_v2 = evaluate_current_session_red_bar_v2(
                 upstox=upstox,
                 database=database,
                 settings=settings,
                 instrument_key=UNDERLYINGS[args.underlying],
+                futures_instrument_key=futures_result.instrument_key,
+                futures_symbol=futures_result.trading_symbol,
+                futures_expiry=futures_result.expiry,
+                require_resolved_futures=futures_applicable,
             )
+            cycle_timings_ms["v2_evaluation"] = (
+                perf_counter() - stage_perf_started
+            ) * 1000.0
+            stage_perf_started = perf_counter()
 
+            v2_snapshot = read_red_bar_v2_ui_snapshot(settings.artifacts_root)
             structural_exit = execute_structural_stop_exits(
-                snapshot=read_red_bar_v2_ui_snapshot(settings.artifacts_root),
+                snapshot=v2_snapshot,
                 completed_1m_close=live_v2.completed_1m_close,
                 completed_1m_timestamp=live_v2.completed_1m_timestamp,
                 open_orders=database.read_open_paper_execution_orders("PAPER-STD"),
@@ -264,6 +356,11 @@ def main() -> int:
                     settings=settings,
                     instrument_key=UNDERLYINGS[args.underlying],
                 )
+                v2_snapshot = read_red_bar_v2_ui_snapshot(settings.artifacts_root)
+            cycle_timings_ms["exit_management"] = (
+                perf_counter() - stage_perf_started
+            ) * 1000.0
+            stage_perf_started = perf_counter()
 
             if cycle_gate.entry_suspended:
                 bridge = RedBarV2PaperSignalPublishResult(
@@ -278,6 +375,10 @@ def main() -> int:
                     authority=authority,
                     now=cycle_started,
                 )
+            cycle_timings_ms["signal_publication"] = (
+                perf_counter() - stage_perf_started
+            ) * 1000.0
+            stage_perf_started = perf_counter()
             candle_diagnostic = assess_monitor_underlying_candles(
                 upstox,
                 instrument_key=UNDERLYINGS[args.underlying],
@@ -286,14 +387,6 @@ def main() -> int:
             )
             candle_log_values = _candle_diagnostic_log_values(candle_diagnostic)
 
-            futures_applicable = args.underlying == "NIFTY 50"
-            if futures_applicable:
-                futures_result = futures_monitor.resolve(as_of_date=cycle_started.date())
-            else:
-                futures_result = NiftyFuturesMonitorResult(
-                    status="NOT_APPLICABLE",
-                    reason="NIFTY futures discovery is only used for NIFTY 50.",
-                )
             futures_log_values = futures_monitor_log_values(futures_result)
             futures_market_result = assess_nifty_futures_market_data(
                 upstox,
@@ -320,6 +413,10 @@ def main() -> int:
             futures_readiness_values = futures_readiness_log_values(
                 futures_readiness_result
             )
+            cycle_timings_ms["readiness"] = (
+                perf_counter() - stage_perf_started
+            ) * 1000.0
+            stage_perf_started = perf_counter()
 
             feed_failure = critical_market_data_failure(
                 underlying_status=candle_diagnostic.readiness.status,
@@ -344,6 +441,10 @@ def main() -> int:
                     lots=max(1, int(args.lots)),
                     monitor_positions=False,
                 )
+            cycle_timings_ms["automation"] = (
+                perf_counter() - stage_perf_started
+            ) * 1000.0
+            stage_perf_started = perf_counter()
 
             next_delay = (
                 circuit_decision.delay_seconds
@@ -379,6 +480,9 @@ def main() -> int:
             global_readiness_values = global_readiness_log_values(
                 global_readiness_result
             )
+            cycle_timings_ms["global_readiness"] = (
+                perf_counter() - stage_perf_started
+            ) * 1000.0
 
             open_orders = database.read_open_paper_execution_orders("PAPER-STD")
             if circuit_decision.entry_suspended or cycle_gate.entry_suspended:
@@ -449,11 +553,80 @@ def main() -> int:
                 report.signals_seen,
                 report.candidates_scored,
                 report.paper_orders_opened,
-                report.paper_orders_closed + reversal_exit.exited_orders,
+                report.paper_orders_closed
+                + structural_exit.exited_orders
+                + rsi_exit.exited_orders,
                 report.skipped,
                 last_decision,
                 last_reason,
             )
+            cycle_timings_ms["total"] = (
+                perf_counter() - cycle_perf_started
+            ) * 1000.0
+            slowest_stage, slowest_ms = max(
+                (
+                    (name, elapsed)
+                    for name, elapsed in cycle_timings_ms.items()
+                    if name != "total"
+                ),
+                key=lambda item: item[1],
+            )
+            logging.info(
+                "paper_monitor_latency total_ms=%.1f slowest_stage=%s "
+                "slowest_ms=%.1f futures_resolution_ms=%.1f "
+                "v2_evaluation_ms=%.1f exit_management_ms=%.1f "
+                "signal_publication_ms=%.1f readiness_ms=%.1f "
+                "automation_ms=%.1f global_readiness_ms=%.1f",
+                cycle_timings_ms["total"],
+                slowest_stage,
+                slowest_ms,
+                cycle_timings_ms["futures_resolution"],
+                cycle_timings_ms["v2_evaluation"],
+                cycle_timings_ms["exit_management"],
+                cycle_timings_ms["signal_publication"],
+                cycle_timings_ms["readiness"],
+                cycle_timings_ms["automation"],
+                cycle_timings_ms["global_readiness"],
+            )
+            _persist_latency_snapshot(
+                settings.artifacts_root,
+                cycle_started_at=cycle_started.isoformat(),
+                cycle_completed_at=datetime.now(ist).isoformat(),
+                timings_ms=cycle_timings_ms,
+                slowest_stage=slowest_stage,
+            )
+            if live_v2.market_data_evidence and not persist_market_data_evidence(
+                settings.artifacts_root,
+                live_v2.market_data_evidence,
+                correlation_id=(
+                    v2_snapshot.correlation_id if v2_snapshot is not None else None
+                ),
+                recorded_at=datetime.now(ist),
+            ):
+                logging.warning("red_bar_v2_market_data_evidence_persistence_failed")
+            if not persist_stage_latency(
+                settings.artifacts_root,
+                architecture="legacy",
+                correlation_id=(
+                    v2_snapshot.correlation_id if v2_snapshot is not None else None
+                ),
+                stages=_legacy_stage_latency_rows(
+                    cycle_timings_ms,
+                    report,
+                    live_v2,
+                ),
+                recorded_at=datetime.now(ist),
+            ):
+                logging.warning("red_bar_v2_legacy_stage_latency_persistence_failed")
+            contract_evidence = tuple(
+                getattr(report, "contract_selection_evidence", ())
+            )
+            if contract_evidence and not persist_contract_selection_evidence(
+                settings.artifacts_root,
+                contract_evidence,
+                recorded_at=datetime.now(ist),
+            ):
+                logging.warning("red_bar_v2_contract_selection_evidence_persistence_failed")
             logging.debug(
                 "futures_market=%s futures_market_reason=%s futures_candle=%s "
                 "futures_volume=%s futures_close=%s futures_volume_value=%s "

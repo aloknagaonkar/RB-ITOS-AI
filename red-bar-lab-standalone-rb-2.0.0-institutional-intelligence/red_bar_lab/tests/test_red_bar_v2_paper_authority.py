@@ -68,6 +68,7 @@ def test_stale_historical_snapshot_is_blocked() -> None:
         admission_allowed=True,
         admission_code="INITIAL_BULLISH_ALIGNMENT",
         direction="BULLISH",
+        admission_timestamp="2026-08-18T10:00:00+05:30",
         last_evaluation_timestamp="2026-08-18T10:00:00+05:30",
     )
     result = validate_snapshot_for_paper(
@@ -82,12 +83,14 @@ def test_stale_historical_snapshot_is_blocked() -> None:
 def test_fresh_admitted_snapshot_publishes_one_signal(tmp_path) -> None:
     now = datetime(2026, 8, 19, 9, 30, tzinfo=IST)
     snapshot = RedBarV2UISnapshot(
+        correlation_id="RBV2-RUNTIME-CORRELATED",
         alignment_status="READY",
         admission_allowed=True,
         admission_code="INITIAL_BEARISH_ALIGNMENT",
         admission_reason="Full bearish alignment.",
         direction="BEARISH",
         option_side="PE",
+        admission_timestamp="2026-08-19T09:29:00+05:30",
         reference_timestamp="2026-08-19T09:25:00+05:30",
         reference_midpoint=24850.0,
         index_close=24820.0,
@@ -136,6 +139,33 @@ def test_fresh_admitted_snapshot_publishes_one_signal(tmp_path) -> None:
     assert first.signal_id == second.signal_id
     with sqlite3.connect(database) as conn:
         rows = conn.execute(
-            "SELECT signal_id,level_type,direction,state FROM signal_attempts"
+            "SELECT signal_id,run_id,level_type,direction,state FROM signal_attempts"
         ).fetchall()
-    assert rows == [(first.signal_id, "RED_BAR_V2", "BEARISH", "ACTIVE")]
+    assert rows == [(
+        first.signal_id,
+        "RBV2-RUNTIME-CORRELATED",
+        "RED_BAR_V2",
+        "BEARISH",
+        "ACTIVE",
+    )]
+
+
+def test_old_admission_is_not_refreshed_by_new_observation_timestamp() -> None:
+    snapshot = RedBarV2UISnapshot(
+        alignment_status="READY",
+        admission_allowed=True,
+        admission_code="INITIAL_BEARISH_ALIGNMENT",
+        direction="BEARISH",
+        option_side="PE",
+        admission_timestamp="2026-08-19T09:20:00+05:30",
+        last_evaluation_timestamp="2026-08-19T11:00:00+05:30",
+    )
+
+    result = validate_snapshot_for_paper(
+        snapshot,
+        authority=_authority(),
+        now=datetime(2026, 8, 19, 11, 0, tzinfo=IST),
+    )
+
+    assert result.status == "BLOCKED"
+    assert result.reason == "V2_SNAPSHOT_STALE"

@@ -78,7 +78,9 @@ class RedBarV2CanonicalShadowCoordinator:
                 error_category="INPUT_UNAVAILABLE",
             )
 
+        stage_timings_ms: dict[str, float] = {}
         try:
+            stage_started = perf_counter_ns()
             resolution = resolve_red_bar_v2_canonical(
                 replay=replay,
                 health=health,
@@ -88,16 +90,27 @@ class RedBarV2CanonicalShadowCoordinator:
                 source_replay_id=source_replay_id,
                 resolved_at=event_timestamp,
             )
+            stage_timings_ms["resolution"] = (
+                perf_counter_ns() - stage_started
+            ) / 1_000_000.0
+            stage_started = perf_counter_ns()
             parity = compare_legacy_to_canonical(
                 legacy_event=legacy_result,
                 canonical_decision=resolution.section_2,
                 legacy_timeframe=resolution.section_2.evaluation_timeframe,
             )
+            stage_timings_ms["parity"] = (
+                perf_counter_ns() - stage_started
+            ) / 1_000_000.0
+            stage_started = perf_counter_ns()
             persisted = self._persistence_service.persist(
                 resolution=resolution,
                 parity=parity,
                 instrument_key=market_metadata.underlying_instrument_key,
             )
+            stage_timings_ms["persistence"] = (
+                perf_counter_ns() - stage_started
+            ) / 1_000_000.0
             mismatch_fields = tuple(parity.mismatches)
             reason_code = (
                 "PARITY_MISMATCH" if not parity.matches
@@ -133,6 +146,10 @@ class RedBarV2CanonicalShadowCoordinator:
                 "resolution_id": persisted.resolution_id,
                 "bundle_id": persisted.bundle_id,
                 "duration_ms": observation.duration_ms,
+                "stage_timings_ms": {
+                    name: round(duration, 3)
+                    for name, duration in stage_timings_ms.items()
+                },
                 "error_category": observation.error_category,
                 "reason_code": reason_code,
             })

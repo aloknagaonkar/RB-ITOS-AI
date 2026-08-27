@@ -27,6 +27,22 @@ def _latest_admission_event(monitored: MonitoredRedBarV2FuturesReplayResult) -> 
     )
 
 
+def build_latest_live_correlation_id(
+    *,
+    monitored: MonitoredRedBarV2FuturesReplayResult,
+    instrument_key: str,
+) -> str | None:
+    """Return the canonical source identity shared by both live V2 paths."""
+    event = _latest_admission_event(monitored)
+    if event is None:
+        return None
+    return build_runtime_source_replay_id(
+        instrument_key=instrument_key,
+        trading_date=monitored.replay.trading_date,
+        event=event,
+    )
+
+
 def submit_latest_live_canonical_shadow(
     *,
     monitored: MonitoredRedBarV2FuturesReplayResult,
@@ -39,6 +55,7 @@ def submit_latest_live_canonical_shadow(
         runtime = get_red_bar_v2_shadow_runtime(
             enabled=settings.red_bar_v2_canonical_shadow_enabled,
             database_path=settings.database_path,
+            artifacts_root=settings.artifacts_root,
         )
         if runtime is None:
             return False
@@ -53,11 +70,12 @@ def submit_latest_live_canonical_shadow(
             futures_instrument_key=futures_instrument_key,
             futures_expiry=futures_expiry,
         )
-        source_replay_id = build_runtime_source_replay_id(
+        source_replay_id = build_latest_live_correlation_id(
+            monitored=monitored,
             instrument_key=instrument_key,
-            trading_date=monitored.replay.trading_date,
-            event=event,
         )
+        if source_replay_id is None:
+            return False
         return runtime.submit(
             build_shadow_task(
                 replay=monitored.replay,

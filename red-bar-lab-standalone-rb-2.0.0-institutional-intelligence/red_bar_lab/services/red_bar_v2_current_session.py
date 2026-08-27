@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import datetime
 import os
+from time import perf_counter
 from typing import Any, Mapping
 
 import pandas as pd
@@ -15,7 +16,12 @@ from red_bar_lab.services.red_bar_v2_futures_replay_service import (
     run_monitored_red_bar_v2_futures_replay,
 )
 from red_bar_lab.services.red_bar_v2_live_shadow import (
+    build_latest_live_correlation_id,
     submit_latest_live_canonical_shadow,
+)
+from red_bar_lab.services.red_bar_v2_market_data_evidence import (
+    CandlePullEvidence,
+    build_candle_pull_evidence,
 )
 
 
@@ -43,6 +49,7 @@ class CurrentSessionV2Result:
     completed_1m_close: float | None = None
     completed_1m_rsi: float | None = None
     completed_1m_timestamp: str | None = None
+    market_data_evidence: tuple[CandlePullEvidence, ...] = ()
 
 
 def _active_v2_order_exists(rows: list[Mapping[str, Any]]) -> bool:
@@ -300,6 +307,11 @@ def _restore_live_candidate_when_replay_only_blocked(
         trade_status="FLAT",
         trade_id=None,
         admission_allowed=True,
+        admission_timestamp=(
+            event.timestamp.isoformat()
+            if hasattr(event.timestamp, "isoformat")
+            else str(event.timestamp)
+        ),
         admission_code=str(getattr(event, "admission_code", None) or "V2_ADMITTED"),
         admission_reason=str(
             details.get("admission_reason")
@@ -324,11 +336,21 @@ def evaluate_current_session_red_bar_v2(
     database: Any,
     settings: Any,
     instrument_key: str,
+    futures_instrument_key: str | None = None,
+    futures_symbol: str | None = None,
+    futures_expiry: str | None = None,
+    require_resolved_futures: bool = False,
 ) -> CurrentSessionV2Result:
     """Refresh the paper-mode V2 snapshot from current intraday data."""
     previous = read_red_bar_v2_ui_snapshot(settings.artifacts_root)
+    if require_resolved_futures and not str(futures_instrument_key or "").strip():
+        return CurrentSessionV2Result(
+            status="BLOCKED",
+            reason="ACTIVE_NIFTY_FUTURES_CONTRACT_UNAVAILABLE",
+        )
     futures_key = (
-        os.getenv("NIFTY_FUTURES_INSTRUMENT_KEY", "").strip()
+        str(futures_instrument_key or "").strip()
+        or os.getenv("NIFTY_FUTURES_INSTRUMENT_KEY", "").strip()
         or (previous.futures_instrument_key if previous else None)
     )
     if not futures_key:
@@ -337,19 +359,44 @@ def evaluate_current_session_red_bar_v2(
             reason="NIFTY_FUTURES_INSTRUMENT_KEY_UNAVAILABLE",
         )
 
+    index_requested = datetime.now().astimezone()
+    pull_started = perf_counter()
     index_candles = upstox.intraday_candles(instrument_key, interval_minutes=1)
+    index_received = datetime.now().astimezone()
+    index_evidence = build_candle_pull_evidence(
+        index_candles,
+        dataset="NIFTY_INDEX_1M",
+        instrument_key=instrument_key,
+        requested_at=index_requested,
+        received_at=index_received,
+        duration_ms=(perf_counter() - pull_started) * 1000.0,
+    )
+    futures_requested = datetime.now().astimezone()
+    pull_started = perf_counter()
     futures_candles = upstox.intraday_candles(futures_key, interval_minutes=1)
+    futures_received = datetime.now().astimezone()
+    futures_evidence = build_candle_pull_evidence(
+        futures_candles,
+        dataset="NIFTY_FUTURES_1M",
+        instrument_key=futures_key,
+        requested_at=futures_requested,
+        received_at=futures_received,
+        duration_ms=(perf_counter() - pull_started) * 1000.0,
+    )
+    market_data_evidence = (index_evidence, futures_evidence)
     if index_candles.empty:
         return CurrentSessionV2Result(
             status="WAITING",
             reason="INDEX_INTRADAY_UNAVAILABLE",
             futures_instrument_key=futures_key,
+            market_data_evidence=market_data_evidence,
         )
     if futures_candles.empty:
         return CurrentSessionV2Result(
             status="WAITING",
             reason="FUTURES_INTRADAY_UNAVAILABLE",
             futures_instrument_key=futures_key,
+            market_data_evidence=market_data_evidence,
         )
 
     evaluated_at = datetime.now().astimezone()
@@ -374,16 +421,20 @@ def evaluate_current_session_red_bar_v2(
         instrument_key=instrument_key,
         vwap_instrument_key=futures_key,
         artifacts_root=settings.artifacts_root,
-        futures_symbol=(previous.futures_symbol if previous else None),
-        futures_expiry=(previous.futures_expiry if previous else None),
+        futures_symbol=(futures_symbol or (previous.futures_symbol if previous else None)),
+        futures_expiry=(futures_expiry or (previous.futures_expiry if previous else None)),
         exit_timestamps=exit_timestamps,
+    )
+    correlation_id = build_latest_live_correlation_id(
+        monitored=monitored,
+        instrument_key=instrument_key,
     )
     submit_latest_live_canonical_shadow(
         monitored=monitored,
         settings=settings,
         instrument_key=instrument_key,
         futures_instrument_key=futures_key,
-        futures_expiry=(previous.futures_expiry if previous else None),
+        futures_expiry=(futures_expiry or (previous.futures_expiry if previous else None)),
     )
 
     snapshot = read_red_bar_v2_ui_snapshot(settings.artifacts_root)
@@ -410,6 +461,7 @@ def evaluate_current_session_red_bar_v2(
         persist_red_bar_v2_ui_snapshot(
             replace(
                 snapshot,
+                correlation_id=correlation_id,
                 mode="PAPER",
                 execution_scope="PAPER_TRADING_ONLY",
                 reference_high=reference_high,
@@ -437,6 +489,9 @@ def evaluate_current_session_red_bar_v2(
                     snapshot.futures_timestamp,
                     live["futures_timestamp"],
                 ),
+                futures_instrument_key=futures_key,
+                futures_symbol=(futures_symbol or snapshot.futures_symbol),
+                futures_expiry=(futures_expiry or snapshot.futures_expiry),
                 recorded_at=datetime.now().astimezone().isoformat(),
             ),
             artifacts_root=settings.artifacts_root,
@@ -455,4 +510,5 @@ def evaluate_current_session_red_bar_v2(
         completed_1m_close=completed_close,
         completed_1m_rsi=completed_rsi,
         completed_1m_timestamp=completed_timestamp,
+        market_data_evidence=market_data_evidence,
     )

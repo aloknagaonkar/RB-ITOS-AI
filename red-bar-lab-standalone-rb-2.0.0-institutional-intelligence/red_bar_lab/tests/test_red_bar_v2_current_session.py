@@ -137,6 +137,7 @@ def test_live_session_restores_candidate_when_only_replay_trade_blocks():
     )
 
     assert restored.admission_allowed is True
+    assert restored.admission_timestamp == "2026-08-20T12:41:00+05:30"
     assert restored.admission_code == "FULL_DIRECTIONAL_ALIGNMENT"
     assert restored.direction == "BULLISH"
     assert restored.option_side == "CE"

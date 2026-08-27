@@ -44,6 +44,15 @@ def test_holiday_adjusts_session_window():
     assert policy.window_steps(date(2026, 8, 19), EXPIRY, calendar) == 4
 
 
+def test_monthly_expiry_uses_bounded_maximum_window():
+    policy = MarketTrendResearchPolicy()
+    assert policy.window_steps(
+        date(2026, 8, 26),
+        date(2026, 9, 29),
+        StaticExchangeSessionCalendar(),
+    ) == 5
+
+
 def test_missing_session_position_fails_explicitly():
     policy = MarketTrendResearchPolicy()
     with pytest.raises(ValueError, match="SESSION_POSITION_UNAVAILABLE"):

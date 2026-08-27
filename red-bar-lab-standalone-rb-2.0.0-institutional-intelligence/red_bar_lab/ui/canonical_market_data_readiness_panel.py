@@ -14,7 +14,7 @@ def _text(value) -> str:
 
 
 def render_canonical_market_data_readiness_panel(st, settings) -> None:
-    st.markdown("### 11. Market-data provider readiness")
+    st.markdown("### 12. Provider Readiness")
     st.warning("READ ONLY — this panel reads one sanitized persisted report. It does not construct a provider, call a network, initialize SQLite, reserve a bundle or submit any order.")
     observation = MarketDataReadinessObservabilityService(
         settings.market_data_readiness_state_path,

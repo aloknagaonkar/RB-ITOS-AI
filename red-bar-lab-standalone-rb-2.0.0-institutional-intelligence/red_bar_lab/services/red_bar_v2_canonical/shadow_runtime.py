@@ -15,6 +15,7 @@ from types import MappingProxyType
 from typing import Protocol, TypeAlias
 
 from red_bar_lab.domain.red_bar_v2 import ContextStatus
+from red_bar_lab.services.red_bar_v2_market_data_evidence import persist_stage_latency
 
 from .models import LegacyV2MarketMetadata
 from .persistence_models import PersistenceOutcome
@@ -496,17 +497,65 @@ _RUNTIME_LOCK = Lock()
 _RUNTIMES: dict[str, RedBarV2CanonicalShadowRuntime] = {}
 
 
-def _build_coordinator_factory(database_path: Path) -> CoordinatorFactory:
+def _canonical_stage_latency_rows(record: Mapping[str, object]) -> tuple[dict[str, object], ...]:
+    raw_timings = record.get("stage_timings_ms")
+    timings = raw_timings if isinstance(raw_timings, Mapping) else {}
+
+    def duration(name: str) -> float | None:
+        value = timings.get(name)
+        return float(value) if isinstance(value, (int, float)) else None
+
+    total = record.get("duration_ms")
+    total_ms = float(total) if isinstance(total, (int, float)) else None
+    return (
+        {"stage_id": "INPUT_READINESS", "status": "COUPLED", "duration_ms": None, "detail": "Measured within canonical resolution"},
+        {"stage_id": "STRATEGY_DECISION", "status": "MEASURED", "duration_ms": duration("resolution"), "detail": "Canonical Sections 1-3 resolution"},
+        {"stage_id": "SIGNAL_BUNDLE", "status": "COUPLED", "duration_ms": None, "detail": "Measured within canonical resolution"},
+        {"stage_id": "ARCHITECTURE_PARITY", "status": "MEASURED", "duration_ms": duration("parity"), "detail": "Legacy-to-canonical parity comparison"},
+        {"stage_id": "PERSISTENCE_INTEGRITY", "status": "MEASURED", "duration_ms": duration("persistence"), "detail": "Canonical durable persistence"},
+        {"stage_id": "RECENT_OBSERVATIONS", "status": "UI_ONLY", "duration_ms": None, "detail": "Read-only UI projection"},
+        {"stage_id": "PROCESS_EXPLANATION", "status": "UI_ONLY", "duration_ms": None, "detail": "Read-only UI projection"},
+        {"stage_id": "OPPORTUNITY_QUEUE", "status": "NOT_EXECUTED_IN_SHADOW", "duration_ms": None, "detail": "Canonical shadow has no queue authority"},
+        {"stage_id": "RESERVATION_BOUNDARY", "status": "NOT_EXECUTED_IN_SHADOW", "duration_ms": None, "detail": "Canonical shadow has no reservation authority"},
+        {"stage_id": "PAPER_EXECUTION", "status": "NOT_EXECUTED_IN_SHADOW", "duration_ms": None, "detail": "Legacy V2 remains paper authority"},
+        {"stage_id": "RUNTIME_HEALTH", "status": "MEASURED", "duration_ms": total_ms, "detail": "Total canonical shadow observation"},
+        {"stage_id": "PROVIDER_READINESS", "status": "SHARED_SOURCE", "duration_ms": None, "detail": "Uses the legacy live-event market snapshot"},
+    )
+
+
+def _build_coordinator_factory(
+    database_path: Path,
+    artifacts_root: Path | None = None,
+) -> CoordinatorFactory:
+    def emit(record: dict[str, object]) -> None:
+        _LOGGER.info("red_bar_v2_shadow", extra={"shadow": record})
+        if artifacts_root is None:
+            return
+        correlation_id = record.get("source_replay_id")
+        if not isinstance(correlation_id, str) or not correlation_id:
+            return
+        try:
+            persist_stage_latency(
+                artifacts_root,
+                architecture="canonical",
+                correlation_id=correlation_id,
+                stages=list(_canonical_stage_latency_rows(record)),
+                recorded_at=datetime.now(timezone.utc),
+            )
+        except (OSError, TypeError, ValueError):
+            _LOGGER.warning(
+                "red_bar_v2_canonical_stage_latency_persist_failed",
+                extra={"source_replay_id": correlation_id},
+                exc_info=True,
+            )
+
     def factory() -> RedBarV2CanonicalShadowCoordinator:
         repository = SQLiteRedBarV2CanonicalRepository(database_path, busy_timeout_ms=250)
         service = RedBarV2CanonicalPersistenceService(repository)
         return RedBarV2CanonicalShadowCoordinator(
             service,
             enabled=True,
-            telemetry_sink=lambda record: _LOGGER.info(
-                "red_bar_v2_shadow",
-                extra={"shadow": record},
-            ),
+            telemetry_sink=emit,
         )
 
     return factory
@@ -516,6 +565,7 @@ def get_red_bar_v2_shadow_runtime(
     *,
     enabled: bool,
     database_path: Path,
+    artifacts_root: Path | None = None,
 ) -> RedBarV2CanonicalShadowRuntime | None:
     if not enabled:
         return None
@@ -526,7 +576,7 @@ def get_red_bar_v2_shadow_runtime(
         if existing is not None:
             return existing
         runtime = RedBarV2CanonicalShadowRuntime(
-            coordinator_factory=_build_coordinator_factory(path),
+            coordinator_factory=_build_coordinator_factory(path, artifacts_root),
         )
         _RUNTIMES[key] = runtime
         return runtime

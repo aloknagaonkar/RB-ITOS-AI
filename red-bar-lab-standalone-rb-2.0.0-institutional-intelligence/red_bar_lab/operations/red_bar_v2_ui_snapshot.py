@@ -12,6 +12,7 @@ SNAPSHOT_FILENAME = "red_bar_v2_ui_snapshot.json"
 
 @dataclass(frozen=True)
 class RedBarV2UISnapshot:
+    correlation_id: str | None = None
     strategy_version: str = "RED_BAR_V2"
     mode: str = "SHADOW"
     execution_scope: str = "OBSERVATION_ONLY"
@@ -34,6 +35,7 @@ class RedBarV2UISnapshot:
     trade_status: str = "FLAT"
     trade_id: str | None = None
     admission_allowed: bool | None = None
+    admission_timestamp: str | None = None
     admission_code: str | None = None
     admission_reason: str | None = None
     trend_strength: str | None = None
@@ -146,6 +148,7 @@ def build_red_bar_v2_ui_snapshot_from_replay(
         trade_status=trade_status,
         trade_id=getattr(latest_admission, "trade_id", None),
         admission_allowed=getattr(latest_admission, "candidate_allowed", None),
+        admission_timestamp=_iso(getattr(latest_admission, "timestamp", None)),
         admission_code=getattr(latest_admission, "admission_code", None),
         admission_reason=admission_details.get("admission_reason"),
         trend_strength=str(trend_strength) if trend_strength else None,

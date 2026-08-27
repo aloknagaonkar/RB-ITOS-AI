@@ -310,6 +310,7 @@ def render_red_bar_v2_legacy_panel(
 
     with st.expander("View V2 source and timestamp details"):
         rows = [
+            {"field": "Correlation ID", "value": _value(snapshot.correlation_id)},
             {"field": "Runtime source", "value": _value(_diagnostic_value(runtime_diagnostics, "source_status"))},
             {"field": "Reference type", "value": _value(_diagnostic_value(runtime_diagnostics, "reference_level_type"), "NEXT_RED_CANDLE")},
             {"field": "Reference timestamp", "value": _value(snapshot.reference_timestamp)},

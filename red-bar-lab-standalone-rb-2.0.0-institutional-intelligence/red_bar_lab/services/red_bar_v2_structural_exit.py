@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Callable, Iterable, Mapping
 
 from red_bar_lab.operations.red_bar_v2_ui_snapshot import RedBarV2UISnapshot
@@ -46,6 +47,21 @@ def execute_structural_stop_exits(
         return RedBarV2StructuralExitResult("NO_ACTION", "REFERENCE_GEOMETRY_UNAVAILABLE")
     if completed_1m_close is None or not completed_1m_timestamp:
         return RedBarV2StructuralExitResult("NO_ACTION", "COMPLETED_1M_CLOSE_UNAVAILABLE")
+    try:
+        reference_date = datetime.fromisoformat(
+            str(snapshot.reference_timestamp).replace("Z", "+00:00")
+        ).date()
+        completed_date = datetime.fromisoformat(
+            str(completed_1m_timestamp).replace("Z", "+00:00")
+        ).date()
+    except (TypeError, ValueError):
+        return RedBarV2StructuralExitResult(
+            "NO_ACTION", "REFERENCE_SESSION_UNAVAILABLE"
+        )
+    if reference_date != completed_date:
+        return RedBarV2StructuralExitResult(
+            "NO_ACTION", "REFERENCE_SESSION_MISMATCH"
+        )
 
     close = float(completed_1m_close)
     high = float(snapshot.reference_high)

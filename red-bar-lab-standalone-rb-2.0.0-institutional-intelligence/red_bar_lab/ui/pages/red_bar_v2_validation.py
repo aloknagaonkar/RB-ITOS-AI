@@ -20,7 +20,7 @@ def _text(value: object | None) -> str:
 
 
 def _render_reservation_boundary(settings: RedBarSettings, bundle_id: str | None) -> None:
-    st.markdown("### 8. Bundle reservation boundary")
+    st.markdown("### 9. Reservation Boundary")
     st.warning("RESERVED does not mean ordered or executed. No capital, order or position was created.")
     st.caption("Execution authority remains legacy-only. This section is read-only and cannot acquire, renew, release, reject or expire a reservation.")
     if not settings.red_bar_v2_canonical_reservation_enabled:
@@ -79,6 +79,18 @@ def _render_reservation_boundary(settings: RedBarSettings, bundle_id: str | None
 
 
 def _render_execution_boundaries(settings: RedBarSettings, bundle_id: str | None) -> None:
+    st.markdown("### 8. Opportunity Queue")
+    st.caption(
+        "Read-only canonical opportunity availability. This stage does not "
+        "reserve a bundle or create a paper order."
+    )
+    if bundle_id is None:
+        st.info("WAITING: no canonical bundle is available for opportunity processing.")
+    else:
+        st.success(
+            f"AVAILABLE: canonical bundle {bundle_id} can be observed by the "
+            "downstream reservation boundary."
+        )
     _render_reservation_boundary(settings, bundle_id)
     render_canonical_paper_execution_panel(st, settings, bundle_id)
     render_canonical_paper_canary_panel(st, settings)
@@ -125,7 +137,7 @@ def _render_shadow_observability(settings: RedBarSettings, instrument_key: str) 
         _render_execution_boundaries(settings, None)
         return
 
-    st.markdown("### 1. Input readiness")
+    st.markdown("### 1. Input Readiness")
     st.caption("What information was available before evaluating the strategy?")
     readiness = pd.DataFrame([
         ("Underlying instrument", section_1.underlying_instrument),
@@ -146,7 +158,7 @@ def _render_shadow_observability(settings: RedBarSettings, instrument_key: str) 
     st.dataframe(readiness, hide_index=True, use_container_width=True)
     st.info(section_1.explanation)
 
-    st.markdown("### 2. Canonical strategy decision")
+    st.markdown("### 2. Strategy Decision")
     st.caption("What did the canonical Red Bar V2 state machine decide?")
     decision_cols = st.columns(4)
     decision_cols[0].metric("Admission", section_2.admission_outcome)
@@ -162,7 +174,7 @@ def _render_shadow_observability(settings: RedBarSettings, instrument_key: str) 
     with st.expander("How this decision was reached"):
         st.write(section_2.explanation)
 
-    st.markdown("### 3. RED BAR V2 CANONICAL BUNDLE")
+    st.markdown("### 3. Signal Bundle")
     st.caption("Was an immutable opportunity bundle produced?")
     if section_3.bundle_available:
         bundle = pd.DataFrame([
@@ -188,7 +200,7 @@ def _render_shadow_observability(settings: RedBarSettings, instrument_key: str) 
     else:
         st.info(section_3.explanation)
 
-    st.markdown("### 4. Legacy ↔ canonical parity")
+    st.markdown("### 4. Architecture Parity")
     st.caption("Did canonical Red Bar V2 agree with the authoritative legacy decision?")
     st.metric("Overall parity", parity.overall)
     if parity.rows:
@@ -199,10 +211,10 @@ def _render_shadow_observability(settings: RedBarSettings, instrument_key: str) 
         st.warning("Mismatch fields: " + ", ".join(parity.mismatches))
     st.caption(parity.explanation)
 
-    st.markdown("### 5. Persistence and integrity")
+    st.markdown("### 5. Persistence & Integrity")
     integrity = pd.DataFrame([
         ("Resolution ID", persistence.resolution_id),
-        ("Source replay ID", persistence.source_replay_id),
+        ("Correlation ID", persistence.source_replay_id),
         ("Resolution schema", persistence.schema_version),
         ("Bundle schema", _text(persistence.bundle_schema_version)),
         ("Payload integrity", persistence.payload_integrity),
@@ -215,14 +227,14 @@ def _render_shadow_observability(settings: RedBarSettings, instrument_key: str) 
     st.dataframe(integrity, hide_index=True, use_container_width=True)
     st.success(persistence.explanation)
 
-    st.markdown("### 6. Recent canonical observations")
+    st.markdown("### 6. Recent Observations")
     history = pd.DataFrame([asdict(row) for row in view.history]).astype("string") if view.history else pd.DataFrame()
     if not history.empty:
         st.dataframe(history, hide_index=True, use_container_width=True)
     else:
         st.info("No recent canonical observations are available.")
 
-    with st.expander("7. What happened from signal detection to shadow persistence?"):
+    with st.expander("7. Process Explanation"):
         st.markdown("1. Legacy Red Bar V2 completed its authoritative evaluation.\n2. The newest admission event was copied into an immutable compact snapshot.\n3. The canonical state machine interpreted the same event-time evidence.\n4. Legacy and canonical outcomes were compared.\n5. The canonical resolution was stored as observational evidence.\n6. No order, position or exit was changed by this process.")
         st.caption(f"Selected observation: {persistence.resolution_id}; admission {section_2.admission_outcome}; parity {parity.overall}.")
 

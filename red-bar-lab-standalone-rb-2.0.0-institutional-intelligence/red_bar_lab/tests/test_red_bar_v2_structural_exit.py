@@ -8,7 +8,11 @@ def _order(option_type: str, source: str = "RED_BAR_V2") -> dict[str, object]:
 
 
 def test_completed_close_drives_pe_and_ce_structural_exits():
-    snapshot = RedBarV2UISnapshot(reference_high=24250.0, reference_low=24200.0)
+    snapshot = RedBarV2UISnapshot(
+        reference_timestamp="2026-08-26T09:20:00+05:30",
+        reference_high=24250.0,
+        reference_low=24200.0,
+    )
     closed: list[tuple[str, str]] = []
     pe = execute_structural_stop_exits(
         snapshot=snapshot, completed_1m_close=24250.01,
@@ -30,7 +34,11 @@ def test_completed_close_drives_pe_and_ce_structural_exits():
 
 
 def test_boundary_equality_and_other_strategies_do_not_exit():
-    snapshot = RedBarV2UISnapshot(reference_high=24250.0, reference_low=24200.0)
+    snapshot = RedBarV2UISnapshot(
+        reference_timestamp="2026-08-26T09:20:00+05:30",
+        reference_high=24250.0,
+        reference_low=24200.0,
+    )
     closed: list[tuple[str, str]] = []
     result = execute_structural_stop_exits(
         snapshot=snapshot, completed_1m_close=24250.0,
@@ -38,5 +46,26 @@ def test_boundary_equality_and_other_strategies_do_not_exit():
         open_orders=[_order("PE"), _order("PE", "DIRECTIONAL_REGIME_INTELLIGENCE")],
         close_position=lambda order_id, reason: closed.append((order_id, reason)),
     )
+    assert result.exited_orders == 0
+    assert closed == []
+
+
+def test_stale_reference_session_cannot_close_current_position():
+    snapshot = RedBarV2UISnapshot(
+        reference_timestamp="2026-08-25T09:20:00+05:30",
+        reference_high=24250.0,
+        reference_low=24200.0,
+    )
+    closed: list[tuple[str, str]] = []
+
+    result = execute_structural_stop_exits(
+        snapshot=snapshot,
+        completed_1m_close=24260.0,
+        completed_1m_timestamp="2026-08-26T10:01:00+05:30",
+        open_orders=[_order("PE")],
+        close_position=lambda order_id, reason: closed.append((order_id, reason)),
+    )
+
+    assert result.reason == "REFERENCE_SESSION_MISMATCH"
     assert result.exited_orders == 0
     assert closed == []

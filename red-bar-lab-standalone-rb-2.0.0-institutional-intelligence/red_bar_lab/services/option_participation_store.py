@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from statistics import median
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -111,20 +112,46 @@ def persist_option_participation(
     return len(rows)
 
 
-def _snapshot_rows(
+# Every column except payload_json, which is written for forensics but never
+# read back. It is ~62% of each row's bytes, so selecting it dominates the
+# cost of this read path.
+_READ_COLUMNS = (
+    "id, observed_at, underlying_name, spot_price, atm_strike, expiry, pcr_oi, "
+    "underlying_rsi, ce_score, pe_score, recommended_side, "
+    "recommended_direction, grade, reason, option_type, distance_rank, "
+    "instrument_key, instrument_token, tradingsymbol, strike, lot_size, "
+    "current_price, vwap, price_vs_vwap_pct, premium_change_pct, volume, "
+    "contract_volume, oi, prev_oi, oi_change, oi_change_pct, delta, iv, "
+    "option_rsi, participation_state, strike_score, bid, ask, spread, authority"
+)
+
+
+def _snapshot_rows_by_stamp(
     connection: sqlite3.Connection,
     *,
     underlying_name: str,
-    observed_at: str,
-) -> list[dict[str, Any]]:
+    stamps: list[str],
+) -> dict[str, list[dict[str, Any]]]:
+    """Fetch all rows for the given stamps in one query, grouped by stamp.
+
+    Issued as a single ``IN`` lookup rather than one query per stamp; the
+    per-stamp ordering (CE before PE, then distance_rank) is preserved because
+    grouping keeps the relative order of the result set.
+    """
+    if not stamps:
+        return {}
+    placeholders = ",".join("?" * len(stamps))
     rows = connection.execute(
-        """SELECT * FROM option_participation_snapshots
-           WHERE underlying_name=? AND observed_at=?
+        f"""SELECT {_READ_COLUMNS} FROM option_participation_snapshots
+           WHERE underlying_name=? AND observed_at IN ({placeholders})
            ORDER BY CASE option_type WHEN 'CE' THEN 0 ELSE 1 END,
                     distance_rank ASC""",
-        (underlying_name, observed_at),
+        (underlying_name, *stamps),
     ).fetchall()
-    return [dict(row) for row in rows]
+    grouped: dict[str, list[dict[str, Any]]] = {stamp: [] for stamp in stamps}
+    for row in rows:
+        grouped[str(row["observed_at"])].append(dict(row))
+    return grouped
 
 
 def _side_totals(rows: list[dict[str, Any]], side: str) -> dict[str, float]:
@@ -163,30 +190,34 @@ def read_latest_option_participation(
     try:
         with sqlite3.connect(path) as connection:
             connection.row_factory = sqlite3.Row
+            # julianday() is required, not incidental: observed_at is stored in
+            # mixed ISO forms ("...T10:02:00+05:30" and "... 15:39:00+05:30").
+            # Space sorts before "T", so plain text ordering would rank a later
+            # space-form timestamp below an earlier T-form one. It costs a temp
+            # B-tree sort; removing it needs the stored values normalised first.
             stamps = connection.execute(
                 """SELECT DISTINCT observed_at
                    FROM option_participation_snapshots
                    WHERE underlying_name=?
                    ORDER BY julianday(observed_at) DESC, observed_at DESC
-                   LIMIT 2""",
+                   LIMIT 14""",
                 (underlying_name,),
             ).fetchall()
             if not stamps:
                 return []
-            latest_rows = _snapshot_rows(
+            stamp_values = [str(stamp["observed_at"]) for stamp in stamps]
+            grouped = _snapshot_rows_by_stamp(
                 connection,
                 underlying_name=underlying_name,
-                observed_at=str(stamps[0]["observed_at"]),
+                stamps=stamp_values,
             )
+            latest_rows = grouped.get(stamp_values[0], [])
             previous_rows = (
-                _snapshot_rows(
-                    connection,
-                    underlying_name=underlying_name,
-                    observed_at=str(stamps[1]["observed_at"]),
-                )
-                if len(stamps) > 1
-                else []
+                grouped.get(stamp_values[1], []) if len(stamp_values) > 1 else []
             )
+            historical_rows = [
+                grouped.get(stamp, []) for stamp in stamp_values[1:]
+            ]
     except sqlite3.OperationalError as exc:
         if "no such table" in str(exc).lower():
             return []
@@ -202,6 +233,17 @@ def read_latest_option_participation(
         for row in previous_rows
         if row.get("instrument_key") or row.get("tradingsymbol")
     }
+    historical_by_identity: dict[str, list[float]] = {}
+    for snapshot_rows in historical_rows:
+        for historical in snapshot_rows:
+            identity = str(
+                historical.get("instrument_key")
+                or historical.get("tradingsymbol")
+                or ""
+            )
+            volume = _number_or_none(historical.get("volume"))
+            if identity and volume is not None:
+                historical_by_identity.setdefault(identity, []).append(volume)
     for side in ("CE", "PE"):
         current = _side_totals(latest_rows, side)
         previous = _side_totals(previous_rows, side)
@@ -235,6 +277,31 @@ def read_latest_option_participation(
             else None
         )
         row["previous_refresh_volume"] = previous_volume
+        interval_volume = (
+            current_volume - previous_volume
+            if current_volume is not None
+            and previous_volume is not None
+            and current_volume >= previous_volume
+            else None
+        )
+        history = historical_by_identity.get(identity, [])
+        prior_intervals = [
+            newer - older
+            for newer, older in zip(history, history[1:])
+            if newer >= older
+        ][:12]
+        baseline = (
+            float(median(prior_intervals))
+            if len(prior_intervals) >= 3
+            else None
+        )
+        row["interval_volume"] = interval_volume
+        row["median_interval_volume"] = baseline
+        row["option_relative_volume"] = (
+            interval_volume / baseline
+            if interval_volume is not None and baseline is not None and baseline > 0
+            else None
+        )
         row["volume_change_from_previous_refresh_pct"] = (
             _pct_change(current_volume, previous_volume)
             if current_volume is not None and previous_volume is not None

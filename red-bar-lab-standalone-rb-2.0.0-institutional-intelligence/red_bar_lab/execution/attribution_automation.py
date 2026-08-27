@@ -6,6 +6,9 @@ from zoneinfo import ZoneInfo
 from red_bar_lab.execution.trend_automation import (
     TrendAwarePaperAutomationService,
 )
+from red_bar_lab.execution.live_admission_automation import (
+    LiveAdmissionRedBarPaperAutomationService,
+)
 from red_bar_lab.services.attribution_pipeline_reconciler import (
     AttributionPipelineReconciler,
 )
@@ -19,7 +22,8 @@ IST = ZoneInfo("Asia/Kolkata")
 
 
 class AttributionAwarePaperAutomationService(
-    TrendAwarePaperAutomationService
+    TrendAwarePaperAutomationService,
+    LiveAdmissionRedBarPaperAutomationService,
 ):
     """Run the existing paper workflow, then publish observational evidence.
 
