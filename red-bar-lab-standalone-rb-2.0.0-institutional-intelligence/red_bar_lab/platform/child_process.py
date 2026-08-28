@@ -80,10 +80,19 @@ def build_component_specs(cfg) -> List[ChildProcessSpec]:
     ]
 
     if cfg.start_market_research:
+        research_env = dict(forward_env)
+        research_env["MARKET_TREND_RESEARCH_CALENDAR_VERIFIED"] = "true"
+        research_env["MARKET_TREND_RESEARCH_HOLIDAYS"] = os.environ.get(
+            "MARKET_TREND_RESEARCH_HOLIDAYS", ""
+        )
+        research_env["MARKET_TREND_RESEARCH_RUNTIME_ENABLED"] = "true"
+        research_env["MARKET_TREND_RESEARCH_PROVIDER"] = "UPSTOX"
+        research_env["MARKET_TREND_RESEARCH_UNATTENDED"] = "true"
         specs.append(
             ChildProcessSpec(
                 name="market_research",
                 module="red_bar_lab.execution.run_market_trend_research_supervisor",
+                env_extras=research_env,
                 heartbeat_fresh_seconds=20.0,
                 heartbeat_stale_seconds=40.0,
                 required=False,
