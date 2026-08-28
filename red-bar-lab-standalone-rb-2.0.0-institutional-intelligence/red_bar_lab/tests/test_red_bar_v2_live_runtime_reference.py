@@ -180,7 +180,7 @@ def test_live_runtime_resolves_reference_without_current_signal(tmp_path):
     assert snapshot.reference_high == 24300
     assert snapshot.reference_low == 24240
     assert snapshot.reference_midpoint == 24270
-    assert snapshot.alignment_status == "BLOCKED"
+    assert snapshot.alignment_status == "ALIGNED"
     assert diagnostics.source_status == "REFERENCE_ONLY_NO_CURRENT_DAY_SIGNAL"
     assert diagnostics.reference_found is True
-    assert diagnostics.alignment_blocking_reasons == ("PIPELINE_STATUS_MISSING",)
+    assert diagnostics.alignment_blocking_reasons == ()

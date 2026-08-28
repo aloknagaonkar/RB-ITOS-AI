@@ -66,7 +66,7 @@ def validate_snapshot_for_paper(
         return RedBarV2PaperSignalPublishResult("DISABLED", "V2_PAPER_AUTHORITY_DISABLED")
     if snapshot is None:
         return RedBarV2PaperSignalPublishResult("WAITING", "V2_SNAPSHOT_UNAVAILABLE")
-    if str(snapshot.alignment_status or "").upper() != "READY":
+    if str(snapshot.alignment_status or "").upper() not in {"READY", "ALIGNED"}:
         return RedBarV2PaperSignalPublishResult("BLOCKED", "V2_SOURCE_ALIGNMENT_NOT_READY")
     if snapshot.admission_allowed is not True:
         return RedBarV2PaperSignalPublishResult(

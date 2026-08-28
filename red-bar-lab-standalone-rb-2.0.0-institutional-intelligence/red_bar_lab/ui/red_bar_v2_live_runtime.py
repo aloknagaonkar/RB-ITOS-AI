@@ -85,8 +85,11 @@ def _terminal(detail: object) -> str | None:
 
 def _alignment_reasons(*, pipeline: dict[str, object], reference: dict[str, object]) -> tuple[str, ...]:
     reasons: list[str] = []
-    if not pipeline:
+    reference_ready = bool(reference) and str(reference.get("data_quality") or "").upper() == "VALID"
+    if not pipeline and not reference_ready:
         reasons.append("PIPELINE_STATUS_MISSING")
+    elif not pipeline:
+        pass
     else:
         for field, code in (
             ("market_context_ready", "MARKET_CONTEXT_NOT_READY"),
@@ -227,7 +230,12 @@ def resolve_red_bar_v2_live_state(
     )
     reference_quality = str(reference.get("data_quality") or "").upper() or None
     reference_ready = bool(reference) and reference_quality == "VALID"
-    alignment_status = "ALIGNED" if pipeline_ready and reference_ready else "BLOCKED"
+    if pipeline_ready and reference_ready:
+        alignment_status = "ALIGNED"
+    elif not pipeline and reference_ready:
+        alignment_status = "ALIGNED"
+    else:
+        alignment_status = "BLOCKED"
 
     conflicts = _state_conflicts(
         snapshot,

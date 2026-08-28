@@ -35,7 +35,7 @@ def confirmed_live_direction(
     """
     if snapshot is None:
         return None
-    if str(snapshot.alignment_status or "").upper() != "READY":
+    if str(snapshot.alignment_status or "").upper() not in {"READY", "ALIGNED"}:
         return None
     if str(snapshot.trend_strength or "").upper() != "CONFIRMED":
         return None
