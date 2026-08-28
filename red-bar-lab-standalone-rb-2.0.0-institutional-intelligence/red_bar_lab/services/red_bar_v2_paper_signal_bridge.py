@@ -83,8 +83,14 @@ def validate_snapshot_for_paper(
         current = current.tz_localize("Asia/Kolkata")
     else:
         current = current.tz_convert("Asia/Kolkata")
-    age_seconds = float((current - evaluation).total_seconds())
-    if evaluation.date() != current.date():
+    recorded = _timestamp(snapshot.recorded_at)
+    freshness_ref = (
+        recorded
+        if recorded and evaluation <= recorded <= current
+        else evaluation
+    )
+    age_seconds = float((current - freshness_ref).total_seconds())
+    if freshness_ref.date() != current.date():
         return RedBarV2PaperSignalPublishResult("BLOCKED", "V2_SNAPSHOT_NOT_CURRENT_SESSION")
     if age_seconds < 0 or age_seconds > maximum_age_seconds:
         return RedBarV2PaperSignalPublishResult("BLOCKED", "V2_SNAPSHOT_STALE")
