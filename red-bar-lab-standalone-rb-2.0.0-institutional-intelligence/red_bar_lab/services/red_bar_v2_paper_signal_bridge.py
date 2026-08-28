@@ -158,9 +158,12 @@ def publish_v2_snapshot_to_paper_signals(
         columns.extend(("confirmation_delay_minutes", "created_at"))
         values.extend((0, created_at))
         placeholders = ",".join("?" for _ in columns)
+        update_cols = [c for c in columns if c not in ("signal_id", "instrument_key", "trading_date")]
+        update_clause = ", ".join(f"{c}=excluded.{c}" for c in update_cols)
         conn.execute(
-            f"INSERT OR IGNORE INTO signal_attempts({','.join(columns)}) "
-            f"VALUES({placeholders})",
+            f"INSERT INTO signal_attempts({','.join(columns)}) "
+            f"VALUES({placeholders}) "
+            f"ON CONFLICT(signal_id) DO UPDATE SET {update_clause}",
             tuple(values),
         )
         conn.commit()
