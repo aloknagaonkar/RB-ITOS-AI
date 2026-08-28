@@ -907,7 +907,7 @@ class EvaluationRepository:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 """
-                SELECT snapshot_timestamp, expiry, atm_strike
+                SELECT snapshot_timestamp, option_expiry, atm_strike
                 FROM option_chain_snapshot_history
                 WHERE instrument_key=? AND trading_date=?
                 ORDER BY snapshot_timestamp DESC

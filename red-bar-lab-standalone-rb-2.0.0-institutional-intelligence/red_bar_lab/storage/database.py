@@ -2934,6 +2934,15 @@ class RedBarDatabase:
             limit=limit, signal_id=signal_id
         )
 
+    def read_latest_option_chain_snapshot(
+        self,
+        instrument_key: str,
+        trading_date: str,
+    ) -> dict[str, object] | None:
+        return self.evaluation.read_latest_option_chain_snapshot(
+            instrument_key, trading_date
+        )
+
 
     def update_signal_state(
         self,
