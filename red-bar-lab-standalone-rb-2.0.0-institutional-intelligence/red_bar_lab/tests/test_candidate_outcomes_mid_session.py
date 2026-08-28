@@ -1,6 +1,9 @@
+import os
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
+
+os.environ.setdefault("RED_BAR_LEGACY_V1_ENABLED", "1")
 
 import pandas as pd
 

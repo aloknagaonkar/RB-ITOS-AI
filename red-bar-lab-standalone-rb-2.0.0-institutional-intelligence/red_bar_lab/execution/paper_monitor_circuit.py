@@ -72,6 +72,15 @@ class PaperMonitorCircuitBreaker:
         self._persist_state(decision)
         return decision, recovered
 
+    def reset(self) -> CircuitDecision:
+        """Manually reset the circuit breaker to closed state."""
+        self.consecutive_failures = 0
+        self._open = False
+        self._reason = "MANUAL_RESET"
+        decision = self._decision(reason=self._reason)
+        self._persist_state(decision)
+        return decision
+
     def _delay_seconds(self) -> int:
         if self.consecutive_failures <= 0:
             return self.base_delay_seconds

@@ -896,6 +896,27 @@ class EvaluationRepository:
                 ).fetchall()
         return [dict(row) for row in rows]
 
+    def read_latest_option_chain_snapshot(
+        self,
+        instrument_key: str,
+        trading_date: str,
+    ) -> dict[str, object] | None:
+        """Return the most recent option chain snapshot for readiness checks."""
+        self._db.initialize()
+        with self._db._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                """
+                SELECT snapshot_timestamp, expiry, atm_strike
+                FROM option_chain_snapshot_history
+                WHERE instrument_key=? AND trading_date=?
+                ORDER BY snapshot_timestamp DESC
+                LIMIT 1
+                """,
+                (instrument_key, trading_date),
+            ).fetchone()
+        return dict(row) if row else None
+
     # ---- Paper Entry Intelligence Update ----
 
     def update_paper_entry_intelligence(

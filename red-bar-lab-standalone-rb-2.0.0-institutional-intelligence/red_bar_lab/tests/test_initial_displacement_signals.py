@@ -1,4 +1,7 @@
+import os
 import pandas as pd
+
+os.environ.setdefault("RED_BAR_LEGACY_V1_ENABLED", "1")
 
 from red_bar_lab.strategy.models import Direction, ReferenceLevel, SignalState
 from red_bar_lab.strategy.signal_engine import scan_level_signals

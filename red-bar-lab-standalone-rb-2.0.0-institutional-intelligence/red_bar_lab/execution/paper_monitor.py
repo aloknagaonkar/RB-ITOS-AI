@@ -464,6 +464,16 @@ def main() -> int:
 
             recent_diagnostics = database.read_paper_signal_diagnostics(limit=1)
             latest = recent_diagnostics[0] if recent_diagnostics else {}
+            option_snapshot = database.read_latest_option_chain_snapshot(
+                UNDERLYINGS[args.underlying], trading_date
+            )
+            if option_snapshot:
+                latest.setdefault(
+                    "option_chain_timestamp",
+                    option_snapshot.get("snapshot_timestamp"),
+                )
+                latest.setdefault("option_expiry", option_snapshot.get("expiry"))
+                latest.setdefault("atm_strike", option_snapshot.get("atm_strike"))
             global_readiness_result = build_and_persist_global_readiness(
                 database_path=settings.database_path,
                 observed_at=cycle_started,

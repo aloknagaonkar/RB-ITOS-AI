@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
+import os
 from typing import Iterable
 
 import pandas as pd
@@ -20,6 +21,14 @@ SAME_SESSION_INITIAL_LEVELS = {
     "NEXT_RED_CANDLE",
     "MID_SESSION_1245",
 }
+
+
+def _legacy_enabled() -> bool:
+    """Check if the base (legacy) Red Bar strategy is enabled."""
+    raw = os.getenv("RED_BAR_LEGACY_V1_ENABLED")
+    if raw is None:
+        return False
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 @dataclass(frozen=True)
@@ -295,6 +304,8 @@ def scan_level_signals(
     The original later 5-minute midpoint re-cross logic remains active, so a
     genuine later cross can create a fresh setup after the initial opportunity.
     """
+    if not _legacy_enabled():
+        return ()
     one_minute = _to_ist(frame)
     setup_bars = _completed_setup_bars(
         one_minute, signal_interval_minutes, session_end=session_end
