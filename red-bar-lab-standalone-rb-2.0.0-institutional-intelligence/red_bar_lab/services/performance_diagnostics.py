@@ -1,11 +1,6 @@
 from __future__ import annotations
 
-
-def _num(value, default=0.0) -> float:
-    try:
-        return float(default if value is None else value)
-    except (TypeError, ValueError):
-        return float(default)
+from red_bar_lab.utils import safe_float
 
 
 def build_performance_gate_trace(selection: dict[str, object], lifecycle: dict[str, object] | None = None) -> dict[str, object]:
@@ -39,10 +34,10 @@ def build_performance_gate_trace(selection: dict[str, object], lifecycle: dict[s
         "gates": gates,
         "candidate_symbol": selection.get("candidate_symbol"),
         "candidate_rank": selection.get("candidate_rank"),
-        "candidate_score": _num(selection.get("candidate_score")),
-        "opportunity_score": _num(selection.get("opportunity_score")),
-        "selection_score": _num(selection.get("selection_score")),
-        "execution_quality_score": _num(selection.get("execution_quality_score")),
+        "candidate_score": safe_float(selection.get("candidate_score")),
+        "opportunity_score": safe_float(selection.get("opportunity_score")),
+        "selection_score": safe_float(selection.get("selection_score")),
+        "execution_quality_score": safe_float(selection.get("execution_quality_score")),
         "lifecycle_state": lifecycle.get("state"),
         "lifecycle_reason": lifecycle.get("reason"),
     }

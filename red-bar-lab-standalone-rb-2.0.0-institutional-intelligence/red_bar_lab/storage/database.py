@@ -10,6 +10,9 @@ from pathlib import Path
 from typing import Iterable
 
 from red_bar_lab.strategy.identity import canonical_signal_id
+from red_bar_lab.storage.signal_repository import SignalRepository
+from red_bar_lab.storage.paper_trade_outcome_repository import PaperTradeOutcomeRepository
+from red_bar_lab.storage.evaluation_repository import EvaluationRepository
 from red_bar_lab.strategy.models import Direction, ReferenceLevel, SignalAttempt, SignalState
 import pandas as pd
 
@@ -339,12 +342,6 @@ CREATE TABLE IF NOT EXISTS historical_option_backfill (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     PRIMARY KEY(instrument_key, trading_date)
-);
-
-CREATE INDEX IF NOT EXISTS idx_historical_option_backfill_date
-ON historical_option_backfill(
-    instrument_key,
-    trading_date
 );
 
 
@@ -774,6 +771,19 @@ CREATE TABLE IF NOT EXISTS trade_outcomes (
     holding_minutes INTEGER,
     FOREIGN KEY(paper_trade_id) REFERENCES paper_trades(id)
 );
+
+CREATE INDEX IF NOT EXISTS idx_signal_attempts_trading_date
+ON signal_attempts(trading_date);
+
+CREATE INDEX IF NOT EXISTS idx_paper_execution_orders_signal
+ON paper_execution_orders(signal_id)
+WHERE signal_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_option_chain_history_trading_date
+ON option_chain_snapshot_history(instrument_key, snapshot_timestamp);
+
+CREATE INDEX IF NOT EXISTS idx_paper_trade_outcomes_signal
+ON paper_trade_outcomes(signal_id);
 """
 
 _EXECUTION_QUEUE_POLICY_COLUMNS = {
@@ -878,6 +888,37 @@ class RedBarDatabase:
         # deleted database self-heals exactly as before.
         self._initialized = False
         self._initialize_lock = threading.Lock()
+        self._signal_repo: SignalRepository | None = None
+        self._paper_trade_outcome_repo: PaperTradeOutcomeRepository | None = None
+        self._evaluation_repo: EvaluationRepository | None = None
+
+    @property
+    def signal(self) -> SignalRepository:
+        if self._signal_repo is None:
+            self._signal_repo = SignalRepository(self)
+        return self._signal_repo
+
+    @property
+    def paper_trade_outcome(self) -> PaperTradeOutcomeRepository:
+        if self._paper_trade_outcome_repo is None:
+            self._paper_trade_outcome_repo = PaperTradeOutcomeRepository(self)
+        return self._paper_trade_outcome_repo
+
+    @property
+    def evaluation(self) -> EvaluationRepository:
+        if self._evaluation_repo is None:
+            self._evaluation_repo = EvaluationRepository(self)
+        return self._evaluation_repo
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.path, timeout=10.0)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA cache_size=-64000")
+        conn.execute("PRAGMA journal_size_limit=67108864")
+        return conn
 
     def initialize(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -904,7 +945,7 @@ class RedBarDatabase:
             if self._initialized and self.path.exists():
                 return
 
-            with sqlite3.connect(self.path) as conn:
+            with self._connect() as conn:
                 conn.executescript(SCHEMA)
                 columns = {
                     row[1] for row in conn.execute("PRAGMA table_info(signal_attempts)")
@@ -1011,7 +1052,7 @@ class RedBarDatabase:
     ) -> int:
         self.initialize()
         rows = list(levels)
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.execute(
                 "DELETE FROM reference_levels WHERE instrument_key=? AND trading_date=?",
                 (instrument_key, trading_date),
@@ -1043,7 +1084,7 @@ class RedBarDatabase:
         self, instrument_key: str, trading_date: str
     ) -> list[dict[str, object]]:
         self.initialize()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 """SELECT level_type,source_timestamp,source_high,source_low,
@@ -1084,216 +1125,37 @@ class RedBarDatabase:
         trading_date: str,
         attempts: Iterable[SignalAttempt],
     ) -> int:
-        """Replace the complete historical replay result for one date.
-
-        Historical replay is deterministic. Re-running it for the same
-        instrument/date must replace prior rows instead of appending duplicates.
-        """
-        self.initialize()
-        rows = list(attempts)
-        now = datetime.now().astimezone().isoformat()
-        values = []
-        for item in rows:
-            direction = item.direction.value if item.direction else None
-            cross_timestamp = (
-                item.cross_timestamp.isoformat() if item.cross_timestamp else None
-            )
-            confirmation_timestamp = (
-                item.confirmation_timestamp.isoformat()
-                if item.confirmation_timestamp
-                else None
-            )
-            signal_id = deterministic_signal_id(
-                instrument_key,
-                trading_date,
-                item.level_type,
-                direction,
-                cross_timestamp,
-                confirmation_timestamp,
-            )
-            values.append(
-                (
-                    signal_id,
-                    run_id,
-                    instrument_key,
-                    trading_date,
-                    item.level_type,
-                    item.level_value,
-                    direction,
-                    item.state.value,
-                    cross_timestamp,
-                    confirmation_timestamp,
-                    item.underlying_entry,
-                    item.cross_open,
-                    item.cross_high,
-                    item.cross_low,
-                    item.cross_close,
-                    item.confirmation_open,
-                    item.confirmation_high,
-                    item.confirmation_low,
-                    item.confirmation_close,
-                    item.confirmation_delay_minutes,
-                    now,
-                )
-            )
-
-        with sqlite3.connect(self.path) as conn:
-            conn.execute(
-                "DELETE FROM signal_attempts WHERE instrument_key=? AND trading_date=?",
-                (instrument_key, trading_date),
-            )
-            conn.executemany(
-                """INSERT INTO signal_attempts(
-                    signal_id,run_id,instrument_key,trading_date,level_type,
-                    level_value,direction,state,cross_timestamp,
-                    confirmation_timestamp,underlying_entry,cross_open,
-                    cross_high,cross_low,cross_close,confirmation_open,
-                    confirmation_high,confirmation_low,confirmation_close,
-                    confirmation_delay_minutes,created_at
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                values,
-            )
-
-            # RB-0.6.8: migrate any legacy SIG-* trade linkage to the
-            # canonical RB-* signal ID using the immutable confirmation
-            # timestamp / level / direction identity.
-            conn.execute(
-                """
-                UPDATE paper_trade_outcomes
-                SET signal_id = (
-                    SELECT s.signal_id
-                    FROM signal_attempts s
-                    WHERE s.instrument_key = paper_trade_outcomes.instrument_key
-                      AND s.trading_date = paper_trade_outcomes.trading_date
-                      AND s.level_type = paper_trade_outcomes.level_type
-                      AND s.direction = paper_trade_outcomes.direction
-                      AND s.confirmation_timestamp =
-                          paper_trade_outcomes.entry_timestamp
-                    LIMIT 1
-                )
-                WHERE instrument_key=?
-                  AND trading_date=?
-                  AND EXISTS (
-                    SELECT 1
-                    FROM signal_attempts s
-                    WHERE s.instrument_key = paper_trade_outcomes.instrument_key
-                      AND s.trading_date = paper_trade_outcomes.trading_date
-                      AND s.level_type = paper_trade_outcomes.level_type
-                      AND s.direction = paper_trade_outcomes.direction
-                      AND s.confirmation_timestamp =
-                          paper_trade_outcomes.entry_timestamp
-                )
-                """,
-                (instrument_key, trading_date),
-            )
-            conn.commit()
-        return len(rows)
+        """Replace the complete historical replay result for one date."""
+        return self.signal.replace_signal_attempts(
+            run_id, instrument_key, trading_date, attempts
+        )
 
     def read_signal_attempts(
         self, instrument_key: str, trading_date: str, run_id: str | None = None
     ) -> list[dict[str, object]]:
-        self.initialize()
-        query = """SELECT signal_id,level_type,level_value,direction,state,
-                          cross_timestamp,confirmation_timestamp,underlying_entry,
-                          cross_open,cross_high,cross_low,cross_close,
-                          confirmation_open,confirmation_high,confirmation_low,
-                          confirmation_close,confirmation_delay_minutes
-                   FROM signal_attempts
-                   WHERE instrument_key=? AND trading_date=?"""
-        params: tuple[object, ...] = (instrument_key, trading_date)
-        if run_id is not None:
-            query += " AND run_id=?"
-            params += (run_id,)
-        query += " ORDER BY cross_timestamp, level_type"
-        with sqlite3.connect(self.path) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(query, params).fetchall()
-        return [dict(row) for row in rows]
-
+        return self.signal.read_signal_attempts(instrument_key, trading_date, run_id)
 
     def read_signal_attempt_by_id(
         self,
         signal_id: str,
     ) -> dict[str, object] | None:
-        self.initialize()
-        with sqlite3.connect(self.path) as conn:
-            conn.row_factory = sqlite3.Row
-            row = conn.execute(
-                """
-                SELECT signal_id,run_id,instrument_key,trading_date,
-                       level_type,level_value,direction,state,
-                       cross_timestamp,confirmation_timestamp,
-                       underlying_entry,confirmation_delay_minutes,
-                       created_at
-                FROM signal_attempts
-                WHERE signal_id=?
-                ORDER BY id DESC
-                LIMIT 1
-                """,
-                (signal_id,),
-            ).fetchone()
-        return dict(row) if row else None
+        return self.signal.read_signal_attempt_by_id(signal_id)
 
     def read_signal_attempts_by_ids(
         self,
         signal_ids: Iterable[str],
     ) -> dict[str, dict[str, object]]:
-        """Batch-load signal metadata keyed by signal_id.
-
-        RB-1.3.2 replaces Paper Trading N+1 lookups with one SQLite query while
-        preserving the exact row shape returned by read_signal_attempt_by_id().
-        """
-        self.initialize()
-        ids = tuple(dict.fromkeys(str(item) for item in signal_ids if str(item)))
-        if not ids:
-            return {}
-        result: dict[str, dict[str, object]] = {}
-        with sqlite3.connect(self.path) as conn:
-            conn.row_factory = sqlite3.Row
-            for start in range(0, len(ids), 500):
-                chunk = ids[start:start + 500]
-                placeholders = ",".join("?" for _ in chunk)
-                query = f"""
-                    SELECT signal_id,run_id,instrument_key,trading_date,
-                           level_type,level_value,direction,state,
-                           cross_timestamp,confirmation_timestamp,
-                           underlying_entry,confirmation_delay_minutes,
-                           created_at
-                    FROM signal_attempts
-                    WHERE signal_id IN ({placeholders})
-                    ORDER BY id DESC
-                """
-                rows = conn.execute(query, chunk).fetchall()
-                for row in rows:
-                    key = str(row["signal_id"] or "")
-                    if key and key not in result:
-                        result[key] = dict(row)
-        return result
+        """Batch-load signal metadata keyed by signal_id."""
+        return self.signal.read_signal_attempts_by_ids(signal_ids)
 
     def signal_summary(
         self, instrument_key: str, trading_date: str, run_id: str | None = None
     ) -> dict[str, int]:
-        rows = self.read_signal_attempts(instrument_key, trading_date, run_id)
-        return {
-            "attempts": len(rows),
-            "active": sum(row["state"] == SignalState.ACTIVE.value for row in rows),
-            "failed": sum(
-                row["state"] in {
-                    SignalState.CONFIRMATION_FAILED.value,
-                    SignalState.TIMEOUT.value,
-                }
-                for row in rows
-            ),
-            "awaiting": sum(
-                row["state"] == SignalState.AWAITING_CONFIRMATION.value for row in rows
-            ),
-            "bullish": sum(row["direction"] == Direction.BULLISH.value for row in rows),
-            "bearish": sum(row["direction"] == Direction.BEARISH.value for row in rows),
-        }
+        return self.signal.signal_summary(instrument_key, trading_date, run_id)
 
     def health(self) -> dict[str, object]:
         self.initialize()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             result = conn.execute("SELECT 1").fetchone()
         return {"ok": result == (1,), "path": str(self.path)}
 
@@ -1304,211 +1166,27 @@ class RedBarDatabase:
         trading_date: str,
         outcomes,
     ) -> int:
-        from datetime import datetime, timezone
-
-        self.initialize()
-        now = datetime.now(timezone.utc).isoformat()
-
-        with sqlite3.connect(self.path) as conn:
-            existing = {
-                row[1]
-                for row in conn.execute(
-                    "PRAGMA table_info(paper_trade_outcomes)"
-                )
-            }
-            required = {
-                "risk_points": "REAL",
-                "exit_model": "TEXT",
-                "model_parameter": "TEXT",
-                "r_multiple": "REAL",
-                "session_mfe_points": "REAL",
-                "session_mae_points": "REAL",
-                "session_extreme_price": "REAL",
-                "session_extreme_timestamp": "TEXT",
-                "move_after_target_points": "REAL",
-                "minutes_from_target_to_extreme": "INTEGER",
-                "giveback_from_extreme_points": "REAL",
-            }
-            for name, sql_type in required.items():
-                if name not in existing:
-                    conn.execute(
-                        f"ALTER TABLE paper_trade_outcomes "
-                        f"ADD COLUMN {name} {sql_type}"
-                    )
-
-            conn.execute(
-                """
-                DELETE FROM paper_trade_outcomes
-                WHERE instrument_key=? AND trading_date=?
-                """,
-                (instrument_key, trading_date),
-            )
-
-            for item in outcomes:
-                conn.execute(
-                    """
-                    INSERT INTO paper_trade_outcomes(
-                        trade_id,
-                        signal_id,
-                        instrument_key,
-                        trading_date,
-                        level_type,
-                        direction,
-                        entry_timestamp,
-                        entry_price,
-                        stop_price,
-                        risk_points,
-                        exit_model,
-                        model_parameter,
-                        target_points,
-                        target_price,
-                        exit_timestamp,
-                        exit_price,
-                        exit_reason,
-                        status,
-                        points,
-                        r_multiple,
-                        mfe,
-                        mae,
-                        holding_minutes,
-                        session_mfe_points,
-                        session_mae_points,
-                        session_extreme_price,
-                        session_extreme_timestamp,
-                        move_after_target_points,
-                        minutes_from_target_to_extreme,
-                        giveback_from_extreme_points,
-                        created_at,
-                        updated_at
-                    ) VALUES(
-                        ?,?,?,?,?,?,?,?,?,?,
-                        ?,?,?,?,?,?,?,?,?,?,
-                        ?,?,?,?,?,?,?,?,?,?,
-                        ?,?
-                    )
-                    """,
-                    (
-                        item.trade_id,
-                        item.signal_id,
-                        item.instrument_key,
-                        item.trading_date,
-                        item.level_type,
-                        item.direction,
-                        item.entry_timestamp.isoformat(),
-                        item.entry_price,
-                        item.stop_price,
-                        item.risk_points,
-                        item.exit_model.value,
-                        item.model_parameter,
-                        item.target_points,
-                        item.target_price,
-                        item.exit_timestamp.isoformat()
-                        if item.exit_timestamp
-                        else None,
-                        item.exit_price,
-                        item.exit_reason.value,
-                        item.status.value,
-                        item.points,
-                        item.r_multiple,
-                        item.mfe,
-                        item.mae,
-                        item.holding_minutes,
-                        item.session_mfe_points,
-                        item.session_mae_points,
-                        item.session_extreme_price,
-                        item.session_extreme_timestamp.isoformat()
-                        if item.session_extreme_timestamp
-                        else None,
-                        item.move_after_target_points,
-                        item.minutes_from_target_to_extreme,
-                        item.giveback_from_extreme_points,
-                        now,
-                        now,
-                    ),
-                )
-            conn.commit()
-
-        return len(outcomes)
+        return self.paper_trade_outcome.replace_paper_trade_outcomes(
+            instrument_key, trading_date, outcomes
+        )
 
     def read_paper_trade_outcomes(
         self,
         instrument_key: str,
         trading_date: str,
     ) -> list[dict[str, object]]:
-        self.initialize()
-
-        with sqlite3.connect(self.path) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                """
-                SELECT *
-                FROM paper_trade_outcomes
-                WHERE instrument_key=? AND trading_date=?
-                ORDER BY
-                    entry_timestamp,
-                    level_type,
-                    exit_model,
-                    model_parameter
-                """,
-                (instrument_key, trading_date),
-            ).fetchall()
-
-        return [dict(row) for row in rows]
+        return self.paper_trade_outcome.read_paper_trade_outcomes(
+            instrument_key, trading_date
+        )
 
     def paper_trade_summary(
         self,
         instrument_key: str,
         trading_date: str,
     ) -> dict[str, object]:
-        rows = self.read_paper_trade_outcomes(
-            instrument_key,
-            trading_date,
+        return self.paper_trade_outcome.paper_trade_summary(
+            instrument_key, trading_date
         )
-        evaluable = [
-            row
-            for row in rows
-            if row["exit_reason"] != "NOT_EVALUABLE"
-            and row["points"] is not None
-        ]
-        winners = [
-            row for row in evaluable if float(row["points"]) > 0
-        ]
-        losers = [
-            row for row in evaluable if float(row["points"]) < 0
-        ]
-
-        gross_profit = sum(
-            float(row["points"]) for row in winners
-        )
-        gross_loss = abs(
-            sum(float(row["points"]) for row in losers)
-        )
-        net_points = sum(
-            float(row["points"]) for row in evaluable
-        )
-
-        return {
-            "trades": len(rows),
-            "evaluable": len(evaluable),
-            "winners": len(winners),
-            "losers": len(losers),
-            "win_rate": (
-                len(winners) / len(evaluable) * 100.0
-                if evaluable
-                else 0.0
-            ),
-            "net_points": net_points,
-            "average_points": (
-                net_points / len(evaluable)
-                if evaluable
-                else 0.0
-            ),
-            "profit_factor": (
-                gross_profit / gross_loss
-                if gross_loss > 0
-                else None
-            ),
-        }
 
     def paper_trade_range_rows(
         self,
@@ -1516,32 +1194,9 @@ class RedBarDatabase:
         start_date: str,
         end_date: str,
     ) -> list[dict[str, object]]:
-        self.initialize()
-
-        with sqlite3.connect(self.path) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                """
-                SELECT *
-                FROM paper_trade_outcomes
-                WHERE instrument_key=?
-                  AND trading_date>=?
-                  AND trading_date<=?
-                ORDER BY
-                    trading_date,
-                    entry_timestamp,
-                    level_type,
-                    exit_model,
-                    model_parameter
-                """,
-                (
-                    instrument_key,
-                    start_date,
-                    end_date,
-                ),
-            ).fetchall()
-
-        return [dict(row) for row in rows]
+        return self.paper_trade_outcome.paper_trade_range_rows(
+            instrument_key, start_date, end_date
+        )
 
     def paper_trade_range_summary(
         self,
@@ -1549,56 +1204,9 @@ class RedBarDatabase:
         start_date: str,
         end_date: str,
     ) -> dict[str, object]:
-        rows = self.paper_trade_range_rows(
-            instrument_key,
-            start_date,
-            end_date,
+        return self.paper_trade_outcome.paper_trade_range_summary(
+            instrument_key, start_date, end_date
         )
-        evaluable = [
-            row
-            for row in rows
-            if row["exit_reason"] != "NOT_EVALUABLE"
-            and row["points"] is not None
-        ]
-        winners = [
-            row for row in evaluable if float(row["points"]) > 0
-        ]
-        losers = [
-            row for row in evaluable if float(row["points"]) < 0
-        ]
-
-        gross_profit = sum(
-            float(row["points"]) for row in winners
-        )
-        gross_loss = abs(
-            sum(float(row["points"]) for row in losers)
-        )
-        net_points = sum(
-            float(row["points"]) for row in evaluable
-        )
-
-        return {
-            "rows": len(rows),
-            "evaluable": len(evaluable),
-            "winners": len(winners),
-            "losers": len(losers),
-            "win_rate": (
-                len(winners) / len(evaluable) * 100.0
-                if evaluable
-                else 0.0
-            ),
-            "net_points": net_points,
-            "average_points": (
-                net_points / len(evaluable)
-                if evaluable
-                else 0.0
-            ),
-            "profit_factor": (
-                gross_profit / gross_loss
-                if gross_loss > 0
-                else None
-            ),
-        }
 
 
     def read_signal_attempts_range(
@@ -1607,21 +1215,7 @@ class RedBarDatabase:
         date_from: str,
         date_to: str,
     ) -> list[dict[str, object]]:
-        self.initialize()
-        with sqlite3.connect(self.path) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                """
-                SELECT *
-                FROM signal_attempts
-                WHERE instrument_key=?
-                  AND trading_date>=?
-                  AND trading_date<=?
-                ORDER BY trading_date, confirmation_timestamp, signal_id
-                """,
-                (instrument_key, date_from, date_to),
-            ).fetchall()
-        return [dict(row) for row in rows]
+        return self.signal.read_signal_attempts_range(instrument_key, date_from, date_to)
 
     def read_paper_trade_outcomes_range(
         self,
@@ -1629,21 +1223,9 @@ class RedBarDatabase:
         date_from: str,
         date_to: str,
     ) -> list[dict[str, object]]:
-        self.initialize()
-        with sqlite3.connect(self.path) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                """
-                SELECT *
-                FROM paper_trade_outcomes
-                WHERE instrument_key=?
-                  AND trading_date>=?
-                  AND trading_date<=?
-                ORDER BY trading_date, entry_timestamp, trade_id
-                """,
-                (instrument_key, date_from, date_to),
-            ).fetchall()
-        return [dict(row) for row in rows]
+        return self.paper_trade_outcome.read_paper_trade_outcomes_range(
+            instrument_key, date_from, date_to
+        )
 
 
 
@@ -1657,7 +1239,7 @@ class RedBarDatabase:
             return 0
 
         now = datetime.utcnow().isoformat()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             for row in payload:
                 conn.execute(
                     """
@@ -1748,7 +1330,7 @@ class RedBarDatabase:
         date_to: str,
     ) -> list[dict[str, object]]:
         self.initialize()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 """
@@ -1775,7 +1357,7 @@ class RedBarDatabase:
             return 0
 
         now = datetime.utcnow().isoformat()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             for row in payload:
                 conn.execute(
                     """
@@ -1841,7 +1423,7 @@ class RedBarDatabase:
         date_to: str,
     ) -> list[dict[str, object]]:
         self.initialize()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 """
@@ -1868,7 +1450,7 @@ class RedBarDatabase:
             return 0
 
         now = datetime.now().astimezone().isoformat()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             for row in payload:
                 conn.execute(
                     """
@@ -1965,7 +1547,7 @@ class RedBarDatabase:
         date_to: str,
     ) -> list[dict[str, object]]:
         self.initialize()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 """
@@ -1985,7 +1567,7 @@ class RedBarDatabase:
         signal_id: str,
     ) -> dict[str, object] | None:
         self.initialize()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 """
@@ -2002,7 +1584,7 @@ class RedBarDatabase:
         signal_id: str,
     ) -> dict[str, object] | None:
         self.initialize()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 """
@@ -2019,7 +1601,7 @@ class RedBarDatabase:
         signal_id: str,
     ) -> dict[str, object] | None:
         self.initialize()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 """
@@ -2040,7 +1622,7 @@ class RedBarDatabase:
         self.initialize()
         now = datetime.now().astimezone().isoformat()
 
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO option_chain_snapshot_history(
@@ -2134,7 +1716,7 @@ class RedBarDatabase:
         limit: int = 500,
     ) -> list[dict[str, object]]:
         self.initialize()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 """
@@ -2167,7 +1749,7 @@ class RedBarDatabase:
             entry - pd.Timedelta(seconds=int(max_age_seconds))
         ).isoformat()
 
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 """
@@ -2199,7 +1781,7 @@ class RedBarDatabase:
     ) -> None:
         self.initialize()
         now = datetime.now().astimezone().isoformat()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO signal_option_snapshot_links(
@@ -2231,7 +1813,7 @@ class RedBarDatabase:
         signal_id: str,
     ) -> dict[str, object] | None:
         self.initialize()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 """
@@ -2256,7 +1838,7 @@ class RedBarDatabase:
     ) -> None:
         self.initialize()
         now = datetime.now().astimezone().isoformat()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO market_collector_status(
@@ -2287,7 +1869,7 @@ class RedBarDatabase:
         collector_name: str = "DUAL_OPTIONS",
     ) -> dict[str, object] | None:
         self.initialize()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 """
@@ -2306,7 +1888,7 @@ class RedBarDatabase:
         order_id: str,
     ) -> list[dict[str, object]]:
         self.initialize()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 """
@@ -2326,7 +1908,7 @@ class RedBarDatabase:
         """Persist one immutable observational checkpoint per order/horizon."""
         self.initialize()
         now = datetime.now().astimezone().isoformat()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             existing_columns = {
                 str(item[1])
                 for item in conn.execute(
@@ -2393,7 +1975,7 @@ class RedBarDatabase:
         horizon_minutes: int,
     ) -> dict[str, object] | None:
         self.initialize()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 """
@@ -2412,7 +1994,7 @@ class RedBarDatabase:
         limit: int = 200,
     ) -> list[dict[str, object]]:
         self.initialize()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             if signal_id:
                 rows = conn.execute(
@@ -2443,7 +2025,7 @@ class RedBarDatabase:
     ) -> None:
         self.initialize()
         now = datetime.now().astimezone().isoformat()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.execute(
                 '''
                 INSERT OR IGNORE INTO option_execution_telemetry(
@@ -2490,7 +2072,7 @@ class RedBarDatabase:
         order_id: str,
     ) -> dict[str, object] | None:
         self.initialize()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 '''SELECT * FROM option_execution_telemetry
@@ -2518,7 +2100,7 @@ class RedBarDatabase:
             values.append(signal_id)
         where = ('WHERE ' + ' AND '.join(clauses)) if clauses else ''
         values.append(int(limit))
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 f'''SELECT * FROM option_execution_telemetry
@@ -2534,7 +2116,7 @@ class RedBarDatabase:
     ) -> None:
         self.initialize()
         now = datetime.now().astimezone().isoformat()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO signal_pipeline_status(
@@ -2575,7 +2157,7 @@ class RedBarDatabase:
         date_to: str,
     ) -> list[dict[str, object]]:
         self.initialize()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 """
@@ -2600,7 +2182,7 @@ class RedBarDatabase:
     ) -> None:
         self.initialize()
         now = datetime.now().astimezone().isoformat()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO intelligence_pipeline_run_status(
@@ -2622,7 +2204,7 @@ class RedBarDatabase:
         trading_date: str,
     ) -> dict[str, object] | None:
         self.initialize()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 """
@@ -2640,7 +2222,7 @@ class RedBarDatabase:
     ) -> None:
         self.initialize()
         now = datetime.now().astimezone().isoformat()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO eod_pipeline_validation(
@@ -2679,7 +2261,7 @@ class RedBarDatabase:
         trading_date: str,
     ) -> dict[str, object] | None:
         self.initialize()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 """
@@ -2699,7 +2281,7 @@ class RedBarDatabase:
     ) -> None:
         self.initialize()
         now = datetime.now().astimezone().isoformat()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO historical_option_backfill(
@@ -2762,7 +2344,7 @@ class RedBarDatabase:
         trading_date: str,
     ) -> dict[str, object] | None:
         self.initialize()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 """
@@ -2781,7 +2363,7 @@ class RedBarDatabase:
         date_to: str,
     ) -> list[dict[str, object]]:
         self.initialize()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 """
@@ -2807,7 +2389,7 @@ class RedBarDatabase:
     ) -> None:
         self.initialize()
         now = datetime.now().astimezone().isoformat()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO paper_execution_accounts(
@@ -2835,7 +2417,7 @@ class RedBarDatabase:
     ) -> None:
         self.initialize()
         now = datetime.now().astimezone().isoformat()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO paper_execution_orders(
@@ -2909,7 +2491,7 @@ class RedBarDatabase:
         order_id: str,
     ) -> dict[str, object] | None:
         self.initialize()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 """
@@ -2926,7 +2508,7 @@ class RedBarDatabase:
         account_id: str,
     ) -> list[dict[str, object]]:
         self.initialize()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 """
@@ -2944,7 +2526,7 @@ class RedBarDatabase:
         account_id: str,
     ) -> list[dict[str, object]]:
         self.initialize()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 """
@@ -2968,7 +2550,7 @@ class RedBarDatabase:
         updated_at: str,
     ) -> None:
         self.initialize()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.execute(
                 """
                 UPDATE paper_execution_orders
@@ -3003,7 +2585,7 @@ class RedBarDatabase:
         exit_detail: str | None,
     ) -> None:
         self.initialize()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.execute(
                 """
                 UPDATE paper_execution_orders
@@ -3043,7 +2625,7 @@ class RedBarDatabase:
         mae_points: float,
     ) -> None:
         self.initialize()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.execute(
                 """
                 UPDATE paper_execution_orders
@@ -3078,7 +2660,7 @@ class RedBarDatabase:
         row: dict[str, object],
     ) -> None:
         self.initialize()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO paper_execution_marks(
@@ -3100,26 +2682,6 @@ class RedBarDatabase:
             )
             conn.commit()
 
-    def read_paper_execution_marks(
-        self,
-        order_id: str,
-    ) -> list[dict[str, object]]:
-        self.initialize()
-        with sqlite3.connect(self.path) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                """
-                SELECT *
-                FROM paper_execution_marks
-                WHERE order_id=?
-                ORDER BY timestamp
-                """,
-                (order_id,),
-            ).fetchall()
-        return [dict(row) for row in rows]
-
-
-
     def paper_execution_exists_for_signal(
         self,
         *,
@@ -3127,7 +2689,7 @@ class RedBarDatabase:
         account_id: str,
     ) -> bool:
         self.initialize()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             row = conn.execute(
                 """
                 SELECT 1
@@ -3147,7 +2709,7 @@ class RedBarDatabase:
         instrument_token: int,
     ) -> bool:
         self.initialize()
-        with sqlite3.connect(self.path) as conn:
+        with self._connect() as conn:
             row = conn.execute(
                 """
                 SELECT 1 FROM paper_execution_orders
@@ -3159,176 +2721,34 @@ class RedBarDatabase:
         return row is not None
 
     def insert_trade_selection_evaluation(self, row: dict[str, object]) -> None:
-        self.initialize()
-        with sqlite3.connect(self.path) as conn:
-            conn.execute(
-                """
-                INSERT INTO trade_selection_evaluations(
-                    scan_id,signal_id,trading_date,direction,candidate_rank,
-                    candidate_symbol,instrument_token,candidate_score,
-                    opportunity_score,reward_remaining_pct,reward_risk_ratio,
-                    execution_quality_score,history_sample_size,
-                    history_win_rate_pct,history_profit_factor,
-                    history_expectancy_pct,history_avg_mfe_pct,
-                    history_avg_mae_pct,historical_score,selection_score,
-                    evidence_ready,eligible,decision,reason,evaluated_at
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """,
-                (
-                    row.get("scan_id"), row.get("signal_id"), row.get("trading_date"),
-                    row.get("direction"), row.get("candidate_rank"),
-                    row.get("candidate_symbol"), row.get("instrument_token"),
-                    row.get("candidate_score"), row.get("opportunity_score"),
-                    row.get("reward_remaining_pct"), row.get("reward_risk_ratio"),
-                    row.get("execution_quality_score"), row.get("history_sample_size"),
-                    row.get("history_win_rate_pct"), row.get("history_profit_factor"),
-                    row.get("history_expectancy_pct"), row.get("history_avg_mfe_pct"),
-                    row.get("history_avg_mae_pct"), row.get("historical_score"),
-                    row.get("selection_score"), int(bool(row.get("evidence_ready"))),
-                    int(bool(row.get("eligible"))), row.get("decision"),
-                    row.get("reason"), row.get("evaluated_at"),
-                ),
-            )
-            conn.commit()
+        self.evaluation.insert_trade_selection_evaluation(row)
 
     def read_trade_selection_evaluations(
         self, *, signal_id: str | None = None, trading_date: str | None = None,
         limit: int = 200,
     ) -> list[dict[str, object]]:
-        self.initialize()
-        with sqlite3.connect(self.path) as conn:
-            conn.row_factory = sqlite3.Row
-            if signal_id:
-                rows = conn.execute(
-                    """SELECT * FROM trade_selection_evaluations
-                    WHERE signal_id=? ORDER BY evaluated_at DESC,candidate_rank LIMIT ?""",
-                    (signal_id, int(limit)),
-                ).fetchall()
-            elif trading_date:
-                rows = conn.execute(
-                    """SELECT * FROM trade_selection_evaluations
-                    WHERE trading_date=? ORDER BY evaluated_at DESC,candidate_rank LIMIT ?""",
-                    (trading_date, int(limit)),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    """SELECT * FROM trade_selection_evaluations
-                    ORDER BY evaluated_at DESC,candidate_rank LIMIT ?""",
-                    (int(limit),),
-                ).fetchall()
-        return [dict(row) for row in rows]
+        return self.evaluation.read_trade_selection_evaluations(
+            signal_id=signal_id, trading_date=trading_date, limit=limit
+        )
 
     def insert_institutional_execution_evaluation(
         self, row: dict[str, object]
     ) -> None:
-        self.initialize()
-        with sqlite3.connect(self.path) as conn:
-            conn.execute(
-                """
-                INSERT INTO institutional_execution_evaluations(
-                    scan_id,signal_id,trading_date,direction,candidate_rank,
-                    candidate_symbol,instrument_token,option_type,
-                    execution_probability_pct,expected_value_pct,
-                    expectancy_pct,expected_win_pct,expected_loss_pct,
-                    expectancy_source,expectancy_confidence_pct,kelly_fraction_pct,
-                    expected_reward_pct,expected_risk_pct,intelligence_score,
-                    adaptive_history_weight_pct,rule_quality_score,
-                    opportunity_score,historical_score,selection_score,
-                    primary_decision,primary_confidence_pct,shadow_decision,
-                    shadow_confidence_pct,agreement,shadow_adjustment_pct,
-                    evidence_sample_size,evidence_ready,modules_json,expert_votes_json,eligible,
-                    decision,reason,evaluated_at
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """,
-                (
-                    row.get("scan_id"), row.get("signal_id"),
-                    row.get("trading_date"), row.get("direction"),
-                    row.get("candidate_rank"), row.get("candidate_symbol"),
-                    row.get("instrument_token"), row.get("option_type"),
-                    row.get("execution_probability_pct"),
-                    row.get("expected_value_pct"),
-                    row.get("expectancy_pct"), row.get("expected_win_pct"),
-                    row.get("expected_loss_pct"), row.get("expectancy_source"),
-                    row.get("expectancy_confidence_pct"), row.get("kelly_fraction_pct"),
-                    row.get("expected_reward_pct"), row.get("expected_risk_pct"),
-                    row.get("intelligence_score"),
-                    row.get("adaptive_history_weight_pct"),
-                    row.get("rule_quality_score"), row.get("opportunity_score"),
-                    row.get("historical_score"), row.get("selection_score"),
-                    row.get("primary_decision"), row.get("primary_confidence_pct"),
-                    row.get("shadow_decision"), row.get("shadow_confidence_pct"),
-                    row.get("agreement"), row.get("shadow_adjustment_pct"),
-                    row.get("evidence_sample_size"),
-                    int(bool(row.get("evidence_ready"))),
-                    json.dumps(row.get("modules") or [], sort_keys=True, default=str),
-                    json.dumps(row.get("expert_votes") or [], sort_keys=True, default=str),
-                    int(bool(row.get("eligible"))), row.get("decision"),
-                    row.get("reason"), row.get("evaluated_at"),
-                ),
-            )
-            conn.commit()
+        self.evaluation.insert_institutional_execution_evaluation(row)
 
     def read_institutional_execution_evaluations(
         self, *, signal_id: str | None = None, trading_date: str | None = None,
         limit: int = 200,
     ) -> list[dict[str, object]]:
-        self.initialize()
-        clauses = []
-        values: list[object] = []
-        if signal_id:
-            clauses.append("signal_id=?")
-            values.append(signal_id)
-        if trading_date:
-            clauses.append("trading_date=?")
-            values.append(trading_date)
-        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-        values.append(int(limit))
-        with sqlite3.connect(self.path) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                f"""SELECT * FROM institutional_execution_evaluations
-                {where} ORDER BY evaluated_at DESC,candidate_rank LIMIT ?""",
-                tuple(values),
-            ).fetchall()
-        result = []
-        for row in rows:
-            item = dict(row)
-            try:
-                item["modules"] = json.loads(str(item.get("modules_json") or "[]"))
-            except Exception:
-                item["modules"] = []
-            try:
-                item["expert_votes"] = json.loads(str(item.get("expert_votes_json") or "[]"))
-            except Exception:
-                item["expert_votes"] = []
-            result.append(item)
-        return result
+        return self.evaluation.read_institutional_execution_evaluations(
+            signal_id=signal_id, trading_date=trading_date, limit=limit
+        )
 
     def insert_execution_state_event(
         self,
         row: dict[str, object],
     ) -> None:
-        self.initialize()
-        with sqlite3.connect(self.path) as conn:
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO execution_state_events(
-                    event_id,signal_id,order_id,state,detail,
-                    candidate_score,timestamp
-                )
-                VALUES(?,?,?,?,?,?,?)
-                """,
-                (
-                    row.get("event_id"),
-                    row.get("signal_id"),
-                    row.get("order_id"),
-                    row.get("state"),
-                    row.get("detail"),
-                    row.get("candidate_score"),
-                    row.get("timestamp"),
-                ),
-            )
-            conn.commit()
+        self.evaluation.insert_execution_state_event(row)
 
     def read_execution_state_events(
         self,
@@ -3336,31 +2756,9 @@ class RedBarDatabase:
         signal_id: str | None = None,
         limit: int = 200,
     ) -> list[dict[str, object]]:
-        self.initialize()
-        with sqlite3.connect(self.path) as conn:
-            conn.row_factory = sqlite3.Row
-            if signal_id:
-                rows = conn.execute(
-                    """
-                    SELECT *
-                    FROM execution_state_events
-                    WHERE signal_id=?
-                    ORDER BY timestamp DESC
-                    LIMIT ?
-                    """,
-                    (signal_id, int(limit)),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    """
-                    SELECT *
-                    FROM execution_state_events
-                    ORDER BY timestamp DESC
-                    LIMIT ?
-                    """,
-                    (int(limit),),
-                ).fetchall()
-        return [dict(row) for row in rows]
+        return self.evaluation.read_execution_state_events(
+            signal_id=signal_id, limit=limit
+        )
 
     def read_execution_state_events_for_signals(
         self,
@@ -3368,278 +2766,58 @@ class RedBarDatabase:
         *,
         per_signal_limit: int = 50,
     ) -> dict[str, list[dict[str, object]]]:
-        """Batch-load newest lifecycle events for multiple signals.
-
-        SQLite window functions keep the same per-signal newest-first semantics as
-        read_execution_state_events(signal_id=..., limit=...).
-        """
-        self.initialize()
-        ids = tuple(dict.fromkeys(str(item) for item in signal_ids if str(item)))
-        if not ids:
-            return {}
-        limit = max(1, int(per_signal_limit))
-        result: dict[str, list[dict[str, object]]] = {key: [] for key in ids}
-        with sqlite3.connect(self.path) as conn:
-            conn.row_factory = sqlite3.Row
-            for start in range(0, len(ids), 400):
-                chunk = ids[start:start + 400]
-                placeholders = ",".join("?" for _ in chunk)
-                query = f"""
-                    SELECT event_id,signal_id,order_id,state,detail,candidate_score,timestamp
-                    FROM (
-                        SELECT *,
-                               ROW_NUMBER() OVER (
-                                   PARTITION BY signal_id
-                                   ORDER BY timestamp DESC
-                               ) AS rn
-                        FROM execution_state_events
-                        WHERE signal_id IN ({placeholders})
-                    ) ranked
-                    WHERE rn <= ?
-                    ORDER BY signal_id, timestamp DESC
-                """
-                rows = conn.execute(query, chunk + (limit,)).fetchall()
-                for row in rows:
-                    key = str(row["signal_id"] or "")
-                    if key:
-                        result.setdefault(key, []).append(dict(row))
-        return result
+        """Batch-load newest lifecycle events for multiple signals."""
+        return self.evaluation.read_execution_state_events_for_signals(
+            signal_ids, per_signal_limit=per_signal_limit
+        )
 
     def upsert_execution_queue_item(self, row: dict[str, object]) -> None:
-        self.initialize()
-        now = datetime.now().astimezone().isoformat()
-        with sqlite3.connect(self.path) as conn:
-            conn.execute(
-                """
-                INSERT INTO execution_queue(
-                    queue_id,signal_id,trading_date,direction,candidate_rank,
-                    candidate_symbol,instrument_token,exchange,option_type,strike,
-                    expiry,lot_size,quantity,candidate_score,selection_score,
-                    execution_probability_pct,expected_value_pct,opportunity_score,
-                    entry_mode,signal_age_seconds,status,reason,order_id,created_at,
-                    updated_at,executed_at,execution_strategy_source,
-                    strategy_stop_loss_pct,strategy_target_pct,exit_mode,
-                    evaluation_horizon_minutes,signal_sources_json,merge_status,
-                    rsi_signal_id,rsi_confirmation_timestamp
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                ON CONFLICT(signal_id,instrument_token) DO UPDATE SET
-                    trading_date=excluded.trading_date,
-                    direction=excluded.direction,
-                    candidate_rank=excluded.candidate_rank,
-                    candidate_symbol=excluded.candidate_symbol,
-                    exchange=excluded.exchange,
-                    option_type=excluded.option_type,
-                    strike=excluded.strike,
-                    expiry=excluded.expiry,
-                    lot_size=excluded.lot_size,
-                    quantity=excluded.quantity,
-                    candidate_score=excluded.candidate_score,
-                    selection_score=excluded.selection_score,
-                    execution_probability_pct=excluded.execution_probability_pct,
-                    expected_value_pct=excluded.expected_value_pct,
-                    opportunity_score=excluded.opportunity_score,
-                    entry_mode=excluded.entry_mode,
-                    signal_age_seconds=excluded.signal_age_seconds,
-                    execution_strategy_source=excluded.execution_strategy_source,
-                    strategy_stop_loss_pct=excluded.strategy_stop_loss_pct,
-                    strategy_target_pct=excluded.strategy_target_pct,
-                    exit_mode=excluded.exit_mode,
-                    evaluation_horizon_minutes=excluded.evaluation_horizon_minutes,
-                    signal_sources_json=excluded.signal_sources_json,
-                    merge_status=excluded.merge_status,
-                    rsi_signal_id=excluded.rsi_signal_id,
-                    rsi_confirmation_timestamp=excluded.rsi_confirmation_timestamp,
-                    status=CASE
-                        WHEN execution_queue.status IN ('EXECUTED','ACTIVE','CLOSED')
-                            THEN execution_queue.status
-                        ELSE excluded.status
-                    END,
-                    reason=CASE
-                        WHEN execution_queue.status IN ('EXECUTED','ACTIVE','CLOSED')
-                            THEN execution_queue.reason
-                        ELSE excluded.reason
-                    END,
-                    updated_at=excluded.updated_at
-                """,
-                (
-                    row.get('queue_id'), row.get('signal_id'), row.get('trading_date'),
-                    row.get('direction'), row.get('candidate_rank'),
-                    row.get('candidate_symbol'), row.get('instrument_token'),
-                    row.get('exchange') or 'NFO', row.get('option_type'), row.get('strike'),
-                    row.get('expiry'), int(row.get('lot_size') or 1),
-                    int(row.get('quantity') or 0), row.get('candidate_score'),
-                    row.get('selection_score'), row.get('execution_probability_pct'),
-                    row.get('expected_value_pct'), row.get('opportunity_score'),
-                    row.get('entry_mode'), row.get('signal_age_seconds'),
-                    row.get('status'), row.get('reason'), row.get('order_id'),
-                    row.get('created_at') or now, row.get('updated_at') or now,
-                    row.get('executed_at'),
-                    row.get('execution_strategy_source'),
-                    row.get('strategy_stop_loss_pct'),
-                    row.get('strategy_target_pct'),
-                    row.get('exit_mode'),
-                    row.get('evaluation_horizon_minutes'),
-                    json.dumps(row.get('signal_sources') or [], sort_keys=True, default=str),
-                    row.get('merge_status'),
-                    row.get('rsi_signal_id'),
-                    row.get('rsi_confirmation_timestamp'),
-                ),
-            )
-            conn.commit()
+        self.evaluation.upsert_execution_queue_item(row)
 
     def read_execution_queue(
         self, *, status: str | None = None, signal_id: str | None = None,
         trading_date: str | None = None, limit: int = 200,
     ) -> list[dict[str, object]]:
-        self.initialize()
-        clauses = []
-        values: list[object] = []
-        if status:
-            clauses.append('status=?')
-            values.append(status)
-        if signal_id:
-            clauses.append('signal_id=?')
-            values.append(signal_id)
-        if trading_date:
-            clauses.append('trading_date=?')
-            values.append(trading_date)
-        where = ('WHERE ' + ' AND '.join(clauses)) if clauses else ''
-        values.append(int(limit))
-        with sqlite3.connect(self.path) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                f"""SELECT * FROM execution_queue {where}
-                ORDER BY CASE status
-                    WHEN 'EXECUTING' THEN 0 WHEN 'APPROVED' THEN 1
-                    WHEN 'WAITING' THEN 2 WHEN 'REJECTED' THEN 3 ELSE 4 END,
-                    expected_value_pct DESC, execution_probability_pct DESC,
-                    candidate_rank ASC LIMIT ?""",
-                tuple(values),
-            ).fetchall()
-        return [dict(row) for row in rows]
+        return self.evaluation.read_execution_queue(
+            status=status, signal_id=signal_id, trading_date=trading_date, limit=limit
+        )
 
     def update_execution_queue_status(
         self, *, queue_id: str, status: str, reason: str | None = None,
         order_id: str | None = None, executed_at: str | None = None,
     ) -> None:
-        self.initialize()
-        now = datetime.now().astimezone().isoformat()
-        with sqlite3.connect(self.path) as conn:
-            conn.execute(
-                """UPDATE execution_queue SET status=?, reason=COALESCE(?,reason),
-                order_id=COALESCE(?,order_id), updated_at=?,
-                executed_at=COALESCE(?,executed_at) WHERE queue_id=?""",
-                (status, reason, order_id, now, executed_at, queue_id),
-            )
-            conn.commit()
+        self.evaluation.update_execution_queue_status(
+            queue_id=queue_id, status=status, reason=reason,
+            order_id=order_id, executed_at=executed_at,
+        )
 
     def update_execution_queue_for_order(
         self, *, order_id: str, status: str, reason: str | None = None,
     ) -> None:
-        self.initialize()
-        now = datetime.now().astimezone().isoformat()
-        with sqlite3.connect(self.path) as conn:
-            conn.execute(
-                """UPDATE execution_queue SET status=?, reason=COALESCE(?,reason),
-                updated_at=? WHERE order_id=?""",
-                (status, reason, now, order_id),
-            )
-            conn.commit()
+        self.evaluation.update_execution_queue_for_order(
+            order_id=order_id, status=status, reason=reason,
+        )
 
     def upsert_paper_candidate_decision(
         self,
         row: dict[str, object],
     ) -> None:
-        self.initialize()
-        now = datetime.now().astimezone().isoformat()
-        with sqlite3.connect(self.path) as conn:
-            conn.execute(
-                """
-                INSERT INTO paper_candidate_decisions(
-                    signal_id,trading_date,direction,tradingsymbol,
-                    instrument_token,option_type,strike,expiry,
-                    candidate_score,score_detail,decision,
-                    created_at,updated_at
-                )
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
-                ON CONFLICT(signal_id) DO UPDATE SET
-                    direction=excluded.direction,
-                    tradingsymbol=excluded.tradingsymbol,
-                    instrument_token=excluded.instrument_token,
-                    option_type=excluded.option_type,
-                    strike=excluded.strike,
-                    expiry=excluded.expiry,
-                    candidate_score=excluded.candidate_score,
-                    score_detail=excluded.score_detail,
-                    decision=excluded.decision,
-                    updated_at=excluded.updated_at
-                """,
-                (
-                    row.get("signal_id"),
-                    row.get("trading_date"),
-                    row.get("direction"),
-                    row.get("tradingsymbol"),
-                    row.get("instrument_token"),
-                    row.get("option_type"),
-                    row.get("strike"),
-                    row.get("expiry"),
-                    row.get("candidate_score"),
-                    row.get("score_detail"),
-                    row.get("decision"),
-                    now,
-                    now,
-                ),
-            )
-            conn.commit()
-
+        self.evaluation.upsert_paper_candidate_decision(row)
 
     def read_paper_candidate_decision(
         self,
         signal_id: str,
     ) -> dict[str, object] | None:
-        self.initialize()
-        with sqlite3.connect(self.path) as conn:
-            conn.row_factory = sqlite3.Row
-            row = conn.execute(
-                """
-                SELECT *
-                FROM paper_candidate_decisions
-                WHERE signal_id=?
-                """,
-                (signal_id,),
-            ).fetchone()
-        return dict(row) if row else None
+        return self.evaluation.read_paper_candidate_decision(signal_id)
 
     def read_paper_candidate_decisions(
         self,
         trading_date: str | None = None,
         limit: int = 200,
     ) -> list[dict[str, object]]:
-        self.initialize()
-        with sqlite3.connect(self.path) as conn:
-            conn.row_factory = sqlite3.Row
-            if trading_date:
-                rows = conn.execute(
-                    """
-                    SELECT *
-                    FROM paper_candidate_decisions
-                    WHERE trading_date=?
-                    ORDER BY updated_at DESC
-                    LIMIT ?
-                    """,
-                    (trading_date, int(limit)),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    """
-                    SELECT *
-                    FROM paper_candidate_decisions
-                    ORDER BY updated_at DESC
-                    LIMIT ?
-                    """,
-                    (int(limit),),
-                ).fetchall()
-        return [dict(row) for row in rows]
+        return self.evaluation.read_paper_candidate_decisions(
+            trading_date=trading_date, limit=limit
+        )
 
 
 
@@ -3648,37 +2826,7 @@ class RedBarDatabase:
         self,
         row: dict[str, object],
     ) -> None:
-        self.initialize()
-        with sqlite3.connect(self.path) as conn:
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO shadow_intelligence_evaluations(
-                    signal_id,trading_date,current_decision,shadow_decision,
-                    shadow_confidence,agreement,portfolio_conflict,
-                    portfolio_action,execution_impact,modules_json,evaluated_at
-                )
-                VALUES(?,?,?,?,?,?,?,?,?,?,?)
-                """,
-                (
-                    row.get("signal_id"),
-                    row.get("trading_date"),
-                    row.get("current_decision") or "WAIT",
-                    row.get("shadow_decision") or "WAIT",
-                    float(row.get("shadow_confidence") or 0.0),
-                    row.get("agreement") or "UNKNOWN",
-                    int(bool(row.get("portfolio_conflict"))),
-                    row.get("portfolio_action"),
-                    "NONE",
-                    json.dumps(
-                        row.get("modules") or [],
-                        sort_keys=True,
-                        default=str,
-                    ),
-                    row.get("evaluated_at")
-                    or datetime.now().astimezone().isoformat(),
-                ),
-            )
-            conn.commit()
+        self.evaluation.insert_shadow_intelligence_evaluation(row)
 
     def read_shadow_intelligence_evaluations(
         self,
@@ -3686,239 +2834,43 @@ class RedBarDatabase:
         signal_id: str | None = None,
         limit: int = 200,
     ) -> list[dict[str, object]]:
-        self.initialize()
-        with sqlite3.connect(self.path) as conn:
-            conn.row_factory = sqlite3.Row
-            if signal_id:
-                rows = conn.execute(
-                    """
-                    SELECT *
-                    FROM shadow_intelligence_evaluations
-                    WHERE signal_id=?
-                    ORDER BY evaluated_at DESC
-                    LIMIT ?
-                    """,
-                    (signal_id, int(limit)),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    """
-                    SELECT *
-                    FROM shadow_intelligence_evaluations
-                    ORDER BY evaluated_at DESC
-                    LIMIT ?
-                    """,
-                    (int(limit),),
-                ).fetchall()
-        result = []
-        for row in rows:
-            item = dict(row)
-            try:
-                item["modules"] = json.loads(
-                    str(item.get("modules_json") or "[]")
-                )
-            except Exception:
-                item["modules"] = []
-            result.append(item)
-        return result
+        return self.evaluation.read_shadow_intelligence_evaluations(
+            signal_id=signal_id, limit=limit
+        )
 
     def upsert_paper_monitor_status(
         self,
         row: dict[str, object],
     ) -> None:
-        self.initialize()
-        now = datetime.now().astimezone().isoformat()
-        monitor_id = str(row.get("monitor_id") or "PAPER-MONITOR")
-        with sqlite3.connect(self.path) as conn:
-            conn.execute(
-                """
-                INSERT INTO paper_monitor_status(
-                    monitor_id,status,heartbeat_at,last_scan_at,started_at,
-                    underlying_name,signals_seen,signals_qualified,
-                    candidates_scored,orders_opened,orders_closed,
-                    signals_skipped,current_state,last_signal_id,
-                    last_decision,last_reason,last_error,updated_at
-                )
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                ON CONFLICT(monitor_id) DO UPDATE SET
-                    status=excluded.status,
-                    heartbeat_at=excluded.heartbeat_at,
-                    last_scan_at=excluded.last_scan_at,
-                    started_at=COALESCE(
-                        paper_monitor_status.started_at,
-                        excluded.started_at
-                    ),
-                    underlying_name=excluded.underlying_name,
-                    signals_seen=excluded.signals_seen,
-                    signals_qualified=excluded.signals_qualified,
-                    candidates_scored=excluded.candidates_scored,
-                    orders_opened=excluded.orders_opened,
-                    orders_closed=excluded.orders_closed,
-                    signals_skipped=excluded.signals_skipped,
-                    current_state=excluded.current_state,
-                    last_signal_id=excluded.last_signal_id,
-                    last_decision=excluded.last_decision,
-                    last_reason=excluded.last_reason,
-                    last_error=excluded.last_error,
-                    updated_at=excluded.updated_at
-                """,
-                (
-                    monitor_id,
-                    row.get("status") or "UNKNOWN",
-                    row.get("heartbeat_at"),
-                    row.get("last_scan_at"),
-                    row.get("started_at"),
-                    row.get("underlying_name"),
-                    int(row.get("signals_seen") or 0),
-                    int(row.get("signals_qualified") or 0),
-                    int(row.get("candidates_scored") or 0),
-                    int(row.get("orders_opened") or 0),
-                    int(row.get("orders_closed") or 0),
-                    int(row.get("signals_skipped") or 0),
-                    row.get("current_state"),
-                    row.get("last_signal_id"),
-                    row.get("last_decision"),
-                    row.get("last_reason"),
-                    row.get("last_error"),
-                    now,
-                ),
-            )
-            conn.commit()
+        self.evaluation.upsert_paper_monitor_status(row)
 
     def read_paper_monitor_status(
         self,
         monitor_id: str = "PAPER-MONITOR",
     ) -> dict[str, object] | None:
-        self.initialize()
-        with sqlite3.connect(self.path) as conn:
-            conn.row_factory = sqlite3.Row
-            row = conn.execute(
-                """
-                SELECT *
-                FROM paper_monitor_status
-                WHERE monitor_id=?
-                """,
-                (monitor_id,),
-            ).fetchone()
-        return dict(row) if row else None
+        return self.evaluation.read_paper_monitor_status(monitor_id)
 
 
     def upsert_candidate_lifecycle(self, row: dict[str, object]) -> None:
-        now = str(row.get("updated_at") or datetime.now().isoformat())
-        created = str(row.get("created_at") or now)
-        with sqlite3.connect(self.path) as conn:
-            conn.execute(
-                """
-                INSERT INTO candidate_lifecycle(
-                    candidate_id, signal_id, trading_date, candidate_symbol,
-                    instrument_token, state, health_score, age_seconds,
-                    created_session, current_session, market_drift, duplicate,
-                    reason, action, replacement_required, replacement_signal_id,
-                    created_at, updated_at
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                ON CONFLICT(candidate_id) DO UPDATE SET
-                    state=excluded.state, health_score=excluded.health_score,
-                    age_seconds=excluded.age_seconds,
-                    created_session=excluded.created_session,
-                    current_session=excluded.current_session,
-                    market_drift=excluded.market_drift, duplicate=excluded.duplicate,
-                    reason=excluded.reason, action=excluded.action,
-                    replacement_required=excluded.replacement_required,
-                    replacement_signal_id=excluded.replacement_signal_id,
-                    updated_at=excluded.updated_at
-                """,
-                (
-                    row.get("candidate_id"), row.get("signal_id"),
-                    row.get("trading_date"), row.get("candidate_symbol"),
-                    row.get("instrument_token"), row.get("state"),
-                    row.get("health_score"), row.get("age_seconds"),
-                    row.get("created_session"), row.get("current_session"),
-                    row.get("market_drift"), int(bool(row.get("duplicate"))),
-                    row.get("reason"), row.get("action"),
-                    int(bool(row.get("replacement_required"))),
-                    row.get("replacement_signal_id"), created, now,
-                ),
-            )
+        self.evaluation.upsert_candidate_lifecycle(row)
 
     def read_candidate_lifecycle(
         self, *, signal_id: str | None = None, state: str | None = None, limit: int = 100
     ) -> list[dict[str, object]]:
-        clauses = []
-        params: list[object] = []
-        if signal_id:
-            clauses.append("signal_id=?")
-            params.append(signal_id)
-        if state:
-            clauses.append("state=?")
-            params.append(state)
-        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-        params.append(int(limit))
-        with sqlite3.connect(self.path) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                f"SELECT * FROM candidate_lifecycle {where} ORDER BY updated_at DESC LIMIT ?",
-                params,
-            ).fetchall()
-        return [dict(row) for row in rows]
+        return self.evaluation.read_candidate_lifecycle(
+            signal_id=signal_id, state=state, limit=limit
+        )
 
     def expire_execution_queue_for_signal(self, *, signal_id: str, reason: str) -> None:
-        with sqlite3.connect(self.path) as conn:
-            conn.execute(
-                """UPDATE execution_queue
-                   SET status='EXPIRED', reason=?, updated_at=?
-                   WHERE signal_id=? AND status IN ('APPROVED','WAITING','REJECTED')""",
-                (reason, datetime.now().isoformat(), signal_id),
-            )
+        self.evaluation.expire_execution_queue_for_signal(
+            signal_id=signal_id, reason=reason
+        )
 
     def insert_opportunity_evaluation(
         self,
         row: dict[str, object],
     ) -> None:
-        self.initialize()
-        with sqlite3.connect(self.path) as conn:
-            conn.execute(
-                """
-                INSERT INTO opportunity_evaluations(
-                    scan_id,signal_id,trading_date,direction,
-                    signal_age_seconds,entry_mode,candidate_symbol,
-                    candidate_score,opportunity_score,
-                    structure_score,momentum_score,reward_score,
-                    option_health_score,market_context_score,time_score,
-                    reward_remaining_pct,move_consumed_pct,
-                    structure_valid,opposite_red_bar,eligible,
-                    decision,reason,evaluated_at
-                )
-                VALUES(
-                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
-                )
-                """,
-                (
-                    row.get("scan_id"),
-                    row.get("signal_id"),
-                    row.get("trading_date"),
-                    row.get("direction"),
-                    row.get("signal_age_seconds"),
-                    row.get("entry_mode"),
-                    row.get("candidate_symbol"),
-                    row.get("candidate_score"),
-                    row.get("opportunity_score"),
-                    row.get("structure_score"),
-                    row.get("momentum_score"),
-                    row.get("reward_score"),
-                    row.get("option_health_score"),
-                    row.get("market_context_score"),
-                    row.get("time_score"),
-                    row.get("reward_remaining_pct"),
-                    row.get("move_consumed_pct"),
-                    int(bool(row.get("structure_valid"))),
-                    int(bool(row.get("opposite_red_bar"))),
-                    int(bool(row.get("eligible"))),
-                    row.get("decision"),
-                    row.get("reason"),
-                    row.get("evaluated_at"),
-                ),
-            )
-            conn.commit()
+        self.evaluation.insert_opportunity_evaluation(row)
 
     def read_opportunity_evaluations(
         self,
@@ -3927,33 +2879,9 @@ class RedBarDatabase:
         signal_id: str | None = None,
         entry_mode: str | None = None,
     ) -> list[dict[str, object]]:
-        self.initialize()
-        clauses = []
-        values: list[object] = []
-        if signal_id:
-            clauses.append("signal_id=?")
-            values.append(signal_id)
-        if entry_mode:
-            clauses.append("entry_mode=?")
-            values.append(entry_mode)
-        where = (
-            "WHERE " + " AND ".join(clauses)
-            if clauses else ""
+        return self.evaluation.read_opportunity_evaluations(
+            limit=limit, signal_id=signal_id, entry_mode=entry_mode
         )
-        values.append(int(limit))
-        with sqlite3.connect(self.path) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                f"""
-                SELECT *
-                FROM opportunity_evaluations
-                {where}
-                ORDER BY evaluated_at DESC
-                LIMIT ?
-                """,
-                tuple(values),
-            ).fetchall()
-        return [dict(row) for row in rows]
 
     def update_paper_entry_intelligence(
         self,
@@ -3974,87 +2902,27 @@ class RedBarDatabase:
         expected_value_pct: float | None = None,
         intelligence_score: float | None = None,
     ) -> None:
-        self.initialize()
-        with sqlite3.connect(self.path) as conn:
-            conn.execute(
-                """
-                UPDATE paper_execution_orders
-                SET entry_mode=?,
-                    signal_age_at_entry=?,
-                    opportunity_score=?,
-                    reward_remaining_pct=?,
-                    candidate_rank=?,
-                    candidate_score=?,
-                    selection_score=?,
-                    historical_win_rate_pct=?,
-                    historical_profit_factor=?,
-                    historical_expectancy_pct=?,
-                    historical_sample_size=?,
-                    execution_probability_pct=?,
-                    expected_value_pct=?,
-                    intelligence_score=?,
-                    updated_at=?
-                WHERE order_id=?
-                """,
-                (
-                    entry_mode,
-                    signal_age_at_entry,
-                    opportunity_score,
-                    reward_remaining_pct,
-                    candidate_rank,
-                    candidate_score,
-                    selection_score,
-                    historical_win_rate_pct,
-                    historical_profit_factor,
-                    historical_expectancy_pct,
-                    historical_sample_size,
-                    execution_probability_pct,
-                    expected_value_pct,
-                    intelligence_score,
-                    datetime.now().astimezone().isoformat(),
-                    order_id,
-                ),
-            )
-            conn.commit()
+        self.evaluation.update_paper_entry_intelligence(
+            order_id=order_id, entry_mode=entry_mode,
+            signal_age_at_entry=signal_age_at_entry,
+            opportunity_score=opportunity_score,
+            reward_remaining_pct=reward_remaining_pct,
+            candidate_rank=candidate_rank, candidate_score=candidate_score,
+            selection_score=selection_score,
+            historical_win_rate_pct=historical_win_rate_pct,
+            historical_profit_factor=historical_profit_factor,
+            historical_expectancy_pct=historical_expectancy_pct,
+            historical_sample_size=historical_sample_size,
+            execution_probability_pct=execution_probability_pct,
+            expected_value_pct=expected_value_pct,
+            intelligence_score=intelligence_score,
+        )
 
     def insert_paper_signal_diagnostic(
         self,
         row: dict[str, object],
     ) -> None:
-        self.initialize()
-        with sqlite3.connect(self.path) as conn:
-            conn.execute(
-                """
-                INSERT INTO paper_signal_diagnostics(
-                    scan_id,signal_id,signal_state,direction,
-                    confirmation_timestamp,signal_age_seconds,
-                    market_hours_ok,freshness_ok,duplicate_free,
-                    candidate_available,best_candidate,best_score,
-                    minimum_score,score_ok,final_decision,reason,timestamp
-                )
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """,
-                (
-                    row.get("scan_id"),
-                    row.get("signal_id"),
-                    row.get("signal_state"),
-                    row.get("direction"),
-                    row.get("confirmation_timestamp"),
-                    row.get("signal_age_seconds"),
-                    int(bool(row.get("market_hours_ok"))),
-                    int(bool(row.get("freshness_ok"))),
-                    int(bool(row.get("duplicate_free"))),
-                    int(bool(row.get("candidate_available"))),
-                    row.get("best_candidate"),
-                    row.get("best_score"),
-                    row.get("minimum_score"),
-                    int(bool(row.get("score_ok"))),
-                    row.get("final_decision"),
-                    row.get("reason"),
-                    row.get("timestamp"),
-                ),
-            )
-            conn.commit()
+        self.evaluation.insert_paper_signal_diagnostic(row)
 
     def read_paper_signal_diagnostics(
         self,
@@ -4062,31 +2930,9 @@ class RedBarDatabase:
         limit: int = 100,
         signal_id: str | None = None,
     ) -> list[dict[str, object]]:
-        self.initialize()
-        with sqlite3.connect(self.path) as conn:
-            conn.row_factory = sqlite3.Row
-            if signal_id:
-                rows = conn.execute(
-                    """
-                    SELECT *
-                    FROM paper_signal_diagnostics
-                    WHERE signal_id=?
-                    ORDER BY timestamp DESC
-                    LIMIT ?
-                    """,
-                    (signal_id, int(limit)),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    """
-                    SELECT *
-                    FROM paper_signal_diagnostics
-                    ORDER BY timestamp DESC
-                    LIMIT ?
-                    """,
-                    (int(limit),),
-                ).fetchall()
-        return [dict(row) for row in rows]
+        return self.evaluation.read_paper_signal_diagnostics(
+            limit=limit, signal_id=signal_id
+        )
 
 
     def update_signal_state(
@@ -4095,15 +2941,46 @@ class RedBarDatabase:
         state: str,
     ) -> None:
         """Persist a lifecycle state change for one signal."""
+        self.signal.update_signal_state(signal_id, state)
+
+    def prune_old_data(self, keep_days: int = 7) -> dict[str, int]:
+        """Delete rows older than keep_days from high-volume tables.
+
+        Returns a dict of table_name -> rows_deleted for observability.
+        """
         self.initialize()
-        with sqlite3.connect(self.path) as conn:
-            conn.execute(
-                """
-                UPDATE signal_attempts
-                SET state=?
-                WHERE signal_id=?
-                """,
-                (state, signal_id),
-            )
+        cutoff_expr = "datetime('now', ?)"
+        cutoff_param = f"-{keep_days} days"
+        tables = [
+            ("execution_state_events", "timestamp"),
+            ("paper_signal_diagnostics", "timestamp"),
+            ("institutional_execution_evaluations", "evaluated_at"),
+            ("trade_selection_evaluations", "evaluated_at"),
+            ("opportunity_evaluations", "evaluated_at"),
+            ("option_execution_telemetry", "captured_at"),
+        ]
+        result: dict[str, int] = {}
+        with self._connect() as conn:
+            for table, ts_col in tables:
+                try:
+                    cursor = conn.execute(
+                        f"DELETE FROM {table} WHERE {ts_col} < {cutoff_expr}",
+                        (cutoff_param,),
+                    )
+                    result[table] = cursor.rowcount
+                except Exception:
+                    result[table] = -1
             conn.commit()
+        return result
+
+    def count_signal_entries(self, account_id: str, signal_id: str) -> int:
+        """Count paper orders for a signal using SQL instead of loading all orders."""
+        self.initialize()
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM paper_execution_orders "
+                "WHERE account_id=? AND signal_id=?",
+                (account_id, signal_id),
+            ).fetchone()
+            return int(row[0]) if row else 0
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from red_bar_lab.utils import safe_float
+
 
 _COMPONENTS = (
     ("Spread", "Spread Score", 15.0),
@@ -13,13 +15,6 @@ _COMPONENTS = (
     ("EMA9 / EMA21", "EMA Score", 10.0),
     ("Momentum", "Momentum", 10.0),
 )
-
-
-def _num(value: Any) -> float:
-    try:
-        return float(value or 0.0)
-    except (TypeError, ValueError):
-        return 0.0
 
 
 @dataclass(frozen=True)
@@ -56,7 +51,7 @@ def inspect_candidate(
 ) -> CandidateInspection:
     rank = int(selected.get("Rank") or 0)
     symbol = str(selected.get("Option") or "")
-    score = _num(selected.get("Score"))
+    score = safe_float(selected.get("Score"), default=0.0)
 
     breakdown = []
     normalized_points = []
@@ -64,7 +59,7 @@ def inspect_candidate(
     weaknesses = []
 
     for label, key, maximum in _COMPONENTS:
-        value = _num(selected.get(key))
+        value = safe_float(selected.get(key), default=0.0)
         ratio = value / maximum if maximum else 0.0
         normalized_points.append(max(0.0, min(1.0, ratio)))
         breakdown.append(
@@ -83,9 +78,9 @@ def inspect_candidate(
             )
 
     # Greeks stay observational: they can contribute to health, not ranking.
-    delta = abs(_num(selected.get("Delta")))
-    gamma = _num(selected.get("Gamma"))
-    iv = _num(selected.get("IV"))
+    delta = abs(safe_float(selected.get("Delta"), default=0.0))
+    gamma = safe_float(selected.get("Gamma"), default=0.0)
+    iv = safe_float(selected.get("IV"), default=0.0)
     greek_quality = 0.0
     greek_checks = 0
     if delta > 0:
@@ -125,14 +120,14 @@ def inspect_candidate(
             "This remains the only automatic paper execution candidate."
         )
     else:
-        best_score = _num(best.get("Score"))
+        best_score = safe_float(best.get("Score"), default=0.0)
         gap = best_score - score
         comparison.append(
             f"Rank #{rank} trails Rank #1 by {gap:.2f} score points."
         )
         for label, key, maximum in _COMPONENTS:
-            selected_value = _num(selected.get(key))
-            best_value = _num(best.get(key))
+            selected_value = safe_float(selected.get(key), default=0.0)
+            best_value = safe_float(best.get(key), default=0.0)
             diff = selected_value - best_value
             if diff > 0.01:
                 comparison.append(

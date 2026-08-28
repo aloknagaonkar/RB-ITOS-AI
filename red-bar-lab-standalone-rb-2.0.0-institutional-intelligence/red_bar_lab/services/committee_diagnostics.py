@@ -1,13 +1,6 @@
 from __future__ import annotations
 
-
-def _num(value, default=0.0) -> float:
-    try:
-        if value is None:
-            return float(default)
-        return float(value)
-    except (TypeError, ValueError):
-        return float(default)
+from red_bar_lab.utils import safe_float
 
 
 def build_committee_gate_trace(
@@ -25,8 +18,8 @@ def build_committee_gate_trace(
     """
     reason = str(evaluation.get("reason") or "")
     reason_upper = reason.upper()
-    probability = _num(evaluation.get("execution_probability_pct"))
-    expectancy = _num(evaluation.get("expectancy_pct"))
+    probability = safe_float(evaluation.get("execution_probability_pct"))
+    expectancy = safe_float(evaluation.get("expectancy_pct"))
 
     performance_blocked = "PERFORMANCE_HARD_BLOCK[" in reason_upper
     terminal_blocked = "OPPORTUNITY_TERMINAL[" in reason_upper

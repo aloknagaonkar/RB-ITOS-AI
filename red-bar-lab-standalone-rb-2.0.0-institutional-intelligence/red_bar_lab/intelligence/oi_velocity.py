@@ -5,6 +5,8 @@ from typing import Iterable
 
 import pandas as pd
 
+from red_bar_lab.utils import safe_float, safe_pct
+
 
 @dataclass(frozen=True)
 class OIVelocityMetric:
@@ -34,21 +36,6 @@ class OIVelocityEngine:
     """Point-in-time OI velocity from persisted option-chain snapshots only."""
 
     @staticmethod
-    def _num(value: object) -> float | None:
-        try:
-            if value is None or pd.isna(value):
-                return None
-            return float(value)
-        except (TypeError, ValueError):
-            return None
-
-    @staticmethod
-    def _pct(current: float | None, previous: float | None) -> float | None:
-        if current is None or previous is None or previous == 0:
-            return None
-        return (current - previous) / abs(previous) * 100.0
-
-    @staticmethod
     def _frame_at_or_before(
         snapshots: list[tuple[pd.Timestamp, pd.DataFrame]], target: pd.Timestamp
     ) -> pd.DataFrame | None:
@@ -69,7 +56,7 @@ class OIVelocityEngine:
         if row is None:
             return None
         prefix = "call" if option_type == "CE" else "put"
-        return cls._num(row.get(f"{prefix}_oi"))
+        return safe_float(row.get(f"{prefix}_oi"))
 
     @staticmethod
     def classify(change_1m: float | None, change_5m: float | None, change_15m: float | None) -> str:
@@ -120,9 +107,9 @@ class OIVelocityEngine:
         for strike in sorted(set(float(v) for v in strike_values)):
             for side in ("CE", "PE"):
                 current = cls._oi(latest, strike, side)
-                c1 = cls._pct(current, cls._oi(frame_1m, strike, side))
-                c5 = cls._pct(current, cls._oi(frame_5m, strike, side))
-                c15 = cls._pct(current, cls._oi(frame_15m, strike, side))
+                c1 = safe_pct(current, cls._oi(frame_1m, strike, side))
+                c5 = safe_pct(current, cls._oi(frame_5m, strike, side))
+                c15 = safe_pct(current, cls._oi(frame_15m, strike, side))
                 acceleration = None
                 if c1 is not None and c5 is not None:
                     acceleration = c1 - (c5 / 5.0)

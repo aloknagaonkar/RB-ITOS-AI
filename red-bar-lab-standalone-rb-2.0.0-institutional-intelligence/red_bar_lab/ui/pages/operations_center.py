@@ -1,4 +1,6 @@
 from red_bar_lab.ui._shared import *
+from red_bar_lab.platform.state_store import AtomicJsonStore, ComponentState
+from pathlib import Path
 
 
 def _format_data_availability_timestamp(value) -> str:
@@ -96,6 +98,104 @@ def _snapshot_freshness(value, market_phase):
     return f"Stale · {age_seconds}s", "unavailable", age_seconds
 
 
+def _render_platform_runtime_health(settings) -> None:
+    state_path = settings.artifacts_root / "platform" / "platform_state.json"
+    if not state_path.exists():
+        state_path = Path(__file__).resolve().parent.parent.parent.parent / "artifacts" / "red_bar" / "platform" / "platform_state.json"
+
+    store = AtomicJsonStore(state_path)
+    platform = store.read_platform_state()
+    components = store.read_all_components()
+
+    if not components:
+        st.info(
+            "No runtime health data available. "
+            "Start the platform with: python -m red_bar_lab.platform.control start"
+        )
+        return
+
+    now = pd.Timestamp.now(tz="Asia/Kolkata")
+
+    def _heartbeat_age(comp: ComponentState) -> str:
+        if not comp.heartbeat_at:
+            return "No heartbeat"
+        try:
+            hb = pd.Timestamp(comp.heartbeat_at)
+            if hb.tzinfo is None:
+                hb = hb.tz_localize("UTC")
+            age = max(0, int((now - hb.tz_convert("Asia/Kolkata")).total_seconds()))
+            if age <= 30:
+                return f"{age}s"
+            if age <= 120:
+                return f"{age // 60}m {age % 60}s"
+            return f"{age // 60}m {age % 60}s (stale)"
+        except (TypeError, ValueError):
+            return "Invalid"
+
+    def _health_state(comp: ComponentState, spec_fresh: float = 30.0, spec_stale: float = 90.0) -> str:
+        if comp.state in ("STOPPED",):
+            return "STOPPED"
+        if comp.state in ("ERROR", "CRASHED"):
+            return "UNHEALTHY"
+        if not comp.heartbeat_at:
+            return "STARTING"
+        try:
+            hb = pd.Timestamp(comp.heartbeat_at)
+            if hb.tzinfo is None:
+                hb = hb.tz_localize("UTC")
+            age = max(0, (now - hb.tz_convert("Asia/Kolkata")).total_seconds())
+            if age <= spec_fresh:
+                return "HEALTHY"
+            if age <= spec_stale:
+                return "DEGRADED"
+            return "STALE"
+        except (TypeError, ValueError):
+            return "UNKNOWN"
+
+    fresh_thresholds = {
+        "market_collector": (60, 180),
+        "paper_monitor": (15, 30),
+        "position_monitor": (15, 30),
+        "market_research": (20, 40),
+        "ui": (999999, 999999),
+    }
+
+    rows = []
+    overall = "HEALTHY"
+    for name, comp in sorted(components.items()):
+        fresh, stale = fresh_thresholds.get(name, (30, 90))
+        health = _health_state(comp, fresh, stale)
+        age_str = _heartbeat_age(comp)
+        pid_str = str(comp.pid) if comp.pid else "—"
+
+        if health == "UNHEALTHY" and comp.required if hasattr(comp, "required") else True:
+            overall = "ENTRY_SUSPENDED"
+        elif health == "DEGRADED" and overall == "HEALTHY":
+            overall = "DEGRADED"
+        elif health == "STALE" and overall in ("HEALTHY", "DEGRADED"):
+            overall = "DEGRADED"
+
+        outcome = comp.last_outcome or "—"
+        if len(outcome) > 40:
+            outcome = outcome[:37] + "..."
+
+        rows.append({
+            "Component": name,
+            "State": health,
+            "PID": pid_str,
+            "Heartbeat Age": age_str,
+            "Last Outcome": outcome,
+            "Restarts": comp.restart_count,
+        })
+
+    st.dataframe(_arrow_safe_rows(rows), width="stretch", hide_index=True)
+
+    if platform.platform_state:
+        state_col1, state_col2 = st.columns(2)
+        state_col1.metric("Platform State", platform.platform_state)
+        state_col2.metric("Overall Health", overall)
+
+
 def render_page(settings, layout, database, token, underlying_name, instrument_key, interval) -> None:
     st.subheader("Operations Center")
     st.caption(
@@ -144,6 +244,9 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         width="stretch",
         hide_index=True,
     )
+
+    st.markdown("### Platform Runtime Health")
+    _render_platform_runtime_health(settings)
 
     st.markdown("### Market Operations")
     market = ops.market

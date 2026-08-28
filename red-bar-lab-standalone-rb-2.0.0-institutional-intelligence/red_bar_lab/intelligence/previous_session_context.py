@@ -12,6 +12,7 @@ from red_bar_lab.intelligence.contract_quality import ContractQualityEngine
 from red_bar_lab.intelligence.institutional_flow import InstitutionalOptionFlowEngine
 from red_bar_lab.intelligence.oi_velocity import OIVelocityEngine
 from red_bar_lab.options.context import _max_pain_strike
+from red_bar_lab.utils import safe_float
 
 
 def _safe_path_part(value: object) -> str:
@@ -265,15 +266,6 @@ class PreviousSessionContextService:
         except Exception:
             return pd.DataFrame()
 
-    @staticmethod
-    def _num(value: object) -> float | None:
-        try:
-            if value is None or pd.isna(value):
-                return None
-            return float(value)
-        except (TypeError, ValueError):
-            return None
-
     @classmethod
     def _closing_chain_summary(cls, frame: pd.DataFrame) -> tuple[float | None, float | None, float | None, str | None, float | None]:
         if frame is None or frame.empty or "strike" not in frame.columns:
@@ -291,7 +283,7 @@ class PreviousSessionContextService:
         for _, row in work.dropna(subset=["strike"]).iterrows():
             strike = float(row["strike"])
             for side, column in (("CALL", "call_oi"), ("PUT", "put_oi")):
-                oi = cls._num(row.get(column)) or 0.0
+                oi = safe_float(row.get(column)) or 0.0
                 candidate = (oi, strike, side)
                 if best is None or candidate[0] > best[0]:
                     best = candidate

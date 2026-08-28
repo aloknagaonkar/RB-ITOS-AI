@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
+import sys
+import tempfile
 import time
-from datetime import datetime
+from datetime import datetime, timezone
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from red_bar_lab.config import RedBarSettings, UNDERLYINGS
@@ -23,6 +27,30 @@ from red_bar_lab.storage.database import RedBarDatabase
 IST = ZoneInfo("Asia/Kolkata")
 
 
+def _write_heartbeat(state_path: Path, **kwargs) -> None:
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    data = {
+        "component": "position_monitor",
+        "pid": os.getpid(),
+        "heartbeat_at": datetime.now(timezone.utc).isoformat(),
+        **kwargs,
+    }
+    fd, tmp = tempfile.mkstemp(
+        dir=str(state_path.parent), suffix=".tmp", prefix="position_monitor_"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, default=str)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, str(state_path))
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
@@ -39,6 +67,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--minimum-score", type=float, default=65.0)
     parser.add_argument("--once", action="store_true")
+    parser.add_argument(
+        "--heartbeat-path",
+        default=None,
+        help="Path to write atomic JSON heartbeat (for platform supervisor)",
+    )
     return parser
 
 
@@ -55,6 +88,10 @@ def main() -> int:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
+    )
+
+    heartbeat_path = Path(args.heartbeat_path) if args.heartbeat_path else (
+        Path(__file__).resolve().parent.parent.parent / "artifacts" / "red_bar" / "platform" / "position_monitor_heartbeat.json"
     )
 
     settings = RedBarSettings.from_env()
@@ -97,6 +134,14 @@ def main() -> int:
         args.interval_seconds,
     )
 
+    _write_heartbeat(
+        heartbeat_path,
+        state="RUNNING",
+        started_at=datetime.now(IST).isoformat(),
+        underlying=args.underlying,
+        interval_seconds=args.interval_seconds,
+    )
+
     while True:
         cycle_started = time.perf_counter()
 
@@ -123,11 +168,27 @@ def main() -> int:
                 elapsed_ms,
             )
 
+            _write_heartbeat(
+                heartbeat_path,
+                state="RUNNING",
+                last_cycle_completed_at=datetime.now(IST).isoformat(),
+                last_outcome=f"open={len(open_after)} closed={closed}",
+                open_positions=len(open_after),
+                closed_this_cycle=closed,
+                duration_ms=round(elapsed_ms, 1),
+            )
+
             for error in errors:
                 logging.warning("position monitor: %s", error)
 
         except Exception:
             logging.exception("Fast position-monitor cycle failed")
+            _write_heartbeat(
+                heartbeat_path,
+                state="ERROR",
+                last_error="Cycle failed — see log",
+                last_cycle_completed_at=datetime.now(IST).isoformat(),
+            )
 
         if args.once:
             break

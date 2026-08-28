@@ -1,16 +1,9 @@
 from __future__ import annotations
 
+from red_bar_lab.utils import safe_float
+
 
 MINIMUM_REWARD_REMAINING_PCT = 40.0
-
-
-def _num(value, default=0.0) -> float:
-    try:
-        if value is None:
-            return float(default)
-        return float(value)
-    except (TypeError, ValueError):
-        return float(default)
 
 
 def build_opportunity_reward_trace(
@@ -24,12 +17,12 @@ def build_opportunity_reward_trace(
     """
     signal = signal or {}
     direction = str(opportunity.get("direction") or signal.get("direction") or "").upper()
-    high = _num(signal.get("confirmation_high"))
-    low = _num(signal.get("confirmation_low"))
-    close = _num(signal.get("confirmation_close"), _num(signal.get("underlying_entry")))
+    high = safe_float(signal.get("confirmation_high"))
+    low = safe_float(signal.get("confirmation_low"))
+    close = safe_float(signal.get("confirmation_close"), default=safe_float(signal.get("underlying_entry")))
 
-    persisted_remaining = _num(opportunity.get("reward_remaining_pct"), 100.0)
-    persisted_consumed = _num(opportunity.get("move_consumed_pct"), 0.0)
+    persisted_remaining = safe_float(opportunity.get("reward_remaining_pct"), default=100.0)
+    persisted_consumed = safe_float(opportunity.get("move_consumed_pct"), default=0.0)
     reason = str(opportunity.get("reason") or "")
     reward_blocked = "REWARD_CONSUMED" in reason.upper()
 

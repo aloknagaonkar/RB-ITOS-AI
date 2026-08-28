@@ -5,6 +5,8 @@ from typing import Iterable
 
 import pandas as pd
 
+from red_bar_lab.utils import safe_float, safe_pct
+
 
 @dataclass(frozen=True)
 class PremiumFlowMetric:
@@ -34,21 +36,6 @@ class PremiumFlowEngine:
     """Premium expansion/compression/exhaustion using captured point-in-time chains."""
 
     @staticmethod
-    def _num(value: object) -> float | None:
-        try:
-            if value is None or pd.isna(value):
-                return None
-            return float(value)
-        except (TypeError, ValueError):
-            return None
-
-    @staticmethod
-    def _pct(current: float | None, previous: float | None) -> float | None:
-        if current is None or previous is None or previous == 0:
-            return None
-        return (current - previous) / abs(previous) * 100.0
-
-    @staticmethod
     def _at_or_before(snapshots, target):
         frames = [frame for ts, frame in snapshots if ts <= target]
         return frames[-1] if frames else None
@@ -62,7 +49,7 @@ class PremiumFlowEngine:
         if match.empty:
             return None
         prefix = "call" if side == "CE" else "put"
-        return cls._num(match.iloc[0].get(f"{prefix}_ltp"))
+        return safe_float(match.iloc[0].get(f"{prefix}_ltp"))
 
     @staticmethod
     def classify(change_1m: float | None, change_5m: float | None, change_15m: float | None) -> str:
@@ -108,9 +95,9 @@ class PremiumFlowEngine:
         for strike in sorted(float(v) for v in strikes):
             for side in ("CE", "PE"):
                 current = cls._premium(latest, strike, side)
-                c1 = cls._pct(current, cls._premium(f1, strike, side))
-                c5 = cls._pct(current, cls._premium(f5, strike, side))
-                c15 = cls._pct(current, cls._premium(f15, strike, side))
+                c1 = safe_pct(current, cls._premium(f1, strike, side))
+                c5 = safe_pct(current, cls._premium(f5, strike, side))
+                c15 = safe_pct(current, cls._premium(f15, strike, side))
                 result.append(PremiumFlowMetric(
                     round(strike, 2), side, current,
                     round(c1, 3) if c1 is not None else None,

@@ -158,6 +158,7 @@ class RedBarIntelligencePipelineOrchestrator:
         states = self.evaluate_day(
             instrument_key=instrument_key,
             trading_date=trading_date,
+            confirmed=confirmed,
         )
         for state in states:
             self.database.upsert_signal_pipeline_status(
@@ -209,11 +210,13 @@ class RedBarIntelligencePipelineOrchestrator:
         *,
         instrument_key: str,
         trading_date: str,
+        confirmed: list | None = None,
     ) -> list[SignalPipelineState]:
-        confirmed = self._confirmed_signals(
-            instrument_key,
-            trading_date,
-        )
+        if confirmed is None:
+            confirmed = self._confirmed_signals(
+                instrument_key,
+                trading_date,
+            )
         states = []
         for signal in confirmed:
             signal_id = str(signal["signal_id"])

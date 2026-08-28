@@ -6,6 +6,8 @@ from typing import Iterable
 
 import pandas as pd
 
+from red_bar_lab.utils import safe_float, safe_pct
+
 
 @dataclass(frozen=True)
 class InstitutionalFlowRow:
@@ -65,21 +67,6 @@ class InstitutionalOptionFlowEngine:
 
     PRICE_NOISE_PCT = 0.15
     OI_NOISE_PCT = 0.50
-
-    @staticmethod
-    def _num(value: object) -> float | None:
-        try:
-            if value is None or pd.isna(value):
-                return None
-            return float(value)
-        except (TypeError, ValueError):
-            return None
-
-    @staticmethod
-    def _pct(current: float | None, previous: float | None) -> float | None:
-        if current is None or previous is None or previous == 0:
-            return None
-        return (current - previous) / abs(previous) * 100.0
 
     @staticmethod
     def _artifact(path_value: object) -> pd.DataFrame:
@@ -153,14 +140,14 @@ class InstitutionalOptionFlowEngine:
     @classmethod
     def _side_row(cls, current: pd.Series, previous: pd.Series, side: str) -> InstitutionalFlowRow:
         prefix = "call" if side == "CE" else "put"
-        strike = cls._num(current.get("strike")) or 0.0
-        premium = cls._num(current.get(f"{prefix}_ltp"))
-        prior_premium = cls._num(previous.get(f"{prefix}_ltp"))
-        oi = cls._num(current.get(f"{prefix}_oi"))
-        prior_oi = cls._num(previous.get(f"{prefix}_oi"))
-        volume = cls._num(current.get(f"{prefix}_volume"))
-        price_pct = cls._pct(premium, prior_premium)
-        oi_pct = cls._pct(oi, prior_oi)
+        strike = safe_float(current.get("strike")) or 0.0
+        premium = safe_float(current.get(f"{prefix}_ltp"))
+        prior_premium = safe_float(previous.get(f"{prefix}_ltp"))
+        oi = safe_float(current.get(f"{prefix}_oi"))
+        prior_oi = safe_float(previous.get(f"{prefix}_oi"))
+        volume = safe_float(current.get(f"{prefix}_volume"))
+        price_pct = safe_pct(premium, prior_premium)
+        oi_pct = safe_pct(oi, prior_oi)
         behaviour = cls.classify_oi_behaviour(price_pct, oi_pct)
         activity = cls.classify_activity(side, behaviour)
         bias = cls.directional_bias(activity)

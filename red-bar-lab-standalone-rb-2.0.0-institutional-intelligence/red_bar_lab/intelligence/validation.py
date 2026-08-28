@@ -5,12 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-
-def _num(value: Any) -> float:
-    try:
-        return float(value or 0.0)
-    except (TypeError, ValueError):
-        return 0.0
+from red_bar_lab.utils import safe_float
 
 
 def _trade_action(order: dict[str, object]) -> str:
@@ -129,7 +124,7 @@ class ShadowValidationService:
         resolved_rows: list[dict[str, object]] = []
 
         for order in closed:
-            pnl = _num(order.get("realized_pnl"))
+            pnl = safe_float(order.get("realized_pnl"), default=0.0)
             result = _result_label(pnl)
             if result == "WIN":
                 current_wins += 1
@@ -180,8 +175,9 @@ class ShadowValidationService:
                     "Trade Result": result,
                     "P&L ₹": pnl,
                     "Validation": resolution,
-                    "Shadow Confidence": _num(
-                        shadow.get("shadow_confidence")
+                    "Shadow Confidence": safe_float(
+                        shadow.get("shadow_confidence"),
+                        default=0.0,
                     ),
                     "Evaluated At": shadow.get("evaluated_at"),
                 }
@@ -243,8 +239,9 @@ class ShadowValidationService:
                 latest_shadow_decision=str(
                     latest.get("shadow_decision") or "NO DATA"
                 ),
-                latest_shadow_confidence=_num(
-                    latest.get("shadow_confidence")
+                latest_shadow_confidence=safe_float(
+                    latest.get("shadow_confidence"),
+                    default=0.0,
                 ),
                 stability_minutes=stability["minutes"],
                 stability_samples=stability["samples"],
@@ -273,14 +270,14 @@ class ShadowValidationService:
                 continue
 
             actual_action = _trade_action(order)
-            result = _result_label(_num(order.get("realized_pnl")))
+            result = _result_label(safe_float(order.get("realized_pnl"), default=0.0))
 
             for module in shadow.get("modules") or []:
                 name = str(module.get("module") or "UNKNOWN")
                 recommendation = str(
                     module.get("recommendation") or "WAIT"
                 ).upper()
-                confidence = _num(module.get("confidence"))
+                confidence = safe_float(module.get("confidence"), default=0.0)
 
                 counters[name]["observations"] += 1
                 if confidence > 0:

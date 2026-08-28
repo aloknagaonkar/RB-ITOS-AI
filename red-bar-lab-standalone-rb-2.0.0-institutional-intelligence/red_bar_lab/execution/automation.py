@@ -413,16 +413,6 @@ class RedBarPaperAutomationService:
         order_id: str | None = None,
         score: float | None = None,
     ) -> None:
-        previous = self.database.read_execution_state_events(
-            signal_id=signal_id,
-            limit=1,
-        )
-        if (
-            previous
-            and previous[0].get("state") == state
-            and previous[0].get("detail") == detail
-        ):
-            return
         self.database.insert_execution_state_event(
             {
                 "event_id": f"EVT-{uuid4().hex[:14].upper()}",
@@ -521,9 +511,9 @@ class RedBarPaperAutomationService:
                 default_stop_loss_pct=self.stop_loss_pct,
                 default_target_pct=self.target_pct,
             )
-            existing_signal_entries = _count_signal_entries(
-                historical_orders,
-                signal_id,
+            existing_signal_entries = self.database.count_signal_entries(
+                account_id=self.engine.account_id,
+                signal_id=signal_id,
             )
             if (
                 execution_policy.strategy_source == "RED_BAR_V2"

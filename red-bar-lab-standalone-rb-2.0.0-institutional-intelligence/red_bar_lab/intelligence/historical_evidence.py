@@ -10,6 +10,8 @@ from typing import Iterable
 
 import pandas as pd
 
+from red_bar_lab.utils import safe_float
+
 
 EVIDENCE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS historical_evidence_records (
@@ -334,15 +336,6 @@ class HistoricalEvidenceService:
         self.store = HistoricalEvidenceStore(database)
 
     @staticmethod
-    def _num(value: object) -> float | None:
-        try:
-            if value is None or pd.isna(value):
-                return None
-            return float(value)
-        except (TypeError, ValueError):
-            return None
-
-    @staticmethod
     def _int(value: object) -> int | None:
         try:
             if value is None or pd.isna(value):
@@ -458,8 +451,8 @@ class HistoricalEvidenceService:
             instrument_key = str(signal.get("instrument_key") or "") or self.UNDERLYING_KEYS.get(
                 str(order.get("underlying_name") or "").upper()
             )
-            entry_price = self._num(order.get("entry_price"))
-            exit_price = self._num(order.get("exit_price"))
+            entry_price = safe_float(order.get("entry_price"))
+            exit_price = safe_float(order.get("exit_price"))
             return_pct = self._return_pct(entry_price, exit_price)
             status = str(order.get("status") or "UNKNOWN").upper()
             outcome = self._outcome(return_pct, status)
@@ -475,17 +468,17 @@ class HistoricalEvidenceService:
                 "candidate_symbol": order.get("tradingsymbol"),
                 "option_type": order.get("option_type"),
                 "candidate_rank": self._int(order.get("candidate_rank")),
-                "candidate_score": self._num(order.get("candidate_score")),
-                "opportunity_score": self._num(order.get("opportunity_score")),
-                "selection_score": self._num(order.get("selection_score")),
+                "candidate_score": safe_float(order.get("candidate_score")),
+                "opportunity_score": safe_float(order.get("opportunity_score")),
+                "selection_score": safe_float(order.get("selection_score")),
                 "decision": "APPROVED",
                 "execution": "EXECUTED",
                 "entry_price": entry_price,
-                "entry_underlying_5m_close": self._num(order.get("entry_underlying_5m_close")),
-                "entry_ema10": self._num(order.get("entry_ema10")),
+                "entry_underlying_5m_close": safe_float(order.get("entry_underlying_5m_close")),
+                "entry_ema10": safe_float(order.get("entry_ema10")),
                 "entry_ema10_state": order.get("entry_ema10_state"),
-                "mfe_points": self._num(order.get("mfe_points")),
-                "mae_points": self._num(order.get("mae_points")),
+                "mfe_points": safe_float(order.get("mfe_points")),
+                "mae_points": safe_float(order.get("mae_points")),
                 "outcome_result": outcome,
             }
             completeness, missing = self._completeness(row)
@@ -512,20 +505,20 @@ class HistoricalEvidenceService:
                 candidate_symbol=str(order.get("tradingsymbol") or "") or None,
                 instrument_token=token or None,
                 option_type=str(order.get("option_type") or "") or None,
-                strike=self._num(order.get("strike")),
+                strike=safe_float(order.get("strike")),
                 expiry=str(order.get("expiry") or "") or None,
                 candidate_rank=self._int(order.get("candidate_rank")),
-                candidate_score=self._num(order.get("candidate_score")),
+                candidate_score=safe_float(order.get("candidate_score")),
                 entry_mode=str(order.get("entry_mode") or "") or None,
-                signal_age_seconds=self._num(order.get("signal_age_at_entry")),
-                opportunity_score=self._num(order.get("opportunity_score")),
-                reward_remaining_pct=self._num(order.get("reward_remaining_pct")),
-                selection_score=self._num(order.get("selection_score")),
+                signal_age_seconds=safe_float(order.get("signal_age_at_entry")),
+                opportunity_score=safe_float(order.get("opportunity_score")),
+                reward_remaining_pct=safe_float(order.get("reward_remaining_pct")),
+                selection_score=safe_float(order.get("selection_score")),
                 history_sample_size=self._int(order.get("historical_sample_size")),
-                history_win_rate_pct=self._num(order.get("historical_win_rate_pct")),
-                history_profit_factor=self._num(order.get("historical_profit_factor")),
-                historical_expectancy_pct=self._num(order.get("historical_expectancy_pct")),
-                committee_confidence_pct=self._num(order.get("execution_probability_pct")),
+                history_win_rate_pct=safe_float(order.get("historical_win_rate_pct")),
+                history_profit_factor=safe_float(order.get("historical_profit_factor")),
+                historical_expectancy_pct=safe_float(order.get("historical_expectancy_pct")),
+                committee_confidence_pct=safe_float(order.get("execution_probability_pct")),
                 committee_expectancy_pct=None,
                 portfolio_status="ADMITTED",
                 portfolio_reason="PAPER_EXECUTION_OPENED",
@@ -533,20 +526,20 @@ class HistoricalEvidenceService:
                 execution="EXECUTED",
                 blocker="NONE",
                 trade_status=status,
-                entry_underlying_price=self._num(order.get("underlying_price_entry")),
+                entry_underlying_price=safe_float(order.get("underlying_price_entry")),
                 entry_price=entry_price,
                 exit_timestamp=str(order.get("exit_timestamp") or "") or None,
                 exit_price=exit_price,
                 exit_reason=str(order.get("exit_reason") or "") or None,
-                mfe_points=self._num(order.get("mfe_points")),
-                mae_points=self._num(order.get("mae_points")),
+                mfe_points=safe_float(order.get("mfe_points")),
+                mae_points=safe_float(order.get("mae_points")),
                 holding_minutes=self._holding_minutes(entry_ts, order.get("exit_timestamp")),
-                realized_pnl=self._num(order.get("realized_pnl")),
+                realized_pnl=safe_float(order.get("realized_pnl")),
                 return_pct=return_pct,
                 outcome_result=outcome,
                 outcome_basis=("PAPER_EXECUTION" if status == "CLOSED" else "OPEN_POSITION"),
-                entry_underlying_5m_close=self._num(order.get("entry_underlying_5m_close")),
-                entry_ema10=self._num(order.get("entry_ema10")),
+                entry_underlying_5m_close=safe_float(order.get("entry_underlying_5m_close")),
+                entry_ema10=safe_float(order.get("entry_ema10")),
                 entry_ema10_state=str(order.get("entry_ema10_state") or "") or None,
                 entry_ema10_timestamp=str(order.get("entry_ema10_timestamp") or "") or None,
                 contract_entry_number=contract_counts[contract_key],
@@ -594,9 +587,9 @@ class HistoricalEvidenceService:
                 candidate_symbol or "NO_CANDIDATE",
                 str(row.get("candidate_rank") or 0),
             ))
-            entry_price = self._num(row.get("option_entry_price"))
-            exit_price = self._num(row.get("option_exit_price"))
-            return_pct = self._num(row.get("option_return_pct"))
+            entry_price = safe_float(row.get("option_entry_price"))
+            exit_price = safe_float(row.get("option_exit_price"))
+            return_pct = safe_float(row.get("option_return_pct"))
             if return_pct is None:
                 return_pct = self._return_pct(entry_price, exit_price)
             outcome = str(row.get("outcome_result") or "UNKNOWN").upper()
@@ -611,17 +604,17 @@ class HistoricalEvidenceService:
                 "candidate_symbol": candidate_symbol,
                 "option_type": row.get("option_side"),
                 "candidate_rank": self._int(row.get("candidate_rank")),
-                "candidate_score": self._num(row.get("candidate_score")),
-                "opportunity_score": self._num(row.get("opportunity_health")),
+                "candidate_score": safe_float(row.get("candidate_score")),
+                "opportunity_score": safe_float(row.get("opportunity_health")),
                 "selection_score": None,
                 "decision": row.get("decision"),
                 "execution": row.get("execution"),
                 "entry_price": entry_price,
-                "entry_underlying_5m_close": self._num(row.get("ema10_5m_close")),
-                "entry_ema10": self._num(row.get("ema10_5m_value")),
+                "entry_underlying_5m_close": safe_float(row.get("ema10_5m_close")),
+                "entry_ema10": safe_float(row.get("ema10_5m_value")),
                 "entry_ema10_state": row.get("ema10_5m_state"),
-                "mfe_points": self._num(row.get("mfe_points")),
-                "mae_points": self._num(row.get("mae_points")),
+                "mfe_points": safe_float(row.get("mfe_points")),
+                "mae_points": safe_float(row.get("mae_points")),
                 "outcome_result": outcome,
             }
             completeness, missing = self._completeness(canonical)
@@ -639,10 +632,10 @@ class HistoricalEvidenceService:
                 candidate_symbol=candidate_symbol,
                 option_type=str(row.get("option_side") or "") or None,
                 candidate_rank=self._int(row.get("candidate_rank")),
-                candidate_score=self._num(row.get("candidate_score")),
-                opportunity_score=self._num(row.get("opportunity_health")),
-                committee_confidence_pct=self._num(row.get("final_confidence_pct")),
-                committee_expectancy_pct=self._num(row.get("expectancy_pct")),
+                candidate_score=safe_float(row.get("candidate_score")),
+                opportunity_score=safe_float(row.get("opportunity_health")),
+                committee_confidence_pct=safe_float(row.get("final_confidence_pct")),
+                committee_expectancy_pct=safe_float(row.get("expectancy_pct")),
                 portfolio_status=str(row.get("portfolio_status") or "") or None,
                 portfolio_reason=str(row.get("portfolio_reason") or "") or None,
                 decision=str(row.get("decision") or "") or None,
@@ -652,13 +645,13 @@ class HistoricalEvidenceService:
                 entry_price=entry_price,
                 exit_price=exit_price,
                 exit_reason=str(row.get("exit_reason") or "") or None,
-                mfe_points=self._num(row.get("mfe_points")),
-                mae_points=self._num(row.get("mae_points")),
+                mfe_points=safe_float(row.get("mfe_points")),
+                mae_points=safe_float(row.get("mae_points")),
                 return_pct=return_pct,
                 outcome_result=outcome,
                 outcome_basis=str(row.get("outcome_basis") or "") or None,
-                entry_underlying_5m_close=self._num(row.get("ema10_5m_close")),
-                entry_ema10=self._num(row.get("ema10_5m_value")),
+                entry_underlying_5m_close=safe_float(row.get("ema10_5m_close")),
+                entry_ema10=safe_float(row.get("ema10_5m_value")),
                 entry_ema10_state=str(row.get("ema10_5m_state") or "") or None,
                 entry_ema10_timestamp=str(row.get("ema10_5m_timestamp") or "") or None,
                 shadow_execution_impact="NONE",

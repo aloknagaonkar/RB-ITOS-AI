@@ -23,6 +23,7 @@ from red_bar_lab.services.red_bar_v2_market_data_evidence import (
     CandlePullEvidence,
     build_candle_pull_evidence,
 )
+from red_bar_lab.utils import safe_float
 
 
 _ACTIVE_ORDER_STATUSES = {
@@ -70,15 +71,6 @@ def _latest_allowed_admission(events: Any) -> Any | None:
     return None
 
 
-def _num(value: object) -> float | None:
-    try:
-        if value is None or pd.isna(value):
-            return None
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
 def _ordered_candles(frame: pd.DataFrame) -> tuple[pd.DataFrame, str | None]:
     work = frame.copy()
     timestamp_column = next(
@@ -121,7 +113,7 @@ def _latest_completed_1m_candle(
     row = completed.iloc[-1]
     timestamp = row.get(timestamp_column)
     return (
-        _num(row.get("close")),
+        safe_float(row.get("close")),
         _rsi14(completed),
         timestamp.isoformat() if hasattr(timestamp, "isoformat") else str(timestamp),
     )
@@ -146,8 +138,8 @@ def _rsi14(frame: pd.DataFrame) -> float | None:
         adjust=False,
         min_periods=14,
     ).mean()
-    last_gain = _num(avg_gain.iloc[-1])
-    last_loss = _num(avg_loss.iloc[-1])
+    last_gain = safe_float(avg_gain.iloc[-1])
+    last_loss = safe_float(avg_loss.iloc[-1])
     if last_gain is None or last_loss is None:
         return None
     if last_loss == 0:
@@ -170,7 +162,7 @@ def _latest_vwap(frame: pd.DataFrame) -> float | None:
         cumulative_volume != 0
     )
     valid = vwap.dropna()
-    return _num(valid.iloc[-1]) if not valid.empty else None
+    return safe_float(valid.iloc[-1]) if not valid.empty else None
 
 
 def _reference_geometry(
@@ -198,8 +190,8 @@ def _reference_geometry(
         return None, None, None
     row = frame.loc[distances.idxmin()]
     return (
-        _num(row.get("high")),
-        _num(row.get("low")),
+        safe_float(row.get("high")),
+        safe_float(row.get("low")),
         row.get(timestamp_column).isoformat()
         if hasattr(row.get(timestamp_column), "isoformat")
         else str(row.get(timestamp_column)),
@@ -216,12 +208,12 @@ def _live_market_snapshot_fields(
     futures_frame, futures_timestamp_column = _ordered_candles(futures_candles)
 
     index_close = (
-        _num(index_frame.iloc[-1].get("close"))
+        safe_float(index_frame.iloc[-1].get("close"))
         if not index_frame.empty
         else None
     )
     futures_close = (
-        _num(futures_frame.iloc[-1].get("close"))
+        safe_float(futures_frame.iloc[-1].get("close"))
         if not futures_frame.empty
         else None
     )

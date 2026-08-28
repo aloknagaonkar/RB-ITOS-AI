@@ -4,6 +4,8 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from red_bar_lab.utils import safe_float
+
 
 @dataclass(frozen=True)
 class ContractQualityMetric:
@@ -44,15 +46,6 @@ class ContractQualityEngine:
     """Advisory quality weighting for option-chain evidence."""
 
     @staticmethod
-    def _num(value: object) -> float | None:
-        try:
-            if value is None or pd.isna(value):
-                return None
-            return float(value)
-        except (TypeError, ValueError):
-            return None
-
-    @staticmethod
     def _records(frame: pd.DataFrame) -> list[dict[str, object]]:
         return frame.to_dict(orient="records")
 
@@ -62,9 +55,9 @@ class ContractQualityEngine:
             return None
         best: tuple[float, float] | None = None
         for row in cls._records(frame):
-            strike = cls._num(row.get("strike"))
-            call = cls._num(row.get("call_ltp"))
-            put = cls._num(row.get("put_ltp"))
+            strike = safe_float(row.get("strike"))
+            call = safe_float(row.get("call_ltp"))
+            put = safe_float(row.get("put_ltp"))
             if strike is None or call is None or put is None or call <= 0 or put <= 0:
                 continue
             candidate = (abs(call - put), strike)
@@ -104,16 +97,16 @@ class ContractQualityEngine:
         step = max(1.0, cls._strike_step(frame))
         result: list[ContractQualityMetric] = []
         for row in cls._records(frame):
-            strike = cls._num(row.get("strike"))
+            strike = safe_float(row.get("strike"))
             if strike is None:
                 continue
             distance = abs(strike - atm) if atm is not None else None
             distance_steps = (distance / step) if distance is not None else 8.0
             proximity_score = max(0.0, 100.0 - distance_steps * 12.5)
             for side, prefix in (("CE", "call"), ("PE", "put")):
-                premium = cls._num(row.get(f"{prefix}_ltp"))
-                oi = cls._num(row.get(f"{prefix}_oi"))
-                volume = cls._num(row.get(f"{prefix}_volume"))
+                premium = safe_float(row.get(f"{prefix}_ltp"))
+                oi = safe_float(row.get(f"{prefix}_oi"))
+                volume = safe_float(row.get(f"{prefix}_volume"))
                 premium_score = min(100.0, max(0.0, (premium or 0.0) / 10.0 * 100.0))
                 oi_score = min(100.0, max(0.0, (oi or 0.0) / 500000.0 * 100.0))
                 volume_score = min(100.0, max(0.0, (volume or 0.0) / 1000000.0 * 100.0))

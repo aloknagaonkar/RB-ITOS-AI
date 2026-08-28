@@ -6,16 +6,9 @@ from statistics import mean
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from red_bar_lab.utils import safe_float
+
 IST = ZoneInfo("Asia/Kolkata")
-
-
-def _num(value: Any) -> float | None:
-    try:
-        if value is None:
-            return None
-        return float(value)
-    except (TypeError, ValueError):
-        return None
 
 
 @dataclass(frozen=True)
@@ -107,7 +100,7 @@ class ShadowIntelligenceEngine:
         modules: list[ShadowModuleResult] = []
 
         # PCR: directional observation only, not a gate.
-        pcr = _num(pcr_oi)
+        pcr = safe_float(pcr_oi)
         if pcr is None:
             modules.append(_result(
                 "PCR", "NEUTRAL", "UNKNOWN", 0, "WAIT",
@@ -178,8 +171,8 @@ class ShadowIntelligenceEngine:
                 ))
 
         # Max pain is intentionally informational; it does not claim direction.
-        mp = _num(max_pain)
-        spot = _num(spot_price)
+        mp = safe_float(max_pain)
+        spot = safe_float(spot_price)
         if mp is None or spot is None:
             modules.append(_result(
                 "Max Pain", "NEUTRAL", "UNKNOWN", 0, "WAIT",
@@ -195,7 +188,7 @@ class ShadowIntelligenceEngine:
             ))
 
         # Call/put walls.
-        cw, pw = _num(call_wall), _num(put_wall)
+        cw, pw = safe_float(call_wall), safe_float(put_wall)
         if spot is None or cw is None or pw is None:
             modules.append(_result(
                 "Call / Put Wall", "NEUTRAL", "UNKNOWN", 0, "WAIT",
@@ -219,11 +212,11 @@ class ShadowIntelligenceEngine:
 
         # Greeks are evaluated as contract quality for the current direction.
         candidate = best_candidate or {}
-        delta = _num(candidate.get("Delta"))
-        gamma = _num(candidate.get("Gamma"))
-        iv = _num(candidate.get("IV"))
-        theta = _num(candidate.get("Theta"))
-        vega = _num(candidate.get("Vega"))
+        delta = safe_float(candidate.get("Delta"))
+        gamma = safe_float(candidate.get("Gamma"))
+        iv = safe_float(candidate.get("IV"))
+        theta = safe_float(candidate.get("Theta"))
+        vega = safe_float(candidate.get("Vega"))
         if delta is None and gamma is None and iv is None:
             modules.append(_result(
                 "Greeks", "NEUTRAL", "UNKNOWN", 0, "WAIT",
@@ -278,8 +271,8 @@ class ShadowIntelligenceEngine:
                 "No decisive persisted 5m trend is available."
             ))
 
-        bull_structure = _num(volume.get("bullish_structure_score"))
-        bear_structure = _num(volume.get("bearish_structure_score"))
+        bull_structure = safe_float(volume.get("bullish_structure_score"))
+        bear_structure = safe_float(volume.get("bearish_structure_score"))
         structure_state = str(volume.get("structure_state") or "")
         if bull_structure is None and bear_structure is None:
             modules.append(_result(
@@ -308,7 +301,7 @@ class ShadowIntelligenceEngine:
                 f"{structure_state or 'Structure'} is not directionally decisive."
             ))
 
-        relative_volume = _num(volume.get("relative_volume_20m"))
+        relative_volume = safe_float(volume.get("relative_volume_20m"))
         volume_trend = str(volume.get("volume_trend_5m") or "")
         if relative_volume is None:
             modules.append(_result(

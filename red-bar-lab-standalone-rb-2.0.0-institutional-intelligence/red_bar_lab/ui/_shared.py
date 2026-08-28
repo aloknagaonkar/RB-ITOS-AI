@@ -101,25 +101,9 @@ def _build_and_store_levels(
     selected_date: date,
     dates: tuple[date, ...],
 ) -> int:
-    current = historical.read_day(instrument_key, selected_date, interval_minutes=1)
-    previous_dates = [day for day in dates if day < selected_date][-10:]
-    previous = [
-        (day, historical.read_day(instrument_key, day, interval_minutes=1))
-        for day in previous_dates
-    ]
-    levels = build_daily_levels(selected_date, current, previous, previous_days=10)
-    all_levels = list(levels.previous_day_levels)
-    all_levels.extend(
-        level
-        for level in (
-            levels.first_candle,
-            levels.next_red_candle,
-            levels.mid_session_candle,
-        )
-        if level is not None
-    )
-    return database.replace_reference_levels(
-        instrument_key, selected_date.isoformat(), all_levels
+    from red_bar_lab.services.ui_business_logic import build_and_store_levels
+    return build_and_store_levels(
+        database, historical, instrument_key, selected_date, dates
     )
 
 
@@ -260,12 +244,8 @@ INDIA_TZ = ZoneInfo("Asia/Kolkata")
 
 
 def _is_session_complete(trading_date: date) -> bool:
-    now = datetime.now(INDIA_TZ)
-    if trading_date < now.date():
-        return True
-    if trading_date > now.date():
-        return False
-    return now.time().replace(tzinfo=None) >= time(15, 30)
+    from red_bar_lab.services.ui_business_logic import is_session_complete
+    return is_session_complete(trading_date)
 
 
 def _filter_backtest_rows(
@@ -278,107 +258,27 @@ def _filter_backtest_rows(
     signal_quality="ALL",
     min_success_score=0,
 ):
-    filtered = list(rows)
-    if signal_type != "ALL":
-        filtered = [
-            r for r in filtered
-            if str(r.get("level_type")) == signal_type
-        ]
-    if direction != "ALL":
-        filtered = [
-            r for r in filtered
-            if str(r.get("direction")) == direction
-        ]
-    if exit_model != "ALL":
-        filtered = [
-            r for r in filtered
-            if str(r.get("exit_model")) == exit_model
-        ]
-    if trade_result != "ALL":
-        from red_bar_lab.strategy.trade_outcome import classify_trade_result
-        filtered = [
-            r for r in filtered
-            if classify_trade_result(r.get("points")) == trade_result
-        ]
-
-    if signal_quality != "ALL" or min_success_score > 0:
-        grouped = {}
-        for row in rows:
-            signal_id = row.get("signal_id")
-            if signal_id:
-                grouped.setdefault(str(signal_id), []).append(row)
-
-        allowed_signal_ids = set()
-        for signal_id, signal_rows in grouped.items():
-            summary = summarize_actionable_models(signal_rows)
-            quality = str(summary.get("signal_quality") or "")
-            success = int(summary.get("actionable_success") or 0)
-
-            quality_match = (
-                signal_quality == "ALL"
-                or quality == signal_quality
-            )
-            score_match = success >= int(min_success_score)
-
-            if quality_match and score_match:
-                allowed_signal_ids.add(signal_id)
-
-        filtered = [
-            r for r in filtered
-            if str(r.get("signal_id")) in allowed_signal_ids
-        ]
-
-    return filtered
+    from red_bar_lab.services.ui_business_logic import filter_backtest_rows
+    return filter_backtest_rows(
+        rows, signal_type=signal_type, direction=direction,
+        exit_model=exit_model, trade_result=trade_result,
+        signal_quality=signal_quality, min_success_score=min_success_score,
+    )
 
 
 def _filtered_backtest_summary(rows):
-    actionable = actionable_trade_rows(rows)
-    benchmark = benchmark_trade_rows(rows)
-
-    points = [
-        float(r["points"])
-        for r in actionable
-        if r.get("points") is not None
-    ]
-    wins = [p for p in points if p > 0]
-    losses = [p for p in points if p < 0]
-    breakeven = [p for p in points if p == 0]
-
-    return {
-        "actionable_rows": len(actionable),
-        "benchmark_rows": len(benchmark),
-        "wins": len(wins),
-        "losses": len(losses),
-        "breakeven": len(breakeven),
-        "win_rate": (
-            len(wins) / max(1, len(wins)+len(losses)+len(breakeven)) * 100.0
-        ),
-        "average_points": (
-            sum(points) / len(points) if points else 0.0
-        ),
-        "best_points": max(points) if points else None,
-        "worst_points": min(points) if points else None,
-    }
+    from red_bar_lab.services.ui_business_logic import filtered_backtest_summary
+    return filtered_backtest_summary(rows)
 
 
 def _format_ist_time(value):
-    if value in (None, ""):
-        return None
-    try:
-        ts = pd.Timestamp(value)
-        if ts.tzinfo is None:
-            ts = ts.tz_localize("Asia/Kolkata")
-        else:
-            ts = ts.tz_convert("Asia/Kolkata")
-        return ts.strftime("%H:%M:%S")
-    except Exception:
-        return str(value)
+    from red_bar_lab.services.ui_business_logic import format_ist_time
+    return format_ist_time(value)
 
 
 def _round_points(value):
-    if value is None:
-        return None
-    return round(float(value), 2)
+    from red_bar_lab.services.ui_business_logic import round_points
+    return round_points(value)
 
 
 def _trade_timeline_rows(rows):
@@ -417,28 +317,8 @@ def _trade_timeline_rows(rows):
 
 
 def _actionable_completion_exit(trade_rows):
-    actionable = [
-        row
-        for row in trade_rows
-        if str(row.get("exit_model") or "") != "EOD_HOLD"
-    ]
-    closed = [
-        row
-        for row in actionable
-        if row.get("status") == "CLOSED"
-        and row.get("exit_timestamp")
-    ]
-    if len(closed) < 10:
-        return None, None
-
-    last = max(
-        closed,
-        key=lambda row: pd.Timestamp(row["exit_timestamp"]),
-    )
-    return (
-        _format_ist_time(last.get("exit_timestamp")),
-        last.get("exit_price"),
-    )
+    from red_bar_lab.services.ui_business_logic import actionable_completion_exit
+    return actionable_completion_exit(trade_rows)
 
 
 def _current_dashboard_rows(
@@ -448,77 +328,11 @@ def _current_dashboard_rows(
     active_attempts,
     completed_attempts,
 ):
-    rows = []
-    trade_rows = database.read_paper_trade_outcomes(
-        instrument_key,
-        trading_date,
+    from red_bar_lab.services.ui_business_logic import current_dashboard_rows
+    return current_dashboard_rows(
+        database, instrument_key, trading_date,
+        active_attempts, completed_attempts,
     )
-    by_signal = {}
-    for row in trade_rows:
-        signal_id = row.get("signal_id")
-        if signal_id:
-            by_signal.setdefault(str(signal_id), []).append(row)
-
-    def append_item(item, completed=False):
-        signal_id = str(item.get("signal_id") or "")
-        linked = by_signal.get(signal_id, [])
-        actionable = summarize_actionable_models(linked)
-
-        if completed:
-            entry_time = item.get("entry_timestamp")
-            entry_price = item.get("entry_price")
-            current_price = item.get("current_price")
-            current_pl = item.get("benchmark_current_points")
-            status = item.get("trade_status") or "COMPLETED"
-            score = item.get("actionable_score")
-            quality = item.get("signal_quality")
-            best_points = item.get("best_actionable_points")
-        else:
-            entry_time = item.get("confirmation_timestamp")
-            entry_price = item.get("underlying_entry")
-            current_price = item.get("current_price")
-            current_pl = item.get("live_points")
-            status = item.get("trade_status")
-            score = item.get("actionable_score")
-            quality = item.get("signal_quality")
-            best_points = item.get("best_actionable_points")
-
-        exit_time, exit_price = _actionable_completion_exit(linked)
-
-        rows.append({
-            "priority": item.get("priority"),
-            "signal": item.get("signal_label"),
-            "status": status,
-            "entry_time_ist": _format_ist_time(entry_time),
-            "entry_price": entry_price,
-            "current_price": current_price,
-            "current_p_l": _round_points(current_pl),
-            "exit_time_ist": exit_time,
-            "exit_price": exit_price,
-            "best_p_l": _round_points(best_points),
-            "score": score,
-            "quality": quality,
-        })
-
-    for item in active_attempts:
-        append_item(item, completed=False)
-
-    for item in completed_attempts:
-        append_item(item, completed=True)
-
-    priority_order = {
-        "HIGH": 0,
-        "MEDIUM": 1,
-        "LOW": 2,
-        "IGNORE": 3,
-    }
-    rows.sort(
-        key=lambda row: (
-            priority_order.get(str(row.get("priority")), 9),
-            str(row.get("signal") or ""),
-        )
-    )
-    return rows
 
 
 def _decision_badge_html(value: object, tone: str = "info") -> str:

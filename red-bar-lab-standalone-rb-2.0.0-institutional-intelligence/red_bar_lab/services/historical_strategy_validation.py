@@ -5,6 +5,8 @@ from datetime import date
 from math import inf
 from typing import Iterable, Protocol, Sequence
 
+from red_bar_lab.utils import safe_float
+
 RESEARCH_ONLY = "RESEARCH_ONLY"
 
 
@@ -163,13 +165,6 @@ def select_validation_dates(
     return tuple(x for x in dates if custom_start <= x <= custom_end)
 
 
-def _num(value, default=0.0) -> float:
-    try:
-        return float(default if value is None else value)
-    except (TypeError, ValueError):
-        return float(default)
-
-
 def calculate_metrics(
     days: Sequence[DayValidationResult],
     *,
@@ -181,7 +176,7 @@ def calculate_metrics(
 ) -> ValidationMetrics:
     ready_days = [d for d in days if d.ready]
     rows = [r for d in ready_days for r in d.rows if r.return_pct is not None]
-    returns = [_num(r.return_pct) for r in rows]
+    returns = [safe_float(r.return_pct) for r in rows]
     winners = sum(v > 0 for v in returns)
     losers = sum(v < 0 for v in returns)
     breakeven = sum(v == 0 for v in returns)
@@ -203,8 +198,8 @@ def calculate_metrics(
     trade_count = len(returns)
     win_rate = winners / trade_count * 100.0 if trade_count else 0.0
     expectancy = sum(returns) / trade_count if trade_count else 0.0
-    mfe = [_num(r.mfe_pct) for r in rows if r.mfe_pct is not None]
-    mae = [_num(r.mae_pct) for r in rows if r.mae_pct is not None]
+    mfe = [safe_float(r.mfe_pct) for r in rows if r.mfe_pct is not None]
+    mae = [safe_float(r.mae_pct) for r in rows if r.mae_pct is not None]
 
     reasons: list[str] = []
     if ready_count < minimum_ready_days:
