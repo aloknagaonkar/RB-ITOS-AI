@@ -47,6 +47,7 @@ def build_component_specs(cfg) -> List[ChildProcessSpec]:
                 "--interval-seconds", str(cfg.collector_interval_seconds),
                 "--mode", "auto",
             ],
+            env_extras=forward_env,
             heartbeat_fresh_seconds=cfg.collector_interval_seconds + 30,
             heartbeat_stale_seconds=cfg.collector_interval_seconds * 3,
         ),
