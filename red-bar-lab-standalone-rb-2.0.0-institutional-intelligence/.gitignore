@@ -48,6 +48,12 @@ artifacts/**/*.csv
 artifacts/**/*.parquet
 artifacts/**/*.jsonl
 
+# Runtime scratch dirs (test runs, validation runs)
+.tmp-*/
+pytest_change*_runtime/
+pytest_local_runtime/
+rsi-*-validation.zip
+
 # Build / packaging
 build/
 dist/
