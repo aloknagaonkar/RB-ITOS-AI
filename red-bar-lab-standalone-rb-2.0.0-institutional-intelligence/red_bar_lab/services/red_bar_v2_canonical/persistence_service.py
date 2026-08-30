@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Callable
+from typing import Any, Callable
 
 from red_bar_lab.domain.red_bar_v2 import AdmissionOutcome
 
@@ -20,9 +20,24 @@ class RedBarV2CanonicalPersistenceService:
         self,
         repository: RedBarV2CanonicalRepository,
         clock: Callable[[], datetime] | None = None,
+        evidence_database: Any | None = None,
+        evidence_writer: Callable[..., Any] | None = None,
+        run_id: str | None = None,
     ) -> None:
         self.repository = repository
         self.clock = clock or (lambda: datetime.now().astimezone())
+        # Optional handle to the main RedBarDatabase. Kept for
+        # backwards compatibility — new code should pass
+        # ``evidence_writer`` instead.
+        self.evidence_database = evidence_database
+        # A callable that writes a single ``process_evidence`` row.
+        # ``None`` means "don't write evidence" (the safe default for
+        # tests and one-shot scripts).
+        self.evidence_writer = evidence_writer
+        # The run_id the coordinator is currently in the middle of.
+        # The persistence service uses it to attach ``persistence`` step
+        # evidence to the same run_id as the upstream resolution.
+        self.run_id = run_id
 
     def persist(
         self,
@@ -89,4 +104,30 @@ class RedBarV2CanonicalPersistenceService:
             section_3=bundle,
             parity=parity,
         )
-        return self.repository.persist_resolution(envelope)
+        # Record persistence as its own evidence step. We do this
+        # *before* the actual repository write so the timing reflects
+        # the write itself.
+        started = self.clock()
+        result = self.repository.persist_resolution(envelope)
+        finished = self.clock()
+        if self.evidence_writer is not None and self.run_id is not None:
+            try:
+                self.evidence_writer(
+                    process_name="canonical_shadow",
+                    run_id=self.run_id,
+                    step_name="persistence",
+                    parent_step="shadow_observe",
+                    started_at=started.isoformat(),
+                    status="OK",
+                    duration_ms=(finished - started).total_seconds() * 1000.0,
+                    artifacts={
+                        "resolution_id": resolution_id,
+                        "outcome": result.outcome.value
+                        if hasattr(result, "outcome") and result.outcome is not None
+                        else None,
+                    },
+                )
+            except Exception:  # noqa: BLE001
+                # Best-effort: never let evidence writing break persistence.
+                pass
+        return result

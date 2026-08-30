@@ -302,8 +302,41 @@ CREATE TABLE IF NOT EXISTS intelligence_pipeline_run_status (
     trading_date TEXT NOT NULL,
     status TEXT NOT NULL,
     message TEXT,
+    confirmed_count INTEGER,
+    core_eligible_count INTEGER,
+    hybrid_eligible_count INTEGER,
+    run_duration_ms REAL,
+    started_at TEXT,
     updated_at TEXT NOT NULL,
     PRIMARY KEY(instrument_key, trading_date)
+);
+
+CREATE TABLE IF NOT EXISTS process_evidence (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    process_name TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    step_name TEXT NOT NULL,
+    parent_step TEXT,
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    status TEXT NOT NULL,
+    duration_ms REAL,
+    error_message TEXT,
+    artifacts_json TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_evidence_process_step_time
+    ON process_evidence(process_name, step_name, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_evidence_run
+    ON process_evidence(run_id);
+
+-- One row per process: the most recent run_id that process produced.
+-- Used by the cadence panel to correlate cross-process cycles.
+CREATE TABLE IF NOT EXISTS process_run_correlation (
+    process_name TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    artifacts_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS eod_pipeline_validation (
@@ -524,6 +557,18 @@ CREATE TABLE IF NOT EXISTS paper_monitor_status (
     last_decision TEXT,
     last_reason TEXT,
     last_error TEXT,
+    last_success_at TEXT,
+    last_success_decision TEXT,
+    last_success_signal_id TEXT,
+    last_success_total_ms REAL,
+    last_success_stages_json TEXT,
+    last_success_underlying_status TEXT,
+    last_success_readiness_ms REAL,
+    last_success_futures_status TEXT,
+    last_success_candle_timestamp TEXT,
+    last_success_candle_age_seconds REAL,
+    last_success_bridge_alignment TEXT,
+    last_success_readiness_reason TEXT,
     updated_at TEXT NOT NULL
 );
 
@@ -832,6 +877,31 @@ _PAPER_EXECUTION_EXIT_COLUMNS = {
 }
 
 
+_PAPER_MONITOR_SUCCESS_COLUMNS = {
+    "last_success_at": "TEXT",
+    "last_success_decision": "TEXT",
+    "last_success_signal_id": "TEXT",
+    "last_success_total_ms": "REAL",
+    "last_success_stages_json": "TEXT",
+    "last_success_underlying_status": "TEXT",
+    "last_success_readiness_ms": "REAL",
+    "last_success_futures_status": "TEXT",
+    "last_success_candle_timestamp": "TEXT",
+    "last_success_candle_age_seconds": "REAL",
+    "last_success_bridge_alignment": "TEXT",
+    "last_success_readiness_reason": "TEXT",
+}
+
+
+_INTELLIGENCE_PIPELINE_RUN_COLUMNS = {
+    "confirmed_count": "INTEGER",
+    "core_eligible_count": "INTEGER",
+    "hybrid_eligible_count": "INTEGER",
+    "run_duration_ms": "REAL",
+    "started_at": "TEXT",
+}
+
+
 _INSTITUTIONAL_EXECUTION_COLUMNS = {
     "expert_votes_json": "TEXT NOT NULL DEFAULT '[]'",
     "expectancy_pct": "REAL",
@@ -988,6 +1058,32 @@ class RedBarDatabase:
                     if name not in committee_columns:
                         conn.execute(
                             f"ALTER TABLE institutional_execution_evaluations "
+                            f"ADD COLUMN {name} {definition}"
+                        )
+
+                paper_monitor_columns = {
+                    row[1]
+                    for row in conn.execute(
+                        "PRAGMA table_info(paper_monitor_status)"
+                    )
+                }
+                for name, definition in _PAPER_MONITOR_SUCCESS_COLUMNS.items():
+                    if name not in paper_monitor_columns:
+                        conn.execute(
+                            f"ALTER TABLE paper_monitor_status "
+                            f"ADD COLUMN {name} {definition}"
+                        )
+
+                pipeline_run_columns = {
+                    row[1]
+                    for row in conn.execute(
+                        "PRAGMA table_info(intelligence_pipeline_run_status)"
+                    )
+                }
+                for name, definition in _INTELLIGENCE_PIPELINE_RUN_COLUMNS.items():
+                    if name not in pipeline_run_columns:
+                        conn.execute(
+                            f"ALTER TABLE intelligence_pipeline_run_status "
                             f"ADD COLUMN {name} {definition}"
                         )
 
@@ -2179,6 +2275,11 @@ class RedBarDatabase:
         trading_date: str,
         status: str,
         message: str | None,
+        confirmed_count: int | None = None,
+        core_eligible_count: int | None = None,
+        hybrid_eligible_count: int | None = None,
+        run_duration_ms: float | None = None,
+        started_at: str | None = None,
     ) -> None:
         self.initialize()
         now = datetime.now().astimezone().isoformat()
@@ -2186,15 +2287,33 @@ class RedBarDatabase:
             conn.execute(
                 """
                 INSERT INTO intelligence_pipeline_run_status(
-                    instrument_key,trading_date,status,message,updated_at
+                    instrument_key,trading_date,status,message,
+                    confirmed_count,core_eligible_count,hybrid_eligible_count,
+                    run_duration_ms,started_at,updated_at
                 )
-                VALUES(?,?,?,?,?)
+                VALUES(?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(instrument_key,trading_date) DO UPDATE SET
                     status=excluded.status,
                     message=excluded.message,
+                    confirmed_count=excluded.confirmed_count,
+                    core_eligible_count=excluded.core_eligible_count,
+                    hybrid_eligible_count=excluded.hybrid_eligible_count,
+                    run_duration_ms=excluded.run_duration_ms,
+                    started_at=excluded.started_at,
                     updated_at=excluded.updated_at
                 """,
-                (instrument_key,trading_date,status,message,now),
+                (
+                    instrument_key,
+                    trading_date,
+                    status,
+                    message,
+                    int(confirmed_count) if confirmed_count is not None else None,
+                    int(core_eligible_count) if core_eligible_count is not None else None,
+                    int(hybrid_eligible_count) if hybrid_eligible_count is not None else None,
+                    float(run_duration_ms) if run_duration_ms is not None else None,
+                    started_at,
+                    now,
+                ),
             )
             conn.commit()
 
@@ -2213,6 +2332,31 @@ class RedBarDatabase:
                 WHERE instrument_key=? AND trading_date=?
                 """,
                 (instrument_key,trading_date),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def read_latest_pipeline_run_status(
+        self,
+        instrument_key: str,
+    ) -> dict[str, object] | None:
+        """Return the most recent pipeline run row for an instrument, any date.
+
+        Used by the live cadence UI to show the last successful run even
+        when today's row hasn't been written yet (the orchestrator runs
+        after market close).
+        """
+        self.initialize()
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                """
+                SELECT *
+                FROM intelligence_pipeline_run_status
+                WHERE instrument_key=?
+                ORDER BY updated_at DESC
+                LIMIT 1
+                """,
+                (instrument_key,),
             ).fetchone()
         return dict(row) if row else None
 
@@ -2850,6 +2994,152 @@ class RedBarDatabase:
     ) -> dict[str, object] | None:
         return self.evaluation.read_paper_monitor_status(monitor_id)
 
+    def write_step_evidence(
+        self,
+        *,
+        process_name: str,
+        run_id: str,
+        step_name: str,
+        parent_step: str | None,
+        started_at: str,
+        status: str,
+        artifacts: dict[str, object] | None = None,
+    ) -> int:
+        return self.evaluation.write_step_evidence(
+            process_name=process_name,
+            run_id=run_id,
+            step_name=step_name,
+            parent_step=parent_step,
+            started_at=started_at,
+            status=status,
+            artifacts=artifacts,
+        )
+
+    def update_step_evidence(
+        self,
+        *,
+        step_id: int,
+        completed_at: str,
+        status: str,
+        duration_ms: float,
+        error_message: str | None = None,
+    ) -> None:
+        self.evaluation.update_step_evidence(
+            step_id=step_id,
+            completed_at=completed_at,
+            status=status,
+            duration_ms=duration_ms,
+            error_message=error_message,
+        )
+
+    def read_step_timelines(
+        self,
+        *,
+        process_name: str | None = None,
+        limit_per_step: int = 5,
+    ) -> dict[str, list[dict[str, object]]]:
+        return self.evaluation.read_step_timelines(
+            process_name=process_name,
+            limit_per_step=limit_per_step,
+        )
+
+    def read_latest_step_evidence(
+        self,
+        *,
+        process_name: str,
+        step_name: str,
+    ) -> dict[str, object] | None:
+        return self.evaluation.read_latest_step_evidence(
+            process_name=process_name,
+            step_name=step_name,
+        )
+
+    def read_running_steps(
+        self,
+        *,
+        older_than_seconds: float = 60.0,
+    ) -> list[dict[str, object]]:
+        return self.evaluation.read_running_steps(
+            older_than_seconds=older_than_seconds,
+        )
+
+    def write_process_run_correlation(
+        self,
+        *,
+        process_name: str,
+        run_id: str,
+        started_at: str,
+        artifacts: dict[str, object] | None = None,
+    ) -> None:
+        return self.evaluation.write_process_run_correlation(
+            process_name=process_name,
+            run_id=run_id,
+            started_at=started_at,
+            artifacts=artifacts,
+        )
+
+    def read_process_run_correlation(
+        self, *, process_name: str
+    ) -> dict[str, object] | None:
+        return self.evaluation.read_process_run_correlation(
+            process_name=process_name,
+        )
+
+    def read_all_process_run_correlations(self) -> list[dict[str, object]]:
+        return self.evaluation.read_all_process_run_correlations()
+
+    def read_run_evidence(self, *, run_id: str) -> list[dict[str, object]]:
+        return self.evaluation.read_run_evidence(run_id=run_id)
+
+    def read_latest_error_per_process(self) -> list[dict[str, object]]:
+        return self.evaluation.read_latest_error_per_process()
+
+    def cleanup_process_evidence(
+        self, *, retention_days: int = 7
+    ) -> int:
+        return self.evaluation.cleanup_process_evidence(
+            retention_days=retention_days,
+        )
+
+    def read_last_cleanup_at(self) -> str | None:
+        return self.evaluation.read_last_cleanup_at()
+
+    def write_last_cleanup_at(self, started_at: str) -> None:
+        return self.evaluation.write_last_cleanup_at(started_at=started_at)
+
+    def record_paper_monitor_success(
+        self,
+        monitor_id: str,
+        *,
+        success_at: str,
+        decision: str | None,
+        signal_id: str | None,
+        total_ms: float | None,
+        stages: dict[str, float] | None,
+        underlying_status: str | None = None,
+        readiness_ms: float | None = None,
+        futures_status: str | None = None,
+        candle_timestamp: str | None = None,
+        candle_age_seconds: float | None = None,
+        bridge_alignment: str | None = None,
+        readiness_reason: str | None = None,
+    ) -> None:
+        self.evaluation.record_paper_monitor_success(
+            monitor_id,
+            success_at=success_at,
+            decision=decision,
+            signal_id=signal_id,
+            total_ms=total_ms,
+            stages=stages,
+            underlying_status=underlying_status,
+            readiness_ms=readiness_ms,
+            futures_status=futures_status,
+            candle_timestamp=candle_timestamp,
+            candle_age_seconds=candle_age_seconds,
+            bridge_alignment=bridge_alignment,
+            readiness_reason=readiness_reason,
+        )
+
 
     def upsert_candidate_lifecycle(self, row: dict[str, object]) -> None:
         self.evaluation.upsert_candidate_lifecycle(row)
@@ -2932,6 +3222,27 @@ class RedBarDatabase:
     ) -> list[dict[str, object]]:
         return self.evaluation.read_paper_signal_diagnostics(
             limit=limit, signal_id=signal_id
+        )
+
+    def read_latest_signal_for_trading(
+        self, *, instrument_key: str, trading_date: str
+    ) -> dict[str, object] | None:
+        return self.evaluation.read_latest_signal_for_trading(
+            instrument_key=instrument_key, trading_date=trading_date
+        )
+
+    def read_today_paper_activity(
+        self, *, account_id: str, trading_date: str
+    ) -> dict[str, object]:
+        return self.evaluation.read_today_paper_activity(
+            account_id=account_id, trading_date=trading_date
+        )
+
+    def read_today_signal_counts(
+        self, *, instrument_key: str, trading_date: str
+    ) -> dict[str, int]:
+        return self.evaluation.read_today_signal_counts(
+            instrument_key=instrument_key, trading_date=trading_date
         )
 
     def read_latest_option_chain_snapshot(

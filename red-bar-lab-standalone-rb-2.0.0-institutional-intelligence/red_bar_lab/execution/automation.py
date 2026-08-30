@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, replace
 from datetime import date, datetime, time
 from time import perf_counter
+from typing import Any
 from zoneinfo import ZoneInfo
 from uuid import uuid4
 
@@ -33,6 +34,56 @@ from red_bar_lab.execution.candidate_lifecycle import CandidateLifecycleManager,
 from red_bar_lab.execution.institutional_execution import InstitutionalExecutionCommittee
 from red_bar_lab.execution.opportunity_engine import OpportunityIntelligenceEngine
 from red_bar_lab.execution.performance_selection import PerformanceTradeSelectionEngine
+
+
+def _record_pipeline_subcheck(
+    database: Any,
+    *,
+    run_id: str | None,
+    step_name: str,
+    artifacts: dict[str, Any] | None = None,
+    status: str = "OK",
+    error_message: str | None = None,
+) -> None:
+    """Best-effort: write one ``process_evidence`` row for a paper-trading
+    pipeline sub-step (lifecycle check, directional regime, scoring,
+    committee, selection, portfolio risk, order placement, mark update,
+    exit decision).
+
+    Same pattern as the strategy-engine sub-checks: rows go to the main
+    ``process_evidence`` table under
+    ``process_name='paper_trading_pipeline'``. The cadence panel reads
+    them to surface the per-stage red/green sub-status inside the
+    V2 Lifecycle page sections.
+    """
+    if not run_id:
+        return
+    write_fn = getattr(database, "write_step_evidence", None)
+    update_fn = getattr(database, "update_step_evidence", None)
+    if not callable(write_fn) or not callable(update_fn):
+        return
+    try:
+        from datetime import datetime as _dt, timezone as _tz
+
+        started_at = _dt.now(_tz.utc).isoformat()
+        step_id = write_fn(
+            process_name="paper_trading_pipeline",
+            run_id=run_id,
+            step_name=step_name,
+            parent_step="pipeline",
+            started_at=started_at,
+            status=status,
+            artifacts=artifacts or {},
+        )
+        update_fn(
+            step_id=step_id,
+            completed_at=started_at,
+            status=status,
+            duration_ms=0.0,
+            error_message=error_message,
+        )
+    except Exception:  # noqa: BLE001
+        pass
 from red_bar_lab.execution.portfolio_manager import PortfolioCandidate, PortfolioRiskManager
 from red_bar_lab.execution.paper_engine import (
     PaperContract,
@@ -432,6 +483,7 @@ class RedBarPaperAutomationService:
         trading_date: str,
         lots: int = 1,
         queue_only: bool = False,
+        run_id: str | None = None,
     ) -> tuple[int, int, int, list[str]]:
         """Evaluate candidates and persist committee decisions to the execution queue.
 
@@ -514,6 +566,13 @@ class RedBarPaperAutomationService:
             existing_signal_entries = self.database.count_signal_entries(
                 account_id=self.engine.account_id,
                 signal_id=signal_id,
+            )
+            # Per-signal audit run_id. The 5 entry-stage evidence rows
+            # (lifecycle, regime, scoring, committee, placement) all
+            # share this id so the user can filter the per-step
+            # evidence panel by signal.
+            signal_audit_id = (
+                f"{run_id}-{signal_id}" if run_id else None
             )
             if (
                 execution_policy.strategy_source == "RED_BAR_V2"
@@ -680,6 +739,19 @@ class RedBarPaperAutomationService:
                             f"replacement={signal_lifecycle.replacement_signal_id or 'AWAIT_NEW_RED_BAR'}"),
                     score=signal_lifecycle.health_score,
                 )
+                _record_pipeline_subcheck(
+                    self.database,
+                    run_id=signal_audit_id,
+                    step_name="lifecycle_check",
+                    status="ERROR" if signal_lifecycle.state == "EXPIRED" else "OK",
+                    artifacts={
+                        "state": signal_lifecycle.state,
+                        "action": signal_lifecycle.action,
+                        "reason": str(signal_lifecycle.reason or "—"),
+                        "replacement": signal_lifecycle.replacement_signal_id,
+                        "health_score": signal_lifecycle.health_score,
+                    },
+                )
                 skipped += 1
                 continue
 
@@ -802,6 +874,40 @@ class RedBarPaperAutomationService:
                     direction=str(signal["direction"]),
                     spot_price=float(spot),
                 )
+                # Audit the candidate-scoring step. Surface the best
+                # candidate so the user sees which strike/option got
+                # the highest score.
+                if scores:
+                    best = scores[0]
+                    _record_pipeline_subcheck(
+                        self.database,
+                        run_id=signal_audit_id,
+                        step_name="score_candidates",
+                        artifacts={
+                            "candidates_scored": len(scores),
+                            "best_candidate": best.contract.tradingsymbol,
+                            "best_score": best.total_score,
+                            "best_spread_score": best.spread_score,
+                            "best_liquidity_score": best.liquidity_score,
+                            "best_volume_score": best.volume_score,
+                            "best_oi_score": best.oi_score,
+                            "best_vwap_score": best.vwap_score,
+                            "best_ema_score": best.ema_score,
+                            "best_momentum_score": best.momentum_score,
+                            "minimum_score": self.minimum_candidate_score,
+                            "score_ok": (
+                                best.total_score >= self.minimum_candidate_score
+                            ),
+                        },
+                    )
+                else:
+                    _record_pipeline_subcheck(
+                        self.database,
+                        run_id=signal_audit_id,
+                        step_name="score_candidates",
+                        status="ERROR",
+                        error_message="NO_ELIGIBLE_CE_PE_CANDIDATE",
+                    )
                 if directional_policy.candidate_score_bonus > 0:
                     scores = [
                         replace(
@@ -1175,6 +1281,39 @@ class RedBarPaperAutomationService:
                         ),
                         score=committee.execution_probability_pct,
                     )
+                    # Audit the committee verdict. The reason text is
+                    # the only place that tells the user *why* the
+                    # committee said ERROR — without it, the user has
+                    # to open the dataframe to find out.
+                    _record_pipeline_subcheck(
+                        self.database,
+                        run_id=(
+                            f"{run_id}-{signal_id}" if run_id else None
+                        ),
+                        step_name="execution_committee",
+                        status=(
+                            "OK" if committee.eligible else "ERROR"
+                        ),
+                        artifacts={
+                            "eligible": committee.eligible,
+                            "decision": committee.decision,
+                            "execution_probability_pct": (
+                                committee.execution_probability_pct
+                            ),
+                            "expected_value_pct": (
+                                committee.expected_value_pct
+                            ),
+                            "intelligence_score": (
+                                committee.intelligence_score
+                            ),
+                            "reason": committee.reason,
+                        },
+                        error_message=(
+                            committee.reason
+                            if not committee.eligible
+                            else None
+                        ),
+                    )
 
                 # Execute strongest positive-EV opportunities first. This is an
                 # ordering rule, not a count limit.
@@ -1238,11 +1377,55 @@ class RedBarPaperAutomationService:
                                 "opportunity + performance selection gates."
                             ),
                         )
+                        # Surface the extension path in the per-step
+                        # evidence panel. Without this row, the user
+                        # would have to read the dataframe to discover
+                        # that a stale signal was admitted via
+                        # opportunity extension rather than as a fresh
+                        # signal.
+                        _record_pipeline_subcheck(
+                            self.database,
+                            run_id=(
+                                f"{run_id}-{signal_id}" if run_id else None
+                            ),
+                            step_name="opportunity_extension",
+                            status="OK",
+                            artifacts={
+                                "stale_for_extension": True,
+                                "evaluated_under_relaxed_opportunity_gate": True,
+                                "eligible_candidates": sum(
+                                    1
+                                    for comm, _, _, _ in evaluations
+                                    if comm.eligible
+                                ),
+                            },
+                        )
                     else:
                         self._record_state(
                             signal_id=signal_id,
                             state="SKIPPED_OPPORTUNITY",
                             detail=(
+                                "No candidate cleared the guarded opportunity "
+                                "extension + performance selection gates."
+                            ),
+                        )
+                        # The extension path was tried but no
+                        # candidate cleared. Surface that to the
+                        # user so they know the extension was
+                        # attempted.
+                        _record_pipeline_subcheck(
+                            self.database,
+                            run_id=(
+                                f"{run_id}-{signal_id}" if run_id else None
+                            ),
+                            step_name="opportunity_extension",
+                            status="ERROR",
+                            artifacts={
+                                "stale_for_extension": True,
+                                "evaluated_under_relaxed_opportunity_gate": True,
+                                "eligible_candidates": 0,
+                            },
+                            error_message=(
                                 "No candidate cleared the guarded opportunity "
                                 "extension + performance selection gates."
                             ),
@@ -1458,7 +1641,7 @@ class RedBarPaperAutomationService:
         return opened, skipped, scored_count, errors
 
     def execute_approved_queue(
-        self, *, trading_date: str, lots: int = 1,
+        self, *, trading_date: str, lots: int = 1, run_id: str | None = None,
     ) -> tuple[int, list[str]]:
         """Consume RB-0.9.3 APPROVED decisions without re-scoring them.
 
@@ -1635,6 +1818,23 @@ class RedBarPaperAutomationService:
                     "reason": "RB093_APPROVED_QUEUE_EXECUTED",
                     "timestamp": datetime.now(IST).isoformat(),
                 })
+                # Order-placement audit row. Same run_id family as the
+                # per-signal lifecycle/scoring/committee rows so the
+                # user sees the whole pipeline in the per-step evidence
+                # panel.
+                _record_pipeline_subcheck(
+                    self.database,
+                    run_id=(
+                        f"{run_id}-{signal_id}" if run_id else None
+                    ),
+                    step_name="order_placement",
+                    artifacts={
+                        "order_id": str(opened_row.get("order_id") or ""),
+                        "symbol": symbol,
+                        "candidate_score": row.get("candidate_score"),
+                        "fill_price": opened_row.get("entry_price"),
+                    },
+                )
                 opened += 1
             except Exception as exc:
                 self.database.update_execution_queue_status(
@@ -1945,6 +2145,7 @@ class RedBarPaperAutomationService:
         trading_date: str,
         lots: int = 1,
         monitor_positions: bool = True,
+        run_id: str | None = None,
     ) -> AutomationReport:
         self._contract_selection_evidence = []
         timings: list[tuple[str, float]] = []
@@ -1959,11 +2160,12 @@ class RedBarPaperAutomationService:
         stage_started = perf_counter()
         _, skipped, scored, decision_errors = self.process_new_signals(
             trading_date=trading_date, lots=lots, queue_only=True,
+            run_id=run_id,
         )
         timings.append(("opportunity_queue", (perf_counter() - stage_started) * 1000.0))
         stage_started = perf_counter()
         opened, queue_errors = self.execute_approved_queue(
-            trading_date=trading_date, lots=lots,
+            trading_date=trading_date, lots=lots, run_id=run_id,
         )
         timings.append(("paper_execution", (perf_counter() - stage_started) * 1000.0))
         cycle_now = datetime.now(IST)

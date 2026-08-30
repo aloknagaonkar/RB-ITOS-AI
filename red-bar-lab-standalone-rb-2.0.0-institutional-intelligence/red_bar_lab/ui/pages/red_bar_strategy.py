@@ -40,10 +40,67 @@ def _render_rows(rows, empty_message):
 
 def render_page(settings, layout, database, token, underlying_name, instrument_key, interval) -> None:
     st.subheader("Red Bar Strategy")
+    # Active config header — user always sees what strategy / exit
+    # policy / thresholds are in effect.
+    from red_bar_lab.ui.live_cadence import render_active_paper_config
+
+    render_active_paper_config(st)
     st.caption(
         "Independent Red Bar strategy observability. Sections 1-4 are read-only and do "
         "not create signals, bundles, contracts, orders or positions."
     )
+
+    # Reference panel: what this strategy actually checks. Tells the
+    # user the rules without making them read the code.
+    with st.expander("What Red Bar V2 checks (reference)", expanded=False):
+        st.markdown(
+            "**A signal is admitted if all five boolean gates are True.**  \n"
+            "Each gate is recorded in `process_evidence` as a separate "
+            "`red_bar_v2_strategy :: check:*` row, so the per-signal "
+            "audit log shows exactly which gate passed or failed."
+        )
+        st.markdown(
+            "**The 4 gating conditions (all must be True for admission):**\n\n"
+            "| Gate | Condition | Threshold |\n"
+            "|---|---|---|\n"
+            "| **Reference ready** | Section 1 outcome = `REFERENCE_READY` | N/A (depends on candle freshness) |\n"
+            "| **Context fresh** | Latest 1m candle timestamp | Age < 120s |\n"
+            "| **RedBar reference aligned** | Latest close vs reference midpoint, in signal direction | LONG: close > midpoint, SHORT: close < midpoint |\n"
+            "| **VWAP aligned** | Latest close vs session VWAP, in signal direction | LONG: close ≥ VWAP, SHORT: close ≤ VWAP |\n\n"
+            "**Informational (does NOT gate admission):**\n\n"
+            "| Signal | What it means |\n"
+            "|---|---|\n"
+            "| **RSI(14)** | Reference only. Logged as `check:rsi_informational` in the audit row. |\n"
+            "| **PCR (current 5m)** | Reference only. Logged as `check:pcr_informational` in the audit row. |\n"
+            "| **PCR (morning fixed-level)** | Reference only. Same audit row, as `morning_pcr` artifact field. |\n"
+            "| **PCR shift** | `current - morning`; positive = more bullish than open. |\n"
+        )
+        st.markdown(
+            "**Time-windowed rules:**\n\n"
+            "| Rule | Window | Effect |\n"
+            "|---|---|---|\n"
+            "| **Mid-session 12:45-1:15** | 12:45 PM - 1:15 PM IST | The 12:50 5m close must cross the reference midpoint. Logs `check:mid_session`. |\n\n"
+            "**Re-entry rules (after a position closes):**\n\n"
+            "| Rule | What it does |\n"
+            "|---|---|\n"
+            "| **Re-entry touch** | Any level touch (midpoint, VWAP, or mid-session) starts the wait. |\n"
+            "| **Re-entry VWAP confirm** | The next 5m candle's underlying close must be on the same side of the underlying futures VWAP as the touch direction. |\n"
+            "| **Re-entry wait** | Logs `check:reentry_validation` with state `waiting_midpoint` / `validated` / `failed`. |"
+        )
+        st.markdown(
+            "**Event types** (the trigger that fires):\n"
+            "- `INITIAL_DISPLACEMENT` — first 5m candle in the direction "
+            "of the day's NEXT_RED_CANDLE reference\n"
+            "- `REVERSAL` — first close back through the reference after a "
+            "counter-trend run\n"
+            "- `MIDPOINT_UPGRADE` — close through the reference midpoint "
+            "after an initial displacement"
+        )
+        st.caption(
+            "Source: `red_bar_lab/strategy/red_bar_v2.py:172-360` "
+            "(`evaluate_initial_direction`, `evaluate_reversal_direction`, "
+            "`evaluate_midpoint_upgrade`)"
+        )
 
     selected_date = st.date_input(
         "Trading date", value=date.today(), key="red_bar_strategy_date"

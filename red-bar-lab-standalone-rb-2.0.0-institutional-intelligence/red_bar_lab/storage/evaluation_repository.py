@@ -758,9 +758,12 @@ class EvaluationRepository:
                     underlying_name,signals_seen,signals_qualified,
                     candidates_scored,orders_opened,orders_closed,
                     signals_skipped,current_state,last_signal_id,
-                    last_decision,last_reason,last_error,updated_at
+                    last_decision,last_reason,last_error,
+                    last_success_at,last_success_decision,
+                    last_success_signal_id,last_success_total_ms,
+                    last_success_stages_json,updated_at
                 )
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(monitor_id) DO UPDATE SET
                     status=excluded.status,
                     heartbeat_at=excluded.heartbeat_at,
@@ -801,7 +804,78 @@ class EvaluationRepository:
                     row.get("last_decision"),
                     row.get("last_reason"),
                     row.get("last_error"),
+                    None,  # last_success_at — written by specialized helper
+                    None,  # last_success_decision
+                    None,  # last_success_signal_id
+                    None,  # last_success_total_ms
+                    None,  # last_success_stages_json
                     now,
+                ),
+            )
+            conn.commit()
+
+    def record_paper_monitor_success(
+        self,
+        monitor_id: str,
+        *,
+        success_at: str,
+        decision: str | None,
+        signal_id: str | None,
+        total_ms: float | None,
+        stages: dict[str, float] | None,
+        underlying_status: str | None = None,
+        readiness_ms: float | None = None,
+        futures_status: str | None = None,
+        candle_timestamp: str | None = None,
+        candle_age_seconds: float | None = None,
+        bridge_alignment: str | None = None,
+        readiness_reason: str | None = None,
+    ) -> None:
+        """Update only the last-success fields on an existing status row.
+
+        Called by the paper monitor after a cycle that is not a circuit
+        breaker trip and not an exception, so the UI can show "last
+        successful cycle" details that survive subsequent SUSPENDED/
+        FAILED cycles.
+        """
+        import json as _json
+
+        self._db.initialize()
+        stages_json = _json.dumps(stages) if stages else None
+        with self._db._connect() as conn:
+            conn.execute(
+                """
+                UPDATE paper_monitor_status SET
+                    last_success_at=?,
+                    last_success_decision=?,
+                    last_success_signal_id=?,
+                    last_success_total_ms=?,
+                    last_success_stages_json=?,
+                    last_success_underlying_status=?,
+                    last_success_readiness_ms=?,
+                    last_success_futures_status=?,
+                    last_success_candle_timestamp=?,
+                    last_success_candle_age_seconds=?,
+                    last_success_bridge_alignment=?,
+                    last_success_readiness_reason=?
+                WHERE monitor_id=?
+                """,
+                (
+                    success_at,
+                    decision,
+                    signal_id,
+                    float(total_ms) if total_ms is not None else None,
+                    stages_json,
+                    underlying_status,
+                    float(readiness_ms) if readiness_ms is not None else None,
+                    futures_status,
+                    candle_timestamp,
+                    float(candle_age_seconds)
+                    if candle_age_seconds is not None
+                    else None,
+                    bridge_alignment,
+                    readiness_reason,
+                    monitor_id,
                 ),
             )
             conn.commit()
@@ -822,6 +896,416 @@ class EvaluationRepository:
                 (monitor_id,),
             ).fetchone()
         return dict(row) if row else None
+
+    # ---- Process Evidence ----
+
+    def write_step_evidence(
+        self,
+        *,
+        process_name: str,
+        run_id: str,
+        step_name: str,
+        parent_step: str | None,
+        started_at: str,
+        status: str,
+        artifacts: dict[str, object] | None = None,
+    ) -> int:
+        """Insert a new step evidence row. Returns the inserted row id."""
+        import json as _json
+
+        self._db.initialize()
+        artifacts_json = _json.dumps(artifacts) if artifacts else None
+        with self._db._connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO process_evidence(
+                    process_name, run_id, step_name, parent_step,
+                    started_at, status, artifacts_json
+                ) VALUES(?,?,?,?,?,?,?)
+                """,
+                (
+                    process_name,
+                    run_id,
+                    step_name,
+                    parent_step,
+                    started_at,
+                    status,
+                    artifacts_json,
+                ),
+            )
+            conn.commit()
+            return int(cursor.lastrowid)
+
+    def update_step_evidence(
+        self,
+        *,
+        step_id: int,
+        completed_at: str,
+        status: str,
+        duration_ms: float,
+        error_message: str | None = None,
+    ) -> None:
+        """Mark a step as completed (or errored) with its final duration."""
+        self._db.initialize()
+        with self._db._connect() as conn:
+            conn.execute(
+                """
+                UPDATE process_evidence SET
+                    completed_at=?,
+                    status=?,
+                    duration_ms=?,
+                    error_message=?
+                WHERE id=?
+                """,
+                (
+                    completed_at,
+                    status,
+                    float(duration_ms) if duration_ms is not None else None,
+                    error_message,
+                    step_id,
+                ),
+            )
+            conn.commit()
+
+    def read_step_timelines(
+        self,
+        *,
+        process_name: str | None = None,
+        limit_per_step: int = 5,
+    ) -> dict[str, list[dict[str, object]]]:
+        """Return the most recent N evidence rows per (process_name, step_name).
+
+        Returns: {step_name: [row, row, ...]} where each row has all columns
+        from process_evidence plus parsed artifacts as a dict.
+        """
+        import json as _json
+
+        self._db.initialize()
+        where = ""
+        params: tuple = ()
+        if process_name is not None:
+            where = "WHERE process_name=?"
+            params = (process_name,)
+        with self._db._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                f"""
+                SELECT *
+                FROM process_evidence
+                {where}
+                ORDER BY started_at DESC
+                LIMIT ?
+                """,
+                (*params, limit_per_step * 50),
+            ).fetchall()
+        # Group by (process_name, step_name), keep the most recent N.
+        grouped: dict[str, list[dict[str, object]]] = {}
+        for row in rows:
+            row_dict = dict(row)
+            artifacts_raw = row_dict.pop("artifacts_json", None)
+            if artifacts_raw:
+                try:
+                    row_dict["artifacts"] = _json.loads(artifacts_raw)
+                except (TypeError, ValueError):
+                    row_dict["artifacts"] = None
+            else:
+                row_dict["artifacts"] = None
+            key = f"{row_dict['process_name']}::{row_dict['step_name']}"
+            if key not in grouped:
+                grouped[key] = []
+            if len(grouped[key]) < limit_per_step:
+                grouped[key].append(row_dict)
+        return grouped
+
+    def read_latest_step_evidence(
+        self,
+        *,
+        process_name: str,
+        step_name: str,
+    ) -> dict[str, object] | None:
+        """Return the most recent evidence row for a single (process, step)."""
+        import json as _json
+
+        self._db.initialize()
+        with self._db._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                """
+                SELECT *
+                FROM process_evidence
+                WHERE process_name=? AND step_name=?
+                ORDER BY started_at DESC
+                LIMIT 1
+                """,
+                (process_name, step_name),
+            ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        raw = d.pop("artifacts_json", None)
+        if raw:
+            try:
+                d["artifacts"] = _json.loads(raw)
+            except (TypeError, ValueError):
+                d["artifacts"] = None
+        else:
+            d["artifacts"] = None
+        return d
+
+    def read_running_steps(
+        self,
+        *,
+        older_than_seconds: float = 60.0,
+    ) -> list[dict[str, object]]:
+        """Return evidence rows that started but never completed (stuck)."""
+        self._db.initialize()
+        import time as _time
+
+        now = _time.time()
+        with self._db._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM process_evidence
+                WHERE status='RUNNING'
+                """
+            ).fetchall()
+        result: list[dict[str, object]] = []
+        for row in rows:
+            d = dict(row)
+            try:
+                from datetime import datetime
+
+                parsed = datetime.fromisoformat(
+                    d["started_at"].replace("Z", "+00:00")
+                )
+                age = now - parsed.timestamp()
+            except (TypeError, ValueError):
+                age = 0.0
+            if age >= older_than_seconds:
+                d["stuck_for_seconds"] = age
+                result.append(d)
+        return result
+
+    # ---- Process Run Correlation ----
+
+    def write_process_run_correlation(
+        self,
+        *,
+        process_name: str,
+        run_id: str,
+        started_at: str,
+        artifacts: dict[str, object] | None = None,
+    ) -> None:
+        """Record the most recent run_id for a process. Other processes
+        can read this to correlate their cycles with the upstream."""
+        import json as _json
+
+        self._db.initialize()
+        artifacts_json = _json.dumps(artifacts) if artifacts else None
+        with self._db._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO process_run_correlation(
+                    process_name, run_id, started_at, artifacts_json
+                ) VALUES(?,?,?,?)
+                ON CONFLICT(process_name) DO UPDATE SET
+                    run_id=excluded.run_id,
+                    started_at=excluded.started_at,
+                    artifacts_json=excluded.artifacts_json
+                """,
+                (process_name, run_id, started_at, artifacts_json),
+            )
+            conn.commit()
+
+    def read_process_run_correlation(
+        self, *, process_name: str
+    ) -> dict[str, object] | None:
+        self._db.initialize()
+        with self._db._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                """
+                SELECT *
+                FROM process_run_correlation
+                WHERE process_name=?
+                """,
+                (process_name,),
+            ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        raw = d.pop("artifacts_json", None)
+        if raw:
+            try:
+                d["artifacts"] = json.loads(raw) if not isinstance(raw, dict) else raw
+            except (TypeError, ValueError):
+                d["artifacts"] = None
+        else:
+            d["artifacts"] = None
+        return d
+
+    def read_all_process_run_correlations(self) -> list[dict[str, object]]:
+        """Return all process run correlations, sorted by started_at desc."""
+        self._db.initialize()
+        with self._db._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM process_run_correlation
+                ORDER BY started_at DESC
+                """
+            ).fetchall()
+        out: list[dict[str, object]] = []
+        for row in rows:
+            d = dict(row)
+            raw = d.pop("artifacts_json", None)
+            if raw:
+                try:
+                    d["artifacts"] = (
+                        json.loads(raw) if not isinstance(raw, dict) else raw
+                    )
+                except (TypeError, ValueError):
+                    d["artifacts"] = None
+            else:
+                d["artifacts"] = None
+            out.append(d)
+        return out
+
+    def read_run_evidence(self, *, run_id: str) -> list[dict[str, object]]:
+        """Return all evidence rows for a single run_id, ordered by time."""
+        import json as _json
+
+        self._db.initialize()
+        with self._db._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM process_evidence
+                WHERE run_id=?
+                ORDER BY started_at ASC
+                """,
+                (run_id,),
+            ).fetchall()
+        out: list[dict[str, object]] = []
+        for row in rows:
+            d = dict(row)
+            raw = d.pop("artifacts_json", None)
+            if raw:
+                try:
+                    d["artifacts"] = _json.loads(raw)
+                except (TypeError, ValueError):
+                    d["artifacts"] = None
+            else:
+                d["artifacts"] = None
+            out.append(d)
+        return out
+
+    def read_latest_error_per_process(self) -> list[dict[str, object]]:
+        """Return the most recent ERROR row per process, with the
+        duration since that error started (computed from
+        ``process_run_correlation``'s last-started-at, or from the
+        evidence row's own started_at if no later run exists).
+
+        Used by the cadence panel to surface "this process has been
+        failing for 47 minutes" banners.
+        """
+        import time as _time
+
+        self._db.initialize()
+        now = _time.time()
+        with self._db._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT process_name, step_name, started_at, completed_at,
+                       error_message, run_id, duration_ms
+                FROM process_evidence
+                WHERE status='ERROR'
+                GROUP BY process_name
+                HAVING started_at = MAX(started_at)
+                ORDER BY started_at DESC
+                """
+            ).fetchall()
+        out: list[dict[str, object]] = []
+        for row in rows:
+            d = dict(row)
+            try:
+                from datetime import datetime
+
+                parsed = datetime.fromisoformat(
+                    d["started_at"].replace("Z", "+00:00")
+                )
+                age = max(0.0, now - parsed.timestamp())
+            except (TypeError, ValueError):
+                age = 0.0
+            d["error_age_seconds"] = age
+            out.append(d)
+        return out
+
+    def cleanup_process_evidence(
+        self, *, retention_days: int = 7
+    ) -> int:
+        """Delete ``process_evidence`` rows older than ``retention_days``.
+
+        Also deletes ``process_run_correlation`` rows older than the
+        cutoff, since they're useless without their evidence rows.
+
+        Returns the number of rows deleted.
+        """
+        from datetime import datetime, timezone, timedelta
+
+        self._db.initialize()
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
+        deleted = 0
+        with self._db._connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM process_evidence WHERE started_at < ?", (cutoff,)
+            )
+            deleted += cursor.rowcount or 0
+            conn.execute(
+                "DELETE FROM process_run_correlation WHERE started_at < ?",
+                (cutoff,),
+            )
+            conn.commit()
+        return int(deleted)
+
+    def read_last_cleanup_at(self) -> str | None:
+        """Return the ISO timestamp of the last successful cleanup, or
+        None if cleanup has never run."""
+        self._db.initialize()
+        with self._db._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT started_at FROM process_run_correlation "
+                "WHERE process_name='_evidence_cleanup' "
+                "ORDER BY started_at DESC LIMIT 1"
+            ).fetchone()
+        if row is None:
+            return None
+        return str(row["started_at"])
+
+    def write_last_cleanup_at(self, started_at: str) -> None:
+        """Record that a cleanup just ran. Uses the correlation table
+        itself as a tiny key-value store keyed by ``_evidence_cleanup``."""
+        self._db.initialize()
+        with self._db._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO process_run_correlation(
+                    process_name, run_id, started_at, artifacts_json
+                ) VALUES(?,?,?,?)
+                ON CONFLICT(process_name) DO UPDATE SET
+                    run_id=excluded.run_id,
+                    started_at=excluded.started_at,
+                    artifacts_json=excluded.artifacts_json
+                """,
+                ("_evidence_cleanup", "cleanup", started_at, None),
+            )
+            conn.commit()
 
     # ---- Paper Signal Diagnostics ----
 
@@ -980,3 +1464,149 @@ class EvaluationRepository:
                 ),
             )
             conn.commit()
+
+    # ---- Trading-View Aggregations ----
+
+    def read_latest_signal_for_trading(
+        self, *, instrument_key: str, trading_date: str
+    ) -> dict[str, object] | None:
+        """Return the most recent confirmed signal for the given date,
+        along with its Section 1 / 2 / 3 verdict from the canonical V2
+        shadow. Used by the trading view of the cadence panel.
+
+        Returns None if no signal exists for that date.
+        """
+        self._db.initialize()
+        # 1. The latest confirmed signal.
+        with self._db._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            sig_row = conn.execute(
+                """
+                SELECT *
+                FROM signal_attempts
+                WHERE instrument_key=? AND trading_date=? AND state='CONFIRMED'
+                ORDER BY confirmation_timestamp DESC, created_at DESC
+                LIMIT 1
+                """,
+                (instrument_key, trading_date),
+            ).fetchone()
+        if sig_row is None:
+            return None
+        signal = dict(sig_row)
+        signal_id = signal.get("signal_id")
+        if not isinstance(signal_id, str):
+            return None
+        # 2. The latest signal_pipeline_status row for it.
+        with self._db._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            status_row = conn.execute(
+                """
+                SELECT core_eligible, hybrid_eligible, market_context_ready,
+                       volume_structure_ready, options_context_ready,
+                       admission_outcome, admission_code
+                FROM signal_pipeline_status
+                WHERE signal_id=?
+                """,
+                (signal_id,),
+            ).fetchone()
+        signal["pipeline_status"] = dict(status_row) if status_row else None
+        # 3. The latest canonical_shadow_evaluations row, if any.
+        with self._db._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            shadow_row = conn.execute(
+                """
+                SELECT resolution_id, bundle_id, message, status,
+                       section_1_outcome, section_2_outcome
+                FROM canonical_shadow_evaluations
+                WHERE signal_id=?
+                ORDER BY written_at DESC
+                LIMIT 1
+                """,
+                (signal_id,),
+            ).fetchone()
+        signal["shadow_observation"] = dict(shadow_row) if shadow_row else None
+        return signal
+
+    def read_today_paper_activity(
+        self, *, account_id: str, trading_date: str
+    ) -> dict[str, object]:
+        """Return today's paper-trading activity: counts of entries
+        opened, entries closed, open positions, and most-recent
+        entry/close. Used by the trading view of the cadence panel.
+
+        Best-effort: returns an empty dict with zero counts if the
+        paper_execution_orders table doesn't exist or is empty.
+        """
+        self._db.initialize()
+        with self._db._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT order_id, direction, option_type, strike_price,
+                           entry_price, exit_price, entry_timestamp,
+                           exit_timestamp, status, exit_reason
+                    FROM paper_execution_orders
+                    WHERE account_id=? AND date(entry_timestamp)=?
+                    ORDER BY entry_timestamp DESC
+                    """,
+                    (account_id, trading_date),
+                ).fetchall()
+            except Exception:  # noqa: BLE001
+                return {
+                    "entered": 0,
+                    "closed": 0,
+                    "open": 0,
+                    "last_entry": None,
+                    "last_close": None,
+                    "realized_pnl": 0.0,
+                }
+        entered = len(rows)
+        closed = sum(1 for r in rows if r["exit_timestamp"] is not None)
+        open_count = entered - closed
+        last_entry = None
+        last_close = None
+        for r in rows:
+            d = dict(r)
+            if last_entry is None:
+                last_entry = d
+            if d["exit_timestamp"] is not None and last_close is None:
+                last_close = d
+        # Realized P&L: simple sum of (exit_price - entry_price) for
+        # closed positions, direction-adjusted. Best-effort; the
+        # signal_explorer page has the full mark-to-market calculation.
+        realized = 0.0
+        for r in rows:
+            if r["exit_price"] is None or r["entry_price"] is None:
+                continue
+            diff = float(r["exit_price"]) - float(r["entry_price"])
+            if str(r["direction"]).upper() == "SHORT":
+                diff = -diff
+            realized += diff
+        return {
+            "entered": entered,
+            "closed": closed,
+            "open": open_count,
+            "last_entry": last_entry,
+            "last_close": last_close,
+            "realized_pnl": realized,
+        }
+
+    def read_today_signal_counts(
+        self, *, instrument_key: str, trading_date: str
+    ) -> dict[str, int]:
+        """Return counts of confirmed / pending / expired signals for
+        the trading date. Used by the trading view of the cadence
+        panel."""
+        self._db.initialize()
+        with self._db._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT state, COUNT(*) AS cnt
+                FROM signal_attempts
+                WHERE instrument_key=? AND trading_date=?
+                GROUP BY state
+                """,
+                (instrument_key, trading_date),
+            ).fetchall()
+        return {r["state"]: r["cnt"] for r in rows}

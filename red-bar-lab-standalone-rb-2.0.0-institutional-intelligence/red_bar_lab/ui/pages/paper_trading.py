@@ -56,6 +56,10 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
         "Recommendations on this page are RULE-BASED PAPER decisions, "
         "not AI recommendations. Live broker execution remains disabled."
     )
+    # Active config header — same as the Red Bar Strategy page.
+    from red_bar_lab.ui.live_cadence import render_active_paper_config
+
+    render_active_paper_config(st)
 
     live_foundation = ZerodhaLiveExecutionProvider(
         kill_switch_active=True

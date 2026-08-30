@@ -57,6 +57,20 @@ def main(argv: list[str] | None = None) -> int:
         overrides["start_market_research"] = False
 
     config = PlatformConfig(**overrides)
+
+    validation_errors = config.validate()
+    if validation_errors and args.action in {"start", "serve", "restart"}:
+        sys.stderr.write(
+            "Platform configuration is invalid; refusing to start:\n"
+        )
+        for err in validation_errors:
+            sys.stderr.write(f"  - {err}\n")
+        sys.stderr.write(
+            "\nFix the above (e.g. set UPSTOX_ACCESS_TOKEN in your shell or "
+            "in a .env file at the project root) and re-run.\n"
+        )
+        return 2
+
     supervisor = PlatformSupervisor(config)
 
     actions = {

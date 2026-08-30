@@ -12,7 +12,7 @@ from queue import Empty, Full, Queue
 from threading import Lock, Thread
 from time import perf_counter_ns
 from types import MappingProxyType
-from typing import Protocol, TypeAlias
+from typing import Any, Protocol, TypeAlias
 
 from red_bar_lab.domain.red_bar_v2 import ContextStatus
 from red_bar_lab.services.red_bar_v2_market_data_evidence import persist_stage_latency
@@ -125,6 +125,11 @@ class RedBarV2ShadowTask:
     health_snapshot: CanonicalHealthSnapshot
     replay_event_snapshot: CanonicalReplayEventSnapshot
     market_metadata: LegacyV2MarketMetadata
+    # Optional run_id shared with the upstream collector tick. When
+    # provided, all evidence rows for this shadow observation will
+    # share this run_id with the collector, orchestrator, and paper
+    # monitor rows. When None, the coordinator generates its own.
+    run_id: str | None = None
 
 
 class _BoundedIdTracker:
@@ -174,6 +179,7 @@ def build_shadow_task(
     replay_event: ReplayEventLike,
     market_metadata: LegacyV2MarketMetadata,
     source_replay_id: str,
+    run_id: str | None = None,
 ) -> RedBarV2ShadowTask:
     details = _freeze_value(replay_event.details)
     if not isinstance(details, Mapping):
@@ -218,6 +224,7 @@ def build_shadow_task(
         health_snapshot=health_snapshot,
         replay_event_snapshot=event_snapshot,
         market_metadata=market_metadata,
+        run_id=run_id,
     )
 
 
@@ -478,6 +485,7 @@ class RedBarV2CanonicalShadowRuntime:
                         legacy_result=task.replay_event_snapshot,
                         source_replay_id=task.source_replay_id,
                         event_timestamp=task.event_timestamp,
+                        run_id=task.run_id,
                     )
             except Exception as error:
                 self._emit(
@@ -526,6 +534,7 @@ def _canonical_stage_latency_rows(record: Mapping[str, object]) -> tuple[dict[st
 def _build_coordinator_factory(
     database_path: Path,
     artifacts_root: Path | None = None,
+    evidence_database: Any | None = None,
 ) -> CoordinatorFactory:
     def emit(record: dict[str, object]) -> None:
         _LOGGER.info("red_bar_v2_shadow", extra={"shadow": record})
@@ -551,11 +560,21 @@ def _build_coordinator_factory(
 
     def factory() -> RedBarV2CanonicalShadowCoordinator:
         repository = SQLiteRedBarV2CanonicalRepository(database_path, busy_timeout_ms=250)
-        service = RedBarV2CanonicalPersistenceService(repository)
+        # Build a process_evidence writer that targets the main
+        # RedBarDatabase. This lets the canonical shadow's resolution,
+        # parity, persistence, and per-section rows all land in the
+        # same ``process_evidence`` table that the cadence panel reads.
+        from red_bar_lab.observability.evidence import ProcessEvidenceWriter
+
+        writer = ProcessEvidenceWriter(evidence_database)
+        service = RedBarV2CanonicalPersistenceService(
+            repository, evidence_writer=writer
+        )
         return RedBarV2CanonicalShadowCoordinator(
             service,
             enabled=True,
             telemetry_sink=emit,
+            evidence_writer=writer,
         )
 
     return factory
@@ -566,6 +585,7 @@ def get_red_bar_v2_shadow_runtime(
     enabled: bool,
     database_path: Path,
     artifacts_root: Path | None = None,
+    evidence_database: Any | None = None,
 ) -> RedBarV2CanonicalShadowRuntime | None:
     if not enabled:
         return None
@@ -576,7 +596,9 @@ def get_red_bar_v2_shadow_runtime(
         if existing is not None:
             return existing
         runtime = RedBarV2CanonicalShadowRuntime(
-            coordinator_factory=_build_coordinator_factory(path, artifacts_root),
+            coordinator_factory=_build_coordinator_factory(
+                path, artifacts_root, evidence_database
+            ),
         )
         _RUNTIMES[key] = runtime
         return runtime

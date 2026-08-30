@@ -128,6 +128,31 @@ class ProcessController:
             return None
         return managed.pid
 
+    def get_recent_output(self, name: str, max_lines: int = 30) -> str:
+        """Return the child's captured stdout+stderr, most recent first.
+
+        Only useful after the child has exited; while it's still running
+        the pipes will be empty because the supervisor doesn't drain
+        them. Used by the supervisor to surface crash diagnostics.
+        """
+        managed = self._managed.get(name)
+        if managed is None or managed.proc is None:
+            return ""
+        proc = managed.proc
+        if proc.poll() is None:
+            return ""
+        try:
+            stdout_bytes, stderr_bytes = proc.communicate(timeout=2.0)
+        except Exception:  # noqa: BLE001
+            return ""
+        combined = (stdout_bytes or b"") + (stderr_bytes or b"")
+        text = combined.decode("utf-8", errors="replace")
+        lines = [line for line in text.splitlines() if line.strip()]
+        if not lines:
+            return ""
+        tail = lines[-max_lines:]
+        return "\n".join(tail)
+
     def _stop_windows(self, managed: ManagedProcess, timeout: float) -> None:
         proc = managed.proc
 

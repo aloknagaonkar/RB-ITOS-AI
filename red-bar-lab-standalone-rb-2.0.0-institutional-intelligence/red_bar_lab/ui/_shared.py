@@ -6,7 +6,6 @@ import os
 import html
 
 import streamlit as st
-import streamlit.components.v1 as components
 import pandas as pd
 
 from red_bar_lab.config import RedBarSettings, UNDERLYINGS
@@ -33,6 +32,7 @@ from red_bar_lab.services.replay_accuracy import ReplayAccuracyService
 from red_bar_lab.brokers.zerodha_client import ZerodhaKiteClient, ZerodhaAPIError
 from red_bar_lab.execution.paper_engine import RedBarPaperExecutionEngine, PaperContract
 from red_bar_lab.execution.automation import RedBarPaperAutomationService
+from red_bar_lab.execution.exit_engine import PaperExitEngine
 from red_bar_lab.execution.providers import ZerodhaLiveExecutionProvider
 from red_bar_lab.market.upstox_intelligence import UnifiedUpstoxMarketIntelligenceService
 from red_bar_lab.market.paper_adapter import UpstoxPaperMarketAdapter

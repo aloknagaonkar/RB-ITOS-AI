@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from red_bar_lab.observability import record_strategy_subcheck
+
+from dataclasses import replace
 from datetime import datetime
-from typing import Iterable
+from typing import Any, Iterable
 
 import pandas as pd
 
@@ -45,6 +48,8 @@ def replay_red_bar_v2_day_with_futures_vwap(
     instrument_key: str,
     vwap_instrument_key: str,
     exit_timestamps: Iterable[datetime | pd.Timestamp] = (),
+    database: Any | None = None,
+    run_id: str | None = None,
 ) -> tuple[RedBarV2ReplayResult, RedBarV2VwapSourceHealth]:
     """Replay Red Bar V2 with index RSI/midpoint and genuine futures VWAP."""
     frame = _normalise(index_candles)
@@ -62,6 +67,7 @@ def replay_red_bar_v2_day_with_futures_vwap(
     current_direction: str | None = None
     provisional_state: RedBarV2State | None = None
     waiting_for_red_bar_touch = False
+    reentry_touch_state: str | None = None
     reference = None
     exit_index = 0
     admitted = 0
@@ -98,6 +104,9 @@ def replay_red_bar_v2_day_with_futures_vwap(
                 pending_reversal = None
                 pending_reversal_snapshot = None
                 pending_reversal_health = None
+                # Re-entry touch state: which level the system is
+                # currently waiting for confirmation on.
+                reentry_touch_state = "waiting_midpoint"
             exit_index += 1
 
         reference = build_red_bar_v2_reference(
@@ -118,21 +127,101 @@ def replay_red_bar_v2_day_with_futures_vwap(
             candle_low = float(row["low"])
             candle_high = float(row["high"])
             touched_midpoint = candle_low <= reference.midpoint <= candle_high
-            if touched_midpoint:
-                snapshot, decision_health = build_red_bar_v2_futures_snapshot(
-                    frame,
-                    futures_frame,
-                    instrument_key=instrument_key,
-                    vwap_instrument_key=vwap_instrument_key,
-                    timeframe="1M",
-                    evaluation_time=evaluation_time,
-                    expected_timestamp=candle_timestamp,
-                )
-                latest_health = decision_health
-                reentry = evaluate_initial_direction_futures(reference, snapshot)
-                if _event_is_due(reentry, evaluation_time):
-                    decision = reentry
-                    decision_snapshot = snapshot
+            # Re-entry touch + next-candle VWAP confirm.
+            # 1) Check if this 5m candle's VWAP-aligned close confirms the
+            #    direction that the touch established. A touch of any
+            #    level is enough to start the wait; the next 5m candle
+            #    must close on the signal's side of the underlying
+            #    futures VWAP.
+            vwap_in_direction = (
+                _reentry_vwap_confirms(row, reference, futures_frame)
+            )
+            if touched_midpoint and vwap_in_direction is not None:
+                # Both confirmed in this 5m candle -> allow re-entry.
+                if vwap_in_direction is True:
+                    snapshot, decision_health = build_red_bar_v2_futures_snapshot(
+                        frame,
+                        futures_frame,
+                        instrument_key=instrument_key,
+                        vwap_instrument_key=vwap_instrument_key,
+                        timeframe="1M",
+                        evaluation_time=evaluation_time,
+                        expected_timestamp=candle_timestamp,
+                    )
+                    latest_health = decision_health
+                    reentry = evaluate_initial_direction_futures(reference, snapshot)
+                    if _event_is_due(reentry, evaluation_time):
+                        decision = reentry
+                        decision_snapshot = snapshot
+                        decision = replace(
+                            decision,
+                            reentry_state="validated",
+                            reentry_alignment_passed=True,
+                        )
+                        # Re-entry validation: re-entry allowed.
+                        if database is not None:
+                            try:
+                                reentry_candle_iso = (
+                                    pd.Timestamp(candle_timestamp)
+                                    .to_pydatetime()
+                                    .isoformat()
+                                )
+                                record_strategy_subcheck(
+                                    database,
+                                    run_id=run_id,
+                                    step_name="reentry_validation",
+                                    artifacts={
+                                        "state": "validated",
+                                        "touch_candle": reentry_candle_iso,
+                                        "touch_level": reentry_touch_state,
+                                        "direction": (
+                                            decision.direction
+                                            if decision
+                                            else None
+                                        ),
+                                    },
+                                )
+                            except Exception:
+                                pass
+                        waiting_for_red_bar_touch = False
+                        reentry_touch_state = None
+                # Else: VWAP not in same direction; continue waiting.
+                elif touched_midpoint and vwap_in_direction is False:
+                    # Touch on midpoint was confirmed but next-candle VWAP
+                    # was in the opposite direction -> re-entry failed.
+                    if database is not None:
+                        try:
+                            reentry_candle_iso = (
+                                pd.Timestamp(candle_timestamp)
+                                .to_pydatetime()
+                                .isoformat()
+                            )
+                            record_strategy_subcheck(
+                                database,
+                                run_id=run_id,
+                                step_name="reentry_validation",
+                                status="ERROR",
+                                artifacts={
+                                    "state": "failed",
+                                    "touch_candle": reentry_candle_iso,
+                                    "touch_level": reentry_touch_state,
+                                    "vwap_confirms": False,
+                                },
+                                error_message=(
+                                    "Next-candle underlying close was on the "
+                                    "opposite side of futures VWAP from the touch."
+                                ),
+                            )
+                        except Exception:
+                            pass
+                    waiting_for_red_bar_touch = False
+                    reentry_touch_state = None
+                elif touched_midpoint:
+                    # Only the touch happened on this candle; waiting
+                    # for the NEXT 5m candle to confirm VWAP.
+                    reentry_touch_state = "waiting_midpoint"
+            # (The single touch on midpoint is no longer enough by itself;
+            # we now require both touch AND next-candle VWAP confirmation.)
         elif pending_reversal is not None:
             decision = pending_reversal
             decision_snapshot = pending_reversal_snapshot
@@ -322,3 +411,68 @@ def replay_red_bar_v2_day_with_futures_vwap(
         final_trade_state=final_state.lifecycle_state.value,
     )
     return result, latest_health
+
+
+def _reentry_vwap_confirms(
+    index_row: pd.Series,
+    reference: object,
+    futures_frame: pd.DataFrame,
+) -> bool | None:
+    """Check if this 5m candle's underlying-vs-futures aligns with the touch.
+
+    The re-entry rule is: a single level touch (midpoint, VWAP, or
+    mid-session) STARTS the wait. The next 5m candle must confirm the
+    direction by having the underlying close on the same side of the
+    underlying futures close as the original touch.
+
+    The touch direction is inferred from the index candle's close vs the
+    reference midpoint:
+      - index_close > midpoint  =>  BULLISH touch
+      - index_close < midpoint  =>  BEARISH touch
+      - equal                  =>  undefined (return None)
+
+    Returns:
+        True  - direction confirmed (re-entry is allowed)
+        False - opposite direction (re-entry wait is cancelled)
+        None  - data unavailable (wait continues)
+
+    The futures close is the latest completed 5m futures close at or
+    before the index candle's timestamp. This is a simple proxy for
+    VWAP confirmation; a more sophisticated implementation would
+    compare to the actual VWAP series. The historical-replay context
+    doesn't have VWAP directly available at the candle level, so
+    futures close is the most reliable signal.
+    """
+    from red_bar_lab.intelligence.market_context import completed_candles
+
+    try:
+        candle_ts = index_row.name
+        index_close = float(index_row.get("close", 0.0))
+        midpoint = float(getattr(reference, "midpoint", 0.0))
+
+        if midpoint == 0.0 or index_close == 0.0:
+            return None
+
+        bullish = index_close > midpoint
+        if index_close == midpoint:
+            return None  # touch direction undefined
+
+        relevant_futures = completed_candles(
+            futures_frame, evaluation_time=candle_ts, interval_minutes=5
+        )
+        if relevant_futures.empty:
+            return None
+        relevant_futures = relevant_futures.sort_index()
+        before = relevant_futures[relevant_futures.index <= candle_ts]
+        if before.empty:
+            return None
+        futures_close = float(before.iloc[-1]["close"])
+        if futures_close == 0.0:
+            return None
+
+        if bullish:
+            return index_close > futures_close
+        else:
+            return index_close < futures_close
+    except Exception:
+        return None

@@ -1,0 +1,2 @@
+﻿trading_date,futures_instrument_key,futures_symbol,futures_expiry,exit_timestamps,expected_regime
+2026-08-18,NSE_FO|58072,NIFTY FUT 25 AUG 26,2026-08-25,2026-08-18T09:40:00+00:00,

@@ -20,6 +20,8 @@ from red_bar_lab.services.upstox_service import (
     RedBarUpstoxService,
     resolve_access_token,
 )
+from red_bar_lab.observability.cleanup import maybe_cleanup_process_evidence
+from red_bar_lab.observability.evidence import generate_run_id, with_step_evidence
 from red_bar_lab.storage.artifacts import ArtifactLayout
 from red_bar_lab.storage.database import RedBarDatabase
 
@@ -152,33 +154,62 @@ def main() -> int:
             phase = market_session_phase(now)
 
         try:
+            # Best-effort: keep the process_evidence table from growing
+            # unbounded. Self-throttles to once per day.
+            maybe_cleanup_process_evidence(database)
+            # Best-effort: write our most-recent run_id so the paper
+            # monitor and UI can correlate with us.
+            try:
+                database.write_process_run_correlation(
+                    process_name="market_collector",
+                    run_id=generate_run_id("market_collector"),
+                    started_at=now.isoformat(),
+                    artifacts={"phase": phase, "mode": mode},
+                )
+            except Exception:  # noqa: BLE001
+                pass
             if mode == "waiting":
-                logging.info(
-                    "collector waiting phase=%s; no market/EOD request made",
-                    phase,
-                )
-                database.update_collector_status(
-                    "DUAL_OPTIONS",
-                    "WAITING",
-                    "WAITING",
-                    f"Market phase: {phase}",
-                    None,
-                )
+                with with_step_evidence(
+                    database,
+                    process_name="market_collector",
+                    step_name="waiting",
+                ):
+                    logging.info(
+                        "collector waiting phase=%s; no market/EOD request made",
+                        phase,
+                    )
+                    database.update_collector_status(
+                        "DUAL_OPTIONS",
+                        "WAITING",
+                        "WAITING",
+                        f"Market phase: {phase}",
+                        None,
+                    )
             elif mode == "online":
                 if not args.skip_live_reference_refresh:
-                    _refresh_live_reference(
-                        live_reference_service,
-                        settings=settings,
+                    with with_step_evidence(
+                        database,
+                        process_name="market_collector",
+                        step_name="live_reference_refresh",
+                    ):
+                        _refresh_live_reference(
+                            live_reference_service,
+                            settings=settings,
+                            instrument_key=instrument_key,
+                            underlying_name=args.underlying,
+                            now=now,
+                        )
+
+                with with_step_evidence(
+                    database,
+                    process_name="market_collector",
+                    step_name="candle_fetch_online",
+                ):
+                    report = collector.online_tick(
                         instrument_key=instrument_key,
-                        underlying_name=args.underlying,
+                        expiry=expiry,
                         now=now,
                     )
-
-                report = collector.online_tick(
-                    instrument_key=instrument_key,
-                    expiry=expiry,
-                    now=now,
-                )
                 logging.info(
                     "collector mode=%s status=%s snapshot_id=%s "
                     "linked=%s message=%s",
@@ -188,11 +219,22 @@ def main() -> int:
                     report.signals_linked,
                     report.message,
                 )
-                pipeline_report = orchestrator.sync_day(
-                    instrument_key=instrument_key,
-                    trading_date=now.date().isoformat(),
-                    link_window_seconds=120,
-                )
+                orchestrator_run_id = generate_run_id("market_collector")
+                with with_step_evidence(
+                    database,
+                    process_name="market_collector",
+                    step_name="orchestrator_run",
+                    run_id=orchestrator_run_id,
+                    artifacts={
+                        "trading_date": now.date().isoformat(),
+                    },
+                ):
+                    pipeline_report = orchestrator.sync_day(
+                        instrument_key=instrument_key,
+                        trading_date=now.date().isoformat(),
+                        link_window_seconds=120,
+                        run_id=orchestrator_run_id,
+                    )
                 logging.info(
                     "pipeline confirmed=%s core=%s hybrid=%s errors=%s",
                     pipeline_report.confirmed_signals,
@@ -214,25 +256,35 @@ def main() -> int:
                 )
                 auto_eod_allowed = args.mode != "auto" or has_online_today
                 if not auto_eod_allowed:
-                    logging.info(
-                        "EOD capture skipped: no ONLINE snapshots exist "
-                        "for %s (holiday/no-session protection)",
-                        today,
-                    )
-                    database.update_collector_status(
-                        "DUAL_OPTIONS",
-                        "WAITING",
-                        "WAITING",
-                        "No online session detected for EOD capture.",
-                        None,
-                    )
+                    with with_step_evidence(
+                        database,
+                        process_name="market_collector",
+                        step_name="eod_skipped",
+                    ):
+                        logging.info(
+                            "EOD capture skipped: no ONLINE snapshots exist "
+                            "for %s (holiday/no-session protection)",
+                            today,
+                        )
+                        database.update_collector_status(
+                            "DUAL_OPTIONS",
+                            "WAITING",
+                            "WAITING",
+                            "No online session detected for EOD capture.",
+                            None,
+                        )
                 elif args.once or today not in offline_done_for_date:
-                    report = collector.offline_eod_tick(
-                        instrument_key=instrument_key,
-                        expiry=expiry,
-                        trading_date=today,
-                        now=now,
-                    )
+                    with with_step_evidence(
+                        database,
+                        process_name="market_collector",
+                        step_name="candle_fetch_eod",
+                    ):
+                        report = collector.offline_eod_tick(
+                            instrument_key=instrument_key,
+                            expiry=expiry,
+                            trading_date=today,
+                            now=now,
+                        )
                     offline_done_for_date.add(today)
                     logging.info(
                         "collector mode=%s status=%s snapshot_id=%s "
@@ -242,15 +294,28 @@ def main() -> int:
                         report.snapshot_id,
                         report.message,
                     )
-                    orchestrator.sync_day(
-                        instrument_key=instrument_key,
-                        trading_date=today,
-                        link_window_seconds=120,
-                    )
-                    validation = orchestrator.validate_eod(
-                        instrument_key=instrument_key,
-                        trading_date=today,
-                    )
+                    orchestrator_run_id = generate_run_id("market_collector")
+                    with with_step_evidence(
+                        database,
+                        process_name="market_collector",
+                        step_name="orchestrator_run",
+                        run_id=orchestrator_run_id,
+                    ):
+                        orchestrator.sync_day(
+                            instrument_key=instrument_key,
+                            trading_date=today,
+                            link_window_seconds=120,
+                            run_id=orchestrator_run_id,
+                        )
+                    with with_step_evidence(
+                        database,
+                        process_name="market_collector",
+                        step_name="eod_validation",
+                    ):
+                        validation = orchestrator.validate_eod(
+                            instrument_key=instrument_key,
+                            trading_date=today,
+                        )
                     logging.info(
                         "EOD validation status=%s core=%.1f%% hybrid=%.1f%%",
                         validation["status"],
@@ -258,10 +323,15 @@ def main() -> int:
                         validation["hybrid_completeness_pct"],
                     )
                 else:
-                    logging.info(
-                        "offline EOD snapshot already attempted for %s",
-                        today,
-                    )
+                    with with_step_evidence(
+                        database,
+                        process_name="market_collector",
+                        step_name="eod_already_done",
+                    ):
+                        logging.info(
+                            "offline EOD snapshot already attempted for %s",
+                            today,
+                        )
         except Exception as exc:
             logging.exception("collector tick failed: %s", exc)
             database.update_collector_status(

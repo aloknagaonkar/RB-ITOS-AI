@@ -63,6 +63,10 @@ class RedBarV2FuturesSnapshot(MarketIndicatorSnapshot):
     vwap_source_timestamp: datetime
     vwap_source_volume: float
     vwap_source_type: str = "NIFTY_FUTURES"
+    # PCR (informational; populated by the caller from
+    # market_trend_research_pcr_5m_history. None if not available.)
+    pcr_value: float | None = None
+    morning_pcr_value: float | None = None
 
 
 def _context_frame(
@@ -109,6 +113,8 @@ def build_red_bar_v2_futures_snapshot(
     rsi_period: int = 14,
     bullish_threshold: float = 55.0,
     bearish_threshold: float = 45.0,
+    pcr_value: float | None = None,
+    morning_pcr_value: float | None = None,
 ) -> tuple[RedBarV2FuturesSnapshot | None, RedBarV2VwapSourceHealth]:
     """Build aligned index-RSI and futures-VWAP context without lookahead."""
     index_frame = _context_frame(
@@ -227,5 +233,7 @@ def build_red_bar_v2_futures_snapshot(
         vwap_source_instrument_key=vwap_instrument_key,
         vwap_source_timestamp=futures_latest.to_pydatetime(),
         vwap_source_volume=futures_volume,
+        pcr_value=pcr_value,
+        morning_pcr_value=morning_pcr_value,
     )
     return snapshot, health("READY", "FULL_TIMESTAMP_ALIGNMENT")

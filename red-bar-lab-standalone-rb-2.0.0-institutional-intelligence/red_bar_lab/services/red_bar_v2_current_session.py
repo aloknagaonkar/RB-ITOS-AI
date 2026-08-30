@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from red_bar_lab.observability import record_strategy_subcheck
+
 from dataclasses import dataclass, replace
 from datetime import datetime
 import os
@@ -38,6 +40,7 @@ _REPLAY_ONLY_BLOCK_CODES = {
     "ACTIVE_TRADE_BLOCK",
     "PREVIOUS_TRADE_NOT_CLOSED",
 }
+
 
 
 @dataclass(frozen=True)
@@ -332,6 +335,7 @@ def evaluate_current_session_red_bar_v2(
     futures_symbol: str | None = None,
     futures_expiry: str | None = None,
     require_resolved_futures: bool = False,
+    run_id: str | None = None,
 ) -> CurrentSessionV2Result:
     """Refresh the paper-mode V2 snapshot from current intraday data."""
     previous = read_red_bar_v2_ui_snapshot(settings.artifacts_root)
@@ -396,6 +400,18 @@ def evaluate_current_session_red_bar_v2(
         index_candles,
         evaluation_time=evaluated_at,
     )
+    record_strategy_subcheck(
+        database,
+        run_id=run_id,
+        step_name="latest_completed_1m_candle",
+        artifacts={
+            "candle_close": completed_close,
+            "candle_rsi_14": completed_rsi,
+            "candle_timestamp": (
+                completed_timestamp.isoformat() if completed_timestamp else None
+            ),
+        },
+    )
 
     order_rows = list(database.read_paper_execution_orders("PAPER-STD"))
     active_v2_order_exists = _active_v2_order_exists(order_rows)
@@ -417,6 +433,161 @@ def evaluate_current_session_red_bar_v2(
         futures_expiry=(futures_expiry or (previous.futures_expiry if previous else None)),
         exit_timestamps=exit_timestamps,
     )
+    # Surface the strategy's candidate scan as a sub-step. The
+    # ``monitored`` object holds the events the strategy engine
+    # produced (initial_displacement, reversal, midpoint_upgrade).
+    candidate_events = list(getattr(monitored.replay, "events", []) or [])
+    record_strategy_subcheck(
+        database,
+        run_id=run_id,
+        step_name="candidate_scan",
+        artifacts={
+            "candidate_count": len(candidate_events),
+            "candidate_event_types": sorted(
+                {str(getattr(e, "event_type", "?")) for e in candidate_events}
+            ),
+        },
+    )
+    # Surface the most recent admission decision, if any.
+    latest_admission = _latest_allowed_admission(monitored)
+    if latest_admission is not None:
+        # Pull the per-boolean conditions and decision metadata out
+        # of the underlying ``RedBarV2DirectionDecision`` so we can
+        # both surface them in the admission_decision artifact and
+        # write one evidence row per boolean check.
+        details = getattr(latest_admission, "details", None)
+        if not isinstance(details, Mapping):
+            details = {}
+        conditions = details.get("conditions")
+        if not isinstance(conditions, Mapping):
+            conditions = {}
+        event_type = str(getattr(latest_admission, "event_type", "—"))
+        direction = str(getattr(latest_admission, "direction", "—"))
+        option_side = getattr(latest_admission, "option_side", None)
+        entry_type = (
+            details.get("entry_type")
+            if isinstance(details.get("entry_type"), str)
+            else None
+        )
+        trend_strength = (
+            details.get("trend_strength")
+            if isinstance(details.get("trend_strength"), str)
+            else None
+        )
+        reason_text = (
+            details.get("admission_reason")
+            or details.get("state")
+            or "—"
+        )
+        # Write the consolidated admission-decision row.
+        record_strategy_subcheck(
+            database,
+            run_id=run_id,
+            step_name="admission_decision",
+            artifacts={
+                "event_type": event_type,
+                "direction": direction,
+                "option_side": option_side,
+                "entry_type": entry_type,
+                "trend_strength": trend_strength,
+                "outcome": str(
+                    getattr(latest_admission, "candidate_allowed", None)
+                ),
+                "candidate_score": getattr(latest_admission, "score", None),
+                "reason": str(reason_text),
+            },
+        )
+        # Write one row per gate. The 5 boolean gates are now:
+        # - reference_ready (gating)
+        # - context_fresh (gating)
+        # - vwap_aligned (gating, combined with RedBar reference)
+        # - midpoint_aligned (gating, alias for RedBar reference)
+        # - rsi_aligned is now informational; we don't gate on it
+        gate_map = {
+            "reference_ready": (
+                bool(details.get("state") == "READY"),
+                {"passed": details.get("state") == "READY",
+                 "state": details.get("state")},
+            ),
+            "context_fresh": (
+                bool(latest_admission.context_fresh),
+                {"passed": latest_admission.context_fresh},
+            ),
+            "vwap_aligned": (
+                bool(latest_admission.vwap_aligned),
+                {"passed": latest_admission.vwap_aligned},
+            ),
+            "midpoint_aligned": (
+                bool(latest_admission.midpoint_aligned),
+                {"passed": latest_admission.midpoint_aligned},
+            ),
+            "rsi_informational": (
+                True,  # informational; always "passed" in audit terms
+                {
+                    "passed": True,
+                    "rsi_value": (
+                        latest_admission.rsi_value
+                        if latest_admission.rsi_value is not None
+                        else None
+                    ),
+                },
+            ),
+        }
+        for check_name, (passed, artifact) in gate_map.items():
+            record_strategy_subcheck(
+                database,
+                run_id=run_id,
+                step_name=f"check:{check_name}",
+                status="OK" if passed else "ERROR",
+                artifacts=artifact,
+            )
+        # Mid-session 12:45-1:15 rule (only fires if the rule is active)
+        if getattr(latest_admission, "mid_session_active", False):
+            mid_passed = getattr(latest_admission, "mid_session_passed", None)
+            record_strategy_subcheck(
+                database,
+                run_id=run_id,
+                step_name="check:mid_session",
+                status=(
+                    "OK"
+                    if mid_passed is True
+                    else "ERROR"
+                    if mid_passed is False
+                    else "RUNNING"
+                ),
+                artifacts={
+                    "passed": mid_passed,
+                    "reason": getattr(
+                        latest_admission, "mid_session_reason", None
+                    ),
+                    "candle_timestamp": str(
+                        getattr(latest_admission, "context_timestamp", None)
+                    ),
+                },
+            )
+        # PCR (informational) — both current and morning, always shown
+        # if the strategy engine recorded them.
+        pcr_value = getattr(latest_admission, "pcr_value", None)
+        morning_pcr = getattr(latest_admission, "morning_pcr_value", None)
+        if pcr_value is not None or morning_pcr is not None:
+            shift = None
+            if (
+                isinstance(pcr_value, (int, float))
+                and isinstance(morning_pcr, (int, float))
+            ):
+                shift = round(float(pcr_value) - float(morning_pcr), 4)
+            record_strategy_subcheck(
+                database,
+                run_id=run_id,
+                step_name="check:pcr_informational",
+                status="OK",
+                artifacts={
+                    "passed": True,
+                    "current_pcr": pcr_value,
+                    "morning_pcr": morning_pcr,
+                    "shift": shift,
+                },
+            )
     correlation_id = build_latest_live_correlation_id(
         monitored=monitored,
         instrument_key=instrument_key,
@@ -427,6 +598,7 @@ def evaluate_current_session_red_bar_v2(
         instrument_key=instrument_key,
         futures_instrument_key=futures_key,
         futures_expiry=(futures_expiry or (previous.futures_expiry if previous else None)),
+        run_id=run_id,
     )
 
     snapshot = read_red_bar_v2_ui_snapshot(settings.artifacts_root)

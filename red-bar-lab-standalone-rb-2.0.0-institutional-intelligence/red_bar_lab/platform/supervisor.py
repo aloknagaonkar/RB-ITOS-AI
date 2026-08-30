@@ -165,11 +165,28 @@ class PlatformSupervisor:
                 return
             if not self._controller.is_running(spec.name):
                 exit_code = self._controller.get_exit_code(spec.name)
+                child_output = self._controller.get_recent_output(
+                    spec.name, max_lines=20
+                )
                 comp_state.state = "CRASHED"
-                comp_state.last_error = f"Exited with code {exit_code}"
+                comp_state.last_error = (
+                    f"Exited with code {exit_code}"
+                    + (f" — last output:\n{child_output}" if child_output else "")
+                )
                 self._state_store.write_component(comp_state)
                 if spec.required:
-                    raise RuntimeError(f"{spec.name} exited during startup (code={exit_code})")
+                    if child_output:
+                        logger.error(
+                            "%s crashed at startup (code=%s). "
+                            "Last child output:\n%s",
+                            spec.name,
+                            exit_code,
+                            child_output,
+                        )
+                    raise RuntimeError(
+                        f"{spec.name} exited during startup (code={exit_code})"
+                        + (f"\nLast child output:\n{child_output}" if child_output else "")
+                    )
                 logger.warning("Non-required %s exited (code=%d), skipping.", spec.name, exit_code)
                 return
             time.sleep(0.5)
@@ -185,11 +202,22 @@ class PlatformSupervisor:
             managed = self._controller._managed.get(spec.name)
             if managed and managed.proc and managed.proc.poll() is not None:
                 exit_code = managed.proc.returncode
-                logger.warning("%s exited unexpectedly (code=%d)", spec.name, exit_code)
+                child_output = self._controller.get_recent_output(
+                    spec.name, max_lines=20
+                )
+                logger.warning(
+                    "%s exited unexpectedly (code=%d)%s",
+                    spec.name,
+                    exit_code,
+                    f"\nLast child output:\n{child_output}" if child_output else "",
+                )
                 comp = self._state_store.read_component(spec.name)
                 if comp:
                     comp.state = "CRASHED"
-                    comp.last_error = f"Exited with code {exit_code}"
+                    comp.last_error = (
+                        f"Exited with code {exit_code}"
+                        + (f" — last output:\n{child_output}" if child_output else "")
+                    )
                     self._state_store.write_component(comp)
                 if spec.restart and not self._shutdown_requested:
                     logger.info("Restarting %s ...", spec.name)

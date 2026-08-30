@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from time import perf_counter
 from types import SimpleNamespace
+from typing import Any
 
 from red_bar_lab.config import RedBarSettings, UNDERLYINGS
 from red_bar_lab.execution.attribution_automation import AttributionAwarePaperAutomationService
@@ -19,6 +20,8 @@ from red_bar_lab.execution.paper_strategy_authority import PaperStrategyAuthorit
 from red_bar_lab.execution.underlying_candle_monitoring import assess_monitor_underlying_candles
 from red_bar_lab.market.paper_adapter import UpstoxPaperMarketAdapter
 from red_bar_lab.market.upstox_intelligence import UnifiedUpstoxMarketIntelligenceService
+from red_bar_lab.observability.cleanup import maybe_cleanup_process_evidence
+from red_bar_lab.observability.evidence import generate_run_id
 from red_bar_lab.operations.red_bar_v2_ui_snapshot import read_red_bar_v2_ui_snapshot
 from red_bar_lab.services.global_readiness import global_readiness_log_values
 from red_bar_lab.services.global_readiness_runtime import build_and_persist_global_readiness
@@ -166,6 +169,104 @@ def _suspended_report(reason: str):
     )
 
 
+def _record_paper_cycle_stage_evidence(
+    database: Any,
+    *,
+    run_id: str,
+    cycle_timings_ms: dict[str, float],
+) -> None:
+    """Write one ``process_evidence`` row per non-total stage key.
+
+    Best-effort: any DB error here is swallowed because the cycle
+    itself has already succeeded. We don't want evidence-writing to
+    mask a healthy run.
+    """
+    from datetime import datetime, timezone
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for stage_name, duration_ms in sorted(cycle_timings_ms.items()):
+        if stage_name == "total":
+            continue
+        if not isinstance(duration_ms, (int, float)):
+            continue
+        try:
+            step_id = database.write_step_evidence(
+                process_name="paper_monitor",
+                run_id=run_id,
+                step_name=f"stage:{stage_name}",
+                parent_step="paper_cycle",
+                started_at=now_iso,
+                status="OK",
+                artifacts={"duration_ms": float(duration_ms)},
+            )
+            database.update_step_evidence(
+                step_id=step_id,
+                completed_at=now_iso,
+                status="OK",
+                duration_ms=float(duration_ms),
+            )
+        except Exception:  # noqa: BLE001
+            # Best-effort: if the DB is unavailable, the cycle still
+            # succeeded and we don't want to raise.
+            continue
+
+
+def _read_recent_collector_run_id(
+    database: Any, *, max_age_seconds: float = 60.0
+) -> str | None:
+    """Return the most-recent market_collector run_id, if it's recent
+    enough that the paper cycle is plausibly part of the same logical
+    cycle. Used to correlate the paper cycle's evidence with the
+    upstream collector tick."""
+    try:
+        row = database.read_process_run_correlation(
+            process_name="market_collector"
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    if not row:
+        return None
+    started_at = row.get("started_at")
+    if not isinstance(started_at, str):
+        return None
+    try:
+        from datetime import datetime, timezone
+
+        parsed = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+        age = (datetime.now(timezone.utc) - parsed).total_seconds()
+    except (TypeError, ValueError):
+        return None
+    if age > max_age_seconds:
+        return None
+    return str(row.get("run_id") or "") or None
+
+
+def _write_paper_correlation(
+    database: Any,
+    *,
+    cycle_run_id: str,
+    correlated_collector_run_id: str | None,
+    trading_date: str,
+) -> None:
+    """Best-effort: record the paper monitor's most-recent run_id so
+    the UI can correlate. The ``correlated_collector_run_id`` artifact
+    is what makes the cross-process link."""
+    from datetime import datetime, timezone
+
+    try:
+        database.write_process_run_correlation(
+            process_name="paper_monitor",
+            run_id=cycle_run_id,
+            started_at=datetime.now(timezone.utc).isoformat(),
+            artifacts={
+                "trading_date": trading_date,
+                "correlated_collector_run_id": correlated_collector_run_id,
+            },
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _parser():
     parser = argparse.ArgumentParser(
         description=(
@@ -294,6 +395,28 @@ def main() -> int:
             cycle_timings_ms: dict[str, float] = {}
             cycle_started = datetime.now(ist)
             trading_date = cycle_started.date().isoformat()
+            cycle_run_id = generate_run_id("paper_monitor")
+            # Best-effort: keep the process_evidence table from growing
+            # unbounded. Self-throttles to once per day.
+            maybe_cleanup_process_evidence(database)
+            # Cross-process correlation: link this paper cycle to the
+            # most-recent market_collector run, if it's recent enough
+            # that the two are plausibly part of the same logical cycle.
+            correlated_collector_run_id = _read_recent_collector_run_id(
+                database, max_age_seconds=60.0
+            )
+            # Per-stage evidence is written at the end of the happy path
+            # via _record_paper_cycle_stage_evidence. The paper_cycle
+            # step is wrapped separately if/when the cycle body is
+            # extracted — for now we don't wrap the whole cycle in a
+            # single with-block because that would require re-indenting
+            # ~200 lines.
+            _write_paper_correlation(
+                database,
+                cycle_run_id=cycle_run_id,
+                correlated_collector_run_id=correlated_collector_run_id,
+                trading_date=trading_date,
+            )
             futures_applicable = args.underlying == "NIFTY 50"
             if futures_applicable:
                 futures_result = futures_monitor.resolve(as_of_date=cycle_started.date())
@@ -315,6 +438,7 @@ def main() -> int:
                 futures_symbol=futures_result.trading_symbol,
                 futures_expiry=futures_result.expiry,
                 require_resolved_futures=futures_applicable,
+                run_id=cycle_run_id,
             )
             cycle_timings_ms["v2_evaluation"] = (
                 perf_counter() - stage_perf_started
@@ -355,6 +479,7 @@ def main() -> int:
                     database=database,
                     settings=settings,
                     instrument_key=UNDERLYINGS[args.underlying],
+                    run_id=cycle_run_id,
                 )
                 v2_snapshot = read_red_bar_v2_ui_snapshot(settings.artifacts_root)
             cycle_timings_ms["exit_management"] = (
@@ -440,6 +565,7 @@ def main() -> int:
                     trading_date=trading_date,
                     lots=max(1, int(args.lots)),
                     monitor_positions=False,
+                    run_id=cycle_run_id,
                 )
             cycle_timings_ms["automation"] = (
                 perf_counter() - stage_perf_started
@@ -545,6 +671,107 @@ def main() -> int:
                     ),
                 }
             )
+            if (
+                not feed_failure
+                and not cycle_gate.entry_suspended
+                and not circuit_decision.entry_suspended
+            ):
+                # Per-stage evidence: one row per cycle_timings_ms key
+                # except "total" (which is the cycle as a whole). Each
+                # row carries the stage's duration so the cadence
+                # panel can render a per-stage timeline.
+                _record_paper_cycle_stage_evidence(
+                    database,
+                    run_id=cycle_run_id,
+                    cycle_timings_ms=cycle_timings_ms,
+                )
+                cycle_total_ms = (
+                    cycle_timings_ms.get("total")
+                    if isinstance(cycle_timings_ms.get("total"), (int, float))
+                    else None
+                )
+                try:
+                    database.record_paper_monitor_success(
+                        "PAPER-MONITOR",
+                        success_at=heartbeat,
+                        decision=last_decision,
+                        signal_id=(
+                            latest.get("signal_id") or bridge.signal_id
+                            if latest
+                            else bridge.signal_id
+                        ),
+                        total_ms=cycle_total_ms,
+                        stages={
+                            stage: float(value)
+                            for stage, value in cycle_timings_ms.items()
+                            if isinstance(value, (int, float))
+                        },
+                        underlying_status=str(
+                            getattr(
+                                getattr(candle_diagnostic, "readiness", None),
+                                "status",
+                                None,
+                            )
+                            or ""
+                        )
+                        or None,
+                        readiness_reason=str(
+                            getattr(
+                                getattr(candle_diagnostic, "readiness", None),
+                                "reason",
+                                None,
+                            )
+                            or ""
+                        )
+                        or None,
+                        readiness_ms=(
+                            float(cycle_timings_ms.get("readiness", 0.0))
+                            if isinstance(
+                                cycle_timings_ms.get("readiness"), (int, float)
+                            )
+                            else None
+                        ),
+                        futures_status=str(
+                            getattr(futures_market_result, "status", None) or ""
+                        )
+                        or None,
+                        candle_timestamp=str(
+                            getattr(
+                                getattr(candle_diagnostic, "readiness", None),
+                                "latest_timestamp",
+                                None,
+                            )
+                            or ""
+                        )
+                        or None,
+                        candle_age_seconds=(
+                            float(
+                                getattr(
+                                    getattr(
+                                        candle_diagnostic, "readiness", None
+                                    ),
+                                    "candle_age_seconds",
+                                    None,
+                                )
+                            )
+                            if getattr(
+                                getattr(candle_diagnostic, "readiness", None),
+                                "candle_age_seconds",
+                                None,
+                            )
+                            is not None
+                            else None
+                        ),
+                        bridge_alignment=str(
+                            getattr(candle_diagnostic, "bridge_alignment", None)
+                            or ""
+                        )
+                        or None,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logging.warning(
+                        "paper_monitor_success_write_failed err=%s", exc
+                    )
 
             logging.info(
                 "paper_monitor circuit=%s failures=%s entry_suspended=%s "

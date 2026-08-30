@@ -50,12 +50,20 @@ def submit_latest_live_canonical_shadow(
     instrument_key: str,
     futures_instrument_key: str,
     futures_expiry: str | None,
+    run_id: str | None = None,
 ) -> bool:
     try:
+        from red_bar_lab.storage.database import RedBarDatabase
+
+        # The main RedBarDatabase is the writer for ``process_evidence``;
+        # the canonical shadow's own SQLite DB is the writer for
+        # ``canonical_shadow_evaluations``. They're separate files.
+        main_db = RedBarDatabase(settings.database_path)
         runtime = get_red_bar_v2_shadow_runtime(
             enabled=settings.red_bar_v2_canonical_shadow_enabled,
             database_path=settings.database_path,
             artifacts_root=settings.artifacts_root,
+            evidence_database=main_db,
         )
         if runtime is None:
             return False
@@ -83,6 +91,7 @@ def submit_latest_live_canonical_shadow(
                 replay_event=event,
                 market_metadata=metadata,
                 source_replay_id=source_replay_id,
+                run_id=run_id,
             )
         )
     except Exception:

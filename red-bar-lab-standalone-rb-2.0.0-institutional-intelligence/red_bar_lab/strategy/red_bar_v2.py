@@ -61,13 +61,31 @@ class RedBarV2DirectionDecision:
     context_timestamp: datetime | None
     reference_timestamp: datetime | None
     close_price: float | None
-    rsi_value: float | None
-    vwap_value: float | None
-    rsi_aligned: bool
-    vwap_aligned: bool
-    midpoint_aligned: bool
-    context_fresh: bool
     reason: str
+    # Re-entry validation (only set when the system is waiting for a
+    # re-entry validation). State values: "waiting_midpoint" |
+    # "waiting_vwap" | "waiting_midsession" | "validating" | "validated"
+    # | "failed". alignment_passed=True means the next-candle VWAP
+    # check confirmed the touch direction.
+    reentry_state: str | None = None
+    reentry_alignment_passed: bool = False
+    # PCR (informational, do not gate admission)
+    pcr_value: float | None = None            # current 5m candle overall PCR
+    morning_pcr_value: float | None = None     # morning fixed-level PCR (None before ~9:20)
+    # Combined RedBar + VWAP alignment (gating; replaces midpoint_aligned
+    # as the canonical "RedBar reference check" in the UI)
+    redbar_vwap_aligned: bool = True           # both aligned in same direction
+    # Legacy fields (kept for backward compat; RedBar reference alignment
+    # is now the "redbar_vwap_aligned" flag, but "midpoint_aligned" still
+    # holds the underlying midpoint-touch result for diagnostics)
+    rsi_aligned: bool = True                   # informational
+    vwap_aligned: bool = True                 # gating (combined with RedBar)
+    midpoint_aligned: bool = True             # gating
+    context_fresh: bool = True                # gating
+    # Mid-session 12:45-1:15 rule (only set when the rule fires)
+    mid_session_active: bool = False
+    mid_session_passed: bool | None = None    # None if rule inactive
+    mid_session_reason: str | None = None
 
 
 def build_red_bar_v2_reference(
@@ -144,6 +162,12 @@ def _invalid_context_decision(
         close_price=context.candle_close if context else None,
         rsi_value=context.rsi_value if context else None,
         vwap_value=context.vwap_value if context else None,
+        pcr_value=(
+            getattr(context, "pcr_value", None) if context else None
+        ),
+        morning_pcr_value=(
+            getattr(context, "morning_pcr_value", None) if context else None
+        ),
         rsi_aligned=False,
         vwap_aligned=False,
         midpoint_aligned=False,
@@ -385,6 +409,10 @@ def evaluate_midpoint_upgrade(
     else:
         raise ValueError("current_state must be a provisional Red Bar V2 state")
 
+    # PCR + morning PCR (informational; defaults to None if not set)
+    pcr_value = getattr(context, "pcr_value", None)
+    morning_pcr_value = getattr(context, "morning_pcr_value", None)
+
     if aligned:
         return RedBarV2DirectionDecision(
             event_type=RedBarV2EventType.FULL_DIRECTIONAL_ALIGNMENT,
@@ -398,6 +426,9 @@ def evaluate_midpoint_upgrade(
             close_price=context.candle_close,
             rsi_value=context.rsi_value,
             vwap_value=context.vwap_value,
+            pcr_value=pcr_value,
+            morning_pcr_value=morning_pcr_value,
+            redbar_vwap_aligned=aligned,
             rsi_aligned=context.bullish_context or context.bearish_context,
             vwap_aligned=context.price_vs_vwap in {"ABOVE", "BELOW"},
             midpoint_aligned=True,
@@ -417,6 +448,9 @@ def evaluate_midpoint_upgrade(
         close_price=context.candle_close,
         rsi_value=context.rsi_value,
         vwap_value=context.vwap_value,
+        pcr_value=pcr_value,
+        morning_pcr_value=morning_pcr_value,
+        redbar_vwap_aligned=False,
         rsi_aligned=context.bullish_context or context.bearish_context,
         vwap_aligned=context.price_vs_vwap in {"ABOVE", "BELOW"},
         midpoint_aligned=False,

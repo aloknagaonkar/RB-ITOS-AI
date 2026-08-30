@@ -18,6 +18,8 @@ PAGE_MODULE_PATHS = {
     "Research Lab": "red_bar_lab.ui.pages.research_lab",
     "Red Bar V2 Validation": "red_bar_lab.ui.pages.red_bar_v2_validation",
     "Red Bar V2 Comparison": "red_bar_lab.ui.pages.red_bar_v2_comparison",
+    "Legacy V2 Lifecycle": "red_bar_lab.ui.pages.legacy_v2_lifecycle",
+    "Canonical V2 Lifecycle": "red_bar_lab.ui.pages.canonical_v2_lifecycle",
     "Shadow Directional": "red_bar_lab.ui.pages.shadow_directional_diagnostics",
     "Historical Intelligence": "red_bar_lab.ui.pages.historical_intelligence",
     "Signal Explorer": "red_bar_lab.ui.pages.signal_explorer",

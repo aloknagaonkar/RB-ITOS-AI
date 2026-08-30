@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import date, datetime, time
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from red_bar_lab.context.service import RedBarMarketContextService
@@ -9,8 +10,19 @@ from red_bar_lab.context.volume_structure_service import (
     RedBarVolumeStructureService,
 )
 from red_bar_lab.features.store import RedBarFeatureStore
+from red_bar_lab.observability.evidence import with_step_evidence
 
 IST = ZoneInfo("Asia/Kolkata")
+
+
+@contextmanager
+def _noop_cm():
+    """A do-nothing context manager used when run_id is None.
+
+    Lets the orchestrator code read naturally even when the caller
+    didn't supply a run_id — instead of `if run_id: with ...` blocks.
+    """
+    yield -1
 
 
 @dataclass(frozen=True)
@@ -77,7 +89,17 @@ class RedBarIntelligencePipelineOrchestrator:
         instrument_key: str,
         trading_date: str,
         link_window_seconds: int = 120,
+        run_id: str | None = None,
     ) -> PipelineRunReport:
+        import time as _time
+
+        run_started = _time.time()
+        run_started_iso = datetime.now(ZoneInfo("Asia/Kolkata")).isoformat()
+        # The collector wraps the orchestrator in a step called
+        # "orchestrator_run". When this is invoked from elsewhere (e.g.
+        # a one-shot EOD validation script), the caller can supply a
+        # different run_id.
+        orchestrator_run_id = run_id
         confirmed = self._confirmed_signals(
             instrument_key,
             trading_date,
@@ -112,54 +134,78 @@ class RedBarIntelligencePipelineOrchestrator:
 
             if confirmed_ids - existing_market:
                 try:
-                    service = RedBarMarketContextService(
-                        self.historical,
+                    with with_step_evidence(
                         self.database,
-                        self.settings,
-                    )
-                    _, report = service.build_for_range(
-                        instrument_key,
-                        date.fromisoformat(trading_date),
-                        date.fromisoformat(trading_date),
-                    )
-                    market_built = report.snapshots_built
+                        process_name="orchestrator",
+                        step_name="build_market_context",
+                        run_id=orchestrator_run_id,
+                    ) if orchestrator_run_id else _noop_cm():
+                        service = RedBarMarketContextService(
+                            self.historical,
+                            self.database,
+                            self.settings,
+                        )
+                        _, report = service.build_for_range(
+                            instrument_key,
+                            date.fromisoformat(trading_date),
+                            date.fromisoformat(trading_date),
+                        )
+                        market_built = report.snapshots_built
                 except Exception as exc:
                     errors.append(f"market_context: {exc}")
 
             if confirmed_ids - existing_volume:
                 try:
-                    service = RedBarVolumeStructureService(
-                        self.historical,
+                    with with_step_evidence(
                         self.database,
-                        self.settings,
-                    )
-                    _, report = service.build_for_range(
-                        instrument_key,
-                        date.fromisoformat(trading_date),
-                        date.fromisoformat(trading_date),
-                    )
-                    volume_built = report.snapshots_built
+                        process_name="orchestrator",
+                        step_name="build_volume_structure",
+                        run_id=orchestrator_run_id,
+                    ) if orchestrator_run_id else _noop_cm():
+                        service = RedBarVolumeStructureService(
+                            self.historical,
+                            self.database,
+                            self.settings,
+                        )
+                        _, report = service.build_for_range(
+                            instrument_key,
+                            date.fromisoformat(trading_date),
+                            date.fromisoformat(trading_date),
+                        )
+                        volume_built = report.snapshots_built
                 except Exception as exc:
                     errors.append(f"volume_structure: {exc}")
 
             if self.options_collector is not None:
                 try:
-                    options_linked = (
-                        self.options_collector
-                        .link_nearest_pre_entry_snapshots(
-                            instrument_key=instrument_key,
-                            trading_date=trading_date,
-                            max_age_seconds=link_window_seconds,
+                    with with_step_evidence(
+                        self.database,
+                        process_name="orchestrator",
+                        step_name="link_options",
+                        run_id=orchestrator_run_id,
+                    ) if orchestrator_run_id else _noop_cm():
+                        options_linked = (
+                            self.options_collector
+                            .link_nearest_pre_entry_snapshots(
+                                instrument_key=instrument_key,
+                                trading_date=trading_date,
+                                max_age_seconds=link_window_seconds,
+                            )
                         )
-                    )
                 except Exception as exc:
                     errors.append(f"options_link: {exc}")
 
-        states = self.evaluate_day(
-            instrument_key=instrument_key,
-            trading_date=trading_date,
-            confirmed=confirmed,
-        )
+        with with_step_evidence(
+            self.database,
+            process_name="orchestrator",
+            step_name="evaluate_day",
+            run_id=orchestrator_run_id,
+        ) if orchestrator_run_id else _noop_cm():
+            states = self.evaluate_day(
+                instrument_key=instrument_key,
+                trading_date=trading_date,
+                confirmed=confirmed,
+            )
         for state in states:
             self.database.upsert_signal_pipeline_status(
                 {
@@ -181,6 +227,11 @@ class RedBarIntelligencePipelineOrchestrator:
                 trading_date=trading_date,
                 status="PARTIAL",
                 message=" | ".join(errors)[:1000],
+                confirmed_count=len(confirmed),
+                core_eligible_count=sum(s.core_eligible for s in states),
+                hybrid_eligible_count=sum(s.hybrid_eligible for s in states),
+                run_duration_ms=(_time.time() - run_started) * 1000.0,
+                started_at=run_started_iso,
             )
         else:
             self.database.update_pipeline_run_status(
@@ -192,6 +243,11 @@ class RedBarIntelligencePipelineOrchestrator:
                     f"{sum(s.core_eligible for s in states)} core eligible; "
                     f"{sum(s.hybrid_eligible for s in states)} hybrid eligible."
                 ),
+                confirmed_count=len(states),
+                core_eligible_count=sum(s.core_eligible for s in states),
+                hybrid_eligible_count=sum(s.hybrid_eligible for s in states),
+                run_duration_ms=(_time.time() - run_started) * 1000.0,
+                started_at=run_started_iso,
             )
 
         return PipelineRunReport(

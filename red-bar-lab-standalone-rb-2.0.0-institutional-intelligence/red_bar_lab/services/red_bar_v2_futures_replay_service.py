@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
+import sqlite3
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 import pandas as pd
 
@@ -52,10 +54,54 @@ def _latest_timestamp(frame: pd.DataFrame) -> pd.Timestamp | None:
     return None
 
 
+def _read_latest_pcr_snapshot(
+    database: Any,
+    underlying: str,
+    trading_date: str,
+) -> tuple[float | None, float | None]:
+    """Read the latest 5m PCR projection's current + morning PCR.
+
+    Returns (current_pcr, morning_pcr). Either may be None if the
+    market_trend_research_pcr_5m_history table doesn't have a row for
+    the given underlying+trading_date or the payload is missing the
+    morning_panel.
+    """
+    path = getattr(database, "path", None)
+    if not path:
+        return None, None
+    try:
+        with sqlite3.connect(str(path)) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT payload_json FROM market_trend_research_pcr_5m_history "
+                "WHERE underlying=? AND trading_date=? "
+                "ORDER BY candle_close_timestamp DESC LIMIT 1",
+                (underlying, trading_date),
+            ).fetchone()
+    except (sqlite3.OperationalError, sqlite3.DatabaseError):
+        return None, None
+    if row is None:
+        return None, None
+    try:
+        payload = json.loads(row["payload_json"])
+    except (TypeError, ValueError):
+        return None, None
+    current = (payload.get("current_panel") or {}).get("aggregate") or {}
+    morning_panel = payload.get("morning_panel") or {}
+    morning = (morning_panel.get("aggregate") or {})
+    current_pcr = current.get("pcr")
+    morning_pcr = morning.get("pcr")
+    return (
+        float(current_pcr) if isinstance(current_pcr, (int, float)) else None,
+        float(morning_pcr) if isinstance(morning_pcr, (int, float)) else None,
+    )
+
+
 def run_monitored_red_bar_v2_futures_replay(
     index_candles: pd.DataFrame,
     futures_candles: pd.DataFrame,
     *,
+    database: Any,
     instrument_key: str,
     vwap_instrument_key: str,
     artifacts_root: str | Path,
@@ -64,6 +110,11 @@ def run_monitored_red_bar_v2_futures_replay(
     exit_timestamps: Iterable[datetime | pd.Timestamp] = (),
 ) -> MonitoredRedBarV2FuturesReplayResult:
     """Run monitored replay without acquiring live shadow-persistence authority."""
+    pcr_value, morning_pcr_value = _read_latest_pcr_snapshot(
+        database=database,
+        underlying=instrument_key,
+        trading_date=index_candles.index[-1].date().isoformat() if not index_candles.empty else "",
+    )
     replay, evaluation_health = replay_red_bar_v2_day_with_futures_vwap(
         index_candles,
         futures_candles,
@@ -117,6 +168,8 @@ def run_monitored_red_bar_v2_futures_replay(
             timeframe="1M",
             evaluation_time=latest_index_timestamp + pd.Timedelta(minutes=1),
             expected_timestamp=latest_index_timestamp,
+            pcr_value=pcr_value,
+            morning_pcr_value=morning_pcr_value,
         )
         if live_context is not None:
             ui_snapshot = replace(

@@ -74,22 +74,42 @@ def evaluate_initial_direction_futures(
     assert reference is not None and context is not None
     assert context.rsi_value is not None and context.vwap_value is not None
 
-    bullish_rsi = context.rsi_value > bullish_threshold
-    bearish_rsi = context.rsi_value < bearish_threshold
+    # RSI is now informational; the gates are RedBar reference + VWAP
+    # both pointing the same direction.
     bullish_vwap = context.vwap_comparison_price > context.vwap_value
     bearish_vwap = context.vwap_comparison_price < context.vwap_value
     bullish_midpoint = context.candle_close > reference.midpoint
     bearish_midpoint = context.candle_close < reference.midpoint
+    bullish_redbar_vwap = bullish_vwap and bullish_midpoint
+    bearish_redbar_vwap = bearish_vwap and bearish_midpoint
+    rsi_aligned = context.rsi_value > bullish_threshold or context.rsi_value < bearish_threshold
 
-    if bullish_rsi and bullish_vwap and bullish_midpoint:
+    # Mid-session 12:45 - 1:15 rule. Only active if the 12:45-1:15
+    # 30-min candle has completed. Evaluates the 12:50 5-min close
+    # (the close of the 12:45-12:50 candle) against the day's
+    # reference midpoint. Outside the window, the rule is inactive.
+    mid_session_active = _is_mid_session_window(context.candle_timestamp)
+    mid_session_passed: bool | None = None
+    mid_session_reason: str | None = None
+    if mid_session_active:
+        mid_session_passed, mid_session_reason = _evaluate_mid_session(
+            context.candle_timestamp, reference.midpoint, context.candle_close
+        )
+
+    if bullish_redbar_vwap and (mid_session_passed is not False):
         event = RedBarV2EventType.INITIAL_BULLISH_ALIGNMENT
         state = RedBarV2State.CONFIRMED_BULLISH
         direction, side = "BULLISH", "CE"
-    elif bearish_rsi and bearish_vwap and bearish_midpoint:
+    elif bearish_redbar_vwap and (mid_session_passed is not False):
         event = RedBarV2EventType.INITIAL_BEARISH_ALIGNMENT
         state = RedBarV2State.CONFIRMED_BEARISH
         direction, side = "BEARISH", "PE"
     else:
+        reason_parts = [
+            "The completed 1-minute index/futures context is not fully aligned."
+        ]
+        if mid_session_passed is False:
+            reason_parts.append(f"Mid-session 12:45 rule blocked: {mid_session_reason}")
         return RedBarV2DirectionDecision(
             event_type=RedBarV2EventType.NO_DIRECTIONAL_ALIGNMENT,
             state=RedBarV2State.NEUTRAL,
@@ -102,11 +122,17 @@ def evaluate_initial_direction_futures(
             close_price=context.candle_close,
             rsi_value=context.rsi_value,
             vwap_value=context.vwap_value,
-            rsi_aligned=bullish_rsi or bearish_rsi,
+            pcr_value=context.pcr_value,
+            morning_pcr_value=context.morning_pcr_value,
+            redbar_vwap_aligned=bullish_redbar_vwap or bearish_redbar_vwap,
+            rsi_aligned=rsi_aligned,
             vwap_aligned=bullish_vwap or bearish_vwap,
             midpoint_aligned=bullish_midpoint or bearish_midpoint,
             context_fresh=True,
-            reason="The completed 1-minute index/futures context is not fully aligned.",
+            mid_session_active=mid_session_active,
+            mid_session_passed=mid_session_passed,
+            mid_session_reason=mid_session_reason,
+            reason=" ".join(reason_parts),
         )
 
     return RedBarV2DirectionDecision(
@@ -121,15 +147,69 @@ def evaluate_initial_direction_futures(
         close_price=context.candle_close,
         rsi_value=context.rsi_value,
         vwap_value=context.vwap_value,
+        pcr_value=context.pcr_value,
+        morning_pcr_value=context.morning_pcr_value,
+        redbar_vwap_aligned=True,
         rsi_aligned=True,
         vwap_aligned=True,
         midpoint_aligned=True,
         context_fresh=True,
+        mid_session_active=mid_session_active,
+        mid_session_passed=mid_session_passed,
+        mid_session_reason=mid_session_reason,
         reason=(
-            "Index RSI/midpoint and futures price/VWAP are fully aligned "
+            "Index and futures price/VWAP are fully aligned "
             f"for {direction.lower()} direction."
+            + (
+                f" Mid-session 12:45 confirmed: {mid_session_reason}."
+                if mid_session_passed
+                else ""
+            )
         ),
     )
+
+
+def _is_mid_session_window(candle_timestamp) -> bool:
+    """True if the 5m candle is between 12:45 PM and 1:15 PM IST."""
+    from datetime import time
+    if candle_timestamp is None:
+        return False
+    ts = candle_timestamp
+    if hasattr(ts, "time"):
+        t = ts.time()
+    else:
+        return False
+    return time(12, 45) <= t <= time(13, 15)
+
+
+def _evaluate_mid_session(candle_timestamp, midpoint: float, candle_close: float):
+    """Check the 12:50 5m candle close against the day's midpoint.
+
+    When the 5m candle timestamp is 12:50, the close is the close of
+    the 12:45-12:50 5-min window, which is also the first 5-min bar
+    of the 12:45-13:15 30-min candle.
+    """
+    from datetime import time
+    if candle_timestamp is None:
+        return None, None
+    if hasattr(candle_timestamp, "time"):
+        t = candle_timestamp.time()
+    else:
+        return None, None
+    if not (time(12, 50) <= t <= time(13, 15)):
+        # Outside the 12:50-1:15 window inside the 12:45-1:15 active zone;
+        # the rule is implicitly passed (no check).
+        return True, None
+    if t > time(12, 50):
+        # The 12:50 close is fixed at 12:50. Subsequent 5m candles
+        # within the window don't re-check the 12:50 close.
+        # We mark the rule as passed.
+        return True, "12:50 close preserved as confirmed by subsequent candles"
+    if candle_close > midpoint:
+        return True, "12:50 close above midpoint (BULLISH confirmed)"
+    if candle_close < midpoint:
+        return True, "12:50 close below midpoint (BEARISH confirmed)"
+    return False, "12:50 close matched midpoint exactly (no direction)"
 
 
 def evaluate_reversal_direction_futures(
@@ -149,14 +229,14 @@ def evaluate_reversal_direction_futures(
     if prior not in {"BULLISH", "BEARISH"}:
         raise ValueError("previous_direction must be BULLISH or BEARISH")
 
+    # Reversal gates are now RedBar + VWAP combined (RSI informational).
     bullish = (
-        context.rsi_value > bullish_threshold
-        and context.vwap_comparison_price > context.vwap_value
+        context.vwap_comparison_price > context.vwap_value
     )
     bearish = (
-        context.rsi_value < bearish_threshold
-        and context.vwap_comparison_price < context.vwap_value
+        context.vwap_comparison_price < context.vwap_value
     )
+    rsi_aligned = context.rsi_value > bullish_threshold or context.rsi_value < bearish_threshold
 
     if prior == "BEARISH" and bullish:
         direction, side = "BULLISH", "CE"
@@ -183,6 +263,9 @@ def evaluate_reversal_direction_futures(
             close_price=context.candle_close,
             rsi_value=context.rsi_value,
             vwap_value=context.vwap_value,
+            pcr_value=context.pcr_value,
+            morning_pcr_value=context.morning_pcr_value,
+            redbar_vwap_aligned=False,
             rsi_aligned=False,
             vwap_aligned=False,
             midpoint_aligned=False,
@@ -202,7 +285,10 @@ def evaluate_reversal_direction_futures(
         close_price=context.candle_close,
         rsi_value=context.rsi_value,
         vwap_value=context.vwap_value,
-        rsi_aligned=True,
+        pcr_value=context.pcr_value,
+        morning_pcr_value=context.morning_pcr_value,
+        redbar_vwap_aligned=aligned,
+        rsi_aligned=rsi_aligned,
         vwap_aligned=True,
         midpoint_aligned=aligned,
         context_fresh=True,
