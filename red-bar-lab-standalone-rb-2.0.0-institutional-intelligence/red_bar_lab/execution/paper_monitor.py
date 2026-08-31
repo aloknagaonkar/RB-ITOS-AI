@@ -49,6 +49,9 @@ from red_bar_lab.services.nifty_futures_readiness import (
     futures_readiness_log_values,
 )
 from red_bar_lab.services.red_bar_v2_current_session import evaluate_current_session_red_bar_v2
+from red_bar_lab.services.red_bar_v2_cycle_evaluation_store import (
+    persist_red_bar_v2_cycle_evaluation,
+)
 from red_bar_lab.services.red_bar_v2_contract_selection_evidence import (
     persist_contract_selection_evidence,
 )
@@ -651,6 +654,25 @@ def main() -> int:
             cycle_timings_ms["global_readiness"] = (
                 perf_counter() - stage_perf_started
             ) * 1000.0
+            try:
+                persist_red_bar_v2_cycle_evaluation(
+                    settings.database_path,
+                    run_id=cycle_run_id,
+                    observed_at=cycle_started,
+                    trading_date=trading_date,
+                    underlying_name=args.underlying,
+                    instrument_key=UNDERLYINGS[args.underlying],
+                    live_v2=live_v2,
+                    snapshot=v2_snapshot,
+                    bridge=bridge,
+                    readiness=global_readiness_result,
+                    report=report,
+                    cycle_timings_ms=cycle_timings_ms,
+                )
+            except Exception:
+                logging.exception(
+                    "V2_CYCLE_EVALUATION_PERSIST_FAILED run_id=%s", cycle_run_id
+                )
 
             open_orders = database.read_open_paper_execution_orders("PAPER-STD")
             if circuit_decision.entry_suspended or cycle_gate.entry_suspended:

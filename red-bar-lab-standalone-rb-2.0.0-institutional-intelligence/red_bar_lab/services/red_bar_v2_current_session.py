@@ -54,6 +54,9 @@ class CurrentSessionV2Result:
     completed_1m_rsi: float | None = None
     completed_1m_timestamp: str | None = None
     market_data_evidence: tuple[CandlePullEvidence, ...] = ()
+    session_health: Mapping[str, Any] | None = None
+    candidate_events_scanned: int = 0
+    latest_admission: Mapping[str, Any] | None = None
 
 
 def _active_v2_order_exists(rows: list[Mapping[str, Any]]) -> bool:
@@ -667,6 +670,39 @@ def evaluate_current_session_red_bar_v2(
             artifacts_root=settings.artifacts_root,
         )
 
+    admission_summary: Mapping[str, Any] | None = None
+    if latest_admission is not None:
+        admission_details = getattr(latest_admission, "details", None)
+        admission_details = (
+            admission_details if isinstance(admission_details, Mapping) else {}
+        )
+        admission_summary = {
+            "event_type": str(getattr(latest_admission, "event_type", "") or ""),
+            "direction": str(getattr(latest_admission, "direction", "") or ""),
+            "option_side": getattr(latest_admission, "option_side", None),
+            "entry_type": admission_details.get("entry_type"),
+            "trend_strength": admission_details.get("trend_strength"),
+            "admission_code": str(
+                getattr(latest_admission, "admission_code", "") or ""
+            ),
+            "admission_reason": str(admission_details.get("admission_reason") or ""),
+            "candidate_allowed": bool(
+                getattr(latest_admission, "candidate_allowed", False)
+            ),
+            "score": getattr(latest_admission, "score", None),
+        }
+
+    health = monitored.health
+    health_to_dict = getattr(health, "to_dict", None)
+    session_health: Mapping[str, Any] = (
+        health_to_dict()
+        if callable(health_to_dict)
+        else {
+            "status": getattr(health, "status", None),
+            "reason": getattr(health, "reason", None),
+        }
+    )
+
     return CurrentSessionV2Result(
         status=(
             "READY"
@@ -681,4 +717,7 @@ def evaluate_current_session_red_bar_v2(
         completed_1m_rsi=completed_rsi,
         completed_1m_timestamp=completed_timestamp,
         market_data_evidence=market_data_evidence,
+        session_health=session_health,
+        candidate_events_scanned=len(candidate_events),
+        latest_admission=admission_summary,
     )
