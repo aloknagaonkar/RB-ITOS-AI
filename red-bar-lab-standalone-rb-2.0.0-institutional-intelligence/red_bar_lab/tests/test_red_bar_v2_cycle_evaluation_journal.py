@@ -146,6 +146,7 @@ def test_result_defaults_include_journal_fields():
     assert result.session_health is None
     assert result.candidate_events_scanned == 0
     assert result.latest_admission is None
+    assert result.rule_state is None
 
 
 def test_evaluate_populates_session_health_from_monitored_replay():
@@ -185,3 +186,177 @@ def test_evaluation_monitor_page_is_read_only():
     assert "read_red_bar_v2_cycle_evaluations" in source
     assert "automation.run_cycle" not in source
     assert "close_position" not in source
+    assert "_render_rule_state" in source
+    assert "Strategy rule state" in source
+
+
+def _rule_state_candles(closes, volumes):
+    from datetime import datetime, timedelta, timezone
+
+    import pandas as pd
+
+    ist = timezone(timedelta(hours=5, minutes=30))
+    timestamps = pd.date_range(
+        datetime(2026, 8, 24, 9, 15, tzinfo=ist),
+        periods=len(closes),
+        freq="1min",
+    )
+    opens = [closes[0] - 0.2, *closes[:-1]]
+    return pd.DataFrame(
+        {
+            "open": opens,
+            "high": [max(o, c) + 0.4 for o, c in zip(opens, closes)],
+            "low": [min(o, c) - 0.4 for o, c in zip(opens, closes)],
+            "close": closes,
+            "volume": volumes,
+        },
+        index=timestamps,
+    )
+
+
+def _rule_state_market_frames():
+    index_closes = [100.0, 101.0, 102.0, 103.0, 104.0]
+    index_closes += [103.0, 101.0, 99.0, 97.0, 95.0]
+    index_closes += [96.0 + index * 0.9 for index in range(40)]
+    futures_closes = [200.0 + index * 0.6 for index in range(50)]
+    index_volumes = [10.0 + index for index in range(50)]
+    futures_volumes = [1000.0 + index * 10.0 for index in range(50)]
+    return (
+        _rule_state_candles(index_closes, index_volumes),
+        _rule_state_candles(futures_closes, futures_volumes),
+    )
+
+
+def test_replay_rule_state_reports_every_rule():
+    from red_bar_lab.services.red_bar_v2_futures_historical_replay import (
+        replay_red_bar_v2_day_with_futures_vwap,
+    )
+
+    index_candles, futures_candles = _rule_state_market_frames()
+    replay, _ = replay_red_bar_v2_day_with_futures_vwap(
+        index_candles,
+        futures_candles,
+        instrument_key="NSE_INDEX|Nifty 50",
+        vwap_instrument_key="NSE_FO|NIFTY-FUT",
+    )
+
+    state = replay.rule_state
+    assert state is not None
+    for section in (
+        "reference",
+        "initial",
+        "reversal",
+        "mid_session",
+        "upgrade",
+        "reentry",
+        "admission",
+    ):
+        assert section in state
+    assert state["as_of"] is not None
+
+    assert state["reference"]["established"] is True
+    assert isinstance(state["reference"]["midpoint"], float)
+    assert state["initial"]["status"] == "ESTABLISHED"
+    assert state["initial"]["direction"] in {"BULLISH", "BEARISH"}
+    assert state["initial"]["admitted"] is True
+    assert state["initial"]["evaluations"] > 0
+    assert state["admission"]["admitted"] >= 1
+    assert state["admission"]["last_admission_code"]
+    assert state["mid_session"]["active"] is False
+    assert state["reentry"]["waiting"] is False
+    assert state["upgrade"]["provisional_state"] is None
+    assert state["current_direction"] in {"BULLISH", "BEARISH"}
+
+
+def test_replay_rule_state_reference_pending_before_red_bar():
+    from red_bar_lab.services.red_bar_v2_futures_historical_replay import (
+        replay_red_bar_v2_day_with_futures_vwap,
+    )
+
+    rising = [100.0 + index for index in range(5)]
+    volumes = [10.0] * 5
+    replay, _ = replay_red_bar_v2_day_with_futures_vwap(
+        _rule_state_candles(rising, volumes),
+        _rule_state_candles([200.0 + index for index in range(5)], volumes),
+        instrument_key="NSE_INDEX|Nifty 50",
+        vwap_instrument_key="NSE_FO|NIFTY-FUT",
+    )
+
+    state = replay.rule_state
+    assert state is not None
+    assert state["reference"]["established"] is False
+    assert state["initial"]["status"] == "REFERENCE_PENDING"
+    assert state["initial"]["evaluations"] == 0
+    assert state["reversal"]["monitoring"] is False
+    assert state["admission"]["admitted"] == 0
+
+
+def test_cycle_evaluation_round_trips_rule_state(tmp_path: Path):
+    path = tmp_path / "lab.sqlite3"
+    live_v2, snapshot, bridge, readiness, report = _stubs()
+    live_v2.rule_state = {
+        "as_of": "2026-08-31T13:01:00+05:30",
+        "reference": {"established": True, "midpoint": 24210.0},
+        "initial": {"status": "ESTABLISHED", "direction": "BEARISH"},
+    }
+
+    persist_red_bar_v2_cycle_evaluation(
+        path,
+        run_id="run-3",
+        observed_at="2026-08-31T13:01:05+05:30",
+        trading_date="2026-08-31",
+        underlying_name="NIFTY 50",
+        instrument_key="NSE_INDEX|Nifty 50",
+        live_v2=live_v2,
+        snapshot=snapshot,
+        bridge=bridge,
+        readiness=readiness,
+        report=report,
+    )
+
+    rows = read_red_bar_v2_cycle_evaluations(path, trading_date="2026-08-31")
+    assert rows[0]["rule_state"]["initial"]["direction"] == "BEARISH"
+    assert rows[0]["rule_state"]["reference"]["midpoint"] == 24210.0
+
+
+def test_cycle_evaluation_migrates_legacy_table_without_rule_state(tmp_path: Path):
+    import sqlite3
+
+    from red_bar_lab.services import red_bar_v2_cycle_evaluation_store as store
+
+    path = tmp_path / "lab.sqlite3"
+    legacy_schema = store._SCHEMA.replace(
+        "    rule_state_json TEXT NOT NULL DEFAULT '{}',\n", ""
+    )
+    assert "rule_state_json" not in legacy_schema
+    connection = sqlite3.connect(path)
+    connection.executescript(legacy_schema)
+    connection.commit()
+    connection.close()
+
+    live_v2, snapshot, bridge, readiness, report = _stubs()
+    live_v2.rule_state = {"initial": {"status": "SCANNING"}}
+    persist_red_bar_v2_cycle_evaluation(
+        path,
+        run_id="run-legacy",
+        observed_at="2026-08-31T13:05:05+05:30",
+        trading_date="2026-08-31",
+        underlying_name="NIFTY 50",
+        instrument_key="NSE_INDEX|Nifty 50",
+        live_v2=live_v2,
+        snapshot=snapshot,
+        bridge=bridge,
+        readiness=readiness,
+        report=report,
+    )
+
+    rows = read_red_bar_v2_cycle_evaluations(path, trading_date="2026-08-31")
+    assert rows[0]["run_id"] == "run-legacy"
+    assert rows[0]["rule_state"] == {"initial": {"status": "SCANNING"}}
+
+
+def test_current_session_wires_rule_state_from_replay():
+    from red_bar_lab.services import red_bar_v2_current_session
+
+    source = inspect.getsource(red_bar_v2_current_session)
+    assert 'rule_state=getattr(monitored.replay, "rule_state", None)' in source

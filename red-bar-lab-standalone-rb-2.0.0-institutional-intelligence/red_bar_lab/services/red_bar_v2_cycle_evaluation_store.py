@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS red_bar_v2_cycle_evaluations (
     orders_skipped INTEGER NOT NULL DEFAULT 0,
     cycle_timings_json TEXT NOT NULL DEFAULT '{}',
     candle_evidence_json TEXT NOT NULL DEFAULT '[]',
+    rule_state_json TEXT NOT NULL DEFAULT '{}',
     authority TEXT NOT NULL DEFAULT 'OBSERVATIONAL_ONLY',
     payload_json TEXT NOT NULL,
     UNIQUE(run_id)
@@ -58,6 +59,21 @@ CREATE TABLE IF NOT EXISTS red_bar_v2_cycle_evaluations (
 CREATE INDEX IF NOT EXISTS idx_v2_cycle_evaluations_time
 ON red_bar_v2_cycle_evaluations(trading_date, julianday(observed_at) DESC);
 """
+
+
+def _ensure_rule_state_column(connection: sqlite3.Connection) -> None:
+    """Add rule_state_json to pre-existing journal tables (schema evolution)."""
+    columns = {
+        str(row[1])
+        for row in connection.execute(
+            "PRAGMA table_info(red_bar_v2_cycle_evaluations)"
+        ).fetchall()
+    }
+    if "rule_state_json" not in columns:
+        connection.execute(
+            "ALTER TABLE red_bar_v2_cycle_evaluations "
+            "ADD COLUMN rule_state_json TEXT NOT NULL DEFAULT '{}'"
+        )
 
 
 def _normalize_timestamp(value: datetime | str | None) -> str | None:
@@ -143,6 +159,8 @@ def persist_red_bar_v2_cycle_evaluation(
     health = health if isinstance(health, Mapping) else {}
     admission = getattr(live_v2, "latest_admission", None)
     admission = admission if isinstance(admission, Mapping) else {}
+    rule_state = getattr(live_v2, "rule_state", None)
+    rule_state = dict(rule_state) if isinstance(rule_state, Mapping) else {}
 
     index_close = _float_or_none(getattr(snapshot, "index_close", None))
     index_rsi = _float_or_none(getattr(snapshot, "index_rsi", None))
@@ -183,6 +201,7 @@ def persist_red_bar_v2_cycle_evaluation(
         },
         "cycle_timings_ms": timings,
         "candle_evidence": candle_evidence,
+        "rule_state": rule_state,
     }
 
     values = (
@@ -226,12 +245,14 @@ def persist_red_bar_v2_cycle_evaluation(
         _int(getattr(report, "skipped", 0)),
         json.dumps(timings, default=str, sort_keys=True),
         json.dumps(candle_evidence, default=str, sort_keys=True),
+        json.dumps(rule_state, default=str, sort_keys=True),
         "OBSERVATIONAL_ONLY",
         json.dumps(payload, default=str, sort_keys=True),
     )
 
     with sqlite3.connect(path) as connection:
         connection.executescript(_SCHEMA)
+        _ensure_rule_state_column(connection)
         cursor = connection.execute(
             """
             INSERT INTO red_bar_v2_cycle_evaluations (
@@ -245,8 +266,9 @@ def persist_red_bar_v2_cycle_evaluation(
                 bridge_status,bridge_reason,readiness_status,readiness_reason,
                 blocking_reasons_json,advisory_reasons_json,execution_reasons_json,
                 signals_seen,candidates_scored,orders_opened,orders_skipped,
-                cycle_timings_json,candle_evidence_json,authority,payload_json
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                cycle_timings_json,candle_evidence_json,rule_state_json,
+                authority,payload_json
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(run_id) DO UPDATE SET
                 observed_at=excluded.observed_at,
                 cycle_status=excluded.cycle_status,
@@ -260,6 +282,7 @@ def persist_red_bar_v2_cycle_evaluation(
                 blocking_reasons_json=excluded.blocking_reasons_json,
                 advisory_reasons_json=excluded.advisory_reasons_json,
                 execution_reasons_json=excluded.execution_reasons_json,
+                rule_state_json=excluded.rule_state_json,
                 payload_json=excluded.payload_json,
                 authority='OBSERVATIONAL_ONLY'
             """,
@@ -326,5 +349,13 @@ def read_red_bar_v2_cycle_evaluations(
         except json.JSONDecodeError:
             item["candle_evidence"] = []
             item.pop("candle_evidence_json", None)
+        rule_state_raw = item.pop("rule_state_json", None)
+        try:
+            parsed_rule_state = json.loads(rule_state_raw or "{}")
+        except json.JSONDecodeError:
+            parsed_rule_state = {}
+        item["rule_state"] = (
+            parsed_rule_state if isinstance(parsed_rule_state, dict) else {}
+        )
         result.append(item)
     return result

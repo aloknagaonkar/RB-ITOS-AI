@@ -180,8 +180,194 @@ def _render_candidates(row: dict[str, Any]) -> None:
         )
 
 
+def _render_rule_state(row: dict[str, Any]) -> None:
+    st.markdown("#### 4 · Strategy rule state (every evaluation)")
+    state = row.get("rule_state") or {}
+    if not state:
+        st.caption(
+            "Rule state is not available for this cycle. Journal rows written "
+            "before the per-rule summary was introduced do not carry it."
+        )
+        return
+
+    reference = state.get("reference") or {}
+    initial = state.get("initial") or {}
+    reversal = state.get("reversal") or {}
+    mid_session = state.get("mid_session") or {}
+    upgrade = state.get("upgrade") or {}
+    reentry = state.get("reentry") or {}
+    admission = state.get("admission") or {}
+
+    direction = state.get("current_direction")
+    side = "CE" if direction == "BULLISH" else "PE" if direction == "BEARISH" else "—"
+    cols = st.columns(5)
+    cols[0].metric(
+        "Current direction", f"{direction} ({side})" if direction else "FLAT"
+    )
+    cols[1].metric(
+        "Rule 0 · Red bar",
+        _fmt_time(reference.get("timestamp"))
+        if reference.get("established")
+        else "NOT SET",
+    )
+    cols[2].metric("Midpoint", _fmt_number(reference.get("midpoint")))
+    cols[3].metric(
+        "Ref high / low",
+        f"{_fmt_number(reference.get('high'))} / {_fmt_number(reference.get('low'))}",
+    )
+    cols[4].metric("Evaluated as of", _fmt_time(state.get("as_of")))
+
+    initial_status = str(initial.get("status") or "UNKNOWN")
+    initial_detail = []
+    if initial.get("direction"):
+        initial_detail.append(f"direction {initial.get('direction')}")
+    if initial.get("established_at"):
+        initial_detail.append(f"established {_fmt_time(initial.get('established_at'))}")
+    if initial.get("admitted") is True:
+        initial_detail.append("first candidate admitted")
+    elif initial.get("admitted") is False:
+        initial_detail.append("first candidate BLOCKED")
+    initial_detail.append(f"{int(initial.get('evaluations') or 0)} evaluations")
+    if initial.get("last_evaluated_at"):
+        initial_detail.append(
+            f"last {_fmt_time(initial.get('last_evaluated_at'))} → "
+            f"{initial.get('last_result') or '—'}"
+        )
+
+    reversal_detail = [
+        f"5m evaluations {int(reversal.get('five_minute_evaluations') or 0)}",
+        f"detections {int(reversal.get('detections') or 0)}",
+    ]
+    if reversal.get("last_detected_at"):
+        aligned = (
+            "confirmed" if reversal.get("last_midpoint_aligned") else "provisional"
+        )
+        reversal_detail.append(
+            f"last {reversal.get('last_direction') or '—'} at "
+            f"{_fmt_time(reversal.get('last_detected_at'))} ({aligned})"
+        )
+    if reversal.get("pending"):
+        reversal_detail.append("PENDING")
+
+    if mid_session.get("active"):
+        mid_status = (
+            "PASSED" if mid_session.get("passed") else "BLOCKING"
+        )
+        mid_detail = [mid_session.get("reason") or "—"]
+        if mid_session.get("evaluated_at"):
+            mid_detail.append(f"checked {_fmt_time(mid_session.get('evaluated_at'))}")
+        blocked_count = int(mid_session.get("blocked_count") or 0)
+        if blocked_count:
+            mid_detail.append(f"{blocked_count} blocked alignment(s)")
+    else:
+        mid_status = "INACTIVE"
+        mid_detail = ["Outside the 12:45–13:15 IST window (or not yet evaluated)."]
+
+    upgrade_detail = [f"upgrades {int(upgrade.get('upgrades') or 0)}"]
+    if upgrade.get("last_upgrade_at"):
+        upgrade_detail.append(
+            f"last {_fmt_time(upgrade.get('last_upgrade_at'))} "
+            f"({upgrade.get('last_direction') or '—'})"
+        )
+
+    reentry_detail = [
+        f"validated {int(reentry.get('validated') or 0)}",
+        f"failed {int(reentry.get('failed') or 0)}",
+    ]
+    if reentry.get("last_outcome"):
+        reentry_detail.append(
+            f"last {reentry.get('last_outcome')} at "
+            f"{_fmt_time(reentry.get('last_outcome_at'))}"
+        )
+
+    admission_detail = [
+        f"admitted {int(admission.get('admitted') or 0)}",
+        f"blocked {int(admission.get('blocked') or 0)}",
+        f"active trades {int(admission.get('active_trade_count') or 0)}",
+        f"trade state {admission.get('trade_state') or '—'}",
+    ]
+    if admission.get("last_admitted_at"):
+        admission_detail.append(
+            f"last admitted {_fmt_time(admission.get('last_admitted_at'))} "
+            f"({admission.get('last_admission_code') or '—'})"
+        )
+
+    status_icon = {
+        "ESTABLISHED": "🟢",
+        "SCANNING": "🟡",
+        "REFERENCE_PENDING": "⚪",
+    }
+    reentry_status = (
+        f"WAITING ({reentry.get('touch_state') or 'touch'})"
+        if reentry.get("waiting")
+        else "NOT WAITING"
+    )
+    table_rows = [
+        {
+            "Rule": "1 · Initial entry (1m)",
+            "Status": f"{status_icon.get(initial_status, '⚪')} {initial_status}",
+            "Detail": " · ".join(initial_detail) or "—",
+        },
+        {
+            "Rule": "2 · Reversal (5m)",
+            "Status": (
+                "🟢 MONITORING" if reversal.get("monitoring") else "⚪ IDLE"
+            ),
+            "Detail": " · ".join(reversal_detail) or "—",
+        },
+        {
+            "Rule": "3 · Mid-session 12:45",
+            "Status": (
+                "🟢 PASSED"
+                if mid_status == "PASSED"
+                else "🔴 BLOCKING"
+                if mid_status == "BLOCKING"
+                else "⚪ INACTIVE"
+            ),
+            "Detail": " · ".join(mid_detail) or "—",
+        },
+        {
+            "Rule": "4 · State upgrade",
+            "Status": (
+                f"🟡 {upgrade.get('provisional_state')}"
+                if upgrade.get("provisional_state")
+                else "⚪ NO PROVISIONAL STATE"
+            ),
+            "Detail": " · ".join(upgrade_detail) or "—",
+        },
+        {
+            "Rule": "5 · Re-entry gate",
+            "Status": (
+                "🟡 " + reentry_status if reentry.get("waiting") else "⚪ " + reentry_status
+            ),
+            "Detail": " · ".join(reentry_detail) or "—",
+        },
+        {
+            "Rule": "6 · Admission",
+            "Status": (
+                "🟢 TRADE ACTIVE"
+                if int(admission.get("active_trade_count") or 0) > 0
+                else "🟢 ADMITTING"
+                if int(admission.get("admitted") or 0) > 0
+                else "🟡 NO ADMISSION YET"
+            ),
+            "Detail": " · ".join(admission_detail) or "—",
+        },
+    ]
+    st.dataframe(_arrow_safe_rows(table_rows), width="stretch", hide_index=True)
+
+    if initial.get("last_reason"):
+        st.caption(f"Last initial-evaluation result: {initial.get('last_reason')}")
+    if admission.get("last_block_code"):
+        st.caption(
+            f"Last blocked candidate: {admission.get('last_block_code')} at "
+            f"{_fmt_time(admission.get('last_block_at'))} — "
+            f"{admission.get('last_block_reason') or 'no reason recorded'}"
+        )
+
+
 def _render_publication_readiness(row: dict[str, Any]) -> None:
-    st.markdown("#### 4 · Publication & global readiness")
+    st.markdown("#### 5 · Publication & global readiness")
     cols = st.columns(2)
     with cols[0]:
         st.markdown("##### Signal publication bridge")
@@ -210,7 +396,7 @@ def _render_stage_timings(row: dict[str, Any]) -> None:
     timings = row.get("cycle_timings") or {}
     if not timings:
         return
-    st.markdown("#### 5 · Cycle stage timings (ms)")
+    st.markdown("#### 6 · Cycle stage timings (ms)")
     rows = [
         {"Stage": str(stage), "Milliseconds": f"{float(value):,.0f}"}
         for stage, value in sorted(timings.items())
@@ -298,6 +484,7 @@ def render_page(
     _render_data_collection(latest)
     _render_strategy_values(latest)
     _render_candidates(latest)
+    _render_rule_state(latest)
     _render_publication_readiness(latest)
     _render_stage_timings(latest)
     st.markdown("---")

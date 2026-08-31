@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime
-from typing import Iterable
+from typing import Any, Iterable, Mapping
 
 import pandas as pd
 
@@ -46,6 +46,9 @@ class RedBarV2ReplayResult:
     blocked_candidates: int
     closed_trades: int
     final_trade_state: str
+    # Observational summary of every strategy rule's latest state.
+    # Populated by the futures replay; legacy replays leave it None.
+    rule_state: Mapping[str, Any] | None = None
 
     def to_records(self) -> list[dict[str, object]]:
         records: list[dict[str, object]] = []
