@@ -295,6 +295,23 @@ def replay_red_bar_v2_day(
                         "active_trade_count": admission.active_trade_count,
                         "previous_trade_status": admission.previous_trade_status,
                         "conditions": dict(admission.conditions),
+                        # V2 informational / time-windowed audit fields
+                        # surfaced by the consumer in red_bar_v2_current_session
+                        "pcr_value": getattr(decision, "pcr_value", None),
+                        "morning_pcr_value": getattr(
+                            decision, "morning_pcr_value", None
+                        ),
+                        "rsi_value": getattr(decision, "rsi_value", None),
+                        "vwap_value": getattr(decision, "vwap_value", None),
+                        "mid_session_active": getattr(
+                            decision, "mid_session_active", False
+                        ),
+                        "mid_session_passed": getattr(
+                            decision, "mid_session_passed", None
+                        ),
+                        "mid_session_reason": getattr(
+                            decision, "mid_session_reason", None
+                        ),
                     },
                 )
             )

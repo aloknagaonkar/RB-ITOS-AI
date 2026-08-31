@@ -507,33 +507,39 @@ def evaluate_current_session_red_bar_v2(
         # - vwap_aligned (gating, combined with RedBar reference)
         # - midpoint_aligned (gating, alias for RedBar reference)
         # - rsi_aligned is now informational; we don't gate on it
+        # ReplayEvent.details["conditions"] carries the per-gate booleans
+        # from the admission evaluator. The flat fields (pcr_value, etc.)
+        # are also placed on the ReplayEvent by the replay builder.
+        conditions = (
+            details.get("conditions")
+            if isinstance(details.get("conditions"), Mapping)
+            else {}
+        )
         gate_map = {
             "reference_ready": (
-                bool(details.get("state") == "READY"),
-                {"passed": details.get("state") == "READY",
-                 "state": details.get("state")},
+                bool(conditions.get("reference_ready", False)),
+                {
+                    "passed": conditions.get("reference_ready", False),
+                    "state": conditions.get("trade_state"),
+                },
             ),
             "context_fresh": (
-                bool(latest_admission.context_fresh),
-                {"passed": latest_admission.context_fresh},
+                bool(conditions.get("context_fresh", False)),
+                {"passed": conditions.get("context_fresh", False)},
             ),
             "vwap_aligned": (
-                bool(latest_admission.vwap_aligned),
-                {"passed": latest_admission.vwap_aligned},
+                bool(conditions.get("vwap_aligned", False)),
+                {"passed": conditions.get("vwap_aligned", False)},
             ),
             "midpoint_aligned": (
-                bool(latest_admission.midpoint_aligned),
-                {"passed": latest_admission.midpoint_aligned},
+                bool(conditions.get("midpoint_aligned", False)),
+                {"passed": conditions.get("midpoint_aligned", False)},
             ),
             "rsi_informational": (
                 True,  # informational; always "passed" in audit terms
                 {
                     "passed": True,
-                    "rsi_value": (
-                        latest_admission.rsi_value
-                        if latest_admission.rsi_value is not None
-                        else None
-                    ),
+                    "rsi_value": conditions.get("rsi_aligned"),
                 },
             ),
         }
@@ -546,8 +552,8 @@ def evaluate_current_session_red_bar_v2(
                 artifacts=artifact,
             )
         # Mid-session 12:45-1:15 rule (only fires if the rule is active)
-        if getattr(latest_admission, "mid_session_active", False):
-            mid_passed = getattr(latest_admission, "mid_session_passed", None)
+        if details.get("mid_session_active", False):
+            mid_passed = details.get("mid_session_passed")
             record_strategy_subcheck(
                 database,
                 run_id=run_id,
@@ -561,18 +567,14 @@ def evaluate_current_session_red_bar_v2(
                 ),
                 artifacts={
                     "passed": mid_passed,
-                    "reason": getattr(
-                        latest_admission, "mid_session_reason", None
-                    ),
-                    "candle_timestamp": str(
-                        getattr(latest_admission, "context_timestamp", None)
-                    ),
+                    "reason": details.get("mid_session_reason"),
+                    "candle_timestamp": str(details.get("context_timestamp")),
                 },
             )
         # PCR (informational) — both current and morning, always shown
         # if the strategy engine recorded them.
-        pcr_value = getattr(latest_admission, "pcr_value", None)
-        morning_pcr = getattr(latest_admission, "morning_pcr_value", None)
+        pcr_value = details.get("pcr_value")
+        morning_pcr = details.get("morning_pcr_value")
         if pcr_value is not None or morning_pcr is not None:
             shift = None
             if (
