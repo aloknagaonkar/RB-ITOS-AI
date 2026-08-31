@@ -43,6 +43,7 @@ temp/
 *.sqlite3
 
 # Generated strategy artifacts / market captures
+artifacts/
 artifacts/red_bar/
 artifacts/**/*.csv
 artifacts/**/*.parquet
