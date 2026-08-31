@@ -453,7 +453,7 @@ def evaluate_current_session_red_bar_v2(
         },
     )
     # Surface the most recent admission decision, if any.
-    latest_admission = _latest_allowed_admission(monitored)
+    latest_admission = _latest_allowed_admission(candidate_events)
     if latest_admission is not None:
         # Pull the per-boolean conditions and decision metadata out
         # of the underlying ``RedBarV2DirectionDecision`` so we can
