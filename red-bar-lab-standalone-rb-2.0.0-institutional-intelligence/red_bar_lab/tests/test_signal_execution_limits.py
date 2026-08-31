@@ -81,6 +81,11 @@ def test_signal_age_gate_fails_closed(tmp_path):
 def test_persistence_boundary_caps_entries_and_contracts(tmp_path):
     settings = RedBarSettings(artifacts_root=tmp_path / "red_bar")
     database = RedBarDatabase(settings.database_path)
+    database.ensure_paper_execution_account(
+        account_id="PAPER-STD",
+        account_name="Standard Paper Account",
+        initial_capital=500000.0,
+    )
     confirmation = datetime.now(IST) - timedelta(seconds=30)
     database.replace_signal_attempts(
         "LIVE_MONITOR", "NIFTY", confirmation.date().isoformat(), [_attempt(confirmation)]
@@ -107,6 +112,11 @@ def test_persistence_boundary_caps_entries_and_contracts(tmp_path):
 def test_live_policy_can_apply_reentry_cooldown(tmp_path):
     settings = RedBarSettings(artifacts_root=tmp_path / "red_bar")
     database = RedBarDatabase(settings.database_path)
+    database.ensure_paper_execution_account(
+        account_id="PAPER-STD",
+        account_name="Standard Paper Account",
+        initial_capital=500000.0,
+    )
     confirmation = datetime.now(IST) - timedelta(seconds=30)
     database.replace_signal_attempts(
         "LIVE_MONITOR", "NIFTY", confirmation.date().isoformat(), [_attempt(confirmation)]

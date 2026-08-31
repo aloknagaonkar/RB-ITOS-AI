@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Mapping
 
@@ -15,7 +15,9 @@ from red_bar_lab.services.shadow_directional_store import ShadowDirectionalStore
 @dataclass(frozen=True)
 class ShadowDirectionalObservationService:
     store: ShadowDirectionalStore
-    engine: ShadowDirectionalService = ShadowDirectionalService()
+    engine: ShadowDirectionalService = field(
+        default_factory=ShadowDirectionalService
+    )
 
     def evaluate_and_store(
         self,

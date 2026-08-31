@@ -52,6 +52,7 @@ def _monitored(tmp_path):
     return run_monitored_red_bar_v2_futures_replay(
         index_candles,
         futures_candles,
+        database=None,
         instrument_key=UNDERLYING,
         vwap_instrument_key=FUTURES,
         artifacts_root=tmp_path,

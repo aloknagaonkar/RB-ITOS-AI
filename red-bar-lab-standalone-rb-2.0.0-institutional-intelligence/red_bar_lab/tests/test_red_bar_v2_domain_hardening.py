@@ -126,9 +126,27 @@ def _bundle() -> RedBarV2SignalBundle:
     )
 
 
-def test_allowed_bullish_rejects_bearish_rsi_alignment():
-    with pytest.raises(DomainValidationError, match="evidence must align"):
-        replace(_decision(), rsi=RsiEvidence(38.0, 60.0, 40.0, False, True))
+def test_allowed_bullish_accepts_informational_bearish_rsi():
+    # RSI is informational-only: a bearish RSI reading must NOT block an
+    # ALLOWED bullish decision. The operational gates are futures VWAP and
+    # reference midpoint alignment.
+    value = replace(_decision(), rsi=RsiEvidence(38.0, 60.0, 40.0, False, True))
+    assert value.rsi.bearish_aligned is True
+    assert value.direction is Direction.BULLISH
+
+
+def test_allowed_bullish_rejects_bearish_futures_vwap_alignment():
+    bullish = _decision()
+    with pytest.raises(DomainValidationError, match="must align with direction"):
+        replace(
+            bullish,
+            futures_vwap=replace(
+                bullish.futures_vwap,
+                comparison_price=24785.0,
+                bullish_aligned=False,
+                bearish_aligned=True,
+            ),
+        )
 
 
 def test_allowed_bearish_rejects_bullish_futures_alignment():

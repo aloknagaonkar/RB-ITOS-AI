@@ -11,8 +11,10 @@ def test_workspace_exposes_trade_evidence_page():
 
 def test_trade_evidence_page_consumes_authoritative_persisted_bundle():
     source = inspect.getsource(market_readiness.render_page)
-    assert "read_latest_market_evidence_bundle(" in source
-    assert "read_global_readiness_snapshots(" in source
+    # The page delegates the persisted-bundle consumption to the
+    # authoritative renderers (which read the monitor-created bundle).
+    assert "render_market_direction_summary(" in source
+    assert "render_market_direction_validation_panel(" in source
     assert "Authoritative market conclusion" in source
     assert "Authoritative evidence diagnostics" in source
     assert "Persisted evidence bundle" in source
