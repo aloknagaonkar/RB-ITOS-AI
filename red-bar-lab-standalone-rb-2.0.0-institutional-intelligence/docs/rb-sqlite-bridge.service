@@ -1,0 +1,21 @@
+[Unit]
+Description=rb-itos-ai sqlite read-only bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aloknagaonkar46
+WorkingDirectory=/home/aloknagaonkar46/bridge
+Environment=RB_DB_PATH=/home/aloknagaonkar46/RB-ITOS-AI/red-bar-lab-standalone-rb-2.0.0-institutional-intelligence/artifacts/red_bar/database/red_bar_strategy.db
+Environment=RB_MAX_ROWS=5000
+ExecStart=/home/aloknagaonkar46/venv/bin/uvicorn server:app --host 0.0.0.0 --port 8765
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=false
+ReadWritePaths=/home/aloknagaonkar46/bridge
+
+[Install]
+WantedBy=multi-user.target
