@@ -408,7 +408,10 @@ def evaluate_current_session_red_bar_v2(
             "candle_close": completed_close,
             "candle_rsi_14": completed_rsi,
             "candle_timestamp": (
-                completed_timestamp.isoformat() if completed_timestamp else None
+                completed_timestamp.isoformat()
+                if completed_timestamp is not None
+                and hasattr(completed_timestamp, "isoformat")
+                else completed_timestamp
             ),
         },
     )
