@@ -59,12 +59,20 @@ class UpstoxClient:
         self._configure_get_retry_policy()
 
     def _configure_get_retry_policy(self) -> None:
+        # Bounded GET-only retry policy tuned for Upstox rate-limit windows.
+        #
+        # Upstox free-tier rate-limit windows can last 20-60 seconds. With
+        # total=3 and backoff_factor=0.5, the cumulative wait was ~1.5s, which
+        # exhausted the budget long before Upstox released. Bumping to total=5
+        # with backoff_factor=2.0 produces 0s, 2s, 4s, 8s, 16s = 30s of wait
+        # time, which fits within a typical Upstox rate-limit window when
+        # combined with respect_retry_after_header=True.
         retry = ObservableRetry(
-            total=3,
+            total=5,
             connect=3,
             read=3,
-            status=3,
-            backoff_factor=0.5,
+            status=5,
+            backoff_factor=2.0,
             status_forcelist=(429, 502, 503, 504),
             allowed_methods=frozenset({"GET", "HEAD", "OPTIONS"}),
             respect_retry_after_header=True,
@@ -76,8 +84,8 @@ class UpstoxClient:
             mount("https://", adapter)
             mount("http://", adapter)
         self.get_retry_policy = {
-            "total": 3,
-            "backoff_factor": 0.5,
+            "total": 5,
+            "backoff_factor": 2.0,
             "status_forcelist": (429, 502, 503, 504),
             "allowed_methods": ("GET", "HEAD", "OPTIONS"),
             "respect_retry_after_header": True,
