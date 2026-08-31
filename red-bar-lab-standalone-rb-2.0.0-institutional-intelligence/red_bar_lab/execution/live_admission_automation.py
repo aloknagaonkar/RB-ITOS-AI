@@ -272,6 +272,7 @@ class LiveAdmissionRedBarPaperAutomationService(
         *,
         trading_date: str,
         lots: int = 1,
+        run_id: str | None = None,
     ):
         self._enforce_queue_admission(
             trading_date=trading_date,
@@ -280,6 +281,7 @@ class LiveAdmissionRedBarPaperAutomationService(
         return super().execute_approved_queue(
             trading_date=trading_date,
             lots=lots,
+            run_id=run_id,
         )
 
 
