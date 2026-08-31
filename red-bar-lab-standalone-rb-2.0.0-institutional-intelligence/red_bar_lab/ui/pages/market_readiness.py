@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from red_bar_lab.ui._shared import *
 from red_bar_lab.services.global_readiness_store import read_global_readiness_snapshots
 from red_bar_lab.services.market_evidence_bundle_store import (
@@ -79,6 +82,41 @@ def _entry_gate_message(status) -> str | None:
     return None
 
 
+def _format_age(seconds: float) -> str:
+    seconds = max(0.0, float(seconds))
+    if seconds < 90:
+        return f"{seconds:.0f}s"
+    minutes = seconds / 60.0
+    if minutes < 90:
+        return f"{minutes:.0f}m"
+    return f"{minutes / 60.0:.1f}h"
+
+
+def _decision_age_caption(database) -> str | None:
+    """Caption showing when the newest diagnostic decision was recorded."""
+    try:
+        rows = database.read_paper_signal_diagnostics(limit=1)
+    except Exception:
+        return None
+    if not rows:
+        return None
+    raw = rows[0].get("timestamp")
+    if not raw:
+        return None
+    try:
+        stamp = datetime.fromisoformat(str(raw))
+    except (TypeError, ValueError):
+        return None
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=ZoneInfo("Asia/Kolkata"))
+    age_seconds = (datetime.now(ZoneInfo("Asia/Kolkata")) - stamp).total_seconds()
+    return (
+        f"Decision recorded {str(raw)} ({_format_age(age_seconds)} ago) — "
+        "the reason above reflects that moment, not necessarily the "
+        "current cycle."
+    )
+
+
 def _render_monitor_status(database) -> None:
     st.markdown("### Paper monitor safety state")
     try:
@@ -108,6 +146,9 @@ def _render_monitor_status(database) -> None:
         st.success("The paper monitor is running without an active entry suspension.")
     if status.get("last_reason"):
         st.caption(f"Reason: {status['last_reason']}")
+    age_caption = _decision_age_caption(database)
+    if age_caption:
+        st.caption(age_caption)
     if status.get("last_error"):
         st.caption(f"Last error: {status['last_error']}")
 

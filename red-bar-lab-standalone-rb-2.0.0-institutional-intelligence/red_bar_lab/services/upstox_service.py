@@ -1,13 +1,25 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 import os
+import threading
+import time
 from typing import Callable
 
 import pandas as pd
 
 from red_bar_lab.brokers.upstox_client import UpstoxClient
+
+
+def _default_intraday_cache_ttl() -> float:
+    raw = os.environ.get("UPSTOX_INTRADAY_CACHE_TTL_SECONDS", "")
+    if not raw:
+        return 15.0
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return 15.0
 
 
 class MissingAccessToken(RuntimeError):
@@ -28,6 +40,13 @@ def resolve_access_token(session_token: str = "") -> str:
 class RedBarUpstoxService:
     access_token: str
     client_factory: Callable[[str], UpstoxClient] = UpstoxClient
+    intraday_cache_ttl_seconds: float = field(
+        default_factory=_default_intraday_cache_ttl
+    )
+    _intraday_cache: dict = field(default_factory=dict, init=False, repr=False)
+    _intraday_cache_lock: threading.Lock = field(
+        default_factory=threading.Lock, init=False, repr=False
+    )
 
     def _client(self) -> UpstoxClient:
         return self.client_factory(self.access_token)
@@ -54,11 +73,26 @@ class RedBarUpstoxService:
         instrument_key: str,
         interval_minutes: int = 1,
     ) -> pd.DataFrame:
-        return self._client().get_intraday_candles(
+        # One monitor cycle pulls the same 1m candles several times
+        # (v2 evaluation, readiness diagnostics, futures assessment).
+        # A short TTL dedupes those pulls; empty frames are never cached
+        # so a degraded feed recovers on the very next call.
+        ttl = float(self.intraday_cache_ttl_seconds or 0.0)
+        key = (instrument_key, int(interval_minutes))
+        if ttl > 0.0:
+            with self._intraday_cache_lock:
+                entry = self._intraday_cache.get(key)
+            if entry is not None and time.monotonic() - entry[0] <= ttl:
+                return entry[1].copy()
+        frame = self._client().get_intraday_candles(
             instrument_key,
             interval=interval_minutes,
             unit="minutes",
         )
+        if ttl > 0.0 and not frame.empty:
+            with self._intraday_cache_lock:
+                self._intraday_cache[key] = (time.monotonic(), frame.copy())
+        return frame
 
 
 

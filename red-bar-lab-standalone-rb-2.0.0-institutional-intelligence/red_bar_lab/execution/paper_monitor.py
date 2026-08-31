@@ -5,10 +5,12 @@ import json
 import logging
 import os
 import time
+from datetime import datetime
 from pathlib import Path
 from time import perf_counter
 from types import SimpleNamespace
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from red_bar_lab.config import RedBarSettings, UNDERLYINGS
 from red_bar_lab.execution.attribution_automation import AttributionAwarePaperAutomationService
@@ -68,6 +70,35 @@ from red_bar_lab.storage.database import RedBarDatabase
 _OPERATIONAL_WARNING_MESSAGES = frozenset(
     {"Automatic paper entry skipped outside entry market hours."}
 )
+
+_IST = ZoneInfo("Asia/Kolkata")
+
+# A diagnostic row older than this no longer describes the current cycle:
+# when no new signals arrive, the newest row can be hours old (e.g. a
+# pre-open admission block) and echoing it misrepresents the monitor state.
+_STALE_DIAGNOSTIC_MAX_AGE_SECONDS = 900
+
+
+def _diagnostic_recorded_recently(
+    latest: Any,
+    *,
+    now: datetime,
+    max_age_seconds: int = _STALE_DIAGNOSTIC_MAX_AGE_SECONDS,
+) -> bool:
+    """True when the row's timestamp is within the window; unparseable fails open."""
+    raw = None
+    if isinstance(latest, dict):
+        raw = latest.get("timestamp")
+    if not raw:
+        return True
+    try:
+        stamp = datetime.fromisoformat(str(raw))
+    except (TypeError, ValueError):
+        return True
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=_IST)
+    reference = now if now.tzinfo is not None else now.replace(tzinfo=_IST)
+    return (reference - stamp).total_seconds() <= float(max_age_seconds)
 
 
 def _persist_latency_snapshot(
@@ -626,13 +657,20 @@ def main() -> int:
                 current_state = "POSITION_MANAGEMENT_ONLY"
                 last_reason = circuit_decision.reason
             else:
-                last_decision = latest.get("final_decision") or (
-                    "MONITORING" if open_orders else bridge.status
-                )
                 current_state = (
                     "MONITORING_POSITION" if open_orders else "WAITING_FOR_V2_SIGNAL"
                 )
-                last_reason = latest.get("reason") or bridge.reason
+                if _diagnostic_recorded_recently(latest, now=cycle_started):
+                    last_decision = latest.get("final_decision") or (
+                        "MONITORING" if open_orders else bridge.status
+                    )
+                    last_reason = latest.get("reason") or bridge.reason
+                else:
+                    last_decision = "MONITORING"
+                    last_reason = (
+                        "NO_NEW_SIGNALS_SINCE "
+                        f"{latest.get('timestamp') or 'session start'}"
+                    )
 
             if latest.get("final_decision") == "OPENED":
                 totals["signals_qualified"] += 1

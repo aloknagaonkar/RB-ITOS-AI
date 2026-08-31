@@ -1,6 +1,10 @@
 from pathlib import Path
 
-from red_bar_lab.ui.pages.market_readiness import _entry_gate_message
+from red_bar_lab.ui.pages.market_readiness import (
+    _decision_age_caption,
+    _entry_gate_message,
+    _format_age,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -55,3 +59,31 @@ def test_running_state_without_gate_is_not_flagged():
     }
 
     assert _entry_gate_message(status) is None
+
+
+def test_format_age_buckets():
+    assert _format_age(45) == "45s"
+    assert _format_age(300) == "5m"
+    assert _format_age(7200) == "2.0h"
+
+
+class _FakeDatabaseWithDiagnostics:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def read_paper_signal_diagnostics(self, limit=1):
+        return self._rows[:limit]
+
+
+def test_decision_age_caption_reports_recorded_time():
+    stamp = "2026-08-31T08:05:00+05:30"
+    caption = _decision_age_caption(
+        _FakeDatabaseWithDiagnostics([{"timestamp": stamp}])
+    )
+    assert caption is not None
+    assert stamp in caption
+    assert "ago" in caption
+
+
+def test_decision_age_caption_absent_without_rows():
+    assert _decision_age_caption(_FakeDatabaseWithDiagnostics([])) is None
