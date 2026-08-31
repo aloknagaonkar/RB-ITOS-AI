@@ -9,6 +9,7 @@ from typing import Any, Iterable
 
 import pandas as pd
 
+from red_bar_lab.config import UNDERLYINGS
 from red_bar_lab.intelligence.red_bar_v2_futures_context import (
     build_red_bar_v2_futures_snapshot,
 )
@@ -79,6 +80,16 @@ def _extract_trading_date(frame: pd.DataFrame) -> str:
     return ""
 
 
+def _underlying_name(value: str) -> str:
+    """Map an instrument key to the underlying display name used by the
+    market trend research PCR history table. Unknown values pass through
+    unchanged so callers that already supply a display name keep working."""
+    for display_name, key in UNDERLYINGS.items():
+        if value == key:
+            return display_name
+    return value
+
+
 def _read_latest_pcr_snapshot(
     database: Any,
     underlying: str,
@@ -94,6 +105,7 @@ def _read_latest_pcr_snapshot(
     path = getattr(database, "path", None)
     if not path:
         return None, None
+    underlying_key = _underlying_name(underlying)
     try:
         with sqlite3.connect(str(path)) as conn:
             conn.row_factory = sqlite3.Row
@@ -101,7 +113,7 @@ def _read_latest_pcr_snapshot(
                 "SELECT payload_json FROM market_trend_research_pcr_5m_history "
                 "WHERE underlying=? AND trading_date=? "
                 "ORDER BY candle_close_timestamp DESC LIMIT 1",
-                (underlying, trading_date),
+                (underlying_key, trading_date),
             ).fetchone()
     except (sqlite3.OperationalError, sqlite3.DatabaseError):
         return None, None

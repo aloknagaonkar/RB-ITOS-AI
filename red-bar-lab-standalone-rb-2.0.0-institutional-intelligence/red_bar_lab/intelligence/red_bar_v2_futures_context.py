@@ -176,12 +176,32 @@ def build_red_bar_v2_futures_snapshot(
 
     index_latest = pd.Timestamp(index_frame.index[-1])
     futures_latest = pd.Timestamp(futures_frame.index[-1])
-    if index_latest != futures_latest:
-        return None, health("BLOCKED", "FUTURES_TIMESTAMP_MISMATCH")
 
     expected = _normalise_expected(index_latest, expected_timestamp)
     if expected is not None and index_latest != expected:
         return None, health("BLOCKED", "STALE_CONTEXT")
+
+    # Index and futures feeds rarely publish a new candle at the exact same
+    # moment. Tolerate at most one candle of skew by evaluating the latest
+    # candle present in both frames, so neither side leaks the future.
+    max_skew_seconds = 60.0 if timeframe == "1M" else 300.0
+    try:
+        skew_seconds = abs((index_latest - futures_latest).total_seconds())
+    except TypeError:
+        return None, health("BLOCKED", "FUTURES_TIMESTAMP_MISMATCH")
+    if skew_seconds > max_skew_seconds:
+        return None, health("BLOCKED", "FUTURES_TIMESTAMP_MISMATCH")
+    if index_latest != futures_latest:
+        aligned = min(index_latest, futures_latest)
+        if aligned not in index_frame.index or aligned not in futures_frame.index:
+            return None, health("BLOCKED", "FUTURES_TIMESTAMP_MISMATCH")
+        index_frame = index_frame.loc[index_frame.index <= aligned]
+        futures_frame = futures_frame.loc[futures_frame.index <= aligned]
+        index_latest = futures_latest = aligned
+        index_timestamp = index_latest.to_pydatetime()
+        futures_timestamp = futures_latest.to_pydatetime()
+        index_rows = len(index_frame)
+        futures_rows = len(futures_frame)
 
     index_enriched = add_market_indicators(index_frame, rsi_period=rsi_period)
     futures_vwap = session_vwap(futures_frame)

@@ -643,6 +643,7 @@ def main() -> int:
                 authority=authority,
                 latest_signal_diagnostic=latest,
                 report=report,
+                option_chain_snapshot=option_snapshot,
             )
             global_readiness_values = global_readiness_log_values(
                 global_readiness_result
