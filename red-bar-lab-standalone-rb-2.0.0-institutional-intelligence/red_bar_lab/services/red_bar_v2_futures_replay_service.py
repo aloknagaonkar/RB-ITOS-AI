@@ -54,6 +54,31 @@ def _latest_timestamp(frame: pd.DataFrame) -> pd.Timestamp | None:
     return None
 
 
+def _extract_trading_date(frame: pd.DataFrame) -> str:
+    """Best-effort: return the trading date of the last row in ``frame``
+    as an ISO-8601 date string (YYYY-MM-DD). Returns "" when the frame
+    is empty, the index is not datetime, and no ``timestamp`` column is
+    available. Defensive against RangeIndex / int-only callers.
+    """
+    if frame is None or frame.empty:
+        return ""
+    if isinstance(frame.index, pd.DatetimeIndex):
+        try:
+            return pd.Timestamp(frame.index.max()).date().isoformat()
+        except (TypeError, ValueError, AttributeError):
+            pass
+    for column_name in ("timestamp", "datetime", "candle_timestamp"):
+        if column_name in frame.columns:
+            try:
+                series = pd.to_datetime(frame[column_name], errors="coerce")
+                series = series.dropna()
+                if not series.empty:
+                    return pd.Timestamp(series.iloc[-1]).date().isoformat()
+            except (TypeError, ValueError, AttributeError):
+                continue
+    return ""
+
+
 def _read_latest_pcr_snapshot(
     database: Any,
     underlying: str,
@@ -110,10 +135,11 @@ def run_monitored_red_bar_v2_futures_replay(
     exit_timestamps: Iterable[datetime | pd.Timestamp] = (),
 ) -> MonitoredRedBarV2FuturesReplayResult:
     """Run monitored replay without acquiring live shadow-persistence authority."""
+    trading_date = _extract_trading_date(index_candles)
     pcr_value, morning_pcr_value = _read_latest_pcr_snapshot(
         database=database,
         underlying=instrument_key,
-        trading_date=index_candles.index[-1].date().isoformat() if not index_candles.empty else "",
+        trading_date=trading_date,
     )
     replay, evaluation_health = replay_red_bar_v2_day_with_futures_vwap(
         index_candles,
