@@ -200,3 +200,180 @@ def test_format_v2_pcr_row_status_propagates() -> None:
     }
     row = _format_v2_pcr_row(evidence)
     assert row["Status"] == "ERROR"
+
+
+def _create_journal_table(db_path: Path) -> None:
+    import sqlite3
+
+    connection = sqlite3.connect(db_path)
+    connection.execute(
+        """CREATE TABLE red_bar_v2_cycle_evaluations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT NOT NULL,
+            observed_at TEXT NOT NULL,
+            trading_date TEXT NOT NULL,
+            admission_direction TEXT,
+            admission_code TEXT,
+            pcr_json TEXT NOT NULL DEFAULT '{}'
+        )"""
+    )
+    connection.commit()
+    connection.close()
+
+
+def _insert_journal_row(
+    db_path: Path,
+    *,
+    run_id: str,
+    observed_at: str,
+    pcr_json: str,
+    admission_direction: str | None = None,
+    admission_code: str | None = None,
+) -> None:
+    import sqlite3
+
+    connection = sqlite3.connect(db_path)
+    connection.execute(
+        """INSERT INTO red_bar_v2_cycle_evaluations
+           (run_id, observed_at, trading_date, admission_direction,
+            admission_code, pcr_json)
+           VALUES (?,?,?,?,?,?)""",
+        (
+            run_id,
+            observed_at,
+            "2026-08-31",
+            admission_direction,
+            admission_code,
+            pcr_json,
+        ),
+    )
+    connection.commit()
+    connection.close()
+
+
+def test_read_v2_cycle_journal_pcr_none_without_table(fresh_db: Path) -> None:
+    from red_bar_lab.ui.market_direction_summary import _read_v2_cycle_journal_pcr
+
+    assert _read_v2_cycle_journal_pcr(fresh_db) is None
+
+
+def test_read_v2_cycle_journal_pcr_skips_empty_and_returns_latest(
+    fresh_db: Path,
+) -> None:
+    import json
+
+    from red_bar_lab.ui.market_direction_summary import _read_v2_cycle_journal_pcr
+
+    _create_journal_table(fresh_db)
+    _insert_journal_row(
+        fresh_db,
+        run_id="run-old",
+        observed_at="2026-08-31T10:00:00+05:30",
+        pcr_json=json.dumps({"overall_pcr": 0.7, "overall_direction": "BEARISH"}),
+    )
+    _insert_journal_row(
+        fresh_db,
+        run_id="run-new",
+        observed_at="2026-08-31T22:44:25+05:30",
+        pcr_json=json.dumps(
+            {
+                "overall_pcr": 1.91,
+                "overall_direction": "BULLISH",
+                "morning_pcr": 1.30,
+                "combined_pcr": 1.75,
+            }
+        ),
+        admission_direction="BEARISH",
+        admission_code="INITIAL_BEARISH_ALIGNMENT",
+    )
+    _insert_journal_row(
+        fresh_db,
+        run_id="run-newest-no-pcr",
+        observed_at="2026-08-31T22:50:00+05:30",
+        pcr_json="{}",
+    )
+
+    result = _read_v2_cycle_journal_pcr(fresh_db)
+    assert result is not None
+    assert result["run_id"] == "run-new"
+    assert result["pcr"]["overall_pcr"] == 1.91
+    assert result["pcr"]["morning_pcr"] == 1.30
+    assert result["admission_direction"] == "BEARISH"
+    assert result["admission_code"] == "INITIAL_BEARISH_ALIGNMENT"
+
+
+def test_format_v2_journal_pcr_row_unavailable_and_observed() -> None:
+    from red_bar_lab.ui.market_direction_summary import _format_v2_journal_pcr_row
+
+    row = _format_v2_journal_pcr_row(None)
+    assert row["Status"] == "UNAVAILABLE"
+    assert row["Live value"] == "Not available"
+
+    journal = {
+        "pcr": {"overall_pcr": 1.916, "overall_direction": "BULLISH"},
+        "observed_at": "2026-08-31T22:44:25+05:30",
+    }
+    row = _format_v2_journal_pcr_row(journal)
+    assert row["Live value"] == "1.916"
+    assert row["Direction"] == "BULLISH"
+    assert row["Status"] == "OBSERVED"
+    assert "observed at 2026-08-31T22:44:25+05:30" in row["Interpretation"]
+
+
+def test_read_pcr_history_excludes_current_trading_day(tmp_path: Path) -> None:
+    import sqlite3
+    from datetime import datetime, timezone
+
+    from red_bar_lab.ui.market_direction_summary import _read_pcr_history
+
+    path = tmp_path / "research.db"
+    connection = sqlite3.connect(path)
+    connection.execute(
+        """CREATE TABLE market_trend_research_pcr_5m_history (
+            underlying TEXT, trading_date TEXT, candle_close_timestamp TEXT,
+            source_timestamp TEXT, overall_pcr REAL
+        )"""
+    )
+    connection.executemany(
+        "INSERT INTO market_trend_research_pcr_5m_history VALUES (?,?,?,?,?)",
+        [
+            (
+                "NIFTY 50",
+                "2026-08-28",
+                "2026-08-28T09:55:00+00:00",
+                "2026-08-28T10:00:00+00:00",
+                1.20,
+            ),
+            (
+                "NIFTY 50",
+                "2026-08-31",
+                "2026-08-31T08:00:00+00:00",
+                "2026-08-31T08:05:00+00:00",
+                2.00,
+            ),
+        ],
+    )
+    connection.commit()
+    connection.close()
+
+    now = datetime(2026, 8, 31, 6, 0, tzinfo=timezone.utc)
+    history = _read_pcr_history(path, "NIFTY 50", now=now)
+    assert history["previous_day_close"] == 1.20
+    assert history["previous_day_date"] == "2026-08-28"
+    assert history["rolling_mean"] == 1.20
+    assert history["rolling_days_used"] == 1
+    assert [pcr for _, pcr in history["sparkline"]] == [1.20, 2.00]
+
+
+def test_summary_wires_history_helpers_and_journal_reader() -> None:
+    import inspect
+
+    from red_bar_lab.ui import market_direction_summary as summary
+
+    source = inspect.getsource(summary)
+    assert "_read_pcr_history(database_path, underlying)" in source
+    assert "_format_history_rows(history)" in source
+    assert "_render_history_sparkline(history)" in source
+    assert "FRESHCROSS" not in source
+    assert "red_bar_v2_cycle_evaluations" in source
+    assert "_read_v2_cycle_journal_pcr(database_path)" in source

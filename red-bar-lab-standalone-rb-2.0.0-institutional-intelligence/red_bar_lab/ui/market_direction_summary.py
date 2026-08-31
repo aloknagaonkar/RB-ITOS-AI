@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import sqlite3
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -102,6 +104,165 @@ def _status(*, available: bool, fresh: bool, ready: bool = True) -> str:
     if not fresh:
         return "STALE"
     return "FRESH" if ready else "PARTIAL"
+
+
+def _read_pcr_history(
+    database_path: str | Path,
+    underlying: str,
+    *,
+    rolling_days: int = 3,
+    sparkline_points: int = 20,
+    now: datetime | None = None,
+) -> dict[str, object]:
+    """Read PCR historical context from the 5m history table.
+
+    Returns a dict with:
+        - previous_day_close (float | None): last 5m PCR of the most recent
+          trading day strictly before today (None if not available)
+        - previous_day_date (str | None): trading_date of that close
+        - rolling_mean (float | None): mean of daily closing PCRs over the
+          last ``rolling_days`` trading days, always excluding today so the
+          window never contains intraday data from the current session
+        - rolling_days_used (int): how many distinct days contributed
+        - sparkline (list[tuple[str, float]]): the last ``sparkline_points``
+          (timestamp, pcr) pairs ordered oldest -> newest, for plotting
+    Best-effort: any DB error returns an empty result so the page keeps
+    rendering.
+    """
+    empty: dict[str, object] = {
+        "previous_day_close": None,
+        "previous_day_date": None,
+        "rolling_mean": None,
+        "rolling_days_used": 0,
+        "sparkline": [],
+    }
+    current = now or datetime.now(timezone.utc)
+    today_ist = current.astimezone(IST).date().isoformat()
+    try:
+        with sqlite3.connect(f"file:{database_path}?mode=ro", uri=True) as conn:
+            conn.row_factory = sqlite3.Row
+            # 1) last close per completed trading day, most recent first
+            daily_closes = conn.execute(
+                """
+                SELECT trading_date, overall_pcr, source_timestamp
+                FROM (
+                    SELECT trading_date, overall_pcr, source_timestamp,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY trading_date
+                               ORDER BY source_timestamp DESC
+                           ) AS rk
+                    FROM market_trend_research_pcr_5m_history
+                    WHERE underlying = ? AND trading_date < ?
+                ) WHERE rk = 1
+                ORDER BY trading_date DESC
+                """,
+                (underlying, today_ist),
+            ).fetchall()
+            if not daily_closes:
+                return empty
+            previous_day = daily_closes[0]
+            previous_day_close = float(previous_day["overall_pcr"])
+            previous_day_date = str(previous_day["trading_date"])
+            closes = [
+                float(row["overall_pcr"])
+                for row in daily_closes[: max(1, rolling_days)]
+            ]
+            rolling_mean = sum(closes) / len(closes) if closes else None
+            # 2) last N 5m points for the sparkline
+            rows = conn.execute(
+                """
+                SELECT source_timestamp, overall_pcr
+                FROM market_trend_research_pcr_5m_history
+                WHERE underlying = ?
+                ORDER BY source_timestamp DESC
+                LIMIT ?
+                """,
+                (underlying, sparkline_points),
+            ).fetchall()
+            sparkline = [
+                (str(r["source_timestamp"]), float(r["overall_pcr"]))
+                for r in reversed(rows)
+            ]
+            return {
+                "previous_day_close": previous_day_close,
+                "previous_day_date": previous_day_date,
+                "rolling_mean": rolling_mean,
+                "rolling_days_used": len(closes),
+                "sparkline": sparkline,
+            }
+    except Exception:
+        return empty
+
+
+def _format_history_rows(history: Mapping[str, object]) -> list[dict[str, str]]:
+    """Format the historical comparison rows for the summary table."""
+    prev_close = history.get("previous_day_close")
+    prev_date = history.get("previous_day_date")
+    rolling = history.get("rolling_mean")
+    rolling_n = history.get("rolling_days_used", 0)
+
+    def _fmt(value: object) -> str:
+        if isinstance(value, bool):
+            return "Not available"
+        if isinstance(value, (int, float)):
+            return f"{float(value):.3f}"
+        return "Not available"
+
+    prev_status = "OK" if prev_close is not None else "INCOMPLETE"
+    return [
+        {
+            "Component": "Previous trading day close (PCR)",
+            "Live value": _fmt(prev_close),
+            "Direction": "OBSERVATION",
+            "Status": prev_status,
+            "Interpretation": (
+                f"Closing PCR for {prev_date}"
+                if prev_date is not None
+                else "No prior trading day in the 5m history table"
+            ),
+        },
+        {
+            "Component": f"Rolling mean PCR ({rolling_n}d)",
+            "Live value": _fmt(rolling),
+            "Direction": "OBSERVATION",
+            "Status": "OK" if rolling is not None else "INCOMPLETE",
+            "Interpretation": (
+                "Mean of daily closing PCRs over the last "
+                f"{rolling_n} trading day(s). Window is thin when fewer "
+                "days are available."
+            ),
+        },
+    ]
+
+
+def _render_history_sparkline(history: Mapping[str, object]) -> None:
+    sparkline = history.get("sparkline") or []
+    if not sparkline:
+        st.caption(
+            "No 5m PCR history available yet for the sparkline."
+        )
+        return
+    try:
+        import pandas as _pd
+        df = _pd.DataFrame(sparkline, columns=["timestamp", "pcr"])
+        df["timestamp"] = _pd.to_datetime(df["timestamp"], utc=True)
+        df = df.set_index("timestamp")
+        st.line_chart(df, height=160)
+    except Exception:
+        # If pandas import or chart rendering fails, fall back to a small table
+        st.dataframe(
+            _arrow_safe_rows(
+                [
+                    {
+                        "When": ts,
+                        "PCR": f"{pcr:.3f}",
+                    }
+                    for ts, pcr in sparkline
+                ]
+            ),
+            width="stretch",
+            hide_index=True,
+        )
 
 
 @_fragment
@@ -298,12 +459,29 @@ def _render_summary_cycle(database_path: str | Path, underlying: str) -> None:
             "Interpretation": f"{len(candidates)}/4 eligible contracts; {trend_reason}",
         },
     ]
+    history = _read_pcr_history(database_path, underlying)
+    current_index = next(
+        (
+            index
+            for index, item in enumerate(rows)
+            if item.get("Component") == "Current/Overall PCR"
+        ),
+        len(rows) - 1,
+    )
+    rows[current_index + 1:current_index + 1] = _format_history_rows(history)
     st.markdown("## Market Direction Summary")
     st.caption(
         "OBSERVATION ONLY — NO TRADING AUTHORITY. "
         "This page does not create, reject, bundle, reserve or execute a trade."
     )
     st.dataframe(_arrow_safe_rows(rows), width="stretch", hide_index=True)
+    with st.expander("PCR history — intraday sparkline", expanded=False):
+        _render_history_sparkline(history)
+        st.caption(
+            "Last 5-minute Overall PCR observations across sessions. The "
+            "previous-day close and rolling mean rows above always exclude "
+            "today's intraday data."
+        )
     with st.expander("Pre-open NIFTY source evidence", expanded=False):
         if preopen:
             st.dataframe(_arrow_safe_rows([{
@@ -380,6 +558,77 @@ def _render_summary_cycle(database_path: str | Path, underlying: str) -> None:
     )
 
 
+def _read_v2_cycle_journal_pcr(
+    database_path: str | Path,
+) -> dict[str, object] | None:
+    """Read PCR context from the newest V2 cycle journal row that has one.
+
+    The paper monitor journals overall/morning/combined PCR per cycle in
+    ``red_bar_v2_cycle_evaluations.pcr_json``. Returns the most recent row
+    with a non-empty PCR payload, or ``None`` when the journal table or PCR
+    data is unavailable. Best-effort so the page keeps rendering.
+    """
+    try:
+        with sqlite3.connect(f"file:{database_path}?mode=ro", uri=True) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                """SELECT observed_at, trading_date, run_id,
+                          admission_direction, admission_code, pcr_json
+                   FROM red_bar_v2_cycle_evaluations
+                   WHERE pcr_json IS NOT NULL AND pcr_json != '{}'
+                   ORDER BY julianday(observed_at) DESC, observed_at DESC
+                   LIMIT 1"""
+            ).fetchone()
+    except Exception:
+        return None
+    if row is None:
+        return None
+    try:
+        pcr = json.loads(row["pcr_json"])
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(pcr, Mapping) or not pcr:
+        return None
+    return {
+        "pcr": dict(pcr),
+        "observed_at": row["observed_at"],
+        "trading_date": row["trading_date"],
+        "run_id": row["run_id"],
+        "admission_direction": row["admission_direction"],
+        "admission_code": row["admission_code"],
+    }
+
+
+def _format_v2_journal_pcr_row(
+    journal: Mapping[str, object] | None,
+) -> dict[str, str]:
+    if not isinstance(journal, Mapping):
+        return {
+            "Component": "V2 Strategy PCR (latest cycle)",
+            "Live value": "Not available",
+            "Direction": "—",
+            "Status": "UNAVAILABLE",
+            "Interpretation": (
+                "The V2 cycle journal has not recorded a PCR context yet."
+            ),
+        }
+    pcr = journal.get("pcr")
+    pcr = pcr if isinstance(pcr, Mapping) else {}
+    overall = pcr.get("overall_pcr")
+    overall_direction = str(pcr.get("overall_direction") or "—")
+    observed_at = str(journal.get("observed_at") or "Not available")
+    return {
+        "Component": "V2 Strategy PCR (latest cycle)",
+        "Live value": _number(overall),
+        "Direction": overall_direction,
+        "Status": "OBSERVED",
+        "Interpretation": (
+            "PCR context the V2 evaluation journaled on its latest cycle "
+            f"(observed at {observed_at})"
+        ),
+    }
+
+
 def _read_v2_pcr_evidence(database_path: str | Path) -> dict[str, object] | None:
     """Read the most recent V2 strategy ``check:pcr_informational`` row.
 
@@ -442,10 +691,64 @@ def _format_v2_pcr_row(evidence: Mapping[str, object] | None) -> dict[str, str]:
     }
 
 
+def _render_v2_journal_details(journal: Mapping[str, object]) -> None:
+    pcr = journal.get("pcr")
+    pcr = pcr if isinstance(pcr, Mapping) else {}
+    detail_rows = [
+        {"Field": "overall_pcr", "Value": _number(pcr.get("overall_pcr"))},
+        {"Field": "overall_direction", "Value": str(pcr.get("overall_direction") or "Not available")},
+        {"Field": "morning_pcr", "Value": _number(pcr.get("morning_pcr"))},
+        {"Field": "combined_pcr", "Value": _number(pcr.get("combined_pcr"))},
+        {"Field": "combined_direction", "Value": str(pcr.get("combined_direction") or "Not available")},
+        {"Field": "combined_coverage", "Value": _number(pcr.get("combined_coverage"), 2)},
+        {"Field": "admission_direction", "Value": str(journal.get("admission_direction") or "None")},
+        {"Field": "admission_code", "Value": str(journal.get("admission_code") or "None")},
+    ]
+    st.caption("Journaled PCR context (latest cycle):")
+    st.dataframe(
+        _arrow_safe_rows(detail_rows),
+        width="stretch",
+        hide_index=True,
+    )
+    raw_observed_at = str(journal.get("observed_at") or "")
+    try:
+        observed_ist = datetime.fromisoformat(raw_observed_at).astimezone(IST)
+        observed_text = observed_ist.strftime("%d %b %Y, %I:%M:%S %p IST")
+    except (TypeError, ValueError):
+        observed_text = raw_observed_at or "Not available"
+    st.caption(
+        "Source: red_bar_v2_cycle_evaluations.pcr_json · "
+        f"Run id = `{journal.get('run_id', '—')}` · "
+        f"Cycle observed at {observed_text}."
+    )
+    admission_direction = str(journal.get("admission_direction") or "")
+    overall_direction = str(pcr.get("overall_direction") or "")
+    if admission_direction and overall_direction and admission_direction != overall_direction:
+        st.warning(
+            f"Divergence to evaluate: the latest admitted candidate direction is "
+            f"{admission_direction} while the journaled Overall PCR direction is "
+            f"{overall_direction}."
+        )
+
+
 def _render_v2_pcr_section(database_path: str | Path) -> None:
-    evidence = _read_v2_pcr_evidence(database_path)
-    row = _format_v2_pcr_row(evidence)
+    journal = _read_v2_cycle_journal_pcr(database_path)
     with st.expander("Red Bar V2 strategy PCR context (informational)", expanded=False):
+        if journal is not None:
+            st.dataframe(
+                _arrow_safe_rows([_format_v2_journal_pcr_row(journal)]),
+                width="stretch",
+                hide_index=True,
+            )
+            _render_v2_journal_details(journal)
+            st.caption(
+                "Read-only. The V2 strategy does not block admission on PCR; "
+                "this panel shows the PCR the strategy actually journaled on "
+                "its latest cycle."
+            )
+            return
+        evidence = _read_v2_pcr_evidence(database_path)
+        row = _format_v2_pcr_row(evidence)
         st.dataframe(
             _arrow_safe_rows([row]),
             width="stretch",
@@ -481,9 +784,10 @@ def _render_v2_pcr_section(database_path: str | Path) -> None:
             )
         else:
             st.caption(
-                "No process_evidence row for step_name='check:pcr_informational' "
-                "was found. The Red Bar V2 strategy writes this row whenever a "
-                "live evaluation records a current or morning PCR value."
+                "No V2 cycle journal PCR and no process_evidence row for "
+                "step_name='check:pcr_informational' was found. The journal "
+                "PCR appears once the paper monitor persists a cycle with a "
+                "usable PCR context."
             )
         st.caption(
             "Read-only. The V2 strategy does not block admission on PCR; "

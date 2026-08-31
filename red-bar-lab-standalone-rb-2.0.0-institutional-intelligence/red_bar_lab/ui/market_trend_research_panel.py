@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import os
 from pathlib import Path
 from typing import Any, Callable, Mapping, TypeVar
@@ -697,22 +697,156 @@ def _render_best_contracts(selection: ContractSelection) -> None:
     st.caption("Observational selection only. It creates no signal, opportunity or order.")
 
 
+def _available_trading_days(
+    repository: object,
+    method_name: str,
+    underlying: str,
+) -> list[str]:
+    """Best-effort distinct trading days via a repository reader method."""
+    reader = getattr(repository, method_name, None)
+    if not callable(reader):
+        return []
+    try:
+        days = reader(underlying)
+    except Exception:
+        return []
+    return [str(day) for day in days if day]
+
+
+def _float_or_none(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    result = float(value)
+    return result if result == result else None
+
+
+def _nearest_history_entry(
+    history_rows: list[dict[str, Any]],
+    opened_at: datetime,
+) -> tuple[dict[str, Any] | None, float | None]:
+    """Pick the 5m PCR candle closest to a recommendation open time."""
+    if opened_at.tzinfo is None or opened_at.utcoffset() is None:
+        raise ValueError("opened_at must be timezone-aware")
+    best_row: dict[str, Any] | None = None
+    best_age: float | None = None
+    for row in history_rows:
+        candle = _parse_aware_timestamp(row.get("candle_close_timestamp"))
+        if candle is None:
+            continue
+        age = abs((candle - opened_at).total_seconds())
+        if best_age is None or age < best_age:
+            best_row, best_age = row, age
+    return best_row, best_age
+
+
+def _pcr_side_alignment(
+    side: object,
+    pcr_change: float | None,
+    *,
+    threshold: float = 0.01,
+) -> str:
+    """Classify whether PCR movement supported the recommended side.
+
+    The research policy reads rising PCR as bullish (favoring CE) and
+    falling PCR as bearish (favoring PE).
+    """
+    if pcr_change is None:
+        return "UNAVAILABLE"
+    if abs(pcr_change) < threshold:
+        return "FLAT"
+    aligned = pcr_change > 0 if str(side).upper() == "CE" else pcr_change < 0
+    return "WITH" if aligned else "AGAINST"
+
+
+def _recommendation_pcr_rows(
+    recommendation_rows: list[dict[str, Any]],
+    history_rows: list[dict[str, Any]],
+) -> list[dict[str, object]]:
+    """Join each recommendation to the PCR evidence at its open time."""
+    rendered: list[dict[str, object]] = []
+    for row in recommendation_rows:
+        opened_at = _parse_aware_timestamp(row.get("opened_at"))
+        entry_overall = _float_or_none(row.get("entry_overall_pcr"))
+        current_overall = _float_or_none(row.get("overall_pcr"))
+        pcr_change = (
+            current_overall - entry_overall
+            if entry_overall is not None and current_overall is not None
+            else None
+        )
+        candle, candle_age = (
+            _nearest_history_entry(history_rows, opened_at)
+            if opened_at is not None and history_rows
+            else (None, None)
+        )
+        rendered.append({
+            "Opened": _format_ist_timestamp(row.get("opened_at")),
+            "Contract": (
+                row.get("symbol")
+                or f"{_number(row.get('strike'), 0)} {row.get('side') or ''}"
+            ),
+            "Side": row.get("side") or "Not available",
+            "Entry strike PCR": _number(row.get("entry_strike_pcr")),
+            "Overall PCR at entry": _number(entry_overall),
+            "5m PCR at entry": _number(
+                (candle or {}).get("overall_pcr")
+            ),
+            "Morning PCR at entry": _number(
+                (candle or {}).get("morning_pcr")
+            ),
+            "Combined PCR at entry": _number(
+                (candle or {}).get("combined_index_pcr")
+            ),
+            "Top-10 PCR at entry": _number(
+                (candle or {}).get("top_ten_pcr")
+            ),
+            "Direction at entry": (
+                (candle or {}).get("research_direction") or "Not available"
+            ),
+            "Overall PCR now": _number(current_overall),
+            "PCR change since entry": _signed_decimal(pcr_change),
+            "PCR vs recommended side": _pcr_side_alignment(
+                row.get("side"), pcr_change
+            ),
+            "Matched candle age": (
+                f"{candle_age:.0f}s" if candle_age is not None else "Not available"
+            ),
+        })
+    return rendered
+
+
 def _render_five_minute_pcr_history(
     repository: MarketTrendResearchRepository,
     *,
     underlying: str,
     now: datetime,
 ) -> None:
-    reader = getattr(repository, "five_minute_pcr_history", None)
-    rows = (
-        reader(
-            underlying=underlying,
-            trading_date=now.astimezone(IST).date(),
-        )
-        if callable(reader)
-        else []
+    today_ist = now.astimezone(IST).date()
+    days = _available_trading_days(
+        repository, "five_minute_pcr_trading_days", underlying
     )
     with st.expander("5-Minute Overall PCR History", expanded=False):
+        if days:
+            default = next(
+                (day for day in days if day <= today_ist.isoformat()), days[0]
+            )
+            selected = st.selectbox(
+                "Trading date",
+                days,
+                index=days.index(default),
+                key="pcr_5m_history_trading_date",
+            )
+            try:
+                chosen = date.fromisoformat(selected)
+            except ValueError:
+                chosen = today_ist
+        else:
+            chosen = today_ist
+        reader = getattr(repository, "five_minute_pcr_history", None)
+        rows = (
+            reader(underlying=underlying, trading_date=chosen)
+            if callable(reader)
+            else []
+        )
         if not rows:
             st.info(
                 "Waiting for the first completed 5-minute candle with a "
@@ -825,21 +959,38 @@ def _render_strike_pcr_recommendation_tracker(
     now: datetime,
     option_rows: list[dict[str, Any]] | None = None,
 ) -> None:
-    reader = getattr(repository, "strike_pcr_recommendations", None)
-    rows = (
-        reader(
-            underlying=underlying,
-            trading_date=now.astimezone(IST).date(),
-        )
-        if callable(reader)
-        else []
+    today_ist = now.astimezone(IST).date()
+    days = _available_trading_days(
+        repository, "strike_pcr_recommendation_trading_days", underlying
     )
-    option_evidence = {
-        (float(item["strike"]), str(item.get("option_type") or "").upper()): item
-        for item in (option_rows or [])
-        if isinstance(item.get("strike"), (int, float))
-    }
     with st.expander("Strike PCR Buy Recommendation Tracker", expanded=False):
+        if days:
+            default = next(
+                (day for day in days if day <= today_ist.isoformat()), days[0]
+            )
+            selected = st.selectbox(
+                "Trading date",
+                days,
+                index=days.index(default),
+                key="strike_pcr_recommendation_trading_date",
+            )
+            try:
+                chosen = date.fromisoformat(selected)
+            except ValueError:
+                chosen = today_ist
+        else:
+            chosen = today_ist
+        reader = getattr(repository, "strike_pcr_recommendations", None)
+        rows = (
+            reader(underlying=underlying, trading_date=chosen)
+            if callable(reader)
+            else []
+        )
+        option_evidence = {
+            (float(item["strike"]), str(item.get("option_type") or "").upper()): item
+            for item in (option_rows or [])
+            if isinstance(item.get("strike"), (int, float))
+        }
         if not rows:
             st.info(
                 "No persisted strike-PCR recommendation is available yet. "
@@ -900,6 +1051,27 @@ def _render_strike_pcr_recommendation_tracker(
             "PCR-only observational tracking. Entry uses the first valid ask; "
             "current and peak values use executable bid. No signal, opportunity "
             "or order is created."
+        )
+        history_reader = getattr(repository, "five_minute_pcr_history", None)
+        history_rows = (
+            history_reader(underlying=underlying, trading_date=chosen)
+            if callable(history_reader)
+            else []
+        )
+        st.markdown("#### PCR at recommendation time — evaluation view")
+        st.dataframe(
+            _arrow_safe_rows(_recommendation_pcr_rows(rows, history_rows)),
+            width="stretch",
+            hide_index=True,
+        )
+        st.caption(
+            "Each row joins one recommendation to the PCR evidence at its open "
+            "time (nearest completed 5-minute candle): overall, morning, "
+            "combined and top-10 PCR plus the research direction at that "
+            "moment. 'PCR vs recommended side' compares the overall PCR "
+            "movement since entry with the recommended side (rising PCR "
+            "supports CE, falling PCR supports PE). Observational only — no "
+            "signal, opportunity or order is created."
         )
 
 

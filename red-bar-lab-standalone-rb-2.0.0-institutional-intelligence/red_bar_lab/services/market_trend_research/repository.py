@@ -410,6 +410,34 @@ class MarketTrendResearchRepository:
             raise
         return [json.loads(row[0]) for row in rows]
 
+    def _distinct_trading_days(self, table: str, underlying: str) -> list[str]:
+        if not self.path.exists():
+            return []
+        try:
+            with sqlite3.connect(self.path) as connection:
+                rows = connection.execute(
+                    f"SELECT DISTINCT trading_date FROM {table} "
+                    "WHERE underlying=? ORDER BY trading_date DESC",
+                    (underlying,),
+                ).fetchall()
+        except sqlite3.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                return []
+            raise
+        return [str(row[0]) for row in rows if row[0]]
+
+    def five_minute_pcr_trading_days(self, underlying: str) -> list[str]:
+        """Distinct trading days with 5m PCR observations, newest first."""
+        return self._distinct_trading_days(
+            "market_trend_research_pcr_5m_history", underlying
+        )
+
+    def strike_pcr_recommendation_trading_days(self, underlying: str) -> list[str]:
+        """Distinct trading days with strike PCR recommendations, newest first."""
+        return self._distinct_trading_days(
+            "market_trend_strike_pcr_recommendations", underlying
+        )
+
     def apply_strike_pcr_recommendations(
         self,
         observations: tuple[StrikePcrRecommendationObservation, ...],
