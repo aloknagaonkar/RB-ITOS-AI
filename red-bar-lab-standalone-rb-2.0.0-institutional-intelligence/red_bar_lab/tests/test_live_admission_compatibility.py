@@ -68,7 +68,7 @@ def test_allowed_processing_delegates_to_base_and_restores_database(monkeypatch)
     service = _service(database)
     seen = {}
 
-    def fake_process(self, *, trading_date, lots=1, queue_only=False):
+    def fake_process(self, *, trading_date, lots=1, queue_only=False, run_id=None):
         seen["database"] = self.database
         seen["engine_database"] = self.engine.database
         seen["arguments"] = (trading_date, lots, queue_only)
@@ -98,7 +98,7 @@ def test_processing_restores_database_when_base_engine_raises(monkeypatch):
     database = _Database()
     service = _service(database)
 
-    def fail_process(self, *, trading_date, lots=1, queue_only=False):
+    def fail_process(self, *, trading_date, lots=1, queue_only=False, run_id=None):
         assert isinstance(self.database, _AdmissionDatabaseProxy)
         raise RuntimeError("compatibility failure")
 
