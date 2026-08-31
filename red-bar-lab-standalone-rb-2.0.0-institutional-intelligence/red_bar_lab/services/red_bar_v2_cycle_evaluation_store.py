@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS red_bar_v2_cycle_evaluations (
     cycle_timings_json TEXT NOT NULL DEFAULT '{}',
     candle_evidence_json TEXT NOT NULL DEFAULT '[]',
     rule_state_json TEXT NOT NULL DEFAULT '{}',
+    pcr_json TEXT NOT NULL DEFAULT '{}',
     authority TEXT NOT NULL DEFAULT 'OBSERVATIONAL_ONLY',
     payload_json TEXT NOT NULL,
     UNIQUE(run_id)
@@ -61,19 +62,26 @@ ON red_bar_v2_cycle_evaluations(trading_date, julianday(observed_at) DESC);
 """
 
 
-def _ensure_rule_state_column(connection: sqlite3.Connection) -> None:
-    """Add rule_state_json to pre-existing journal tables (schema evolution)."""
-    columns = {
+_EVOLVED_COLUMNS = {
+    "rule_state_json": "'{}'",
+    "pcr_json": "'{}'",
+}
+
+
+def _ensure_evolved_columns(connection: sqlite3.Connection) -> None:
+    """Add newer observational columns to pre-existing journal tables."""
+    existing = {
         str(row[1])
         for row in connection.execute(
             "PRAGMA table_info(red_bar_v2_cycle_evaluations)"
         ).fetchall()
     }
-    if "rule_state_json" not in columns:
-        connection.execute(
-            "ALTER TABLE red_bar_v2_cycle_evaluations "
-            "ADD COLUMN rule_state_json TEXT NOT NULL DEFAULT '{}'"
-        )
+    for name, default in _EVOLVED_COLUMNS.items():
+        if name not in existing:
+            connection.execute(
+                "ALTER TABLE red_bar_v2_cycle_evaluations "
+                f"ADD COLUMN {name} TEXT NOT NULL DEFAULT {default}"
+            )
 
 
 def _normalize_timestamp(value: datetime | str | None) -> str | None:
@@ -161,6 +169,8 @@ def persist_red_bar_v2_cycle_evaluation(
     admission = admission if isinstance(admission, Mapping) else {}
     rule_state = getattr(live_v2, "rule_state", None)
     rule_state = dict(rule_state) if isinstance(rule_state, Mapping) else {}
+    pcr_context = getattr(live_v2, "pcr_context", None)
+    pcr_context = dict(pcr_context) if isinstance(pcr_context, Mapping) else {}
 
     index_close = _float_or_none(getattr(snapshot, "index_close", None))
     index_rsi = _float_or_none(getattr(snapshot, "index_rsi", None))
@@ -202,6 +212,7 @@ def persist_red_bar_v2_cycle_evaluation(
         "cycle_timings_ms": timings,
         "candle_evidence": candle_evidence,
         "rule_state": rule_state,
+        "pcr": pcr_context,
     }
 
     values = (
@@ -246,13 +257,14 @@ def persist_red_bar_v2_cycle_evaluation(
         json.dumps(timings, default=str, sort_keys=True),
         json.dumps(candle_evidence, default=str, sort_keys=True),
         json.dumps(rule_state, default=str, sort_keys=True),
+        json.dumps(pcr_context, default=str, sort_keys=True),
         "OBSERVATIONAL_ONLY",
         json.dumps(payload, default=str, sort_keys=True),
     )
 
     with sqlite3.connect(path) as connection:
         connection.executescript(_SCHEMA)
-        _ensure_rule_state_column(connection)
+        _ensure_evolved_columns(connection)
         cursor = connection.execute(
             """
             INSERT INTO red_bar_v2_cycle_evaluations (
@@ -266,9 +278,9 @@ def persist_red_bar_v2_cycle_evaluation(
                 bridge_status,bridge_reason,readiness_status,readiness_reason,
                 blocking_reasons_json,advisory_reasons_json,execution_reasons_json,
                 signals_seen,candidates_scored,orders_opened,orders_skipped,
-                cycle_timings_json,candle_evidence_json,rule_state_json,
+                cycle_timings_json,candle_evidence_json,rule_state_json,pcr_json,
                 authority,payload_json
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(run_id) DO UPDATE SET
                 observed_at=excluded.observed_at,
                 cycle_status=excluded.cycle_status,
@@ -283,6 +295,7 @@ def persist_red_bar_v2_cycle_evaluation(
                 advisory_reasons_json=excluded.advisory_reasons_json,
                 execution_reasons_json=excluded.execution_reasons_json,
                 rule_state_json=excluded.rule_state_json,
+                pcr_json=excluded.pcr_json,
                 payload_json=excluded.payload_json,
                 authority='OBSERVATIONAL_ONLY'
             """,
@@ -357,5 +370,11 @@ def read_red_bar_v2_cycle_evaluations(
         item["rule_state"] = (
             parsed_rule_state if isinstance(parsed_rule_state, dict) else {}
         )
+        pcr_raw = item.pop("pcr_json", None)
+        try:
+            parsed_pcr = json.loads(pcr_raw or "{}")
+        except json.JSONDecodeError:
+            parsed_pcr = {}
+        item["pcr"] = parsed_pcr if isinstance(parsed_pcr, dict) else {}
         result.append(item)
     return result

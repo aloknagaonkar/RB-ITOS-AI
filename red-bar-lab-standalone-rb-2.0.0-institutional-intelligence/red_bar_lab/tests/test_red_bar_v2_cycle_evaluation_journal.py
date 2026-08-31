@@ -32,6 +32,16 @@ def _stubs():
         },
         candidate_events_scanned=2,
         latest_admission=None,
+        pcr_context={
+            "overall_pcr": 0.72,
+            "overall_direction": "BEARISH",
+            "morning_pcr": 0.68,
+            "combined_pcr": 0.81,
+            "combined_direction": "BULLISH",
+            "combined_coverage": 0.92,
+            "source_timestamp": "2026-08-31T07:30:12+00:00",
+            "trading_date": "2026-08-31",
+        },
     )
     snapshot = SimpleNamespace(
         index_close=24199.0,
@@ -95,6 +105,10 @@ def test_cycle_evaluation_round_trip_and_idempotency(tmp_path: Path):
     ]
     assert row["cycle_timings"]["v2_evaluation"] == 123.0
     assert row["authority"] == "OBSERVATIONAL_ONLY"
+    assert row["pcr"]["overall_pcr"] == 0.72
+    assert row["pcr"]["morning_pcr"] == 0.68
+    assert row["pcr"]["combined_pcr"] == 0.81
+    assert row["pcr"]["combined_direction"] == "BULLISH"
 
 
 def test_cycle_evaluation_records_admission_summary(tmp_path: Path):
@@ -147,6 +161,7 @@ def test_result_defaults_include_journal_fields():
     assert result.candidate_events_scanned == 0
     assert result.latest_admission is None
     assert result.rule_state is None
+    assert result.pcr_context is None
 
 
 def test_evaluate_populates_session_health_from_monitored_replay():
@@ -327,8 +342,11 @@ def test_cycle_evaluation_migrates_legacy_table_without_rule_state(tmp_path: Pat
     path = tmp_path / "lab.sqlite3"
     legacy_schema = store._SCHEMA.replace(
         "    rule_state_json TEXT NOT NULL DEFAULT '{}',\n", ""
+    ).replace(
+        "    pcr_json TEXT NOT NULL DEFAULT '{}',\n", ""
     )
     assert "rule_state_json" not in legacy_schema
+    assert "pcr_json" not in legacy_schema
     connection = sqlite3.connect(path)
     connection.executescript(legacy_schema)
     connection.commit()
@@ -353,6 +371,7 @@ def test_cycle_evaluation_migrates_legacy_table_without_rule_state(tmp_path: Pat
     rows = read_red_bar_v2_cycle_evaluations(path, trading_date="2026-08-31")
     assert rows[0]["run_id"] == "run-legacy"
     assert rows[0]["rule_state"] == {"initial": {"status": "SCANNING"}}
+    assert rows[0]["pcr"]["overall_pcr"] == 0.72
 
 
 def test_current_session_wires_rule_state_from_replay():
@@ -360,3 +379,232 @@ def test_current_session_wires_rule_state_from_replay():
 
     source = inspect.getsource(red_bar_v2_current_session)
     assert 'rule_state=getattr(monitored.replay, "rule_state", None)' in source
+    assert 'pcr_context=getattr(monitored, "pcr_context", None)' in source
+
+
+def test_read_pcr_context_from_history_payload(tmp_path: Path):
+    import json
+    import sqlite3
+
+    from types import SimpleNamespace
+
+    from red_bar_lab.services.red_bar_v2_futures_replay_service import (
+        read_red_bar_v2_pcr_context,
+    )
+
+    path = tmp_path / "lab.sqlite3"
+    payload = {
+        "overall_pcr": 0.72,
+        "morning_pcr": 0.68,
+        "combined_index_pcr": 0.81,
+        "combined_direction": "BULLISH",
+        "combined_coverage": 0.92,
+    }
+    connection = sqlite3.connect(path)
+    connection.execute(
+        """
+        CREATE TABLE market_trend_research_pcr_5m_history (
+            underlying TEXT NOT NULL,
+            trading_date TEXT NOT NULL,
+            candle_close_timestamp TEXT NOT NULL,
+            source_timestamp TEXT NOT NULL,
+            overall_pcr REAL NOT NULL,
+            overall_direction TEXT NOT NULL,
+            quality_state TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY(underlying, candle_close_timestamp)
+        )
+        """
+    )
+    connection.execute(
+        "INSERT INTO market_trend_research_pcr_5m_history VALUES "
+        "(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "NIFTY 50",
+            "2026-08-31",
+            "2026-08-31T07:30:00+00:00",
+            "2026-08-31T07:30:12+00:00",
+            0.72,
+            "BEARISH",
+            "COMPLETE",
+            json.dumps(payload),
+            "2026-08-31T07:30:15+00:00",
+        ),
+    )
+    connection.commit()
+    connection.close()
+
+    context = read_red_bar_v2_pcr_context(
+        SimpleNamespace(path=path),
+        "NSE_INDEX|Nifty 50",
+        "2026-08-31",
+    )
+    assert context["overall_pcr"] == 0.72
+    assert context["overall_direction"] == "BEARISH"
+    assert context["morning_pcr"] == 0.68
+    assert context["combined_pcr"] == 0.81
+    assert context["combined_direction"] == "BULLISH"
+    assert context["combined_coverage"] == 0.92
+    assert context["source_timestamp"] == "2026-08-31T07:30:12+00:00"
+
+
+def test_read_pcr_context_degrades_without_tables(tmp_path: Path):
+    from types import SimpleNamespace
+
+    from red_bar_lab.services.red_bar_v2_futures_replay_service import (
+        read_red_bar_v2_pcr_context,
+    )
+
+    context = read_red_bar_v2_pcr_context(
+        SimpleNamespace(path=tmp_path / "missing.sqlite3"),
+        "NSE_INDEX|Nifty 50",
+        "2026-08-31",
+    )
+    assert context["overall_pcr"] is None
+    assert context["morning_pcr"] is None
+    assert context["combined_pcr"] is None
+
+
+def test_monitored_replay_result_exposes_pcr_context():
+    from red_bar_lab.services import red_bar_v2_futures_replay_service
+
+    source = inspect.getsource(red_bar_v2_futures_replay_service)
+    assert "pcr_context=pcr_context" in source
+    assert "pcr_context: Mapping[str, Any] | None = None" in source
+    assert "_read_latest_pcr_snapshot" not in source
+
+
+def test_replay_rule_state_reentry_narrative_keys():
+    from red_bar_lab.services.red_bar_v2_futures_historical_replay import (
+        replay_red_bar_v2_day_with_futures_vwap,
+    )
+
+    index_candles, futures_candles = _rule_state_market_frames()
+    replay, _ = replay_red_bar_v2_day_with_futures_vwap(
+        index_candles,
+        futures_candles,
+        instrument_key="NSE_INDEX|Nifty 50",
+        vwap_instrument_key="NSE_FO|NIFTY-FUT",
+    )
+    reentry = replay.rule_state["reentry"]
+    for key in (
+        "waiting_since",
+        "last_touch_at",
+        "last_touch_direction",
+        "last_vwap_confirmed",
+        "last_direction",
+    ):
+        assert key in reentry
+
+
+def test_replay_rule_state_reentry_wait_after_trade_close():
+    from red_bar_lab.services.red_bar_v2_futures_historical_replay import (
+        replay_red_bar_v2_day_with_futures_vwap,
+    )
+
+    index_candles, futures_candles = _rule_state_market_frames()
+    base, _ = replay_red_bar_v2_day_with_futures_vwap(
+        index_candles,
+        futures_candles,
+        instrument_key="NSE_INDEX|Nifty 50",
+        vwap_instrument_key="NSE_FO|NIFTY-FUT",
+    )
+    admitted_at = next(
+        event.timestamp
+        for event in base.events
+        if event.event_type == "CANDIDATE_ADMISSION" and event.candidate_allowed
+    )
+    from datetime import timedelta
+
+    exit_at = admitted_at + timedelta(minutes=2)
+    replay, _ = replay_red_bar_v2_day_with_futures_vwap(
+        index_candles,
+        futures_candles,
+        instrument_key="NSE_INDEX|Nifty 50",
+        vwap_instrument_key="NSE_FO|NIFTY-FUT",
+        exit_timestamps=(exit_at,),
+    )
+    reentry = replay.rule_state["reentry"]
+    # The closed trade must start the re-entry wait and record when.
+    assert reentry["waiting_since"] == exit_at.isoformat()
+    assert reentry["waiting"] is True or reentry["last_outcome"] in {
+        "VALIDATED",
+        "FAILED",
+    }
+
+
+def test_rule_sentence_builders():
+    from red_bar_lab.ui.pages import v2_evaluation_monitor as page
+
+    row = {
+        "index_close": 24219.0,
+        "futures_close": 24245.0,
+        "futures_vwap": 24234.49,
+        "price_vs_vwap": "ABOVE",
+        "pcr": {
+            "overall_pcr": 0.72,
+            "morning_pcr": 0.68,
+            "combined_pcr": 0.81,
+        },
+    }
+    state = {
+        "current_direction": "BULLISH",
+        "reference": {"midpoint": 24210.0},
+        "initial": {"direction": "BULLISH"},
+        "reversal": {
+            "last_direction": "BULLISH",
+            "last_detected_at": "2026-08-31T10:35:00+05:30",
+            "last_midpoint_aligned": True,
+        },
+        "reentry": {
+            "waiting": True,
+            "waiting_since": "2026-08-31T13:02:00+05:30",
+            "last_touch_at": "2026-08-31T13:08:00+05:30",
+            "last_touch_direction": "BEARISH",
+            "last_vwap_confirmed": False,
+            "last_outcome": "FAILED",
+            "last_outcome_at": "2026-08-31T13:13:00+05:30",
+        },
+        "admission": {"active_trade_count": 1, "trade_state": "OPEN"},
+    }
+
+    rule_one = page._rule_one_sentence(row, state)
+    assert rule_one == (
+        "BULLISH: futures close 24,245.00 > futures VWAP 24,234.49 AND "
+        "index close 24,219.00 > red-bar midpoint 24,210.00."
+    )
+
+    rule_two = page._rule_two_sentence(row, state)
+    assert "Currently BEARISH + futures close > futures VWAP" in rule_two
+    assert "BULLISH reversal detected at 10:35:00" in rule_two
+    assert "confirmed" in rule_two
+
+    rule_five = page._rule_five_sentence(state)
+    assert "trade closed at 13:02:00" in rule_five
+    assert "BEARISH touch of the midpoint at 13:08:00" in rule_five
+    assert "opposite side of VWAP" in rule_five
+    assert "Re-entry FAILED at 13:13:00" in rule_five
+
+    rule_six = page._rule_six_sentence(row, state)
+    assert "Trade ACTIVE (state OPEN)" in rule_six
+    assert "overall 0.720" in rule_six
+    assert "morning 0.680" in rule_six
+    assert "combined 0.810" in rule_six
+
+    assert page._pcr_brief(row["pcr"]) == (
+        "Overall 0.720 · Morning 0.680 · Combined 0.810"
+    )
+    assert page._rule_six_sentence(row, {"admission": {"active_trade_count": 0}}) is None
+    assert page._rule_two_sentence(row, {"reversal": {}}) is None
+
+
+def test_monitor_page_renders_pcr_and_sentences():
+    from red_bar_lab.ui.pages import v2_evaluation_monitor
+
+    source = inspect.getsource(v2_evaluation_monitor)
+    assert "Overall PCR" in source
+    assert "Morning PCR" in source
+    assert "Combined PCR" in source
+    assert "PCR info" in source
+    assert "red-bar midpoint" in source

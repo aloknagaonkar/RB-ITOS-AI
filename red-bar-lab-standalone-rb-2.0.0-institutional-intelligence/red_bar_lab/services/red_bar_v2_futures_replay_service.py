@@ -5,7 +5,7 @@ import sqlite3
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 import pandas as pd
 
@@ -42,6 +42,9 @@ class MonitoredRedBarV2FuturesReplayResult:
     health: RedBarV2SessionVwapHealth
     health_path: Path
     event_episodes: tuple[ReplayEventEpisode, ...]
+    # Observational PCR context (overall/morning/combined) seen by the
+    # cycle. Never consumed by strategy gates.
+    pcr_context: Mapping[str, Any] | None = None
 
 
 def _latest_timestamp(frame: pd.DataFrame) -> pd.Timestamp | None:
@@ -90,48 +93,75 @@ def _underlying_name(value: str) -> str:
     return value
 
 
-def _read_latest_pcr_snapshot(
+def _optional_float(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def read_red_bar_v2_pcr_context(
     database: Any,
     underlying: str,
     trading_date: str,
-) -> tuple[float | None, float | None]:
-    """Read the latest 5m PCR projection's current + morning PCR.
+) -> dict[str, Any]:
+    """Read the observational PCR context for one cycle.
 
-    Returns (current_pcr, morning_pcr). Either may be None if the
-    market_trend_research_pcr_5m_history table doesn't have a row for
-    the given underlying+trading_date or the payload is missing the
-    morning_panel.
+    Returns overall (current) PCR, morning fixed-level PCR and the
+    combined cross-index PCR together with source metadata. All values
+    degrade to None when data is unavailable; nothing here influences
+    strategy gates.
     """
+    context: dict[str, Any] = {
+        "overall_pcr": None,
+        "overall_direction": None,
+        "morning_pcr": None,
+        "combined_pcr": None,
+        "combined_direction": None,
+        "combined_coverage": None,
+        "source_timestamp": None,
+        "trading_date": trading_date,
+    }
     path = getattr(database, "path", None)
     if not path:
-        return None, None
-    underlying_key = _underlying_name(underlying)
+        return context
+    underlying_name = _underlying_name(underlying)
+    row = None
     try:
         with sqlite3.connect(str(path)) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
-                "SELECT payload_json FROM market_trend_research_pcr_5m_history "
+                "SELECT overall_pcr, overall_direction, source_timestamp, "
+                "payload_json FROM market_trend_research_pcr_5m_history "
                 "WHERE underlying=? AND trading_date=? "
                 "ORDER BY candle_close_timestamp DESC LIMIT 1",
-                (underlying_key, trading_date),
+                (underlying_name, trading_date),
             ).fetchone()
     except (sqlite3.OperationalError, sqlite3.DatabaseError):
-        return None, None
-    if row is None:
-        return None, None
-    try:
-        payload = json.loads(row["payload_json"])
-    except (TypeError, ValueError):
-        return None, None
-    current = (payload.get("current_panel") or {}).get("aggregate") or {}
-    morning_panel = payload.get("morning_panel") or {}
-    morning = (morning_panel.get("aggregate") or {})
-    current_pcr = current.get("pcr")
-    morning_pcr = morning.get("pcr")
-    return (
-        float(current_pcr) if isinstance(current_pcr, (int, float)) else None,
-        float(morning_pcr) if isinstance(morning_pcr, (int, float)) else None,
-    )
+        row = None
+    if row is not None:
+        try:
+            context["overall_pcr"] = float(row["overall_pcr"])
+        except (TypeError, ValueError):
+            context["overall_pcr"] = None
+        context["overall_direction"] = row["overall_direction"]
+        context["source_timestamp"] = row["source_timestamp"]
+        try:
+            payload = json.loads(row["payload_json"])
+        except (TypeError, ValueError):
+            payload = {}
+        if isinstance(payload, Mapping):
+            context["morning_pcr"] = _optional_float(payload.get("morning_pcr"))
+            context["combined_pcr"] = _optional_float(
+                payload.get("combined_index_pcr")
+            )
+            combined_direction = payload.get("combined_direction")
+            context["combined_direction"] = (
+                str(combined_direction) if combined_direction else None
+            )
+            context["combined_coverage"] = _optional_float(
+                payload.get("combined_coverage")
+            )
+    return context
 
 
 def run_monitored_red_bar_v2_futures_replay(
@@ -148,11 +178,13 @@ def run_monitored_red_bar_v2_futures_replay(
 ) -> MonitoredRedBarV2FuturesReplayResult:
     """Run monitored replay without acquiring live shadow-persistence authority."""
     trading_date = _extract_trading_date(index_candles)
-    pcr_value, morning_pcr_value = _read_latest_pcr_snapshot(
+    pcr_context = read_red_bar_v2_pcr_context(
         database=database,
         underlying=instrument_key,
         trading_date=trading_date,
     )
+    pcr_value = pcr_context["overall_pcr"]
+    morning_pcr_value = pcr_context["morning_pcr"]
     replay, evaluation_health = replay_red_bar_v2_day_with_futures_vwap(
         index_candles,
         futures_candles,
@@ -188,6 +220,7 @@ def run_monitored_red_bar_v2_futures_replay(
         health=session_health,
         health_path=persisted,
         event_episodes=summarize_replay_event_episodes(replay),
+        pcr_context=pcr_context,
     )
     ui_snapshot = build_red_bar_v2_ui_snapshot_from_replay(
         monitored,

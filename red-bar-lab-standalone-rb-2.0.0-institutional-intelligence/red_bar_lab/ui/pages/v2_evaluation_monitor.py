@@ -63,6 +63,152 @@ def _status_color(status: str) -> str:
     return "🔴"
 
 
+def _fmt_pcr(value: object) -> str:
+    if value is None:
+        return "—"
+    try:
+        return f"{float(value):.3f}"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def _pcr_brief(pcr: dict[str, Any]) -> str:
+    if not pcr:
+        return "PCR not available"
+    return (
+        f"Overall {_fmt_pcr(pcr.get('overall_pcr'))} · "
+        f"Morning {_fmt_pcr(pcr.get('morning_pcr'))} · "
+        f"Combined {_fmt_pcr(pcr.get('combined_pcr'))}"
+    )
+
+
+def _pcr_caption(row: dict[str, Any]) -> str | None:
+    pcr = row.get("pcr") or {}
+    if not pcr:
+        return None
+    source = pcr.get("source_timestamp")
+    parts = [_pcr_brief(pcr)]
+    detail = []
+    if pcr.get("overall_direction"):
+        detail.append(f"overall bias {pcr.get('overall_direction')}")
+    if pcr.get("combined_direction"):
+        coverage = pcr.get("combined_coverage")
+        coverage_text = (
+            f", {float(coverage):.0%} coverage"
+            if isinstance(coverage, (int, float)) and not isinstance(coverage, bool)
+            else ""
+        )
+        detail.append(f"combined bias {pcr.get('combined_direction')}{coverage_text}")
+    if source:
+        detail.append(f"source {_fmt_time(source)} ({_age_label(source)})")
+    if detail:
+        parts.append(" · ".join(detail))
+    return "PCR at this cycle: " + " — ".join(parts)
+
+
+def _comparison_symbol(left: float, right: float) -> str:
+    if left > right:
+        return ">"
+    if left < right:
+        return "<"
+    return "="
+
+
+def _rule_one_sentence(row: dict[str, Any], state: dict[str, Any]) -> str | None:
+    initial = state.get("initial") or {}
+    reference = state.get("reference") or {}
+    direction = initial.get("direction") or state.get("current_direction")
+    futures_close = row.get("futures_close")
+    futures_vwap = row.get("futures_vwap")
+    index_close = row.get("index_close")
+    midpoint = reference.get("midpoint")
+    if midpoint is None:
+        midpoint = row.get("reference_midpoint")
+    if not direction or None in (futures_close, futures_vwap, index_close, midpoint):
+        return None
+    futures_close = float(futures_close)
+    futures_vwap = float(futures_vwap)
+    index_close = float(index_close)
+    midpoint = float(midpoint)
+    return (
+        f"{direction}: futures close {_fmt_number(futures_close)} "
+        f"{_comparison_symbol(futures_close, futures_vwap)} futures VWAP "
+        f"{_fmt_number(futures_vwap)} AND index close {_fmt_number(index_close)} "
+        f"{_comparison_symbol(index_close, midpoint)} red-bar midpoint "
+        f"{_fmt_number(midpoint)}."
+    )
+
+
+def _rule_two_sentence(row: dict[str, Any], state: dict[str, Any]) -> str | None:
+    reversal = state.get("reversal") or {}
+    new_direction = reversal.get("last_direction")
+    if not new_direction:
+        return None
+    previous = "BEARISH" if new_direction == "BULLISH" else "BULLISH"
+    position = str(row.get("price_vs_vwap") or "").upper()
+    operator = ">" if position == "ABOVE" else "<" if position == "BELOW" else "="
+    alignment = (
+        "midpoint aligned (confirmed)"
+        if reversal.get("last_midpoint_aligned")
+        else "midpoint not aligned (provisional)"
+    )
+    return (
+        f"Currently {previous} + futures close {operator} futures VWAP → "
+        f"{new_direction} reversal detected at "
+        f"{_fmt_time(reversal.get('last_detected_at'))} — {alignment}."
+    )
+
+
+def _rule_five_sentence(state: dict[str, Any]) -> str | None:
+    reentry = state.get("reentry") or {}
+    parts: list[str] = []
+    if reentry.get("waiting"):
+        parts.append(
+            f"A trade closed at {_fmt_time(reentry.get('waiting_since'))} — now "
+            "waiting for a red-bar midpoint touch plus a next-candle VWAP "
+            "confirmation before any re-entry is allowed."
+        )
+    if reentry.get("last_touch_at"):
+        touch_direction = reentry.get("last_touch_direction") or "direction unclear"
+        confirmed = reentry.get("last_vwap_confirmed")
+        if confirmed is True:
+            confirm_text = "the next candle confirmed the same side of VWAP"
+        elif confirmed is False:
+            confirm_text = "the next candle closed on the opposite side of VWAP"
+        else:
+            confirm_text = "VWAP confirmation still pending"
+        parts.append(
+            f"Last touch: {touch_direction} touch of the midpoint at "
+            f"{_fmt_time(reentry.get('last_touch_at'))}; {confirm_text}."
+        )
+    if reentry.get("last_outcome") == "VALIDATED":
+        parts.append(
+            f"Re-entry VALIDATED at {_fmt_time(reentry.get('last_outcome_at'))} "
+            f"in direction {reentry.get('last_direction') or '—'} — the touch and "
+            "the VWAP confirmation agreed."
+        )
+    elif reentry.get("last_outcome") == "FAILED":
+        parts.append(
+            f"Re-entry FAILED at {_fmt_time(reentry.get('last_outcome_at'))} — the "
+            "confirmation was on the opposite side, so the wait was cancelled and "
+            "a fresh setup is required."
+        )
+    return " ".join(parts) if parts else None
+
+
+def _rule_six_sentence(row: dict[str, Any], state: dict[str, Any]) -> str | None:
+    admission = state.get("admission") or {}
+    if not int(admission.get("active_trade_count") or 0):
+        return None
+    pcr = row.get("pcr") or {}
+    return (
+        f"Trade ACTIVE (state {admission.get('trade_state') or '—'}). PCR "
+        f"published with this trade: overall {_fmt_pcr(pcr.get('overall_pcr'))} · "
+        f"morning {_fmt_pcr(pcr.get('morning_pcr'))} · "
+        f"combined {_fmt_pcr(pcr.get('combined_pcr'))}."
+    )
+
+
 def _render_latest_cycle(row: dict[str, Any]) -> None:
     observed = _parse(row.get("observed_at"))
     cols = st.columns(5)
@@ -162,6 +308,24 @@ def _render_strategy_values(row: dict[str, Any]) -> None:
             f"Futures close is {delta:+.2f} pts vs session VWAP "
             f"({row.get('price_vs_vwap') or 'n/a'})."
         )
+    pcr = row.get("pcr") or {}
+    pcr_cols = st.columns(4)
+    pcr_cols[0].metric("Overall PCR", _fmt_pcr(pcr.get("overall_pcr")))
+    pcr_cols[1].metric("Morning PCR", _fmt_pcr(pcr.get("morning_pcr")))
+    pcr_cols[2].metric("Combined PCR", _fmt_pcr(pcr.get("combined_pcr")))
+    pcr_source = pcr.get("source_timestamp")
+    pcr_cols[3].metric(
+        "PCR source",
+        _fmt_time(pcr_source),
+        delta=_age_label(pcr_source) if pcr_source else None,
+        delta_color="off",
+    )
+    caption = _pcr_caption(row)
+    st.caption(
+        caption
+        or "PCR not available for this cycle — no completed-candle PCR "
+        "observation was recorded for this trading date yet."
+    )
 
 
 def _render_candidates(row: dict[str, Any]) -> None:
@@ -216,6 +380,14 @@ def _render_rule_state(row: dict[str, Any]) -> None:
         f"{_fmt_number(reference.get('high'))} / {_fmt_number(reference.get('low'))}",
     )
     cols[4].metric("Evaluated as of", _fmt_time(state.get("as_of")))
+
+    pcr = row.get("pcr") or {}
+    pcr_caption = _pcr_caption(row)
+    if pcr_caption:
+        st.caption(pcr_caption + " (shown on every rule stage below)")
+    else:
+        st.caption("PCR not available for this cycle.")
+    pcr_info = _pcr_brief(pcr)
 
     initial_status = str(initial.get("status") or "UNKNOWN")
     initial_detail = []
@@ -307,6 +479,7 @@ def _render_rule_state(row: dict[str, Any]) -> None:
             "Rule": "1 · Initial entry (1m)",
             "Status": f"{status_icon.get(initial_status, '⚪')} {initial_status}",
             "Detail": " · ".join(initial_detail) or "—",
+            "PCR info": pcr_info,
         },
         {
             "Rule": "2 · Reversal (5m)",
@@ -314,6 +487,7 @@ def _render_rule_state(row: dict[str, Any]) -> None:
                 "🟢 MONITORING" if reversal.get("monitoring") else "⚪ IDLE"
             ),
             "Detail": " · ".join(reversal_detail) or "—",
+            "PCR info": pcr_info,
         },
         {
             "Rule": "3 · Mid-session 12:45",
@@ -325,6 +499,7 @@ def _render_rule_state(row: dict[str, Any]) -> None:
                 else "⚪ INACTIVE"
             ),
             "Detail": " · ".join(mid_detail) or "—",
+            "PCR info": pcr_info,
         },
         {
             "Rule": "4 · State upgrade",
@@ -334,6 +509,7 @@ def _render_rule_state(row: dict[str, Any]) -> None:
                 else "⚪ NO PROVISIONAL STATE"
             ),
             "Detail": " · ".join(upgrade_detail) or "—",
+            "PCR info": pcr_info,
         },
         {
             "Rule": "5 · Re-entry gate",
@@ -341,6 +517,7 @@ def _render_rule_state(row: dict[str, Any]) -> None:
                 "🟡 " + reentry_status if reentry.get("waiting") else "⚪ " + reentry_status
             ),
             "Detail": " · ".join(reentry_detail) or "—",
+            "PCR info": pcr_info,
         },
         {
             "Rule": "6 · Admission",
@@ -352,6 +529,7 @@ def _render_rule_state(row: dict[str, Any]) -> None:
                 else "🟡 NO ADMISSION YET"
             ),
             "Detail": " · ".join(admission_detail) or "—",
+            "PCR info": pcr_info,
         },
     ]
     st.dataframe(_arrow_safe_rows(table_rows), width="stretch", hide_index=True)
@@ -364,6 +542,16 @@ def _render_rule_state(row: dict[str, Any]) -> None:
             f"{_fmt_time(admission.get('last_block_at'))} — "
             f"{admission.get('last_block_reason') or 'no reason recorded'}"
         )
+
+    sentences = (
+        ("Rule 1 · Initial entry", _rule_one_sentence(row, state)),
+        ("Rule 2 · Reversal detection", _rule_two_sentence(row, state)),
+        ("Rule 5 · Re-entry", _rule_five_sentence(state)),
+        ("Rule 6 · Active trade", _rule_six_sentence(row, state)),
+    )
+    for label, sentence in sentences:
+        if sentence:
+            st.markdown(f"- **{label}:** {sentence}")
 
 
 def _render_publication_readiness(row: dict[str, Any]) -> None:

@@ -58,6 +58,7 @@ class CurrentSessionV2Result:
     candidate_events_scanned: int = 0
     latest_admission: Mapping[str, Any] | None = None
     rule_state: Mapping[str, Any] | None = None
+    pcr_context: Mapping[str, Any] | None = None
 
 
 def _active_v2_order_exists(rows: list[Mapping[str, Any]]) -> bool:
@@ -722,4 +723,5 @@ def evaluate_current_session_red_bar_v2(
         candidate_events_scanned=len(candidate_events),
         latest_admission=admission_summary,
         rule_state=getattr(monitored.replay, "rule_state", None),
+        pcr_context=getattr(monitored, "pcr_context", None),
     )

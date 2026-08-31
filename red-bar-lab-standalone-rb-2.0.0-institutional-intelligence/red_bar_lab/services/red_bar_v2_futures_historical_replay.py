@@ -97,6 +97,11 @@ def replay_red_bar_v2_day_with_futures_vwap(
     reentry_failed = 0
     reentry_last_outcome: str | None = None
     reentry_last_outcome_at: str | None = None
+    reentry_waiting_since: str | None = None
+    reentry_last_touch_at: str | None = None
+    reentry_last_touch_direction: str | None = None
+    reentry_last_vwap_confirmed: bool | None = None
+    reentry_last_direction: str | None = None
     last_admitted_at: str | None = None
     last_admission_code: str | None = None
     last_block_code: str | None = None
@@ -153,6 +158,8 @@ def replay_red_bar_v2_day_with_futures_vwap(
                 # Re-entry touch state: which level the system is
                 # currently waiting for confirmation on.
                 reentry_touch_state = "waiting_midpoint"
+                reentry_waiting_since = exits[exit_index].to_pydatetime().isoformat()
+                reentry_last_vwap_confirmed = None
             exit_index += 1
 
         reference = build_red_bar_v2_reference(
@@ -191,6 +198,15 @@ def replay_red_bar_v2_day_with_futures_vwap(
             vwap_in_direction = (
                 _reentry_vwap_confirms(row, reference, futures_frame)
             )
+            if touched_midpoint:
+                reentry_last_touch_at = evaluation_time.isoformat()
+                touch_close = float(row["close"])
+                if touch_close > reference.midpoint:
+                    reentry_last_touch_direction = "BULLISH"
+                elif touch_close < reference.midpoint:
+                    reentry_last_touch_direction = "BEARISH"
+                else:
+                    reentry_last_touch_direction = None
             if touched_midpoint and vwap_in_direction is not None:
                 # Both confirmed in this 5m candle -> allow re-entry.
                 if vwap_in_direction is True:
@@ -216,6 +232,8 @@ def replay_red_bar_v2_day_with_futures_vwap(
                         reentry_validated += 1
                         reentry_last_outcome = "VALIDATED"
                         reentry_last_outcome_at = evaluation_time.isoformat()
+                        reentry_last_vwap_confirmed = True
+                        reentry_last_direction = decision.direction
                         _track_mid_session(decision, evaluation_time)
                         # Re-entry validation: re-entry allowed.
                         if database is not None:
@@ -276,6 +294,7 @@ def replay_red_bar_v2_day_with_futures_vwap(
                     reentry_failed += 1
                     reentry_last_outcome = "FAILED"
                     reentry_last_outcome_at = evaluation_time.isoformat()
+                    reentry_last_vwap_confirmed = False
                     waiting_for_red_bar_touch = False
                     reentry_touch_state = None
                 elif touched_midpoint:
@@ -549,10 +568,15 @@ def replay_red_bar_v2_day_with_futures_vwap(
         "reentry": {
             "waiting": waiting_for_red_bar_touch,
             "touch_state": reentry_touch_state,
+            "waiting_since": reentry_waiting_since,
+            "last_touch_at": reentry_last_touch_at,
+            "last_touch_direction": reentry_last_touch_direction,
+            "last_vwap_confirmed": reentry_last_vwap_confirmed,
             "validated": reentry_validated,
             "failed": reentry_failed,
             "last_outcome": reentry_last_outcome,
             "last_outcome_at": reentry_last_outcome_at,
+            "last_direction": reentry_last_direction,
         },
         "admission": {
             "admitted": admitted,
