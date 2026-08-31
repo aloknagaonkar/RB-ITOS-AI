@@ -429,6 +429,7 @@ def evaluate_current_session_red_bar_v2(
     monitored = run_monitored_red_bar_v2_futures_replay(
         index_candles,
         futures_candles,
+        database=database,
         instrument_key=instrument_key,
         vwap_instrument_key=futures_key,
         artifacts_root=settings.artifacts_root,
