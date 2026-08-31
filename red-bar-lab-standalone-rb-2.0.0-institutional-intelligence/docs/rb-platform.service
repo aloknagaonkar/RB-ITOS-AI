@@ -1,0 +1,22 @@
+[Unit]
+Description=rb-itos-ai platform supervisor (market_collector, paper_monitor, position_monitor, market_research, ui)
+After=network-online.target rb-sqlite-bridge.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aloknagaonkar46
+WorkingDirectory=/home/aloknagaonkar46/RB-ITOS-AI/red-bar-lab-standalone-rb-2.0.0-institutional-intelligence
+Environment=PYTHONPATH=/home/aloknagaonkar46/RB-ITOS-AI/red-bar-lab-standalone-rb-2.0.0-institutional-intelligence
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/aloknagaonkar46/venv/bin/python -m red_bar_lab.platform.control start
+ExecStop=/home/aloknagaonkar46/venv/bin/python -m red_bar_lab.platform.control stop
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=false
+ReadWritePaths=/home/aloknagaonkar46
+
+[Install]
+WantedBy=multi-user.target
