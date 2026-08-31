@@ -299,6 +299,10 @@ def _render_summary_cycle(database_path: str | Path, underlying: str) -> None:
         },
     ]
     st.markdown("## Market Direction Summary")
+    st.caption(
+        "OBSERVATION ONLY — NO TRADING AUTHORITY. "
+        "This page does not create, reject, bundle, reserve or execute a trade."
+    )
     st.dataframe(_arrow_safe_rows(rows), width="stretch", hide_index=True)
     with st.expander("Pre-open NIFTY source evidence", expanded=False):
         if preopen:
@@ -369,10 +373,123 @@ def _render_summary_cycle(database_path: str | Path, underlying: str) -> None:
             } for item in candidates]), width="stretch", hide_index=True)
         else:
             st.info(f"No contracts selected. {preference_reason}")
+    _render_v2_pcr_section(database_path)
     st.caption(
         "Read-only summary of persisted research. Detailed evidence remains "
         "inside the two tabs below; this summary has no trading authority."
     )
+
+
+def _read_v2_pcr_evidence(database_path: str | Path) -> dict[str, object] | None:
+    """Read the most recent V2 strategy ``check:pcr_informational`` row.
+
+    Returns the row dict (with ``artifacts`` already decoded) or ``None``
+    if the strategy has not yet recorded one today. Best-effort: any DB
+    error returns ``None`` so the page can keep rendering.
+    """
+    try:
+        from red_bar_lab.storage.database import RedBarDatabase
+        db = RedBarDatabase(str(database_path))
+        return db.read_latest_step_evidence(
+            process_name="red_bar_v2_strategy",
+            step_name="check:pcr_informational",
+        )
+    except Exception:
+        return None
+
+
+def _format_v2_pcr_row(evidence: Mapping[str, object] | None) -> dict[str, str]:
+    artifacts = (evidence or {}).get("artifacts") or {}
+    if not isinstance(artifacts, Mapping):
+        artifacts = {}
+    current = artifacts.get("current_pcr")
+    morning = artifacts.get("morning_pcr")
+    shift = artifacts.get("shift")
+
+    def _fmt(value: object) -> str:
+        if isinstance(value, bool):
+            return "Not available"
+        if isinstance(value, (int, float)):
+            return f"{float(value):.3f}"
+        return "Not available"
+
+    if evidence is None or (current is None and morning is None):
+        status = "UNAVAILABLE"
+        direction = "—"
+        interpretation = (
+            "Red Bar V2 strategy has not recorded a PCR audit row yet. "
+            "The values above are the research PCR, not the strategy PCR."
+        )
+    else:
+        status = str((evidence or {}).get("status") or "—")
+        direction = "INFORMATIONAL"
+        if isinstance(shift, (int, float)) and not isinstance(shift, bool):
+            if shift > 0.05:
+                interpretation = "current > morning (positioning shifted bullish)"
+            elif shift < -0.05:
+                interpretation = "current < morning (positioning shifted bearish)"
+            else:
+                interpretation = "current ≈ morning (positioning stable)"
+        else:
+            interpretation = "shift not computable (one of the values missing)"
+
+    return {
+        "Component": "V2 Strategy PCR (current 5m)",
+        "Live value": _fmt(current),
+        "Direction": direction,
+        "Status": status,
+        "Interpretation": interpretation,
+    }
+
+
+def _render_v2_pcr_section(database_path: str | Path) -> None:
+    evidence = _read_v2_pcr_evidence(database_path)
+    row = _format_v2_pcr_row(evidence)
+    with st.expander("Red Bar V2 strategy PCR context (informational)", expanded=False):
+        st.dataframe(
+            _arrow_safe_rows([row]),
+            width="stretch",
+            hide_index=True,
+        )
+        artifacts = (evidence or {}).get("artifacts") or {}
+        if isinstance(artifacts, Mapping) and artifacts:
+            detail_rows = [
+                {
+                    "Field": "current_pcr",
+                    "Value": artifacts.get("current_pcr", "Not available"),
+                },
+                {
+                    "Field": "morning_pcr",
+                    "Value": artifacts.get("morning_pcr", "Not available"),
+                },
+                {
+                    "Field": "shift",
+                    "Value": artifacts.get("shift", "Not computable"),
+                },
+            ]
+            st.caption("Raw audit values:")
+            st.dataframe(
+                _arrow_safe_rows(detail_rows),
+                width="stretch",
+                hide_index=True,
+            )
+            st.caption(
+                "Source: process_evidence row where step_name = "
+                "'check:pcr_informational'. Run id = "
+                f"`{evidence.get('run_id', '—')}` · "
+                f"started_at = `{evidence.get('started_at', '—')}`."
+            )
+        else:
+            st.caption(
+                "No process_evidence row for step_name='check:pcr_informational' "
+                "was found. The Red Bar V2 strategy writes this row whenever a "
+                "live evaluation records a current or morning PCR value."
+            )
+        st.caption(
+            "Read-only. The V2 strategy does not block admission on PCR; "
+            "this panel exists so the trader can see what PCR the strategy "
+            "actually saw, not just what the research layer reports."
+        )
 
 
 def render_market_direction_summary(
