@@ -1,4 +1,34 @@
-pandas>=2.2
-requests>=2.31
-streamlit>=1.40
-pytest>=8.0
+# Minimal: only what the project directly imports.
+# Use this for the bridge / DB validation VM.
+
+# Core data + numeric
+pandas
+numpy
+pyarrow
+psutil
+
+# Network
+requests
+urllib3
+
+# UI (only if you intend to run streamlit on the VM)
+streamlit
+altair
+
+# Test
+pytest
+
+# SQLite bridge (FastAPI)
+fastapi
+uvicorn[standard]
+pydantic
+h11
+httptools
+anyio
+starlette
+click
+python-dotenv
+watchfiles
+uvloop
+websockets
+pyyaml
