@@ -86,6 +86,8 @@ class RedBarV2DirectionDecision:
     mid_session_active: bool = False
     mid_session_passed: bool | None = None    # None if rule inactive
     mid_session_reason: str | None = None
+    rsi_value: float | None = None            # 14-period RSI of the underlying close
+    vwap_value: float | None = None           # 5m VWAP of the futures contract
 
 
 def build_red_bar_v2_reference(
