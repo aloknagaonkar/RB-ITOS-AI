@@ -54,6 +54,11 @@ class CurrentSessionV2Result:
     completed_1m_rsi: float | None = None
     completed_1m_timestamp: str | None = None
     market_data_evidence: tuple[CandlePullEvidence, ...] = ()
+    session_health: Mapping[str, Any] | None = None
+    candidate_events_scanned: int = 0
+    latest_admission: Mapping[str, Any] | None = None
+    rule_state: Mapping[str, Any] | None = None
+    pcr_context: Mapping[str, Any] | None = None
 
 
 def _active_v2_order_exists(rows: list[Mapping[str, Any]]) -> bool:
@@ -408,7 +413,10 @@ def evaluate_current_session_red_bar_v2(
             "candle_close": completed_close,
             "candle_rsi_14": completed_rsi,
             "candle_timestamp": (
-                completed_timestamp.isoformat() if completed_timestamp else None
+                completed_timestamp.isoformat()
+                if completed_timestamp is not None
+                and hasattr(completed_timestamp, "isoformat")
+                else completed_timestamp
             ),
         },
     )
@@ -426,6 +434,7 @@ def evaluate_current_session_red_bar_v2(
     monitored = run_monitored_red_bar_v2_futures_replay(
         index_candles,
         futures_candles,
+        database=database,
         instrument_key=instrument_key,
         vwap_instrument_key=futures_key,
         artifacts_root=settings.artifacts_root,
@@ -449,7 +458,7 @@ def evaluate_current_session_red_bar_v2(
         },
     )
     # Surface the most recent admission decision, if any.
-    latest_admission = _latest_allowed_admission(monitored)
+    latest_admission = _latest_allowed_admission(candidate_events)
     if latest_admission is not None:
         # Pull the per-boolean conditions and decision metadata out
         # of the underlying ``RedBarV2DirectionDecision`` so we can
@@ -503,33 +512,39 @@ def evaluate_current_session_red_bar_v2(
         # - vwap_aligned (gating, combined with RedBar reference)
         # - midpoint_aligned (gating, alias for RedBar reference)
         # - rsi_aligned is now informational; we don't gate on it
+        # ReplayEvent.details["conditions"] carries the per-gate booleans
+        # from the admission evaluator. The flat fields (pcr_value, etc.)
+        # are also placed on the ReplayEvent by the replay builder.
+        conditions = (
+            details.get("conditions")
+            if isinstance(details.get("conditions"), Mapping)
+            else {}
+        )
         gate_map = {
             "reference_ready": (
-                bool(details.get("state") == "READY"),
-                {"passed": details.get("state") == "READY",
-                 "state": details.get("state")},
+                bool(conditions.get("reference_ready", False)),
+                {
+                    "passed": conditions.get("reference_ready", False),
+                    "state": conditions.get("trade_state"),
+                },
             ),
             "context_fresh": (
-                bool(latest_admission.context_fresh),
-                {"passed": latest_admission.context_fresh},
+                bool(conditions.get("context_fresh", False)),
+                {"passed": conditions.get("context_fresh", False)},
             ),
             "vwap_aligned": (
-                bool(latest_admission.vwap_aligned),
-                {"passed": latest_admission.vwap_aligned},
+                bool(conditions.get("vwap_aligned", False)),
+                {"passed": conditions.get("vwap_aligned", False)},
             ),
             "midpoint_aligned": (
-                bool(latest_admission.midpoint_aligned),
-                {"passed": latest_admission.midpoint_aligned},
+                bool(conditions.get("midpoint_aligned", False)),
+                {"passed": conditions.get("midpoint_aligned", False)},
             ),
             "rsi_informational": (
                 True,  # informational; always "passed" in audit terms
                 {
                     "passed": True,
-                    "rsi_value": (
-                        latest_admission.rsi_value
-                        if latest_admission.rsi_value is not None
-                        else None
-                    ),
+                    "rsi_value": conditions.get("rsi_aligned"),
                 },
             ),
         }
@@ -542,8 +557,8 @@ def evaluate_current_session_red_bar_v2(
                 artifacts=artifact,
             )
         # Mid-session 12:45-1:15 rule (only fires if the rule is active)
-        if getattr(latest_admission, "mid_session_active", False):
-            mid_passed = getattr(latest_admission, "mid_session_passed", None)
+        if details.get("mid_session_active", False):
+            mid_passed = details.get("mid_session_passed")
             record_strategy_subcheck(
                 database,
                 run_id=run_id,
@@ -557,18 +572,14 @@ def evaluate_current_session_red_bar_v2(
                 ),
                 artifacts={
                     "passed": mid_passed,
-                    "reason": getattr(
-                        latest_admission, "mid_session_reason", None
-                    ),
-                    "candle_timestamp": str(
-                        getattr(latest_admission, "context_timestamp", None)
-                    ),
+                    "reason": details.get("mid_session_reason"),
+                    "candle_timestamp": str(details.get("context_timestamp")),
                 },
             )
         # PCR (informational) — both current and morning, always shown
         # if the strategy engine recorded them.
-        pcr_value = getattr(latest_admission, "pcr_value", None)
-        morning_pcr = getattr(latest_admission, "morning_pcr_value", None)
+        pcr_value = details.get("pcr_value")
+        morning_pcr = details.get("morning_pcr_value")
         if pcr_value is not None or morning_pcr is not None:
             shift = None
             if (
@@ -661,6 +672,39 @@ def evaluate_current_session_red_bar_v2(
             artifacts_root=settings.artifacts_root,
         )
 
+    admission_summary: Mapping[str, Any] | None = None
+    if latest_admission is not None:
+        admission_details = getattr(latest_admission, "details", None)
+        admission_details = (
+            admission_details if isinstance(admission_details, Mapping) else {}
+        )
+        admission_summary = {
+            "event_type": str(getattr(latest_admission, "event_type", "") or ""),
+            "direction": str(getattr(latest_admission, "direction", "") or ""),
+            "option_side": getattr(latest_admission, "option_side", None),
+            "entry_type": admission_details.get("entry_type"),
+            "trend_strength": admission_details.get("trend_strength"),
+            "admission_code": str(
+                getattr(latest_admission, "admission_code", "") or ""
+            ),
+            "admission_reason": str(admission_details.get("admission_reason") or ""),
+            "candidate_allowed": bool(
+                getattr(latest_admission, "candidate_allowed", False)
+            ),
+            "score": getattr(latest_admission, "score", None),
+        }
+
+    health = monitored.health
+    health_to_dict = getattr(health, "to_dict", None)
+    session_health: Mapping[str, Any] = (
+        health_to_dict()
+        if callable(health_to_dict)
+        else {
+            "status": getattr(health, "status", None),
+            "reason": getattr(health, "reason", None),
+        }
+    )
+
     return CurrentSessionV2Result(
         status=(
             "READY"
@@ -675,4 +719,9 @@ def evaluate_current_session_red_bar_v2(
         completed_1m_rsi=completed_rsi,
         completed_1m_timestamp=completed_timestamp,
         market_data_evidence=market_data_evidence,
+        session_health=session_health,
+        candidate_events_scanned=len(candidate_events),
+        latest_admission=admission_summary,
+        rule_state=getattr(monitored.replay, "rule_state", None),
+        pcr_context=getattr(monitored, "pcr_context", None),
     )

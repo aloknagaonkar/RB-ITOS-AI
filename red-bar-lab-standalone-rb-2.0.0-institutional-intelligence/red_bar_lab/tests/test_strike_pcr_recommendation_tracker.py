@@ -32,8 +32,15 @@ def _projection(*, pe_oi: float, source: datetime) -> dict[str, object]:
     }
 
 
-def _quotes(*, bid: float, ask: float) -> list[dict[str, object]]:
-    return [{
+def _quotes(
+    *,
+    bid: float,
+    ask: float,
+    delta: float | None = None,
+    iv: float | None = None,
+    vwap: float | None = None,
+) -> list[dict[str, object]]:
+    quote: dict[str, object] = {
         "strike": 24200.0,
         "option_type": "PE",
         "expiry": "2026-08-25",
@@ -41,7 +48,14 @@ def _quotes(*, bid: float, ask: float) -> list[dict[str, object]]:
         "bid": bid,
         "ask": ask,
         "current_price": (bid + ask) / 2.0,
-    }]
+    }
+    if delta is not None:
+        quote["delta"] = delta
+    if iv is not None:
+        quote["iv"] = iv
+    if vwap is not None:
+        quote["vwap"] = vwap
+    return [quote]
 
 
 def test_builder_maps_each_strike_pcr_without_overall_gate() -> None:
@@ -102,3 +116,85 @@ def test_neutral_strike_closes_active_episode(tmp_path) -> None:
     )
     assert rows[0]["status"] == "CLOSED"
     assert rows[0]["entry_price"] == 100.0
+
+
+def test_builder_captures_entry_greeks_from_quote_rows() -> None:
+    observations = build_strike_pcr_recommendations(
+        projection=_projection(pe_oi=60.0, source=START),
+        option_rows=_quotes(bid=99.0, ask=100.0, delta=-0.42, iv=11.25, vwap=97.5),
+    )
+    item = observations[0]
+    assert item.entry_delta == -0.42
+    assert item.entry_iv == 11.25
+    assert item.entry_contract_vwap == 97.5
+
+
+def test_builder_defaults_entry_greeks_to_none_when_absent() -> None:
+    observations = build_strike_pcr_recommendations(
+        projection=_projection(pe_oi=60.0, source=START),
+        option_rows=_quotes(bid=99.0, ask=100.0),
+    )
+    item = observations[0]
+    assert item.entry_delta is None
+    assert item.entry_iv is None
+    assert item.entry_contract_vwap is None
+
+
+def test_entry_greeks_are_persisted_and_read_back(tmp_path) -> None:
+    repository = MarketTrendResearchRepository(tmp_path / "research.db")
+    repository.apply_strike_pcr_recommendations(build_strike_pcr_recommendations(
+        projection=_projection(pe_oi=60.0, source=START),
+        option_rows=_quotes(bid=99.0, ask=100.0, delta=-0.42, iv=11.25, vwap=97.5),
+    ))
+    rows = repository.strike_pcr_recommendations(
+        underlying="NIFTY 50",
+        trading_date=date(2026, 8, 25),
+    )
+    assert rows[0]["entry_delta"] == -0.42
+    assert rows[0]["entry_iv"] == 11.25
+    assert rows[0]["entry_contract_vwap"] == 97.5
+
+
+def test_entry_greeks_persist_none_without_greeks(tmp_path) -> None:
+    repository = MarketTrendResearchRepository(tmp_path / "research.db")
+    repository.apply_strike_pcr_recommendations(build_strike_pcr_recommendations(
+        projection=_projection(pe_oi=60.0, source=START),
+        option_rows=_quotes(bid=99.0, ask=100.0),
+    ))
+    rows = repository.strike_pcr_recommendations(
+        underlying="NIFTY 50",
+        trading_date=date(2026, 8, 25),
+    )
+    assert rows[0]["entry_delta"] is None
+    assert rows[0]["entry_iv"] is None
+    assert rows[0]["entry_contract_vwap"] is None
+
+
+def test_entry_greeks_migrate_into_legacy_table(tmp_path) -> None:
+    """A table created before the greeks columns gains them on first apply."""
+    import sqlite3
+
+    from red_bar_lab.services.market_trend_research import repository as repo_module
+
+    legacy_schema = repo_module._SCHEMA.replace(
+        " entry_delta REAL,\n entry_iv REAL,\n entry_contract_vwap REAL,\n", ""
+    )
+    assert "entry_delta" not in legacy_schema
+    path = tmp_path / "legacy.db"
+    connection = sqlite3.connect(path)
+    connection.executescript(legacy_schema)
+    connection.commit()
+    connection.close()
+
+    repository = MarketTrendResearchRepository(path)
+    repository.apply_strike_pcr_recommendations(build_strike_pcr_recommendations(
+        projection=_projection(pe_oi=60.0, source=START),
+        option_rows=_quotes(bid=99.0, ask=100.0, delta=-0.5, iv=12.0, vwap=98.0),
+    ))
+    rows = repository.strike_pcr_recommendations(
+        underlying="NIFTY 50",
+        trading_date=date(2026, 8, 25),
+    )
+    assert rows[0]["entry_delta"] == -0.5
+    assert rows[0]["entry_iv"] == 12.0
+    assert rows[0]["entry_contract_vwap"] == 98.0

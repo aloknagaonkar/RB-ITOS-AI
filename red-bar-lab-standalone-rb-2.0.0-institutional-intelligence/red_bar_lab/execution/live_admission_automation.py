@@ -243,6 +243,7 @@ class LiveAdmissionRedBarPaperAutomationService(
         trading_date: str,
         lots: int = 1,
         queue_only: bool = False,
+        run_id: str | None = None,
     ):
         original_database = self.database
         proxy = _AdmissionDatabaseProxy(
@@ -260,6 +261,7 @@ class LiveAdmissionRedBarPaperAutomationService(
                 trading_date=trading_date,
                 lots=lots,
                 queue_only=queue_only,
+                run_id=run_id,
             )
         finally:
             self.database = original_database
@@ -270,6 +272,7 @@ class LiveAdmissionRedBarPaperAutomationService(
         *,
         trading_date: str,
         lots: int = 1,
+        run_id: str | None = None,
     ):
         self._enforce_queue_admission(
             trading_date=trading_date,
@@ -278,6 +281,7 @@ class LiveAdmissionRedBarPaperAutomationService(
         return super().execute_approved_queue(
             trading_date=trading_date,
             lots=lots,
+            run_id=run_id,
         )
 
 

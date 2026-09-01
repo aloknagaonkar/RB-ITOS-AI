@@ -1,0 +1,21 @@
+[Unit]
+Description=rb-itos-ai streamlit (red_bar_lab/app.py)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aloknagaonkar46
+WorkingDirectory=/home/aloknagaonkar46/RB-ITOS-AI/red-bar-lab-standalone-rb-2.0.0-institutional-intelligence
+Environment=PYTHONPATH=/home/aloknagaonkar46/RB-ITOS-AI/red-bar-lab-standalone-rb-2.0.0-institutional-intelligence
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/aloknagaonkar46/venv/bin/streamlit run red_bar_lab/app.py --server.address 0.0.0.0 --server.port 8502 --server.headless true --browser.gatherUsageStats false
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=false
+ReadWritePaths=/home/aloknagaonkar46
+
+[Install]
+WantedBy=multi-user.target

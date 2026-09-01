@@ -68,7 +68,7 @@ def test_allowed_processing_delegates_to_base_and_restores_database(monkeypatch)
     service = _service(database)
     seen = {}
 
-    def fake_process(self, *, trading_date, lots=1, queue_only=False):
+    def fake_process(self, *, trading_date, lots=1, queue_only=False, run_id=None):
         seen["database"] = self.database
         seen["engine_database"] = self.engine.database
         seen["arguments"] = (trading_date, lots, queue_only)
@@ -98,7 +98,7 @@ def test_processing_restores_database_when_base_engine_raises(monkeypatch):
     database = _Database()
     service = _service(database)
 
-    def fail_process(self, *, trading_date, lots=1, queue_only=False):
+    def fail_process(self, *, trading_date, lots=1, queue_only=False, run_id=None):
         assert isinstance(self.database, _AdmissionDatabaseProxy)
         raise RuntimeError("compatibility failure")
 
@@ -131,7 +131,7 @@ def test_unresolved_legacy_queue_rows_remain_approved_and_delegate(monkeypatch):
     )
     delegated = {}
 
-    def fake_execute(self, *, trading_date, lots=1):
+    def fake_execute(self, *, trading_date, lots=1, run_id=None):
         delegated["arguments"] = (trading_date, lots)
         return (1, [])
 
@@ -165,7 +165,7 @@ def test_queue_guard_is_noop_when_queue_api_is_unavailable(monkeypatch):
     monkeypatch.setattr(
         RedBarPaperAutomationService,
         "execute_approved_queue",
-        lambda self, *, trading_date, lots=1: (0, []),
+        lambda self, *, trading_date, lots=1, run_id=None: (0, []),
     )
 
     assert service.execute_approved_queue(

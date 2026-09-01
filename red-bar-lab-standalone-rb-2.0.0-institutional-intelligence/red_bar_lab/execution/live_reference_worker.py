@@ -84,10 +84,43 @@ def _write_status(
                 "last_refresh": result.last_refresh.isoformat(),
             }
         )
+        current_price = getattr(result, "current_price", None)
+        if current_price is not None:
+            payload["current_price"] = float(current_price)
+        attempts = getattr(result, "attempts", None)
+        if attempts is not None:
+            payload["attempts"] = int(attempts)
+        active = getattr(result, "active", None)
+        if active is not None:
+            payload["active_attempts"] = int(active)
+        awaiting = getattr(result, "awaiting", None)
+        if awaiting is not None:
+            payload["awaiting_attempts"] = int(awaiting)
+        level_diagnostics = getattr(result, "level_diagnostics", None)
+        if level_diagnostics:
+            payload["level_diagnostics"] = list(level_diagnostics)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     temporary.replace(path)
+
+
+def _format_level_diagnostics(
+    level_diagnostics: tuple[dict[str, object], ...] | list[dict[str, object]],
+) -> str:
+    """Render per-level diagnostics into a single human-readable line."""
+    if not level_diagnostics:
+        return "no-levels-built-yet"
+    parts: list[str] = []
+    for entry in level_diagnostics:
+        level_type = entry.get("level_type")
+        status = entry.get("status")
+        explanation = entry.get("explanation")
+        parts.append(
+            f"{level_type}={status}"
+            + (f" ({explanation})" if explanation else "")
+        )
+    return "; ".join(parts)
 
 
 def _should_refresh(now: datetime, *, force: bool) -> bool:
@@ -151,15 +184,33 @@ def run_cycle(
         message=result.message,
         result=result,
     )
+    attempts_value = int(getattr(result, "attempts", 0) or 0)
+    current_price = getattr(result, "current_price", None)
+    level_diagnostics = getattr(result, "level_diagnostics", ()) or ()
+    active_count = int(getattr(result, "active", 0) or 0)
+    awaiting_count = int(getattr(result, "awaiting", 0) or 0)
     logging.info(
-        "live reference refresh status=%s date=%s source_rows=%s levels=%s completed_5m=%s message=%s",
+        "live reference refresh status=%s date=%s source_rows=%s levels=%s "
+        "completed_5m=%s current_price=%s attempts=%s active=%s awaiting=%s message=%s",
         status,
         result.trading_date,
         result.source_rows,
         result.levels_stored,
         result.completed_five_minute_rows,
+        current_price,
+        attempts_value,
+        active_count,
+        awaiting_count,
         result.message,
     )
+    if attempts_value == 0 and not active_count and not awaiting_count:
+        logging.info(
+            "live reference monitor: no signal candidates this cycle. "
+            "current_price=%s levels_built=%s diagnostic=%s",
+            current_price,
+            len(level_diagnostics),
+            _format_level_diagnostics(level_diagnostics),
+        )
     return result
 
 

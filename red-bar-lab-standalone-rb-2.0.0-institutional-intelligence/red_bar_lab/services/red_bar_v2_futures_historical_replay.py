@@ -75,8 +75,59 @@ def replay_red_bar_v2_day_with_futures_vwap(
     closed = 0
     latest_health: RedBarV2VwapSourceHealth | None = None
 
+    # Observational rule-state accumulators (no effect on strategy logic).
+    rule_reference: dict[str, object] | None = None
+    initial_evaluations = 0
+    initial_last_evaluated: str | None = None
+    initial_last_result: str | None = None
+    initial_last_reason: str | None = None
+    initial_direction: str | None = None
+    initial_established_at: str | None = None
+    initial_admitted: bool | None = None
+    reversal_5m_evaluations = 0
+    reversal_detections = 0
+    reversal_last_at: str | None = None
+    reversal_last_direction: str | None = None
+    reversal_last_aligned: bool | None = None
+    mid_session_tracker: dict[str, object] = {"latest": None, "blocked": 0}
+    upgrade_count = 0
+    upgrade_last_at: str | None = None
+    upgrade_last_direction: str | None = None
+    reentry_validated = 0
+    reentry_failed = 0
+    reentry_last_outcome: str | None = None
+    reentry_last_outcome_at: str | None = None
+    reentry_waiting_since: str | None = None
+    reentry_last_touch_at: str | None = None
+    reentry_last_touch_direction: str | None = None
+    reentry_last_vwap_confirmed: bool | None = None
+    reentry_last_direction: str | None = None
+    last_admitted_at: str | None = None
+    last_admission_code: str | None = None
+    last_block_code: str | None = None
+    last_block_reason: str | None = None
+    last_block_at: str | None = None
+    last_evaluation_iso: str | None = None
+
+    def _track_mid_session(
+        decision: RedBarV2DirectionDecision, evaluation_time: pd.Timestamp
+    ) -> None:
+        if not getattr(decision, "mid_session_active", False):
+            return
+        mid_session_tracker["latest"] = {
+            "active": True,
+            "passed": decision.mid_session_passed,
+            "reason": decision.mid_session_reason,
+            "evaluated_at": evaluation_time.isoformat(),
+        }
+        if decision.mid_session_passed is False:
+            mid_session_tracker["blocked"] = int(
+                mid_session_tracker.get("blocked", 0)
+            ) + 1
+
     for candle_timestamp in frame.index:
         evaluation_time = pd.Timestamp(candle_timestamp) + pd.Timedelta(minutes=1)
+        last_evaluation_iso = evaluation_time.isoformat()
 
         while exit_index < len(exits) and exits[exit_index] <= evaluation_time:
             active = next((row for row in reversed(trade_rows) if row["status"] == "ACTIVE"), None)
@@ -107,6 +158,8 @@ def replay_red_bar_v2_day_with_futures_vwap(
                 # Re-entry touch state: which level the system is
                 # currently waiting for confirmation on.
                 reentry_touch_state = "waiting_midpoint"
+                reentry_waiting_since = exits[exit_index].to_pydatetime().isoformat()
+                reentry_last_vwap_confirmed = None
             exit_index += 1
 
         reference = build_red_bar_v2_reference(
@@ -116,6 +169,15 @@ def replay_red_bar_v2_day_with_futures_vwap(
         )
         if reference is None:
             continue
+        if rule_reference is None:
+            rule_reference = {
+                "timestamp": reference.reference_timestamp.isoformat(),
+                "open": reference.reference_open,
+                "high": reference.reference_high,
+                "low": reference.reference_low,
+                "close": reference.reference_close,
+                "midpoint": reference.midpoint,
+            }
 
         trade_state = observe_trade_state(trade_rows, instrument_key=instrument_key)
         decision: RedBarV2DirectionDecision | None = None
@@ -136,6 +198,15 @@ def replay_red_bar_v2_day_with_futures_vwap(
             vwap_in_direction = (
                 _reentry_vwap_confirms(row, reference, futures_frame)
             )
+            if touched_midpoint:
+                reentry_last_touch_at = evaluation_time.isoformat()
+                touch_close = float(row["close"])
+                if touch_close > reference.midpoint:
+                    reentry_last_touch_direction = "BULLISH"
+                elif touch_close < reference.midpoint:
+                    reentry_last_touch_direction = "BEARISH"
+                else:
+                    reentry_last_touch_direction = None
             if touched_midpoint and vwap_in_direction is not None:
                 # Both confirmed in this 5m candle -> allow re-entry.
                 if vwap_in_direction is True:
@@ -158,6 +229,12 @@ def replay_red_bar_v2_day_with_futures_vwap(
                             reentry_state="validated",
                             reentry_alignment_passed=True,
                         )
+                        reentry_validated += 1
+                        reentry_last_outcome = "VALIDATED"
+                        reentry_last_outcome_at = evaluation_time.isoformat()
+                        reentry_last_vwap_confirmed = True
+                        reentry_last_direction = decision.direction
+                        _track_mid_session(decision, evaluation_time)
                         # Re-entry validation: re-entry allowed.
                         if database is not None:
                             try:
@@ -214,6 +291,10 @@ def replay_red_bar_v2_day_with_futures_vwap(
                             )
                         except Exception:
                             pass
+                    reentry_failed += 1
+                    reentry_last_outcome = "FAILED"
+                    reentry_last_outcome_at = evaluation_time.isoformat()
+                    reentry_last_vwap_confirmed = False
                     waiting_for_red_bar_touch = False
                     reentry_touch_state = None
                 elif touched_midpoint:
@@ -238,11 +319,19 @@ def replay_red_bar_v2_day_with_futures_vwap(
             )
             latest_health = decision_health
             initial = evaluate_initial_direction_futures(reference, snapshot)
+            initial_evaluations += 1
+            initial_last_evaluated = evaluation_time.isoformat()
+            initial_last_result = initial.event_type.value
+            initial_last_reason = initial.reason
+            _track_mid_session(initial, evaluation_time)
             if _event_is_due(initial, evaluation_time):
                 decision = initial
                 decision_snapshot = snapshot
                 if initial.direction is not None:
                     initial_processed = True
+                    if initial_direction is None:
+                        initial_direction = initial.direction
+                        initial_established_at = evaluation_time.isoformat()
         elif current_direction is not None and evaluation_time.minute % 5 == 0:
             snapshot, decision_health = build_red_bar_v2_futures_snapshot(
                 frame,
@@ -258,12 +347,17 @@ def replay_red_bar_v2_day_with_futures_vwap(
                 key = snapshot.candle_timestamp.isoformat()
                 if key not in processed_5m_contexts:
                     processed_5m_contexts.add(key)
+                    reversal_5m_evaluations += 1
                     reversal = evaluate_reversal_direction_futures(
                         reference,
                         snapshot,
                         previous_direction=current_direction,
                     )
                     if reversal.direction is not None and reversal.direction != current_direction and _event_is_due(reversal, evaluation_time):
+                        reversal_detections += 1
+                        reversal_last_at = evaluation_time.isoformat()
+                        reversal_last_direction = reversal.direction
+                        reversal_last_aligned = bool(reversal.midpoint_aligned)
                         decision = reversal
                         decision_snapshot = snapshot
                         pending_reversal = reversal
@@ -291,6 +385,10 @@ def replay_red_bar_v2_day_with_futures_vwap(
                 if admission.reversal_event_id:
                     consumed_reversals.add(admission.reversal_event_id)
                 admitted += 1
+                last_admitted_at = evaluation_time.isoformat()
+                last_admission_code = admission.admission_code.value
+                if initial_admitted is None and admission.entry_type == "INITIAL":
+                    initial_admitted = True
                 trade_id = f"RBV2-FVWAP-{admitted:04d}"
                 row = _trade_row(trade_id, admission, evaluation_time.to_pydatetime())
                 row["instrument_key"] = instrument_key
@@ -309,6 +407,11 @@ def replay_red_bar_v2_day_with_futures_vwap(
                 waiting_for_red_bar_touch = False
             else:
                 blocked += 1
+                last_block_code = admission.admission_code.value
+                last_block_reason = admission.admission_reason
+                last_block_at = evaluation_time.isoformat()
+                if initial_admitted is None and admission.entry_type == "INITIAL":
+                    initial_admitted = False
                 trade_id = None
                 if admission.admission_code not in {AdmissionCode.ACTIVE_TRADE_BLOCK, AdmissionCode.PREVIOUS_TRADE_NOT_CLOSED}:
                     pending_reversal = None
@@ -370,6 +473,9 @@ def replay_red_bar_v2_day_with_futures_vwap(
                 latest_health = health
                 upgrade = evaluate_midpoint_upgrade(reference, snapshot, current_state=provisional_state)
                 if upgrade.event_type.value == "FULL_DIRECTIONAL_ALIGNMENT" and _event_is_due(upgrade, evaluation_time):
+                    upgrade_count += 1
+                    upgrade_last_at = evaluation_time.isoformat()
+                    upgrade_last_direction = upgrade.direction
                     events.append(ReplayEvent(
                         timestamp=evaluation_time.to_pydatetime(),
                         event_type="STATE_UPGRADE",
@@ -399,6 +505,96 @@ def replay_red_bar_v2_day_with_futures_vwap(
 
     final_state = observe_trade_state(trade_rows, instrument_key=instrument_key)
     trading_date = pd.Timestamp(frame.index[0]).date().isoformat()
+    mid_session_latest = mid_session_tracker.get("latest")
+    rule_state: dict[str, object] = {
+        "as_of": last_evaluation_iso,
+        "current_direction": current_direction,
+        "reference": {
+            "established": rule_reference is not None,
+            **(rule_reference or {}),
+        },
+        "initial": {
+            "status": (
+                "ESTABLISHED"
+                if initial_processed
+                else "SCANNING"
+                if rule_reference is not None
+                else "REFERENCE_PENDING"
+            ),
+            "direction": initial_direction,
+            "established_at": initial_established_at,
+            "admitted": initial_admitted,
+            "evaluations": initial_evaluations,
+            "last_evaluated_at": initial_last_evaluated,
+            "last_result": initial_last_result,
+            "last_reason": initial_last_reason,
+        },
+        "reversal": {
+            "monitoring": current_direction is not None,
+            "five_minute_evaluations": reversal_5m_evaluations,
+            "detections": reversal_detections,
+            "last_detected_at": reversal_last_at,
+            "last_direction": reversal_last_direction,
+            "last_midpoint_aligned": reversal_last_aligned,
+            "pending": pending_reversal is not None,
+        },
+        "mid_session": {
+            "active": bool(mid_session_latest),
+            "passed": (
+                mid_session_latest.get("passed")
+                if isinstance(mid_session_latest, dict)
+                else None
+            ),
+            "reason": (
+                mid_session_latest.get("reason")
+                if isinstance(mid_session_latest, dict)
+                else None
+            ),
+            "evaluated_at": (
+                mid_session_latest.get("evaluated_at")
+                if isinstance(mid_session_latest, dict)
+                else None
+            ),
+            "blocked_count": int(mid_session_tracker.get("blocked", 0)),
+        },
+        "upgrade": {
+            "provisional_state": (
+                provisional_state.value if provisional_state is not None else None
+            ),
+            "upgrades": upgrade_count,
+            "last_upgrade_at": upgrade_last_at,
+            "last_direction": upgrade_last_direction,
+        },
+        "reentry": {
+            "waiting": waiting_for_red_bar_touch,
+            "touch_state": reentry_touch_state,
+            "waiting_since": reentry_waiting_since,
+            "last_touch_at": reentry_last_touch_at,
+            "last_touch_direction": reentry_last_touch_direction,
+            "last_vwap_confirmed": reentry_last_vwap_confirmed,
+            "validated": reentry_validated,
+            "failed": reentry_failed,
+            "last_outcome": reentry_last_outcome,
+            "last_outcome_at": reentry_last_outcome_at,
+            "last_direction": reentry_last_direction,
+        },
+        "admission": {
+            "admitted": admitted,
+            "blocked": blocked,
+            "last_admitted_at": last_admitted_at,
+            "last_admission_code": last_admission_code,
+            "last_block_code": last_block_code,
+            "last_block_reason": last_block_reason,
+            "last_block_at": last_block_at,
+            "active_trade_count": final_state.active_trade_count,
+            "previous_trade_status": (
+                final_state.latest_executed_trade.lifecycle_state.value
+                if final_state.latest_executed_trade is not None
+                else None
+            ),
+            "trade_state": final_state.lifecycle_state.value,
+        },
+    }
     result = RedBarV2ReplayResult(
         instrument_key=instrument_key,
         trading_date=trading_date,
@@ -409,6 +605,7 @@ def replay_red_bar_v2_day_with_futures_vwap(
         blocked_candidates=blocked,
         closed_trades=closed,
         final_trade_state=final_state.lifecycle_state.value,
+        rule_state=rule_state,
     )
     return result, latest_health
 

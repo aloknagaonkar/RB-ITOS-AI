@@ -10,17 +10,25 @@ from red_bar_lab.services.red_bar_v2_historical_replay import ReplayEvent, RedBa
 IST = "Asia/Kolkata"
 
 
+class _StubDatabase:
+    """Minimal stand-in for RedBarDatabase used by the monitored replay
+    service. The service's PCR reader only touches ``.path``; setting
+    ``path`` to ``None`` short-circuits the read and returns (None, None)."""
+
+    path = None
+
+
 def _candles(periods: int) -> pd.DataFrame:
     timestamps = pd.date_range("2026-08-18 09:15", periods=periods, freq="1min", tz=IST)
     return pd.DataFrame(
         {
-            "timestamp": timestamps,
             "open": [100.0] * periods,
             "high": [101.0] * periods,
             "low": [99.0] * periods,
             "close": [100.0] * periods,
             "volume": [1000.0] * periods,
-        }
+        },
+        index=pd.Index(timestamps, name="timestamp"),
     )
 
 
@@ -75,6 +83,7 @@ def test_monitored_replay_persists_full_session_and_summarizes_blocks(monkeypatc
     result = service.run_monitored_red_bar_v2_futures_replay(
         _candles(375),
         _candles(385),
+        database=_StubDatabase(),
         instrument_key="NIFTY",
         vwap_instrument_key="NIFTY-FUT",
         artifacts_root=tmp_path,

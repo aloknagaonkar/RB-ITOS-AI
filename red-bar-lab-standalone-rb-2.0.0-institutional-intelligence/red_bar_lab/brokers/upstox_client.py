@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 import logging
+import os
 import re
+import threading
+import time
 from typing import Any
 from urllib.parse import quote, unquote
 
@@ -43,6 +46,75 @@ class ObservableRetry(Retry):
         return next_retry
 
 
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name, "")
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+class GetPacer:
+    """Serializes GET issue times to stay under provider rate limits."""
+
+    def __init__(
+        self,
+        minimum_gap_seconds: float,
+        maximum_wait_seconds: float,
+    ) -> None:
+        self.minimum_gap_seconds = max(0.0, float(minimum_gap_seconds))
+        self.maximum_wait_seconds = max(0.0, float(maximum_wait_seconds))
+        self._lock = threading.Lock()
+        self._next_slot = 0.0
+
+    def wait(self) -> float:
+        """Sleep until this caller's slot; returns the seconds actually waited."""
+        if self.minimum_gap_seconds <= 0.0:
+            return 0.0
+        with self._lock:
+            now = time.monotonic()
+            slot = max(now, self._next_slot)
+            delay = slot - now
+            if delay > self.maximum_wait_seconds:
+                logger.warning(
+                    "broker_get_pacing_capped requested_wait=%.1fs cap=%.1fs",
+                    delay,
+                    self.maximum_wait_seconds,
+                )
+                delay = self.maximum_wait_seconds
+                slot = now + delay
+            self._next_slot = slot + self.minimum_gap_seconds
+        if delay > 0:
+            time.sleep(delay)
+        return delay
+
+
+class _PacedSessionProxy:
+    """Delegates to the wrapped session while pacing GET requests."""
+
+    def __init__(self, session: Any, pacer: GetPacer) -> None:
+        self._session = session
+        self._pacer = pacer
+
+    def get(self, *args, **kwargs):
+        self._pacer.wait()
+        return self._session.get(*args, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._session, name)
+
+
+# Shared across every client instance in this process: independent loops
+# (paper monitor, collector, reference worker) all issue GETs through it.
+# Set UPSTOX_GET_MIN_GAP_SECONDS=0 to disable pacing entirely.
+_GET_PACER = GetPacer(
+    minimum_gap_seconds=_env_float("UPSTOX_GET_MIN_GAP_SECONDS", 1.0),
+    maximum_wait_seconds=_env_float("UPSTOX_GET_MAX_WAIT_SECONDS", 15.0),
+)
+
+
 class UpstoxClient:
     BASE_URL_V2 = "https://api.upstox.com/v2"
     BASE_URL_V3 = "https://api.upstox.com/v3"
@@ -57,14 +129,23 @@ class UpstoxClient:
         self.timeout = timeout
         self.session = session or requests.Session()
         self._configure_get_retry_policy()
+        self.session = _PacedSessionProxy(self.session, _GET_PACER)
 
     def _configure_get_retry_policy(self) -> None:
+        # Bounded GET-only retry policy tuned for Upstox rate-limit windows.
+        #
+        # Upstox free-tier rate-limit windows can last 20-60 seconds. With
+        # total=3 and backoff_factor=0.5, the cumulative wait was ~1.5s, which
+        # exhausted the budget long before Upstox released. Bumping to total=5
+        # with backoff_factor=2.0 produces 0s, 2s, 4s, 8s, 16s = 30s of wait
+        # time, which fits within a typical Upstox rate-limit window when
+        # combined with respect_retry_after_header=True.
         retry = ObservableRetry(
-            total=3,
+            total=5,
             connect=3,
             read=3,
-            status=3,
-            backoff_factor=0.5,
+            status=5,
+            backoff_factor=2.0,
             status_forcelist=(429, 502, 503, 504),
             allowed_methods=frozenset({"GET", "HEAD", "OPTIONS"}),
             respect_retry_after_header=True,
@@ -76,8 +157,8 @@ class UpstoxClient:
             mount("https://", adapter)
             mount("http://", adapter)
         self.get_retry_policy = {
-            "total": 3,
-            "backoff_factor": 0.5,
+            "total": 5,
+            "backoff_factor": 2.0,
             "status_forcelist": (429, 502, 503, 504),
             "allowed_methods": ("GET", "HEAD", "OPTIONS"),
             "respect_retry_after_header": True,

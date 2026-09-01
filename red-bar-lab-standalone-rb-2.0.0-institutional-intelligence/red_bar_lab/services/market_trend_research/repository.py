@@ -120,6 +120,9 @@ CREATE TABLE IF NOT EXISTS market_trend_strike_pcr_recommendations (
  entry_strike_pcr REAL NOT NULL,
  entry_overall_pcr REAL,
  entry_price REAL NOT NULL,
+ entry_delta REAL,
+ entry_iv REAL,
+ entry_contract_vwap REAL,
  current_price REAL NOT NULL,
  peak_price REAL NOT NULL,
  peak_at TEXT NOT NULL,
@@ -139,6 +142,28 @@ ON market_trend_strike_pcr_recommendations(
  underlying, trading_date, last_observed_at DESC
 );
 """
+
+
+_RECOMMENDATION_ENTRY_GREEK_COLUMNS = (
+    ("entry_delta", "REAL"),
+    ("entry_iv", "REAL"),
+    ("entry_contract_vwap", "REAL"),
+)
+
+
+def _ensure_recommendation_entry_columns(connection: sqlite3.Connection) -> None:
+    columns = {
+        row[1]
+        for row in connection.execute(
+            "PRAGMA table_info(market_trend_strike_pcr_recommendations)"
+        ).fetchall()
+    }
+    for name, declaration in _RECOMMENDATION_ENTRY_GREEK_COLUMNS:
+        if name not in columns:
+            connection.execute(
+                "ALTER TABLE market_trend_strike_pcr_recommendations "
+                f"ADD COLUMN {name} {declaration}"
+            )
 
 
 def _json_value(value: object) -> object:
@@ -410,6 +435,34 @@ class MarketTrendResearchRepository:
             raise
         return [json.loads(row[0]) for row in rows]
 
+    def _distinct_trading_days(self, table: str, underlying: str) -> list[str]:
+        if not self.path.exists():
+            return []
+        try:
+            with sqlite3.connect(self.path) as connection:
+                rows = connection.execute(
+                    f"SELECT DISTINCT trading_date FROM {table} "
+                    "WHERE underlying=? ORDER BY trading_date DESC",
+                    (underlying,),
+                ).fetchall()
+        except sqlite3.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                return []
+            raise
+        return [str(row[0]) for row in rows if row[0]]
+
+    def five_minute_pcr_trading_days(self, underlying: str) -> list[str]:
+        """Distinct trading days with 5m PCR observations, newest first."""
+        return self._distinct_trading_days(
+            "market_trend_research_pcr_5m_history", underlying
+        )
+
+    def strike_pcr_recommendation_trading_days(self, underlying: str) -> list[str]:
+        """Distinct trading days with strike PCR recommendations, newest first."""
+        return self._distinct_trading_days(
+            "market_trend_strike_pcr_recommendations", underlying
+        )
+
     def apply_strike_pcr_recommendations(
         self,
         observations: tuple[StrikePcrRecommendationObservation, ...],
@@ -419,6 +472,7 @@ class MarketTrendResearchRepository:
             return
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            _ensure_recommendation_entry_columns(connection)
             for item in observations:
                 observed_at = _utc_iso(item.observed_at, field_name="observed_at")
                 trading_date = item.observed_at.astimezone(IST).date().isoformat()
@@ -483,15 +537,18 @@ class MarketTrendResearchRepository:
                        (recommendation_id, underlying, trading_date, expiry,
                         strike, side, status, opened_at, closed_at,
                         entry_strike_pcr, entry_overall_pcr, entry_price,
+                        entry_delta, entry_iv, entry_contract_vwap,
                         current_price, peak_price, peak_at, last_strike_pcr,
                         strike_signal, overall_pcr, overall_signal, symbol,
                         last_observed_at, authority)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (
                         recommendation_id, item.underlying, trading_date,
                         item.expiry, item.strike, desired_side, "ACTIVE",
                         observed_at, None, item.strike_pcr, item.overall_pcr,
-                        ask, bid, bid, observed_at, item.strike_pcr,
+                        ask, item.entry_delta, item.entry_iv,
+                        item.entry_contract_vwap,
+                        bid, bid, observed_at, item.strike_pcr,
                         item.strike_signal, item.overall_pcr,
                         item.overall_signal, item.symbol, observed_at,
                         item.authority,

@@ -12,8 +12,8 @@ def test_upstox_get_retry_policy_is_bounded_and_get_only():
     client = UpstoxClient("token", session=requests.Session())
     policy = client.get_retry_policy
 
-    assert policy["total"] == 3
-    assert policy["backoff_factor"] == 0.5
+    assert policy["total"] == 5
+    assert policy["backoff_factor"] == 2.0
     assert policy["status_forcelist"] == (429, 502, 503, 504)
     assert "GET" in policy["allowed_methods"]
     assert "POST" not in policy["allowed_methods"]

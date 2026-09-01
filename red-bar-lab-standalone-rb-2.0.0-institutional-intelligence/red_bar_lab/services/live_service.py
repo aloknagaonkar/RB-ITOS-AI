@@ -64,7 +64,106 @@ class LiveMonitorResult:
     awaiting_attempts: tuple[dict[str, object], ...]
     event_timeline: tuple[dict[str, object], ...]
     current_price: float | None
-    message: str
+    level_diagnostics: tuple[dict[str, object], ...] = ()
+    message: str = ""
+
+
+def _build_level_diagnostics(
+    *,
+    levels: list[object],
+    current_price: float | None,
+    attempts: tuple[object, ...] | list[object],
+) -> tuple[dict[str, object], ...]:
+    """Return a per-level diagnostic record for the live monitor log/UI.
+
+    Each entry explains whether ``current_price`` is currently inside the
+    level's source candle range (already consumed), above it (would need a
+    bearish break to re-trigger), or below it (would need a bullish break).
+    The output is also annotated with the latest attempt state for the level
+    so an operator can immediately see why no signal was generated.
+    """
+    if current_price is None or not levels:
+        return ()
+
+    latest_attempt_by_level: dict[str, object] = {}
+    for attempt in attempts:
+        level_type = getattr(attempt, "level_type", None)
+        if not level_type:
+            continue
+        existing = latest_attempt_by_level.get(level_type)
+        if existing is None:
+            latest_attempt_by_level[level_type] = attempt
+            continue
+        existing_ts = getattr(existing, "cross_timestamp", None)
+        new_ts = getattr(attempt, "cross_timestamp", None)
+        if new_ts is not None and (
+            existing_ts is None or new_ts > existing_ts
+        ):
+            latest_attempt_by_level[level_type] = attempt
+
+    diagnostics: list[dict[str, object]] = []
+    for level in levels:
+        level_type = getattr(level, "level_type", None)
+        source_high = getattr(level, "source_high", None)
+        source_low = getattr(level, "source_low", None)
+        source_timestamp = getattr(level, "source_timestamp", None)
+        interval_minutes = getattr(level, "interval_minutes", None)
+        if level_type is None or source_high is None or source_low is None:
+            continue
+        midpoint = (float(source_high) + float(source_low)) / 2.0
+        price = float(current_price)
+        if source_low <= price <= source_high:
+            status = "PRICE_INSIDE_RANGE"
+        elif price > source_high:
+            status = "PRICE_ABOVE_LEVEL"
+        elif price < source_low:
+            status = "PRICE_BELOW_LEVEL"
+
+        last_attempt = latest_attempt_by_level.get(level_type)
+        last_attempt_state = getattr(last_attempt, "state", None)
+        last_attempt_state_value = (
+            last_attempt_state.value
+            if last_attempt_state is not None and hasattr(last_attempt_state, "value")
+            else last_attempt_state
+        )
+        entry: dict[str, object] = {
+            "level_type": str(level_type),
+            "source_timestamp": (
+                source_timestamp.isoformat()
+                if source_timestamp is not None
+                else None
+            ),
+            "source_high": float(source_high),
+            "source_low": float(source_low),
+            "midpoint": midpoint,
+            "interval_minutes": int(interval_minutes) if interval_minutes is not None else None,
+            "current_price": price,
+            "status": status,
+            "distance_to_high": float(source_high) - price,
+            "distance_to_low": price - float(source_low),
+        }
+        if status == "PRICE_INSIDE_RANGE":
+            entry["explanation"] = (
+                "Current price is inside the level's source candle range; "
+                "no cross can fire until price leaves the range."
+            )
+        elif status == "PRICE_ABOVE_LEVEL":
+            entry["explanation"] = (
+                f"Need a bearish break (close below {float(source_low):.2f}) "
+                "to trigger a new attempt."
+            )
+        elif status == "PRICE_BELOW_LEVEL":
+            entry["explanation"] = (
+                f"Need a bullish break (close above {float(source_high):.2f}) "
+                "to trigger a new attempt."
+            )
+        entry["last_attempt_state"] = last_attempt_state_value
+        entry["has_active_attempt"] = last_attempt_state_value in {
+            "ACTIVE",
+            "AWAITING_CONFIRMATION",
+        }
+        diagnostics.append(entry)
+    return tuple(diagnostics)
 
 
 def completed_signal_source(
@@ -682,6 +781,12 @@ class RedBarLiveService:
                 "close": float(row["close"]),
             }
 
+        level_diagnostics = _build_level_diagnostics(
+            levels=levels,
+            current_price=current_price,
+            attempts=scan.attempts,
+        )
+
         return LiveMonitorResult(
             connected=True,
             trading_date=trading_date,
@@ -700,6 +805,7 @@ class RedBarLiveService:
             awaiting_attempts=awaiting_details,
             event_timeline=timeline,
             current_price=current_price,
+            level_diagnostics=level_diagnostics,
             message=(
                 f"Current session refreshed; {len(completed_five)} completed "
                 "five-minute setup candles evaluated with one-minute confirmation."
