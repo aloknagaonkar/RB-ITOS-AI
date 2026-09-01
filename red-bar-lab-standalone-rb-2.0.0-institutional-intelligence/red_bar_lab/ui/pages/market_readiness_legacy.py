@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from datetime import datetime
 import sqlite3
+from zoneinfo import ZoneInfo
 
 from red_bar_lab.ui._shared import *
 from red_bar_lab.services.global_readiness_store import read_global_readiness_snapshots
@@ -13,6 +15,9 @@ from red_bar_lab.services.independent_market_recommendation import (
 )
 from red_bar_lab.services.nifty_futures_snapshot_store import (
     read_nifty_futures_snapshots,
+)
+from red_bar_lab.services.market_trend_research.repository import (
+    MarketTrendResearchRepository,
 )
 from red_bar_lab.services.option_participation_store import (
     read_latest_option_participation,
@@ -81,6 +86,24 @@ def _latest_option_context(database_path):
             return dict(row) if row else {}
     except sqlite3.Error:
         return {}
+
+
+def _latest_one_minute_observation(database_path, *, underlying_name):
+    """Return the most recent 1m PCR observation for the trading day, or {}."""
+    try:
+        repository = MarketTrendResearchRepository(database_path)
+        reader = getattr(repository, "one_minute_pcr_history", None)
+        if not callable(reader):
+            return {}
+        trading_date = datetime.now(tz=ZoneInfo("Asia/Kolkata")).date()
+        rows = reader(
+            underlying=underlying_name,
+            trading_date=trading_date,
+            limit=1,
+        )
+    except Exception:
+        return {}
+    return rows[0] if rows else {}
 
 
 def _evidence_table(recommendation):
@@ -233,6 +256,10 @@ def render_legacy_page(
         limit=1,
     )
     latest_futures = futures_rows[0] if futures_rows else {}
+    one_minute_observation = _latest_one_minute_observation(
+        settings.database_path,
+        underlying_name=underlying_name,
+    )
     option_context = _latest_option_context(settings.database_path)
     participation_rows = read_latest_option_participation(
         settings.database_path,
@@ -250,6 +277,7 @@ def render_legacy_page(
         readiness=latest,
         signal_diagnostic=latest_signal,
         futures_snapshot=latest_futures,
+        one_minute_observation=one_minute_observation,
     )
 
     st.markdown("### A. Today's Spot & ATM ± 4 Option Participation")

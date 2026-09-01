@@ -38,6 +38,7 @@ def build_trade_evidence_recommendation(
     readiness: Mapping[str, object] | None,
     signal_diagnostic: Mapping[str, object] | None,
     futures_snapshot: Mapping[str, object] | None,
+    one_minute_observation: Mapping[str, object] | None = None,
 ) -> TradeEvidenceRecommendation:
     """Grade a proposed Red Bar V2 trade without affecting execution."""
 
@@ -74,6 +75,20 @@ def build_trade_evidence_recommendation(
         positives.append(f"FUTURES_{futures_state}_SUPPORTIVE")
     elif futures_state in _CONTRARY_FUTURES.get(direction, set()):
         cautions.append(f"FUTURES_{futures_state}_CONTRADICTS_{direction}")
+
+    if isinstance(one_minute_observation, Mapping):
+        one_minute_direction = _text(
+            one_minute_observation.get("research_direction")
+            or one_minute_observation.get("overall_direction"),
+            "UNAVAILABLE",
+        )
+        if direction in {"BULLISH", "BEARISH"} and one_minute_direction == direction:
+            positives.append(f"ONE_MIN_PCR_{one_minute_direction}_SUPPORTIVE")
+        elif direction in {"BULLISH", "BEARISH"} and one_minute_direction in {
+            "BULLISH",
+            "BEARISH",
+        } and one_minute_direction != direction:
+            cautions.append(f"ONE_MIN_PCR_{one_minute_direction}_CONTRADICTS_{direction}")
 
     if direction == "NO_SIGNAL":
         grade = "NO_SIGNAL"

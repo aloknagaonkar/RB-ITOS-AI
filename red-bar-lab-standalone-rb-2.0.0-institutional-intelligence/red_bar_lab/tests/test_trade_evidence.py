@@ -106,3 +106,81 @@ def test_missing_direction_waits_for_signal():
     assert result.grade == "NO_SIGNAL"
     assert result.suggested_option == "—"
     assert result.action == "WAIT FOR RED BAR V2 SIGNAL"
+
+
+def test_one_minute_observation_supportive_adds_positive_token_without_flipping_grade() -> None:
+    result = build_trade_evidence_recommendation(
+        readiness=_readiness(),
+        signal_diagnostic={
+            "direction": "BULLISH",
+            "best_candidate": "NIFTY 24300 CE",
+            "best_score": 78,
+        },
+        futures_snapshot={"positioning_state": "LONG_BUILDUP", "strength": "STRONG"},
+        one_minute_observation={
+            "research_direction": "BULLISH",
+            "overall_pcr": 0.82,
+            "candle_close_timestamp": "2026-08-25T09:21:00+05:30",
+        },
+    )
+    assert "ONE_MIN_PCR_BULLISH_SUPPORTIVE" in result.positive_evidence
+    assert result.grade == "STRONG"
+
+
+def test_one_minute_observation_contradictory_adds_caution_without_flipping_grade() -> None:
+    result = build_trade_evidence_recommendation(
+        readiness=_readiness(),
+        signal_diagnostic={
+            "direction": "BULLISH",
+            "best_candidate": "NIFTY 24300 CE",
+            "best_score": 78,
+        },
+        futures_snapshot={"positioning_state": "LONG_BUILDUP", "strength": "STRONG"},
+        one_minute_observation={
+            "research_direction": "BEARISH",
+            "overall_pcr": 1.18,
+            "candle_close_timestamp": "2026-08-25T09:21:00+05:30",
+        },
+    )
+    assert "ONE_MIN_PCR_BEARISH_CONTRADICTS_BULLISH" in result.caution_evidence
+    assert result.grade == "STRONG"
+
+
+def test_one_minute_observation_contradiction_does_not_force_conflicted_grade() -> None:
+    result = build_trade_evidence_recommendation(
+        readiness=_readiness(),
+        signal_diagnostic={"direction": "BULLISH"},
+        futures_snapshot={"positioning_state": "LONG_BUILDUP", "strength": "STRONG"},
+        one_minute_observation={"research_direction": "BEARISH"},
+    )
+    assert result.grade != "CONFLICTED"
+
+
+def test_one_minute_observation_missing_is_noop() -> None:
+    result = build_trade_evidence_recommendation(
+        readiness=_readiness(),
+        signal_diagnostic={"direction": "BULLISH"},
+        futures_snapshot={"positioning_state": "LONG_BUILDUP", "strength": "STRONG"},
+        one_minute_observation=None,
+    )
+    assert not any(
+        token.startswith("ONE_MIN_PCR_") for token in result.positive_evidence
+    )
+    assert not any(
+        token.startswith("ONE_MIN_PCR_") for token in result.caution_evidence
+    )
+
+
+def test_one_minute_observation_unavailable_direction_is_ignored() -> None:
+    result = build_trade_evidence_recommendation(
+        readiness=_readiness(),
+        signal_diagnostic={"direction": "BULLISH"},
+        futures_snapshot={"positioning_state": "LONG_BUILDUP", "strength": "STRONG"},
+        one_minute_observation={"research_direction": "UNAVAILABLE"},
+    )
+    assert not any(
+        token.startswith("ONE_MIN_PCR_") for token in result.positive_evidence
+    )
+    assert not any(
+        token.startswith("ONE_MIN_PCR_") for token in result.caution_evidence
+    )
