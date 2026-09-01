@@ -21,6 +21,7 @@ from .models import (
     ResearchState,
 )
 from .five_minute_history import FiveMinutePcrObservation, IST
+from .one_minute_history import OneMinutePcrObservation
 from .strike_pcr_tracker import StrikePcrRecommendationObservation
 from .policy import MarketTrendResearchPolicy
 from .preopen_spot import PreOpenSpotObservation
@@ -105,6 +106,22 @@ CREATE TABLE IF NOT EXISTS market_trend_research_pcr_5m_history (
 );
 CREATE INDEX IF NOT EXISTS idx_market_trend_research_pcr_5m_latest
 ON market_trend_research_pcr_5m_history(
+ underlying, trading_date, candle_close_timestamp DESC
+);
+CREATE TABLE IF NOT EXISTS market_trend_research_pcr_1m_history (
+ underlying TEXT NOT NULL,
+ trading_date TEXT NOT NULL,
+ candle_close_timestamp TEXT NOT NULL,
+ source_timestamp TEXT NOT NULL,
+ overall_pcr REAL NOT NULL,
+ overall_direction TEXT NOT NULL,
+ quality_state TEXT NOT NULL,
+ payload_json TEXT NOT NULL,
+ created_at TEXT NOT NULL,
+ PRIMARY KEY(underlying, candle_close_timestamp)
+);
+CREATE INDEX IF NOT EXISTS idx_market_trend_research_pcr_1m_latest
+ON market_trend_research_pcr_1m_history(
  underlying, trading_date, candle_close_timestamp DESC
 );
 CREATE TABLE IF NOT EXISTS market_trend_strike_pcr_recommendations (
@@ -455,6 +472,75 @@ class MarketTrendResearchRepository:
         """Distinct trading days with 5m PCR observations, newest first."""
         return self._distinct_trading_days(
             "market_trend_research_pcr_5m_history", underlying
+        )
+
+    def persist_one_minute_pcr_observation(
+        self,
+        observation: OneMinutePcrObservation,
+    ) -> bool:
+        """Persist exactly one immutable PCR record per completed 1m candle."""
+        candle_close = _utc_iso(
+            observation.candle_close_timestamp,
+            field_name="candle_close_timestamp",
+        )
+        source_timestamp = _utc_iso(
+            observation.source_timestamp,
+            field_name="source_timestamp",
+        )
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """INSERT OR IGNORE INTO market_trend_research_pcr_1m_history
+                   (underlying, trading_date, candle_close_timestamp,
+                    source_timestamp, overall_pcr, overall_direction,
+                    quality_state, payload_json, created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                (
+                    observation.underlying,
+                    observation.candle_close_timestamp.astimezone(IST).date().isoformat(),
+                    candle_close,
+                    source_timestamp,
+                    observation.overall_pcr,
+                    observation.overall_direction,
+                    observation.quality_state,
+                    _json(observation.payload()),
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+            connection.commit()
+            return cursor.rowcount == 1
+
+    def one_minute_pcr_history(
+        self,
+        *,
+        underlying: str,
+        trading_date: date,
+        limit: int = 75,
+    ) -> list[dict[str, Any]]:
+        """Read completed-candle PCR history newest first."""
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        if not self.path.exists():
+            return []
+        try:
+            with sqlite3.connect(self.path) as connection:
+                rows = connection.execute(
+                    """SELECT payload_json
+                       FROM market_trend_research_pcr_1m_history
+                       WHERE underlying=? AND trading_date=?
+                       ORDER BY candle_close_timestamp DESC
+                       LIMIT ?""",
+                    (underlying, trading_date.isoformat(), limit),
+                ).fetchall()
+        except sqlite3.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                return []
+            raise
+        return [json.loads(row[0]) for row in rows]
+
+    def one_minute_pcr_trading_days(self, underlying: str) -> list[str]:
+        """Distinct trading days with 1m PCR observations, newest first."""
+        return self._distinct_trading_days(
+            "market_trend_research_pcr_1m_history", underlying
         )
 
     def strike_pcr_recommendation_trading_days(self, underlying: str) -> list[str]:

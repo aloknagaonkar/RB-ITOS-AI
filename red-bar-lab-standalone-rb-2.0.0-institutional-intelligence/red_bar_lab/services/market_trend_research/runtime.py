@@ -15,6 +15,12 @@ from .five_minute_history import (
     completed_five_minute_close,
     completed_five_minute_rsi,
 )
+from .one_minute_history import (
+    aligned_one_minute_futures_vwap,
+    build_one_minute_pcr_observation,
+    completed_one_minute_close,
+    completed_one_minute_rsi,
+)
 from ..nifty_futures_snapshot_store import read_nifty_futures_snapshots
 from .strike_pcr_tracker import build_strike_pcr_recommendations
 from ..option_participation_store import read_latest_option_participation
@@ -286,6 +292,7 @@ class CombinedMarketTrendResearchRuntime(MarketTrendResearchRuntime):
         self.stocks_per_cycle = stocks_per_cycle
         self._stock_cursor = 0
         self._last_history_close: datetime | None = None
+        self._last_one_minute_close: datetime | None = None
 
     def _cycle_names(self) -> tuple[str, ...]:
         core = tuple(
@@ -391,6 +398,39 @@ class CombinedMarketTrendResearchRuntime(MarketTrendResearchRuntime):
                     self.repository.apply_strike_pcr_recommendations(
                         strike_recommendations
                     )
+                    one_minute_close = completed_one_minute_close(history_now)
+                    if one_minute_close is not None and one_minute_close != self._last_one_minute_close:
+                        try:
+                            one_minute_candles = self.collectors["NIFTY 50"].provider.intraday_candles(
+                                self.collectors["NIFTY 50"].instrument_key,
+                                interval_minutes=1,
+                            )
+                        except Exception:
+                            one_minute_candles = None
+                        one_minute_rsi = completed_one_minute_rsi(
+                            one_minute_candles,
+                            candle_close=one_minute_close,
+                        )
+                        one_minute_vwap = aligned_one_minute_futures_vwap(
+                            read_nifty_futures_snapshots(
+                                self.repository.path,
+                                underlying_name="NIFTY 50",
+                                limit=10,
+                            ),
+                            candle_close=one_minute_close,
+                        )
+                        one_minute_observation = build_one_minute_pcr_observation(
+                            projection=nifty,
+                            combined=combined,
+                            evaluated_at=history_now,
+                            rsi=one_minute_rsi,
+                            vwap=one_minute_vwap,
+                        )
+                        if one_minute_observation is not None:
+                            self.repository.persist_one_minute_pcr_observation(
+                                one_minute_observation
+                            )
+                            self._last_one_minute_close = one_minute_close
             except Exception as exc:
                 # History is observational; its failure must not interrupt collection.
                 failures.append(exc)

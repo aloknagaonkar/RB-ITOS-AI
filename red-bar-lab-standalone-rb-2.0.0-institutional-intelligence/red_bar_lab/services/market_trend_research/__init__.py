@@ -2,6 +2,7 @@ from .calculator import DualPcrCalculator
 from .collector import CollectionResult, UpstoxResearchChainCollector
 from .combined_pcr import CombinedMarketPcr, CombinedMarketPcrCalculator
 from .five_minute_history import FiveMinutePcrObservation
+from .one_minute_history import OneMinutePcrObservation
 from .strike_pcr_tracker import StrikePcrRecommendationObservation
 from .models import (
     DualPcrResearchSnapshot,
@@ -29,6 +30,7 @@ __all__ = [
     "CombinedMarketTrendResearchRuntime",
     "FiveMinutePcrObservation",
     "StrikePcrRecommendationObservation",
+    "OneMinutePcrObservation",
     "DualPcrCalculator",
     "DualPcrResearchSnapshot",
     "LatestValueSlot",

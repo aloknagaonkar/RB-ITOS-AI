@@ -819,6 +819,144 @@ def _recommendation_pcr_rows(
     return rendered
 
 
+def _render_one_minute_pcr_history(
+    repository: MarketTrendResearchRepository,
+    *,
+    underlying: str,
+    now: datetime,
+) -> None:
+    today_ist = now.astimezone(IST).date()
+    days = _available_trading_days(
+        repository, "one_minute_pcr_trading_days", underlying
+    )
+    with st.expander("1-Minute Overall PCR History", expanded=False):
+        if days:
+            default = next(
+                (day for day in days if day <= today_ist.isoformat()), days[0]
+            )
+            selected = st.selectbox(
+                "Trading date",
+                days,
+                index=days.index(default),
+                key="pcr_1m_history_trading_date",
+            )
+            try:
+                chosen = date.fromisoformat(selected)
+            except ValueError:
+                chosen = today_ist
+        else:
+            chosen = today_ist
+        reader = getattr(repository, "one_minute_pcr_history", None)
+        rows = (
+            reader(underlying=underlying, trading_date=chosen)
+            if callable(reader)
+            else []
+        )
+        if not rows:
+            st.info(
+                "Waiting for the first completed 1-minute candle with a "
+                "contemporaneous Overall PCR snapshot."
+            )
+            return
+        rendered: list[dict[str, object]] = []
+        previous_spot: float | None = None
+        previous_pcr: float | None = None
+        previous_ce_day_change: float | None = None
+        previous_pe_day_change: float | None = None
+        for row in reversed(rows):
+            spot = row.get("nifty_spot")
+            spot = float(spot) if isinstance(spot, (int, float)) else None
+            pcr = row.get("overall_pcr")
+            pcr = float(pcr) if isinstance(pcr, (int, float)) else None
+            price_change = (
+                spot - previous_spot
+                if spot is not None and previous_spot is not None
+                else None
+            )
+            price_change_pct = (
+                price_change / previous_spot * 100.0
+                if price_change is not None and previous_spot not in {None, 0}
+                else None
+            )
+            pcr_change = (
+                pcr - previous_pcr
+                if pcr is not None and previous_pcr is not None
+                else None
+            )
+            price_trend = _movement(price_change_pct, threshold=0.05)
+            pcr_trend = _movement(pcr_change, threshold=0.02)
+            ce_day_change = row.get("ce_day_oi_change")
+            ce_day_change = float(ce_day_change) if isinstance(ce_day_change, (int, float)) else None
+            pe_day_change = row.get("pe_day_oi_change")
+            pe_day_change = float(pe_day_change) if isinstance(pe_day_change, (int, float)) else None
+            ce_increment = (
+                ce_day_change - previous_ce_day_change
+                if ce_day_change is not None and previous_ce_day_change is not None
+                else None
+            )
+            pe_increment = (
+                pe_day_change - previous_pe_day_change
+                if pe_day_change is not None and previous_pe_day_change is not None
+                else None
+            )
+            ce_change_pct = _history_change_pct(
+                row.get("ce_day_oi_change_pct"),
+                current_oi=row.get("total_ce_oi"),
+                absolute_change=row.get("ce_day_oi_change"),
+            )
+            pe_change_pct = _history_change_pct(
+                row.get("pe_day_oi_change_pct"),
+                current_oi=row.get("total_pe_oi"),
+                absolute_change=row.get("pe_day_oi_change"),
+            )
+            rendered.append({
+                "Time": _format_ist_timestamp(row.get("candle_close_timestamp")),
+                "NIFTY spot": _number(row.get("nifty_spot"), 2),
+                "NIFTY change": _signed_decimal(price_change, 2),
+                "NIFTY change %": _percent(price_change_pct),
+                "RSI": _number(row.get("rsi"), 2),
+                "VWAP": _number(row.get("vwap"), 2),
+                "Fixed Morning PCR": _number(row.get("morning_pcr")),
+                "NIFTY Strike PCR": _number(row.get("overall_pcr")),
+                "PCR change": _signed_decimal(pcr_change),
+                "Price trend": price_trend,
+                "PCR trend": pcr_trend,
+                "Price–PCR relationship": _price_pcr_relationship(
+                    price_trend,
+                    pcr_trend,
+                ),
+                "OI driver": _incremental_oi_driver(ce_increment, pe_increment),
+                "Combined Index PCR": _number(row.get("combined_index_pcr")),
+                "NIFTY Top-10 PCR": _number(row.get("top_ten_pcr")),
+                "Overall Direction": row.get("research_direction", "Not available"),
+                "CE day OI change %": _percent(ce_change_pct),
+                "PE day OI change %": _percent(pe_change_pct),
+                "CE day OI change": _signed(row.get("ce_day_oi_change")),
+                "PE day OI change": _signed(row.get("pe_day_oi_change")),
+            })
+            previous_spot = spot if spot is not None else previous_spot
+            previous_pcr = pcr if pcr is not None else previous_pcr
+            previous_ce_day_change = (
+                ce_day_change
+                if ce_day_change is not None
+                else previous_ce_day_change
+            )
+            previous_pe_day_change = (
+                pe_day_change
+                if pe_day_change is not None
+                else previous_pe_day_change
+            )
+        st.dataframe(
+            _arrow_safe_rows(list(reversed(rendered))),
+            width="stretch",
+            hide_index=True,
+        )
+        st.caption(
+            "One immutable observation per completed NIFTY one-minute candle. "
+            "This history is observational and has no signal or execution authority."
+        )
+
+
 def _render_five_minute_pcr_history(
     repository: MarketTrendResearchRepository,
     *,
@@ -1326,6 +1464,11 @@ def _render_projection_cycle(
         underlying=underlying,
         now=current,
         option_rows=option_rows,
+    )
+    _render_one_minute_pcr_history(
+        repository,
+        underlying=underlying,
+        now=current,
     )
     _render_five_minute_pcr_history(
         repository,

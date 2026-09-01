@@ -40,9 +40,63 @@ def completed_five_minute_close(evaluated_at: datetime) -> datetime | None:
     return close if close.time() >= time(9, 20) else None
 
 
+def completed_one_minute_close(evaluated_at: datetime) -> datetime | None:
+    """Return the latest completed regular-session one-minute boundary."""
+    if evaluated_at.tzinfo is None or evaluated_at.utcoffset() is None:
+        raise ValueError("evaluated_at must be timezone-aware")
+    local = evaluated_at.astimezone(IST)
+    if local.weekday() >= 5 or local.time() < time(9, 15) or local.time() > time(15, 30, 59, 999999):
+        return None
+    close = local.replace(second=0, microsecond=0)
+    return close if close.time() >= time(9, 15) else None
+
+
 @dataclass(frozen=True, slots=True)
 class FiveMinutePcrObservation:
     """Immutable PCR evidence associated with one completed NIFTY 5m candle."""
+
+    underlying: str
+    candle_close_timestamp: datetime
+    source_timestamp: datetime
+    overall_pcr: float
+    overall_direction: str
+    total_ce_oi: float
+    total_pe_oi: float
+    ce_day_oi_change: float | None
+    pe_day_oi_change: float | None
+    morning_pcr: float | None
+    combined_score: float | None
+    combined_direction: str
+    combined_coverage: float
+    quality_state: str
+    combined_index_pcr: float | None = None
+    top_ten_pcr: float | None = None
+    research_direction: str = "UNAVAILABLE"
+    ce_day_oi_change_pct: float | None = None
+    pe_day_oi_change_pct: float | None = None
+    nifty_spot: float | None = None
+    rsi: float | None = None
+    vwap: float | None = None
+
+    def __post_init__(self) -> None:
+        for name in ("candle_close_timestamp", "source_timestamp"):
+            value = getattr(self, name)
+            if value.tzinfo is None or value.utcoffset() is None:
+                raise ValueError(f"{name} must be timezone-aware")
+        if not self.underlying.strip():
+            raise ValueError("underlying cannot be empty")
+        if self.overall_pcr < 0 or self.total_ce_oi < 0 or self.total_pe_oi < 0:
+            raise ValueError("PCR and OI values cannot be negative")
+        if not 0 <= self.combined_coverage <= 1:
+            raise ValueError("combined_coverage invalid")
+
+    def payload(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
+class OneMinutePcrObservation:
+    """Immutable PCR evidence associated with one completed NIFTY 1m candle."""
 
     underlying: str
     candle_close_timestamp: datetime
@@ -171,6 +225,91 @@ def build_five_minute_pcr_observation(
     )
 
 
+def build_one_minute_pcr_observation(
+    *,
+    projection: Mapping[str, object],
+    combined: CombinedMarketPcr,
+    evaluated_at: datetime,
+    rsi: float | None = None,
+    vwap: float | None = None,
+) -> OneMinutePcrObservation | None:
+    close = completed_one_minute_close(evaluated_at)
+    if close is None:
+        return None
+    source_raw = projection.get("source_timestamp")
+    if not isinstance(source_raw, str):
+        return None
+    try:
+        source = datetime.fromisoformat(source_raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if source.tzinfo is None or source.utcoffset() is None:
+        return None
+    if source.astimezone(timezone.utc) < close.astimezone(timezone.utc):
+        return None
+    current = _mapping(projection.get("current_panel"))
+    aggregate = _mapping(current.get("aggregate"))
+    pcr = _number(aggregate.get("pcr"))
+    ce_oi = _number(aggregate.get("total_ce_oi"))
+    pe_oi = _number(aggregate.get("total_pe_oi"))
+    if pcr is None or ce_oi is None or pe_oi is None:
+        return None
+    evidence = _mapping(aggregate.get("direction_evidence"))
+    morning = _mapping(projection.get("morning_panel"))
+    morning_aggregate = _mapping(morning.get("aggregate"))
+    quality = _mapping(projection.get("quality"))
+    total_row = next(
+        (
+            row for row in current.get("rows", ())
+            if isinstance(row, Mapping) and str(row.get("position", "")).upper() == "TOTAL"
+        ),
+        {},
+    )
+    current_direction = str(evidence.get("direction") or "UNAVAILABLE").upper()
+    morning_evidence = _mapping(morning_aggregate.get("direction_evidence"))
+    morning_direction = str(
+        morning_evidence.get("direction") or "UNAVAILABLE"
+    ).upper()
+    resolved_direction, _ = research_direction(
+        combined_direction=combined.direction,
+        combined_ready=combined.index_pcr is not None,
+        current_direction=current_direction,
+        current_ready=True,
+        morning_direction=morning_direction,
+    )
+    top_ten = next(
+        (
+            component for component in combined.components
+            if component.name == "NIFTY TOP 10"
+        ),
+        None,
+    )
+    return OneMinutePcrObservation(
+        underlying=str(projection.get("underlying") or "NIFTY 50"),
+        candle_close_timestamp=close,
+        source_timestamp=source,
+        overall_pcr=pcr,
+        overall_direction=str(evidence.get("direction") or "UNAVAILABLE").upper(),
+        total_ce_oi=ce_oi,
+        total_pe_oi=pe_oi,
+        ce_day_oi_change=_number(total_row.get("ce_previous_day_change")),
+        pe_day_oi_change=_number(total_row.get("pe_previous_day_change")),
+        morning_pcr=_number(morning_aggregate.get("pcr")),
+        combined_score=combined.score,
+        combined_direction=combined.direction,
+        combined_coverage=combined.coverage,
+        quality_state=str(quality.get("state") or "UNAVAILABLE").upper(),
+        combined_index_pcr=combined.index_pcr,
+        top_ten_pcr=None if top_ten is None else top_ten.pcr,
+        research_direction=resolved_direction,
+        ce_day_oi_change_pct=_number(total_row.get("ce_previous_day_change_pct")),
+        pe_day_oi_change_pct=_number(total_row.get("pe_previous_day_change_pct")),
+        nifty_spot=_number(current.get("spot")),
+        rsi=_number(rsi),
+        vwap=_number(vwap),
+    )
+
+
 def completed_five_minute_rsi(
     candles: object,
     *,
@@ -229,8 +368,11 @@ def aligned_futures_vwap(
 
 __all__ = [
     "FiveMinutePcrObservation",
+    "OneMinutePcrObservation",
     "build_five_minute_pcr_observation",
+    "build_one_minute_pcr_observation",
     "completed_five_minute_rsi",
     "completed_five_minute_close",
+    "completed_one_minute_close",
     "aligned_futures_vwap",
 ]
