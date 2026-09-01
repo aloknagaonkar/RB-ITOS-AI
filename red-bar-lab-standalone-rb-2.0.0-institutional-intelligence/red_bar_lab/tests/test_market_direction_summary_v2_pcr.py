@@ -7,6 +7,15 @@ Covers:
 - _format_v2_pcr_row renders shift direction (bullish / bearish / stable)
 - _format_v2_pcr_row handles missing shift gracefully
 - _format_v2_pcr_row uses INFORMATIONAL status when evidence is present
+
+Futures VWAP × PCR touch journal:
+- _vwap_touch_events detects a touch only after price moved 10+ points away,
+  and marks ACCEPTED/REJECTED from the next 15 closes
+- _touch_day_pcr_rows returns chronological PCR rows with slope deltas
+- _touch_pcr_context joins the nearest PCR row at/before the event within 600s
+- _read_futures_touch_candles picks the longest candle list and degrades safely
+- _futures_snapshot_days returns [] when the table is missing
+- the summary cycle wires the touch journal panel
 """
 
 from __future__ import annotations
@@ -377,3 +386,270 @@ def test_summary_wires_history_helpers_and_journal_reader() -> None:
     assert "FRESHCROSS" not in source
     assert "red_bar_v2_cycle_evaluations" in source
     assert "_read_v2_cycle_journal_pcr(database_path)" in source
+
+
+def _flat_candle(
+    close: float,
+    *,
+    high: float | None = None,
+    low: float | None = None,
+    timestamp: str | None = None,
+    volume: float = 1.0,
+) -> dict[str, object]:
+    return {
+        "timestamp": timestamp,
+        "high": close if high is None else high,
+        "low": close if low is None else low,
+        "close": close,
+        "volume": volume,
+    }
+
+
+def _touch_candles(window_close: float) -> list[dict[str, object]]:
+    """20 candles at 100, 5 at 115, one touch candle closing below VWAP,
+    then 15 forward candles closing at ``window_close``."""
+    candles = [_flat_candle(100.0) for _ in range(20)]
+    candles.extend(_flat_candle(115.0) for _ in range(5))
+    candles.append(
+        _flat_candle(
+            99.0,
+            high=115.0,
+            low=99.0,
+            timestamp="2026-08-27 14:35:00+05:30",
+        )
+    )
+    candles.extend(_flat_candle(window_close) for _ in range(15))
+    return candles
+
+
+def test_vwap_touch_events_detects_accepted_down_touch() -> None:
+    from red_bar_lab.ui.market_direction_summary import (
+        _vwap_series,
+        _vwap_touch_events,
+    )
+
+    candles = _touch_candles(95.0)
+    events = _vwap_touch_events(candles, _vwap_series(candles))
+    assert len(events) == 1
+    event = events[0]
+    assert event["timestamp"] == "2026-08-27 14:35:00+05:30"
+    assert event["approach"] == "DOWN"
+    assert event["close_side"] == "BELOW"
+    assert event["close"] == 99.0
+    assert event["accepted"] is True
+    assert event["next_move"] == pytest.approx(-4.0)
+
+
+def test_vwap_touch_events_rejects_touch_when_window_fails_to_hold() -> None:
+    from red_bar_lab.ui.market_direction_summary import (
+        _vwap_series,
+        _vwap_touch_events,
+    )
+
+    candles = _touch_candles(120.0)
+    events = _vwap_touch_events(candles, _vwap_series(candles))
+    assert len(events) == 1
+    assert events[0]["approach"] == "DOWN"
+    assert events[0]["accepted"] is False
+    assert events[0]["next_move"] == pytest.approx(21.0)
+
+
+def test_vwap_touch_events_ignores_moves_inside_threshold() -> None:
+    from red_bar_lab.ui.market_direction_summary import (
+        _vwap_series,
+        _vwap_touch_events,
+    )
+
+    candles = [_flat_candle(100.0) for _ in range(30)]
+    candles.append(_flat_candle(100.0, high=106.0, low=99.0))
+    events = _vwap_touch_events(candles, _vwap_series(candles))
+    assert events == []
+
+
+class _FakePcrRepository:
+    def __init__(self, rows: list[dict[str, object]]) -> None:
+        self._rows = rows
+        self.calls: list[dict[str, object]] = []
+
+    def five_minute_pcr_history(
+        self, *, underlying: str, trading_date: object, limit: int
+    ) -> list[dict[str, object]]:
+        self.calls.append(
+            {
+                "underlying": underlying,
+                "trading_date": trading_date,
+                "limit": limit,
+            }
+        )
+        return list(self._rows)
+
+
+def test_touch_day_pcr_rows_orders_chronologically_and_computes_slope() -> None:
+    from datetime import date
+
+    from red_bar_lab.ui.market_direction_summary import _touch_day_pcr_rows
+
+    repository = _FakePcrRepository(
+        [
+            {
+                "candle_close_timestamp": "2026-08-27 14:35:00+05:30",
+                "overall_pcr": 0.80,
+                "research_direction": "WAIT",
+            },
+            {
+                "candle_close_timestamp": "2026-08-27T14:30:00+05:30",
+                "overall_pcr": 0.75,
+                "research_direction": "WAIT",
+            },
+            {
+                "candle_close_timestamp": "2026-08-27T14:25:00+05:30",
+                "overall_pcr": None,
+                "research_direction": None,
+            },
+        ]
+    )
+    rows = _touch_day_pcr_rows(
+        repository, underlying="NIFTY 50", trading_day="2026-08-27"
+    )
+    assert repository.calls == [
+        {
+            "underlying": "NIFTY 50",
+            "trading_date": date(2026, 8, 27),
+            "limit": 100,
+        }
+    ]
+    assert [row["overall"] for row in rows] == [0.75, 0.80]
+    assert rows[0]["slope"] is None
+    assert rows[1]["slope"] == pytest.approx(0.05)
+    assert rows[1]["direction"] == "WAIT"
+    assert rows[1]["ts"].isoformat() == "2026-08-27T14:35:00+05:30"
+
+
+def test_touch_pcr_context_respects_event_bounds() -> None:
+    from datetime import datetime, timedelta
+
+    from red_bar_lab.ui.market_direction_summary import IST, _touch_pcr_context
+
+    first = datetime(2026, 8, 27, 14, 30, tzinfo=IST)
+    second = first + timedelta(minutes=5)
+    rows = [
+        {"ts": first, "overall": 0.75, "direction": "WAIT", "slope": None},
+        {"ts": second, "overall": 0.80, "direction": "WAIT", "slope": 0.05},
+    ]
+    assert _touch_pcr_context(second, rows)["overall"] == 0.80
+    assert _touch_pcr_context(first, rows)["overall"] == 0.75
+    assert (
+        _touch_pcr_context(second + timedelta(seconds=600), rows)["overall"]
+        == 0.80
+    )
+    assert _touch_pcr_context(second + timedelta(seconds=601), rows) is None
+    assert _touch_pcr_context(first - timedelta(seconds=1), rows) is None
+    assert _touch_pcr_context(second, []) is None
+    assert _touch_pcr_context(None, rows) is None
+
+
+def _create_snapshot_table(db_path: Path) -> None:
+    import sqlite3
+
+    connection = sqlite3.connect(db_path)
+    connection.execute(
+        """CREATE TABLE nifty_futures_diagnostic_snapshots (
+            observed_at TEXT NOT NULL,
+            payload_json TEXT NOT NULL
+        )"""
+    )
+    connection.commit()
+    connection.close()
+
+
+def _insert_snapshot(
+    db_path: Path, observed_at: str, payload: dict[str, object]
+) -> None:
+    import json
+    import sqlite3
+
+    connection = sqlite3.connect(db_path)
+    connection.execute(
+        "INSERT INTO nifty_futures_diagnostic_snapshots VALUES (?,?)",
+        (observed_at, json.dumps(payload)),
+    )
+    connection.commit()
+    connection.close()
+
+
+def test_read_futures_touch_candles_prefers_longest_candle_list(
+    tmp_path: Path,
+) -> None:
+    from red_bar_lab.ui.market_direction_summary import (
+        _read_futures_touch_candles,
+    )
+
+    path = tmp_path / "futures.db"
+    _create_snapshot_table(path)
+    _insert_snapshot(
+        path,
+        "2026-08-27T13:00:00+05:30",
+        {
+            "market": {
+                "completed_candles": [
+                    {"close": 100.0},
+                    {"close": 101.0},
+                    {"close": 102.0},
+                ],
+                "futures_vwap": 101.5,
+                "futures_vwap_acceptance": "BELOW_FALLING_VWAP",
+                "futures_close_vs_vwap_points": -3.2,
+            }
+        },
+    )
+    _insert_snapshot(
+        path,
+        "2026-08-27T14:00:00+05:30",
+        {
+            "market": {
+                "completed_candles": [{"close": 103.0}],
+                "futures_vwap": 999.0,
+            }
+        },
+    )
+    _insert_snapshot(
+        path,
+        "2026-08-28T10:00:00+05:30",
+        {"market": {"completed_candles": [{"close": 50.0}] * 9}},
+    )
+
+    candles, meta = _read_futures_touch_candles(path, "2026-08-27")
+    assert [candle["close"] for candle in candles] == [100.0, 101.0, 102.0]
+    assert meta["futures_vwap"] == 101.5
+    assert meta["futures_vwap_acceptance"] == "BELOW_FALLING_VWAP"
+    assert meta["futures_close_vs_vwap_points"] == pytest.approx(-3.2)
+
+    assert _read_futures_touch_candles(path, "2026-08-29") == ([], {})
+
+
+def test_futures_snapshot_days_handles_missing_table(tmp_path: Path) -> None:
+    from red_bar_lab.ui.market_direction_summary import (
+        _futures_snapshot_days,
+        _read_futures_touch_candles,
+    )
+
+    missing = tmp_path / "missing.db"
+    assert _futures_snapshot_days(missing) == []
+    assert _read_futures_touch_candles(missing, "2026-08-27") == ([], {})
+
+    path = tmp_path / "days.db"
+    _create_snapshot_table(path)
+    _insert_snapshot(path, "2026-08-27T13:00:00+05:30", {"market": {}})
+    _insert_snapshot(path, "2026-08-28T13:00:00+05:30", {"market": {}})
+    assert _futures_snapshot_days(path) == ["2026-08-28", "2026-08-27"]
+
+
+def test_summary_wires_vwap_touch_journal_panel() -> None:
+    import inspect
+
+    from red_bar_lab.ui import market_direction_summary as summary
+
+    source = inspect.getsource(summary)
+    assert "_render_vwap_touch_journal(database_path)" in source
+    assert '"vwap_touch_journal_trading_date"' in source
+    assert "Futures VWAP × PCR touch journal" in source

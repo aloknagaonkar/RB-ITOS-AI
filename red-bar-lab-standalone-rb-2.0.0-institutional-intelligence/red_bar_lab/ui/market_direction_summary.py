@@ -552,6 +552,7 @@ def _render_summary_cycle(database_path: str | Path, underlying: str) -> None:
         else:
             st.info(f"No contracts selected. {preference_reason}")
     _render_v2_pcr_section(database_path)
+    _render_vwap_touch_journal(database_path)
     st.caption(
         "Read-only summary of persisted research. Detailed evidence remains "
         "inside the two tabs below; this summary has no trading authority."
@@ -793,6 +794,298 @@ def _render_v2_pcr_section(database_path: str | Path) -> None:
             "Read-only. The V2 strategy does not block admission on PCR; "
             "this panel exists so the trader can see what PCR the strategy "
             "actually saw, not just what the research layer reports."
+        )
+
+
+_VWAP_TOUCH_THRESHOLD_POINTS = 10.0
+_VWAP_TOUCH_FORWARD_CANDLES = 15
+
+
+def _as_float(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    result = float(value)
+    return result if result == result and abs(result) != float("inf") else None
+
+
+def _parse_ist_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace(" ", "T"))
+    except ValueError:
+        return None
+    return parsed.astimezone(IST) if parsed.tzinfo is not None else parsed.replace(tzinfo=IST)
+
+
+def _futures_snapshot_days(database_path: str | Path) -> list[str]:
+    try:
+        with sqlite3.connect(f"file:{database_path}?mode=ro", uri=True) as conn:
+            rows = conn.execute(
+                """SELECT DISTINCT substr(observed_at, 1, 10) AS day
+                   FROM nifty_futures_diagnostic_snapshots
+                   ORDER BY day DESC"""
+            ).fetchall()
+    except Exception:
+        return []
+    return [str(row[0]) for row in rows if row[0]]
+
+
+def _read_futures_touch_candles(
+    database_path: str | Path,
+    trading_day: str,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Return the day's completed 1m candles plus session VWAP metadata.
+
+    Picks the snapshot with the longest candle list among the newest rows of
+    the day, so mid-day re-renders see the candles collected so far.
+    """
+    try:
+        with sqlite3.connect(f"file:{database_path}?mode=ro", uri=True) as conn:
+            rows = conn.execute(
+                """SELECT payload_json
+                   FROM nifty_futures_diagnostic_snapshots
+                   WHERE substr(observed_at, 1, 10) = ?
+                   ORDER BY julianday(observed_at) DESC, observed_at DESC
+                   LIMIT 6""",
+                (trading_day,),
+            ).fetchall()
+    except Exception:
+        return [], {}
+    best: list[dict[str, Any]] = []
+    meta: dict[str, Any] = {}
+    for (payload_json,) in rows:
+        try:
+            payload = json.loads(payload_json)
+        except (TypeError, ValueError):
+            continue
+        market = payload.get("market")
+        market = market if isinstance(market, Mapping) else {}
+        candles = market.get("completed_candles")
+        candles = candles if isinstance(candles, list) else []
+        if len(candles) > len(best):
+            best = [c for c in candles if isinstance(c, Mapping)]
+            meta = {
+                "futures_vwap": _as_float(market.get("futures_vwap")),
+                "futures_vwap_acceptance": market.get("futures_vwap_acceptance"),
+                "futures_close_vs_vwap_points": _as_float(
+                    market.get("futures_close_vs_vwap_points")
+                ),
+            }
+    return best, meta
+
+
+def _vwap_series(candles: list[Mapping[str, Any]]) -> list[float]:
+    series: list[float] = []
+    cum_tp_volume = cum_volume = 0.0
+    for candle in candles:
+        high = _as_float(candle.get("high"))
+        low = _as_float(candle.get("low"))
+        close = _as_float(candle.get("close"))
+        volume = _as_float(candle.get("volume")) or 0.0
+        if high is None or low is None or close is None:
+            series.append(series[-1] if series else 0.0)
+            continue
+        typical = (high + low + close) / 3.0
+        cum_tp_volume += typical * volume
+        cum_volume += volume
+        series.append(cum_tp_volume / cum_volume if cum_volume > 0 else typical)
+    return series
+
+
+def _vwap_touch_events(
+    candles: list[Mapping[str, Any]],
+    vwaps: list[float],
+    *,
+    threshold: float = _VWAP_TOUCH_THRESHOLD_POINTS,
+    forward: int = _VWAP_TOUCH_FORWARD_CANDLES,
+) -> list[dict[str, Any]]:
+    """Detect returns to session VWAP after price moved at least `threshold` away."""
+    events: list[dict[str, Any]] = []
+    for index in range(6, len(candles)):
+        previous_close = _as_float(candles[index - 1].get("close"))
+        if previous_close is None:
+            continue
+        away = previous_close - vwaps[index - 1]
+        if abs(away) < threshold:
+            continue
+        high = _as_float(candles[index].get("high"))
+        low = _as_float(candles[index].get("low"))
+        close = _as_float(candles[index].get("close"))
+        vwap = vwaps[index]
+        if high is None or low is None or close is None:
+            continue
+        if not low <= vwap <= high:
+            continue
+        approach = "DOWN" if away > 0 else "UP"
+        if close > vwap:
+            close_side = "ABOVE"
+        elif close < vwap:
+            close_side = "BELOW"
+        else:
+            close_side = "AT"
+        window = candles[index + 1:index + 1 + forward]
+        next_move = None
+        accepted = None
+        if window:
+            last_close = _as_float(window[-1].get("close"))
+            if last_close is not None:
+                next_move = last_close - close
+            if approach == "DOWN":
+                far = [c for c in window if (_as_float(c.get("close")) or vwap) < vwap]
+            else:
+                far = [c for c in window if (_as_float(c.get("close")) or vwap) > vwap]
+            accepted = len(far) >= max(1, int(0.6 * len(window)))
+        events.append({
+            "timestamp": str(candles[index].get("timestamp") or ""),
+            "approach": approach,
+            "vwap": vwap,
+            "close": close,
+            "close_side": close_side,
+            "accepted": accepted,
+            "next_move": next_move,
+        })
+    return events
+
+
+def _touch_day_pcr_rows(
+    repository: MarketTrendResearchRepository,
+    *,
+    underlying: str,
+    trading_day: str,
+) -> list[dict[str, Any]]:
+    try:
+        history = repository.five_minute_pcr_history(
+            underlying=underlying,
+            trading_date=date.fromisoformat(trading_day),
+            limit=100,
+        )
+    except Exception:
+        return []
+    rows: list[dict[str, Any]] = []
+    for row in reversed(history):
+        if not isinstance(row, Mapping):
+            continue
+        ts = _parse_ist_timestamp(row.get("candle_close_timestamp"))
+        overall = _as_float(row.get("overall_pcr"))
+        if ts is None or overall is None:
+            continue
+        rows.append({
+            "ts": ts,
+            "overall": overall,
+            "direction": str(row.get("research_direction") or ""),
+        })
+    for previous, current in zip(rows, rows[1:]):
+        current["slope"] = current["overall"] - previous["overall"]
+    if rows:
+        rows[0]["slope"] = None
+    return rows
+
+
+def _touch_pcr_context(
+    event_ts: datetime | None,
+    pcr_rows: list[dict[str, Any]],
+    *,
+    max_age_seconds: float = 600.0,
+) -> dict[str, Any] | None:
+    if event_ts is None or not pcr_rows:
+        return None
+    latest = None
+    for row in pcr_rows:
+        if row["ts"] <= event_ts:
+            latest = row
+        else:
+            break
+    if latest is None:
+        return None
+    if (event_ts - latest["ts"]).total_seconds() > max_age_seconds:
+        return None
+    return latest
+
+
+def _render_vwap_touch_journal(database_path: str | Path) -> None:
+    repository = MarketTrendResearchRepository(database_path)
+    with st.expander("Futures VWAP × PCR touch journal", expanded=False):
+        futures_days = _futures_snapshot_days(database_path)
+        pcr_days = set()
+        reader = getattr(repository, "five_minute_pcr_trading_days", None)
+        if callable(reader):
+            try:
+                pcr_days = set(reader("NIFTY 50"))
+            except Exception:
+                pcr_days = set()
+        days = [day for day in futures_days if day in pcr_days]
+        if not days:
+            st.info(
+                "Waiting for a trading day that has both futures 1-minute "
+                "candles and 5-minute PCR history."
+            )
+            return
+        selected = st.selectbox(
+            "Trading date",
+            days,
+            index=0,
+            key="vwap_touch_journal_trading_date",
+        )
+        candles, meta = _read_futures_touch_candles(database_path, selected)
+        if len(candles) < 20:
+            st.info("Not enough completed futures candles for this day yet.")
+            return
+        vwaps = _vwap_series(candles)
+        events = _vwap_touch_events(candles, vwaps)
+        pcr_rows = _touch_day_pcr_rows(
+            repository, underlying="NIFTY 50", trading_day=selected
+        )
+        rendered: list[dict[str, object]] = []
+        for event in events:
+            ts = _parse_ist_timestamp(event["timestamp"])
+            context = _touch_pcr_context(ts, pcr_rows)
+            slope = (context or {}).get("slope")
+            rendered.append({
+                "Time (IST)": ts.strftime("%H:%M") if ts else "Not available",
+                "Approach": f"{event['approach']} to VWAP",
+                "VWAP": f"{event['vwap']:.1f}",
+                "Candle close": f"{event['close']:.1f}",
+                "Closed": event["close_side"],
+                "Outcome": (
+                    "Not available" if event["accepted"] is None
+                    else "ACCEPTED" if event["accepted"] else "REJECTED"
+                ),
+                "Next 15m move": (
+                    "Not available" if event["next_move"] is None
+                    else f"{event['next_move']:+.1f}"
+                ),
+                "PCR at touch": _number((context or {}).get("overall")),
+                "PCR direction": str((context or {}).get("direction") or "Not available"),
+                "PCR slope": (
+                    "Not available" if slope is None else f"{slope:+.2f}"
+                ),
+            })
+        if rendered:
+            st.dataframe(
+                _arrow_safe_rows(rendered), width="stretch", hide_index=True
+            )
+        else:
+            st.info(
+                f"No return-to-VWAP touches beyond "
+                f"{_VWAP_TOUCH_THRESHOLD_POINTS:.0f} points were detected on "
+                "this day."
+            )
+        last_close = _as_float(candles[-1].get("close"))
+        session_vwap = vwaps[-1] if vwaps else None
+        if last_close is not None and session_vwap:
+            st.caption(
+                f"Session summary: final close {last_close:.1f} vs VWAP "
+                f"{session_vwap:.1f} ({last_close - session_vwap:+.1f} pts) · "
+                f"system acceptance = "
+                f"{meta.get('futures_vwap_acceptance') or 'UNAVAILABLE'}."
+            )
+        st.caption(
+            "A touch is a candle that re-enters session VWAP after price was "
+            f"{_VWAP_TOUCH_THRESHOLD_POINTS:.0f}+ points away; ACCEPTED means "
+            f"≥60% of the next {_VWAP_TOUCH_FORWARD_CANDLES} closes held "
+            "through VWAP. PCR columns join the nearest completed 5-minute "
+            "PCR candle at or before the touch. Read-only; observational only."
         )
 
 

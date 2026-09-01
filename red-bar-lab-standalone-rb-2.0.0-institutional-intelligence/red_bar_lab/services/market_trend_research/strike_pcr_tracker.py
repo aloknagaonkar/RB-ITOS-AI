@@ -50,6 +50,9 @@ class StrikePcrRecommendationObservation:
     entry_ask: float | None
     executable_bid: float | None
     last_price: float | None
+    entry_delta: float | None = None
+    entry_iv: float | None = None
+    entry_contract_vwap: float | None = None
     authority: str = "OBSERVATIONAL_ONLY"
 
 
@@ -111,6 +114,9 @@ def build_strike_pcr_recommendations(
             entry_ask=_number(quote.get("ask")),
             executable_bid=_number(quote.get("bid")),
             last_price=_number(quote.get("current_price")),
+            entry_delta=_number(quote.get("delta")),
+            entry_iv=_number(quote.get("iv")),
+            entry_contract_vwap=_number(quote.get("vwap")),
         ))
     return tuple(result)
 

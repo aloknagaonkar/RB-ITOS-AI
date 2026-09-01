@@ -787,6 +787,11 @@ def _recommendation_pcr_rows(
             "Side": row.get("side") or "Not available",
             "Entry strike PCR": _number(row.get("entry_strike_pcr")),
             "Overall PCR at entry": _number(entry_overall),
+            "Entry delta": _number(_float_or_none(row.get("entry_delta"))),
+            "Entry IV": _number(_float_or_none(row.get("entry_iv")), 2),
+            "Entry contract VWAP": _number(
+                _float_or_none(row.get("entry_contract_vwap")), 2
+            ),
             "5m PCR at entry": _number(
                 (candle or {}).get("overall_pcr")
             ),
