@@ -16,6 +16,14 @@ Futures VWAP × PCR touch journal:
 - _read_futures_touch_candles picks the longest candle list and degrades safely
 - _futures_snapshot_days returns [] when the table is missing
 - the summary cycle wires the touch journal panel
+
+PCR Best-Trade Evaluation:
+- _pcr_evaluation_band applies the trader's bands (≥1.25 / <0.7 / neutral)
+- _pcr_evaluation_alignment maps band × side to ALIGNED/COUNTER/NEUTRAL
+- _pcr_evaluation_trades normalizes recommendation rows into point outcomes
+- _pcr_evaluation_alignment_summary aggregates hit rate and point averages
+- _pcr_evaluation_vwap_events collects touch events across selected days
+- the summary cycle wires the evaluation panel with the All-days replay
 """
 
 from __future__ import annotations
@@ -653,3 +661,136 @@ def test_summary_wires_vwap_touch_journal_panel() -> None:
     assert "_render_vwap_touch_journal(database_path)" in source
     assert '"vwap_touch_journal_trading_date"' in source
     assert "Futures VWAP × PCR touch journal" in source
+
+
+def test_pcr_evaluation_band_boundaries() -> None:
+    from red_bar_lab.ui.market_direction_summary import _pcr_evaluation_band
+
+    assert _pcr_evaluation_band(1.50) == "BULLISH"
+    assert _pcr_evaluation_band(1.25) == "BULLISH"
+    assert _pcr_evaluation_band(1.24) == "NEUTRAL"
+    assert _pcr_evaluation_band(0.70) == "NEUTRAL"
+    assert _pcr_evaluation_band(0.69) == "BEARISH"
+    assert _pcr_evaluation_band(None) == "UNAVAILABLE"
+
+
+def test_pcr_evaluation_alignment_matrix() -> None:
+    from red_bar_lab.ui.market_direction_summary import (
+        _pcr_evaluation_alignment,
+    )
+
+    assert _pcr_evaluation_alignment("BULLISH", "CE") == "ALIGNED"
+    assert _pcr_evaluation_alignment("BULLISH", "PE") == "COUNTER"
+    assert _pcr_evaluation_alignment("BEARISH", "PE") == "ALIGNED"
+    assert _pcr_evaluation_alignment("BEARISH", "CE") == "COUNTER"
+    assert _pcr_evaluation_alignment("NEUTRAL", "CE") == "NEUTRAL"
+    assert _pcr_evaluation_alignment("NEUTRAL", "PE") == "NEUTRAL"
+    assert _pcr_evaluation_alignment("UNAVAILABLE", "CE") == "UNAVAILABLE"
+    assert _pcr_evaluation_alignment("BULLISH", "") == "UNAVAILABLE"
+    assert _pcr_evaluation_alignment("BEARISH", None) == "UNAVAILABLE"
+
+
+def test_pcr_evaluation_trades_normalizes_rows() -> None:
+    from red_bar_lab.ui.market_direction_summary import _pcr_evaluation_trades
+
+    trades = _pcr_evaluation_trades(
+        [
+            {
+                "opened_at": "2026-08-27T03:45:02+00:00",
+                "symbol": "NIFTY 24350 PE 01 SEP 26 PE",
+                "side": "PE",
+                "strike": 24350,
+                "entry_overall_pcr": 0.65,
+                "entry_price": 120.0,
+                "peak_price": 209.65,
+                "current_price": 209.65,
+                "status": "CLOSED",
+            },
+            {
+                "opened_at": "2026-08-27T04:10:00+00:00",
+                "symbol": None,
+                "side": "CE",
+                "strike": 25000,
+                "entry_overall_pcr": 1.30,
+                "entry_price": 100.0,
+                "peak_price": None,
+                "current_price": 90.0,
+                "status": "ACTIVE",
+            },
+            "garbage",
+        ]
+    )
+    assert len(trades) == 2
+    first, second = trades
+    assert first["contract"] == "NIFTY 24350 PE 01 SEP 26 PE"
+    assert first["band"] == "BEARISH"
+    assert first["alignment"] == "ALIGNED"
+    assert first["peak_points"] == pytest.approx(89.65)
+    assert first["last_points"] == pytest.approx(89.65)
+    assert first["status"] == "CLOSED"
+    assert second["contract"] == "25000 CE"
+    assert second["band"] == "BULLISH"
+    assert second["alignment"] == "ALIGNED"
+    assert second["peak_points"] is None
+    assert second["last_points"] == pytest.approx(-10.0)
+
+
+def test_pcr_evaluation_alignment_summary_aggregates() -> None:
+    from red_bar_lab.ui.market_direction_summary import (
+        _pcr_evaluation_alignment_summary,
+    )
+
+    def trade(alignment: str, peak: float | None, last: float | None) -> dict:
+        return {"alignment": alignment, "peak_points": peak, "last_points": last}
+
+    summary = _pcr_evaluation_alignment_summary(
+        [
+            trade("ALIGNED", 20.0, 10.0),
+            trade("ALIGNED", 30.0, 20.0),
+            trade("COUNTER", -1.0, -60.0),
+            trade("NEUTRAL", 15.0, -5.0),
+            trade("UNAVAILABLE", 99.0, 99.0),
+            trade("ALIGNED", None, None),
+        ]
+    )
+    assert [row["Group"] for row in summary] == ["ALIGNED", "COUNTER", "NEUTRAL"]
+    aligned, counter, neutral = summary
+    assert aligned["Trades"] == 3
+    assert aligned["Hit rate"] == "100%"
+    assert aligned["Avg peak pts"] == "+25.0"
+    assert aligned["Avg final pts"] == "+15.0"
+    assert aligned["Best peak pts"] == "+30.0"
+    assert counter["Trades"] == 1
+    assert counter["Hit rate"] == "0%"
+    assert counter["Avg final pts"] == "-60.0"
+    assert neutral["Trades"] == 1
+    assert neutral["Hit rate"] == "0%"
+
+
+def test_pcr_evaluation_vwap_events_collects_across_days(tmp_path: Path) -> None:
+    from red_bar_lab.ui.market_direction_summary import (
+        _pcr_evaluation_vwap_events,
+    )
+
+    path = tmp_path / "evaluation.db"
+    _create_snapshot_table(path)
+    _insert_snapshot(
+        path,
+        "2026-08-27T15:00:00+05:30",
+        {"market": {"completed_candles": _touch_candles(95.0)}},
+    )
+    events = _pcr_evaluation_vwap_events(path, ["2026-08-27", "2026-08-26"])
+    assert len(events) == 1
+    assert events[0]["accepted"] is True
+
+
+def test_summary_wires_pcr_best_trade_evaluation_panel() -> None:
+    import inspect
+
+    from red_bar_lab.ui import market_direction_summary as summary
+
+    source = inspect.getsource(summary)
+    assert "_render_pcr_best_trade_evaluation(database_path, underlying)" in source
+    assert '"pcr_best_trade_evaluation_trading_date"' in source
+    assert "PCR Best-Trade Evaluation" in source
+    assert "All days" in source

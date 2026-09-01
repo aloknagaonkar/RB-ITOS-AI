@@ -553,6 +553,7 @@ def _render_summary_cycle(database_path: str | Path, underlying: str) -> None:
             st.info(f"No contracts selected. {preference_reason}")
     _render_v2_pcr_section(database_path)
     _render_vwap_touch_journal(database_path)
+    _render_pcr_best_trade_evaluation(database_path, underlying)
     st.caption(
         "Read-only summary of persisted research. Detailed evidence remains "
         "inside the two tabs below; this summary has no trading authority."
@@ -1003,6 +1004,127 @@ def _touch_pcr_context(
     return latest
 
 
+_PCR_BAND_BULLISH_MINIMUM = 1.25
+_PCR_BAND_BEARISH_MAXIMUM = 0.7
+
+
+def _pcr_evaluation_band(pcr: float | None) -> str:
+    if pcr is None:
+        return "UNAVAILABLE"
+    if pcr >= _PCR_BAND_BULLISH_MINIMUM:
+        return "BULLISH"
+    if pcr < _PCR_BAND_BEARISH_MAXIMUM:
+        return "BEARISH"
+    return "NEUTRAL"
+
+
+def _pcr_evaluation_alignment(band: str, side: object) -> str:
+    side_text = str(side or "").upper()
+    if side_text not in {"CE", "PE"}:
+        return "UNAVAILABLE"
+    if band == "BULLISH":
+        return "ALIGNED" if side_text == "CE" else "COUNTER"
+    if band == "BEARISH":
+        return "ALIGNED" if side_text == "PE" else "COUNTER"
+    if band == "NEUTRAL":
+        return "NEUTRAL"
+    return "UNAVAILABLE"
+
+
+def _evaluation_points(entry: object, value: object) -> float | None:
+    entry_float = _as_float(entry)
+    value_float = _as_float(value)
+    if entry_float is None or value_float is None:
+        return None
+    return value_float - entry_float
+
+
+def _pcr_evaluation_trades(
+    rows: list[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Normalize recommendation rows into band-labelled trade outcomes."""
+    trades: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        pcr = _as_float(row.get("entry_overall_pcr"))
+        band = _pcr_evaluation_band(pcr)
+        side = str(row.get("side") or "").upper()
+        strike = _as_float(row.get("strike"))
+        trades.append({
+            "opened_at": str(row.get("opened_at") or ""),
+            "contract": (
+                str(row.get("symbol"))
+                if row.get("symbol")
+                else f"{strike or 0:.0f} {side}"
+            ),
+            "side": side or "UNAVAILABLE",
+            "entry_pcr": pcr,
+            "band": band,
+            "alignment": _pcr_evaluation_alignment(band, side),
+            "entry_price": _as_float(row.get("entry_price")),
+            "peak_points": _evaluation_points(
+                row.get("entry_price"), row.get("peak_price")
+            ),
+            "last_points": _evaluation_points(
+                row.get("entry_price"), row.get("current_price")
+            ),
+            "status": str(row.get("status") or "UNAVAILABLE"),
+        })
+    return trades
+
+
+def _pcr_evaluation_alignment_summary(
+    trades: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    groups: dict[str, list[dict[str, Any]]] = {
+        "ALIGNED": [],
+        "COUNTER": [],
+        "NEUTRAL": [],
+    }
+    for trade in trades:
+        if trade.get("alignment") in groups:
+            groups[trade["alignment"]].append(trade)
+    summary: list[dict[str, Any]] = []
+    for name in ("ALIGNED", "COUNTER", "NEUTRAL"):
+        members = groups[name]
+        finals = [t["last_points"] for t in members if t["last_points"] is not None]
+        peaks = [t["peak_points"] for t in members if t["peak_points"] is not None]
+        hits = sum(1 for value in finals if value > 0)
+        summary.append({
+            "Group": name,
+            "Trades": len(members),
+            "Hit rate": (
+                f"{hits / len(finals) * 100.0:.0f}%" if finals else "Not available"
+            ),
+            "Avg peak pts": (
+                f"{sum(peaks) / len(peaks):+.1f}" if peaks else "Not available"
+            ),
+            "Avg final pts": (
+                f"{sum(finals) / len(finals):+.1f}" if finals else "Not available"
+            ),
+            "Best peak pts": f"{max(peaks):+.1f}" if peaks else "Not available",
+        })
+    return summary
+
+
+def _pcr_evaluation_vwap_events(
+    database_path: str | Path,
+    days: list[str],
+) -> list[dict[str, Any]]:
+    """Collect VWAP touch events across every requested day with candle data."""
+    available = set(_futures_snapshot_days(database_path))
+    events: list[dict[str, Any]] = []
+    for day in days:
+        if day not in available:
+            continue
+        candles, _meta = _read_futures_touch_candles(database_path, day)
+        if len(candles) < 20:
+            continue
+        events.extend(_vwap_touch_events(candles, _vwap_series(candles)))
+    return events
+
+
 def _render_vwap_touch_journal(database_path: str | Path) -> None:
     repository = MarketTrendResearchRepository(database_path)
     with st.expander("Futures VWAP × PCR touch journal", expanded=False):
@@ -1086,6 +1208,143 @@ def _render_vwap_touch_journal(database_path: str | Path) -> None:
             f"≥60% of the next {_VWAP_TOUCH_FORWARD_CANDLES} closes held "
             "through VWAP. PCR columns join the nearest completed 5-minute "
             "PCR candle at or before the touch. Read-only; observational only."
+        )
+
+
+def _points_text(value: object) -> str:
+    number = _as_float(value)
+    return "Not available" if number is None else f"{number:+.1f}"
+
+
+def _render_pcr_best_trade_evaluation(
+    database_path: str | Path,
+    underlying: str,
+) -> None:
+    repository = MarketTrendResearchRepository(database_path)
+    with st.expander("PCR Best-Trade Evaluation", expanded=False):
+        reader = getattr(
+            repository, "strike_pcr_recommendation_trading_days", None
+        )
+        days: list[str] = []
+        if callable(reader):
+            try:
+                days = [str(day) for day in reader(underlying)]
+            except Exception:
+                days = []
+        if not days:
+            st.info(
+                "No persisted strike PCR recommendations yet. Trades appear "
+                "here once the research layer opens a recommendation with a "
+                "valid two-sided quote."
+            )
+            return
+        selected = st.selectbox(
+            "Trading date",
+            ["All days", *days],
+            index=0,
+            key="pcr_best_trade_evaluation_trading_date",
+        )
+        chosen_days = days if selected == "All days" else [selected]
+        trades: list[dict[str, Any]] = []
+        for day in chosen_days:
+            try:
+                chosen = date.fromisoformat(day)
+            except ValueError:
+                continue
+            trades.extend(
+                _pcr_evaluation_trades(
+                    repository.strike_pcr_recommendations(
+                        underlying=underlying, trading_date=chosen
+                    )
+                )
+            )
+        if not trades:
+            st.info("No recommendation rows exist for the selected day(s).")
+            return
+        st.markdown("#### Best trades per PCR band")
+        ranked = sorted(
+            trades,
+            key=lambda trade: (
+                trade["peak_points"]
+                if trade["peak_points"] is not None
+                else float("-inf")
+            ),
+            reverse=True,
+        )
+        table: list[dict[str, object]] = []
+        for trade in ranked:
+            ts = _parse_ist_timestamp(trade["opened_at"])
+            row: dict[str, object] = {}
+            if len(chosen_days) > 1:
+                row["Date"] = (
+                    ts.astimezone(IST).date().isoformat() if ts else "Not available"
+                )
+            row.update({
+                "Time (IST)": ts.strftime("%H:%M") if ts else "Not available",
+                "Contract": trade["contract"],
+                "Side": trade["side"],
+                "Entry PCR": _number(trade["entry_pcr"]),
+                "PCR band": trade["band"],
+                "Alignment": trade["alignment"],
+                "Entry": _number(trade["entry_price"], 2),
+                "Peak pts": _points_text(trade["peak_points"]),
+                "Final pts": _points_text(trade["last_points"]),
+                "State": trade["status"],
+            })
+            table.append(row)
+        st.dataframe(_arrow_safe_rows(table), width="stretch", hide_index=True)
+        st.markdown("#### Band alignment — the standout statistic")
+        st.dataframe(
+            _arrow_safe_rows(_pcr_evaluation_alignment_summary(trades)),
+            width="stretch",
+            hide_index=True,
+        )
+        st.markdown("#### VWAP behavior — what happened after candles reached VWAP")
+        events = _pcr_evaluation_vwap_events(database_path, chosen_days)
+        if events:
+            decided = [event for event in events if event["accepted"] is not None]
+            accepted = [event for event in decided if event["accepted"]]
+            moves = [
+                event["next_move"] for event in events
+                if event["next_move"] is not None
+            ]
+            st.dataframe(
+                _arrow_safe_rows([{
+                    "Touches": len(events),
+                    "Accepted": (
+                        f"{len(accepted)}/{len(decided)}"
+                        if decided else "Not available"
+                    ),
+                    "Acceptance rate": (
+                        f"{len(accepted) / len(decided) * 100.0:.0f}%"
+                        if decided else "Not available"
+                    ),
+                    "Avg next 15m move": (
+                        f"{sum(moves) / len(moves):+.1f} pts"
+                        if moves else "Not available"
+                    ),
+                    "Best next 15m move": (
+                        f"{max(moves):+.1f} pts" if moves else "Not available"
+                    ),
+                    "Worst next 15m move": (
+                        f"{min(moves):+.1f} pts" if moves else "Not available"
+                    ),
+                }]),
+                width="stretch",
+                hide_index=True,
+            )
+        else:
+            st.info(
+                "No futures VWAP touches (10+ points away) are persisted for "
+                "the selected day(s)."
+            )
+        st.caption(
+            "PCR bands: ≥1.25 BULLISH, <0.7 BEARISH, 0.7–1.25 NEUTRAL. "
+            "ALIGNED means the band agreed with the bought side (BULLISH+CE or "
+            "BEARISH+PE); COUNTER means the opposite. Peak/Final pts subtract "
+            "the frozen entry ask from the peak/latest bid. The touch-by-touch "
+            "detail lives in the Futures VWAP × PCR touch journal above. "
+            "Read-only; observational only — no trading authority."
         )
 
 
