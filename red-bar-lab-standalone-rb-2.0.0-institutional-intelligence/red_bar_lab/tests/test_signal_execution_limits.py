@@ -53,9 +53,28 @@ def _order(signal_id: str, token: int, timestamp: datetime) -> dict[str, object]
     }
 
 
-def test_signal_age_gate_fails_closed(tmp_path):
+def _database(tmp_path):
+    """Mirror the production setup for paper order inserts.
+
+    ``paper_execution_orders.account_id`` is a foreign key into
+    ``paper_execution_accounts`` and ``RedBarDatabase._connect`` enables
+    ``PRAGMA foreign_keys=ON``, so the account must exist first. In
+    production ``PaperEngine.__init__`` guarantees this by calling
+    ``ensure_paper_execution_account`` for the same PAPER-STD default.
+    """
     settings = RedBarSettings(artifacts_root=tmp_path / "red_bar")
     database = RedBarDatabase(settings.database_path)
+    database.initialize()
+    database.ensure_paper_execution_account(
+        account_id="PAPER-STD",
+        account_name="Standard Paper Account",
+        initial_capital=100000.0,
+    )
+    return settings, database
+
+
+def test_signal_age_gate_fails_closed(tmp_path):
+    settings, database = _database(tmp_path)
     confirmation = datetime.now(IST) - timedelta(minutes=10)
     database.replace_signal_attempts(
         "LIVE_MONITOR", "NIFTY", confirmation.date().isoformat(), [_attempt(confirmation)]
@@ -79,8 +98,7 @@ def test_signal_age_gate_fails_closed(tmp_path):
 
 
 def test_persistence_boundary_caps_entries_and_contracts(tmp_path):
-    settings = RedBarSettings(artifacts_root=tmp_path / "red_bar")
-    database = RedBarDatabase(settings.database_path)
+    settings, database = _database(tmp_path)
     confirmation = datetime.now(IST) - timedelta(seconds=30)
     database.replace_signal_attempts(
         "LIVE_MONITOR", "NIFTY", confirmation.date().isoformat(), [_attempt(confirmation)]
@@ -105,8 +123,7 @@ def test_persistence_boundary_caps_entries_and_contracts(tmp_path):
 
 
 def test_live_policy_can_apply_reentry_cooldown(tmp_path):
-    settings = RedBarSettings(artifacts_root=tmp_path / "red_bar")
-    database = RedBarDatabase(settings.database_path)
+    settings, database = _database(tmp_path)
     confirmation = datetime.now(IST) - timedelta(seconds=30)
     database.replace_signal_attempts(
         "LIVE_MONITOR", "NIFTY", confirmation.date().isoformat(), [_attempt(confirmation)]

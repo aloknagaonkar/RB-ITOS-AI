@@ -47,11 +47,21 @@ def _frames():
     )
 
 
+class _StubDatabase:
+    """Minimal stand-in for RedBarDatabase used by the monitored replay
+    service. The service's PCR reader only touches ``.path``; setting
+    ``path`` to ``None`` short-circuits the read so no database file is
+    created, which these tests assert on."""
+
+    path = None
+
+
 def _monitored(tmp_path):
     index_candles, futures_candles = _frames()
     return run_monitored_red_bar_v2_futures_replay(
         index_candles,
         futures_candles,
+        database=_StubDatabase(),
         instrument_key=UNDERLYING,
         vwap_instrument_key=FUTURES,
         artifacts_root=tmp_path,

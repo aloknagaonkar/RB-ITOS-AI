@@ -8,11 +8,21 @@ def _ui_source() -> str:
     Older regression tests intentionally inspect UI source strings. After
     RB-0.8.0 the UI is split across _shared.py + pages/, so synthesize the
     former page markers while preserving the original page order.
+
+    Presentation logic later moved again, out of the page modules and into
+    ``services/ui_business_logic.py`` (``_shared.py`` now thinly delegates to
+    it). That module owns the row/column vocabulary these tests assert on, so
+    it belongs in this synthesized view too.
     """
     ui_dir = Path(__file__).resolve().parents[1] / "ui"
     parts = [
         (ui_dir / "_shared.py").read_text(encoding="utf-8"),
         (ui_dir / "workspace.py").read_text(encoding="utf-8"),
+        (
+            Path(__file__).resolve().parents[1]
+            / "services"
+            / "ui_business_logic.py"
+        ).read_text(encoding="utf-8"),
     ]
     pages = [
         ("Operations Center", "operations_center.py"),
