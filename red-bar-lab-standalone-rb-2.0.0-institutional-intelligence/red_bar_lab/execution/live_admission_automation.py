@@ -92,6 +92,7 @@ class _AdmissionDatabaseProxy:
         allow_outside_market_hours: bool,
         allow_stale_signals: bool,
         enable_opportunity_extension: bool,
+        account_id: str | None = None,
     ) -> None:
         self._database = database
         self._now = now
@@ -99,16 +100,34 @@ class _AdmissionDatabaseProxy:
         self._allow_outside_market_hours = bool(allow_outside_market_hours)
         self._allow_stale_signals = bool(allow_stale_signals)
         self._enable_opportunity_extension = bool(enable_opportunity_extension)
+        self._account_id = str(account_id or "")
         self.decisions: dict[str, LiveSignalAdmissionDecision] = {}
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._database, name)
 
+    def _executed_signal_ids(self) -> frozenset[str]:
+        """Signals that already opened a paper order must not be re-blocked,
+        re-expired, or re-admitted by the per-cycle freshness guard."""
+        if not self._account_id:
+            return frozenset()
+        try:
+            orders = self._database.read_paper_execution_orders(self._account_id)
+        except Exception:
+            return frozenset()
+        return frozenset(
+            str(row.get("signal_id") or "")
+            for row in orders
+            if row.get("signal_id")
+        )
+
     def read_signal_attempts(self, instrument_key: str, trading_date: str):
         rows = self._database.read_signal_attempts(instrument_key, trading_date)
+        executed_signal_ids = self._executed_signal_ids()
         allowed = []
         for row in rows:
             signal_id = str(row.get("signal_id") or "")
+            already_executed = bool(signal_id) and signal_id in executed_signal_ids
             decision = evaluate_live_signal_admission(
                 confirmation_timestamp=row.get("confirmation_timestamp"),
                 now=self._now,
@@ -117,9 +136,15 @@ class _AdmissionDatabaseProxy:
                 allow_outside_market_hours=self._allow_outside_market_hours,
                 allow_stale_signals=self._allow_stale_signals,
                 enable_opportunity_extension=self._enable_opportunity_extension,
+                already_executed=already_executed,
             )
             if signal_id:
                 self.decisions[signal_id] = decision
+            if already_executed:
+                # The signal already produced its order: do not re-admit it
+                # into the execution pipeline and do not keep BLOCKing/expiring
+                # it with MAX_SIGNAL_AGE_EXCEEDED on every cycle.
+                continue
             if decision.allowed:
                 allowed.append(row)
                 continue
@@ -156,6 +181,20 @@ class LiveAdmissionRedBarPaperAutomationService(
             f"Unsupported live-admission underlying {self.underlying_name}"
         )
 
+    def _signal_has_order(self, signal_id: str) -> bool:
+        if not signal_id:
+            return False
+        try:
+            orders = self.database.read_paper_execution_orders(
+                self.engine.account_id
+            )
+        except Exception:
+            return False
+        return any(
+            str(row.get("signal_id") or "") == signal_id
+            for row in orders
+        )
+
     def _admission_decision(
         self,
         signal: dict[str, Any],
@@ -170,6 +209,9 @@ class LiveAdmissionRedBarPaperAutomationService(
             allow_outside_market_hours=self.allow_outside_market_hours,
             allow_stale_signals=self.allow_stale_signals,
             enable_opportunity_extension=self.enable_opportunity_extension,
+            already_executed=self._signal_has_order(
+                str(signal.get("signal_id") or "")
+            ),
         )
 
     def _enforce_queue_admission(
@@ -253,6 +295,7 @@ class LiveAdmissionRedBarPaperAutomationService(
             allow_outside_market_hours=self.allow_outside_market_hours,
             allow_stale_signals=self.allow_stale_signals,
             enable_opportunity_extension=self.enable_opportunity_extension,
+            account_id=getattr(self.engine, "account_id", None),
         )
         self.database = proxy
         self.engine.database = proxy

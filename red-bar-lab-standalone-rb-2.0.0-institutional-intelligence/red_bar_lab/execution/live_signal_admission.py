@@ -58,6 +58,7 @@ def evaluate_live_signal_admission(
     enable_opportunity_extension: bool = True,
     market_open_time: time = time(9, 15),
     market_close_time: time = time(15, 25),
+    already_executed: bool = False,
 ) -> LiveSignalAdmissionDecision:
     """Evaluate live admission without historical replay or performance evidence.
 
@@ -123,6 +124,23 @@ def evaluate_live_signal_admission(
             mode=resolved_mode,
             signal_age_seconds=age_seconds,
             market_hours_ok=False,
+            freshness_ok=False,
+            requires_opportunity_extension=False,
+        )
+
+    # A signal that already produced an order is still a valid live candidate
+    # for monitoring (entry position management already happened). Do not
+    # pathologicaly re-block/expire it on the 180-second age gate once the
+    # order was opened; the freshness limit governs new entries, not
+    # monitoring of an already-executed signal.
+    if already_executed:
+        return LiveSignalAdmissionDecision(
+            allowed=True,
+            decision="ADMIT",
+            reason="SIGNAL_ALREADY_EXECUTED",
+            mode=resolved_mode,
+            signal_age_seconds=age_seconds,
+            market_hours_ok=market_hours_ok,
             freshness_ok=False,
             requires_opportunity_extension=False,
         )

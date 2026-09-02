@@ -96,3 +96,38 @@ def test_outside_market_hours_requires_explicit_override():
     assert blocked.reason == "OUTSIDE_AUTOMATIC_ENTRY_HOURS"
     assert allowed.allowed is True
     assert allowed.reason == "LIVE_SIGNAL_FRESH"
+
+
+def test_already_executed_signal_skips_age_gate_without_readmission_semantics():
+    # Regression for the 2026-09-01 failure: a signal confirmed at 09:30 that
+    # already opened a paper order must not be BLOCKed by the 180s freshness
+    # gate on later cycles. The decision returns ADMIT so the caller can skip
+    # re-entry, but the freshness flag stays False (it is not a fresh entry).
+    now = datetime(2026, 9, 1, 9, 40, tzinfo=IST)
+    decision = evaluate_live_signal_admission(
+        confirmation_timestamp=now - timedelta(minutes=10),
+        now=now,
+        max_signal_age_seconds=180,
+        enable_opportunity_extension=False,
+        already_executed=True,
+    )
+    assert decision.allowed is True
+    assert decision.decision == "ADMIT"
+    assert decision.reason == "SIGNAL_ALREADY_EXECUTED"
+    assert decision.freshness_ok is False
+    assert decision.requires_opportunity_extension is False
+
+
+def test_already_executed_signal_still_respects_market_hours():
+    # The already-executed bypass only relaxes the age gate; it must not bypass
+    # the automatic-entry-hours boundary.
+    now = datetime(2026, 9, 1, 8, 30, tzinfo=IST)
+    blocked = evaluate_live_signal_admission(
+        confirmation_timestamp=now - timedelta(minutes=10),
+        now=now,
+        max_signal_age_seconds=180,
+        enable_opportunity_extension=False,
+        already_executed=True,
+    )
+    assert blocked.allowed is False
+    assert blocked.reason == "OUTSIDE_AUTOMATIC_ENTRY_HOURS"

@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 from red_bar_lab.execution.live_admission_automation import (
@@ -183,6 +184,113 @@ def test_queue_consumer_preserves_fresh_and_unresolved_approved_rows():
 
     blocked = service._enforce_queue_admission(
         trading_date="2026-08-21",
+        now=now,
+    )
+
+    assert blocked == 0
+    assert database.expired == []
+    assert all(row["status"] == "APPROVED" for row in database.queue)
+    assert database.diagnostics == []
+    assert database.events == []
+
+
+def test_executed_signal_is_skipped_not_reblocked_or_readmitted():
+    # Regression for the 2026-09-01 failure: a signal confirmed at 09:30 that
+    # already opened a paper order must not be BLOCKed with
+    # MAX_SIGNAL_AGE_EXCEEDED (and spam diagnostics) nor re-admitted into the
+    # execution pipeline once the 180-second age gate has passed.
+    now = datetime(2026, 9, 1, 9, 40, tzinfo=IST)
+    database = _Database(
+        [
+            {
+                "signal_id": "SIG-EXECUTED",
+                "confirmation_timestamp": now - timedelta(minutes=10),
+                "direction": "BULLISH",
+                "state": "ACTIVE",
+            },
+            {
+                "signal_id": "SIG-FRESH",
+                "confirmation_timestamp": now - timedelta(seconds=30),
+                "direction": "BEARISH",
+                "state": "CONFIRMED",
+            },
+        ],
+        queue=[
+            {
+                "queue_id": "Q-EXEC",
+                "signal_id": "SIG-EXECUTED",
+                "status": "EXECUTED",
+            },
+        ],
+    )
+    database.orders = [
+        {"signal_id": "SIG-EXECUTED", "status": "OPEN"},
+    ]
+
+    def _read_paper_execution_orders(account_id):
+        return list(database.orders)
+
+    database.read_paper_execution_orders = _read_paper_execution_orders
+
+    proxy = _AdmissionDatabaseProxy(
+        database,
+        now=now,
+        max_signal_age_seconds=180,
+        allow_outside_market_hours=False,
+        allow_stale_signals=False,
+        enable_opportunity_extension=False,
+        account_id="PAPER-STD",
+    )
+
+    rows = proxy.read_signal_attempts("NIFTY", "2026-09-01")
+
+    # The executed signal is dropped entirely: fresh BEARISH signal only.
+    assert [row["signal_id"] for row in rows] == ["SIG-FRESH"]
+    # No BLOCK diagnostic spam for the already-executed signal.
+    assert all(
+        row["signal_id"] != "SIG-EXECUTED"
+        for row in database.diagnostics
+    )
+    assert proxy.decisions["SIG-EXECUTED"].reason == (
+        "SIGNAL_ALREADY_EXECUTED"
+    )
+
+
+def test_queue_consumer_does_not_expire_already_executed_signal():
+    # An APPROVED row whose signal already produced an order must survive the
+    # age gate: it should not be expired with MAX_SIGNAL_AGE_EXCEEDED.
+    now = datetime(2026, 9, 1, 9, 40, tzinfo=IST)
+    database = _Database(
+        [
+            {
+                "signal_id": "SIG-EXECUTED",
+                "confirmation_timestamp": now - timedelta(minutes=10),
+                "direction": "BULLISH",
+                "state": "ACTIVE",
+            }
+        ],
+        queue=[
+            {
+                "queue_id": "Q-APPROVED",
+                "signal_id": "SIG-EXECUTED",
+                "status": "APPROVED",
+            },
+        ],
+    )
+    database.orders = [
+        {"signal_id": "SIG-EXECUTED", "status": "OPEN"},
+    ]
+
+    def _read_paper_execution_orders(account_id):
+        return list(database.orders)
+
+    database.read_paper_execution_orders = _read_paper_execution_orders
+
+    service = _service(database)
+    service.engine = SimpleNamespace(account_id="PAPER-STD")
+
+    blocked = service._enforce_queue_admission(
+        trading_date="2026-09-01",
         now=now,
     )
 
