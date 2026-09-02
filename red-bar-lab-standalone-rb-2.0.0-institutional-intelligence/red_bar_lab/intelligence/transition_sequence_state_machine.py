@@ -72,7 +72,7 @@ def _new_id(direction: str, timestamp: str) -> str:
 
 
 def _now_text(snapshot: Mapping[str, object]) -> str:
-    return str(snapshot.get("timestamp") or datetime.utcnow().isoformat())
+    return str(snapshot.get("timestamp") or datetime.now().astimezone().isoformat())
 
 
 def _bullish_stage(snapshot: Mapping[str, object]) -> tuple[str, int]:

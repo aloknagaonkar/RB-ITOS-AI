@@ -116,7 +116,7 @@ class FreshSetupSignalEngine:
         detected_at = str(
             transition.get("updated_at")
             or regime_snapshot.get("timestamp")
-            or datetime.utcnow().isoformat()
+            or datetime.now().astimezone().isoformat()
         )
         transition_id = str(transition.get("transition_id") or "")
         regime_snapshot_id = str(attribution.get("regime_snapshot_id") or "")
