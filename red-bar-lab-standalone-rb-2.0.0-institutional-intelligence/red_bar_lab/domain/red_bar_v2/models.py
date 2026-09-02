@@ -292,15 +292,16 @@ class RedBarV2Decision:
             if not self.futures_vwap.fresh:
                 raise DomainValidationError("ALLOWED decision requires fresh futures VWAP evidence")
             _require_entry_timeframe(self.entry_type, self.evaluation_timeframe)
-            rsi_vwap_aligned = (
-                self.rsi.bullish_aligned and not self.rsi.bearish_aligned
-                and self.futures_vwap.bullish_aligned and not self.futures_vwap.bearish_aligned
+            # RSI is informational under the futures gates (RedBar reference +
+            # VWAP decide direction), so RSI evidence must not invalidate an
+            # ALLOWED decision. It is still carried for observability.
+            vwap_aligned = (
+                self.futures_vwap.bullish_aligned and not self.futures_vwap.bearish_aligned
             ) if self.direction is Direction.BULLISH else (
-                self.rsi.bearish_aligned and not self.rsi.bullish_aligned
-                and self.futures_vwap.bearish_aligned and not self.futures_vwap.bullish_aligned
+                self.futures_vwap.bearish_aligned and not self.futures_vwap.bullish_aligned
             )
-            if not rsi_vwap_aligned:
-                raise DomainValidationError("ALLOWED decision RSI/VWAP evidence must align with direction")
+            if not vwap_aligned:
+                raise DomainValidationError("ALLOWED decision VWAP evidence must align with direction")
             midpoint_aligned = (
                 self.midpoint.bullish_aligned and not self.midpoint.bearish_aligned
             ) if self.direction is Direction.BULLISH else (

@@ -233,7 +233,7 @@ def test_reversal_state_and_strength_must_match_midpoint():
         )
 
 
-def test_reversal_still_requires_rsi_and_vwap_direction():
+def test_reversal_still_requires_vwap_direction_but_tolerates_rsi():
     value = _decision(
         direction=Direction.BULLISH,
         entry_type=EntryType.REVERSAL,
@@ -241,8 +241,24 @@ def test_reversal_still_requires_rsi_and_vwap_direction():
         current_state=RedBarV2State.PROVISIONAL_BULLISH,
         trend_strength=TrendStrength.PROVISIONAL,
     )
-    with pytest.raises(DomainValidationError):
-        replace(value, rsi=RsiEvidence(38.0, 60.0, 40.0, False, True))
+    # RSI is informational on the reversal path too: a bearish RSI reading is
+    # recorded without invalidating a provisional bullish reversal.
+    tolerated = replace(value, rsi=RsiEvidence(38.0, 60.0, 40.0, False, True))
+    assert tolerated.trend_strength is TrendStrength.PROVISIONAL
+    # Futures VWAP still decides direction and must agree with it.
+    with pytest.raises(DomainValidationError, match="VWAP evidence must align with direction"):
+        replace(
+            value,
+            futures_vwap=FuturesVwapEvidence(
+                "NSE_FO|NIFTY-FUT",
+                24785.0,
+                24800.0,
+                150000.0,
+                False,
+                True,
+                True,
+            ),
+        )
 
 
 def test_provisional_reversal_bundle_round_trip_and_identity_determinism():
