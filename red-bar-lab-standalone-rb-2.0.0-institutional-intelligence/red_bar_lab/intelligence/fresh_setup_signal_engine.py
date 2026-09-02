@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Iterable, Mapping
 import hashlib
 
@@ -116,7 +116,7 @@ class FreshSetupSignalEngine:
         detected_at = str(
             transition.get("updated_at")
             or regime_snapshot.get("timestamp")
-            or datetime.utcnow().isoformat()
+            or datetime.now(timezone.utc).isoformat()
         )
         transition_id = str(transition.get("transition_id") or "")
         regime_snapshot_id = str(attribution.get("regime_snapshot_id") or "")

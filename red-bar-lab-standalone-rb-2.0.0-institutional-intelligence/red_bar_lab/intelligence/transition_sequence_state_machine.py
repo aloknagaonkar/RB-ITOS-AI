@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Mapping
 from uuid import uuid4
 
@@ -72,7 +72,7 @@ def _new_id(direction: str, timestamp: str) -> str:
 
 
 def _now_text(snapshot: Mapping[str, object]) -> str:
-    return str(snapshot.get("timestamp") or datetime.utcnow().isoformat())
+    return str(snapshot.get("timestamp") or datetime.now(timezone.utc).isoformat())
 
 
 def _bullish_stage(snapshot: Mapping[str, object]) -> tuple[str, int]:

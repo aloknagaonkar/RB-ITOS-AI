@@ -200,9 +200,6 @@ def render_page(settings, layout, database, token, underlying_name, instrument_k
                                 "quality_explanation": item.get(
                                     "quality_explanation"
                                 ),
-                                "quality_symbol": item.get(
-                                    "quality_symbol"
-                                ),
                                 "quality_band": item.get(
                                     "quality_band"
                                 ),

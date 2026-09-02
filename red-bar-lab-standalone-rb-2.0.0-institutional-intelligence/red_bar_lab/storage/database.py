@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 import json
 import sqlite3
@@ -996,13 +996,34 @@ class RedBarDatabase:
         # RB-0.6.6 safety: preserve the database exactly as it existed before
         # the first startup of this patch. initialize() is called frequently,
         # so the backup is intentionally created only once.
+        #
+        # The backup must use the SQLite online-backup API rather than a raw
+        # file copy: the database runs in WAL mode, so recently committed
+        # transactions may still live in the -wal sidecar file. A bare
+        # shutil.copy2 of the main file silently drops that data from the
+        # backup. sqlite3.Connection.backup() checkpoints WAL content into
+        # the destination, producing a complete, consistent snapshot.
         path_exists = self.path.exists()
         if path_exists:
             backup = self.path.with_name(
                 f"{self.path.stem}.pre_RB_0_6_6{self.path.suffix}"
             )
             if not backup.exists():
-                shutil.copy2(self.path, backup)
+                try:
+                    source = sqlite3.connect(self.path, timeout=10.0)
+                    try:
+                        destination = sqlite3.connect(backup)
+                        try:
+                            source.backup(destination)
+                        finally:
+                            destination.close()
+                    finally:
+                        source.close()
+                except sqlite3.Error:
+                    # Fall back to a raw copy so a corrupt/locked source
+                    # still yields a best-effort artifact instead of no
+                    # backup at all.
+                    shutil.copy2(self.path, backup)
 
         # Normal hot-path calls return here after the first successful migration.
         # If the DB file was deleted, path_exists is False and initialization is
@@ -1334,7 +1355,7 @@ class RedBarDatabase:
         if not payload:
             return 0
 
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         with self._connect() as conn:
             for row in payload:
                 conn.execute(
@@ -1452,7 +1473,7 @@ class RedBarDatabase:
         if not payload:
             return 0
 
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         with self._connect() as conn:
             for row in payload:
                 conn.execute(

@@ -10,9 +10,14 @@ def _ui_source() -> str:
     former page markers while preserving the original page order.
     """
     ui_dir = Path(__file__).resolve().parents[1] / "ui"
+    services_dir = Path(__file__).resolve().parents[1] / "services"
     parts = [
         (ui_dir / "_shared.py").read_text(encoding="utf-8"),
         (ui_dir / "workspace.py").read_text(encoding="utf-8"),
+        # Dashboard row construction moved to the UI business-logic
+        # service layer; include it so legacy marker assertions still
+        # observe the same rendered contract.
+        (services_dir / "ui_business_logic.py").read_text(encoding="utf-8"),
     ]
     pages = [
         ("Operations Center", "operations_center.py"),

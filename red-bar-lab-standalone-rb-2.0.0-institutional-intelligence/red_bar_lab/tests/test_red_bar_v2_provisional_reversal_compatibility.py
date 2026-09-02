@@ -233,7 +233,7 @@ def test_reversal_state_and_strength_must_match_midpoint():
         )
 
 
-def test_reversal_still_requires_rsi_and_vwap_direction():
+def test_reversal_still_requires_vwap_direction_but_rsi_is_informational():
     value = _decision(
         direction=Direction.BULLISH,
         entry_type=EntryType.REVERSAL,
@@ -241,8 +241,22 @@ def test_reversal_still_requires_rsi_and_vwap_direction():
         current_state=RedBarV2State.PROVISIONAL_BULLISH,
         trend_strength=TrendStrength.PROVISIONAL,
     )
+    # RSI is informational-only after the admission-gate retirement:
+    # counter-direction RSI must not invalidate an ALLOWED reversal.
+    informational = replace(value, rsi=RsiEvidence(38.0, 60.0, 40.0, False, True))
+    assert informational.rsi.bearish_aligned is True
+    # Futures VWAP remains an operational gate: counter-direction VWAP
+    # evidence must still be rejected.
     with pytest.raises(DomainValidationError):
-        replace(value, rsi=RsiEvidence(38.0, 60.0, 40.0, False, True))
+        replace(
+            value,
+            futures_vwap=replace(
+                value.futures_vwap,
+                comparison_price=24785.0,
+                bullish_aligned=False,
+                bearish_aligned=True,
+            ),
+        )
 
 
 def test_provisional_reversal_bundle_round_trip_and_identity_determinism():

@@ -165,7 +165,9 @@ def test_matching_real_provisional_reversal_parity():
         (lambda event: _with_detail(event, trend_strength="CONFIRMED"), "trend_strength"),
         (lambda event: _with_detail(event, reference_timestamp=(REFERENCE_AT + timedelta(minutes=5)).isoformat()), "reference_timestamp"),
         (lambda event: _with_detail(event, context_timestamp=(EVALUATED_AT + timedelta(minutes=5)).isoformat()), "evaluation_timestamp"),
-        (lambda event: _with_condition(event, "rsi_aligned", False), "rsi_aligned"),
+        # NOTE: rsi_aligned is intentionally absent — RSI was retired from
+        # the admission gates and the legacy evaluator now reports it as an
+        # informational display flag only, so parity no longer compares it.
         (lambda event: _with_condition(event, "vwap_aligned", False), "vwap_aligned"),
         (lambda event: _with_condition(event, "midpoint_aligned", True), "midpoint_aligned"),
     ],

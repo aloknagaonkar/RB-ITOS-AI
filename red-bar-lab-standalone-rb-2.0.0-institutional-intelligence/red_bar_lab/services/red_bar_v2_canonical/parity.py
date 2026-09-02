@@ -57,20 +57,23 @@ def compare_legacy_to_canonical(
 
     conditions = event_conditions(legacy_event)
     direction = canonical_decision.direction
+    # `rsi_aligned` is intentionally excluded from parity: after RSI was
+    # retired from the admission gates the legacy evaluator hardcodes
+    # rsi_aligned=True on every ALLOWED event (informational display only),
+    # so it no longer carries comparable directional meaning. The
+    # operational admission evidence is futures VWAP + reference midpoint.
     if direction is Direction.BULLISH:
         expected = {
-            "rsi_aligned": canonical_decision.rsi.bullish_aligned if canonical_decision.rsi else None,
             "vwap_aligned": canonical_decision.futures_vwap.bullish_aligned if canonical_decision.futures_vwap else None,
             "midpoint_aligned": canonical_decision.midpoint.bullish_aligned if canonical_decision.midpoint else None,
         }
     elif direction is Direction.BEARISH:
         expected = {
-            "rsi_aligned": canonical_decision.rsi.bearish_aligned if canonical_decision.rsi else None,
             "vwap_aligned": canonical_decision.futures_vwap.bearish_aligned if canonical_decision.futures_vwap else None,
             "midpoint_aligned": canonical_decision.midpoint.bearish_aligned if canonical_decision.midpoint else None,
         }
     else:
-        expected = {"rsi_aligned": None, "vwap_aligned": None, "midpoint_aligned": None}
+        expected = {"vwap_aligned": None, "midpoint_aligned": None}
 
     for name, canonical_value in expected.items():
         legacy_value = conditions.get(name)
