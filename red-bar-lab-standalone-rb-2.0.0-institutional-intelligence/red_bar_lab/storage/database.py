@@ -4,7 +4,6 @@ from datetime import datetime
 import hashlib
 import json
 import sqlite3
-import shutil
 import threading
 from pathlib import Path
 from typing import Iterable
@@ -990,6 +989,37 @@ class RedBarDatabase:
         conn.execute("PRAGMA journal_size_limit=67108864")
         return conn
 
+    def _snapshot_to(self, destination: Path) -> None:
+        """Write a consistent, self-contained copy of the database.
+
+        ``_connect`` puts the database in WAL mode, which is a persistent
+        property of the file, so committed transactions can still live in the
+        ``-wal`` sidecar when this runs. A plain file copy of ``self.path``
+        alone would silently omit them -- on a freshly created database that
+        means the copy is missing the schema itself. SQLite's own backup API
+        reads through the WAL and produces one complete file.
+
+        The copy is staged under a temporary name and moved into place so an
+        interrupted snapshot cannot leave a truncated file behind: callers
+        create the backup only when it does not already exist, so a torn file
+        would otherwise be permanent.
+        """
+        staged = destination.with_name(f"{destination.name}.partial")
+        staged.unlink(missing_ok=True)
+        try:
+            source = sqlite3.connect(self.path, timeout=10.0)
+            try:
+                target = sqlite3.connect(staged, timeout=10.0)
+                try:
+                    source.backup(target)
+                finally:
+                    target.close()
+            finally:
+                source.close()
+            staged.replace(destination)
+        finally:
+            staged.unlink(missing_ok=True)
+
     def initialize(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1002,7 +1032,7 @@ class RedBarDatabase:
                 f"{self.path.stem}.pre_RB_0_6_6{self.path.suffix}"
             )
             if not backup.exists():
-                shutil.copy2(self.path, backup)
+                self._snapshot_to(backup)
 
         # Normal hot-path calls return here after the first successful migration.
         # If the DB file was deleted, path_exists is False and initialization is
