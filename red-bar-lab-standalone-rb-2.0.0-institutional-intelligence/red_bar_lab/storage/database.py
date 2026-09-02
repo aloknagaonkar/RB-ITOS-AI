@@ -1364,7 +1364,7 @@ class RedBarDatabase:
         if not payload:
             return 0
 
-        now = datetime.utcnow().isoformat()
+        now = datetime.now().astimezone().isoformat()
         with self._connect() as conn:
             for row in payload:
                 conn.execute(
@@ -1482,7 +1482,7 @@ class RedBarDatabase:
         if not payload:
             return 0
 
-        now = datetime.utcnow().isoformat()
+        now = datetime.now().astimezone().isoformat()
         with self._connect() as conn:
             for row in payload:
                 conn.execute(
