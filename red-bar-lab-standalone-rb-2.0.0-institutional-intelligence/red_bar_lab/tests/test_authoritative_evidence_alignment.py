@@ -65,11 +65,30 @@ def test_authoritative_bundle_never_moves_before_cycle_start():
 
 
 def test_market_readiness_uses_true_participation_scores():
-    from pathlib import Path
-    import red_bar_lab.ui.pages.market_readiness as page
+    """CE/PE pressure must be measured, not read off a precomputed bundle.
 
-    source = Path(page.__file__).read_text(encoding="utf-8")
-    assert 'participation.get("ce_score")' in source
-    assert 'participation.get("pe_score")' in source
-    assert '_display_score(bundle.get("bullish_score"))' not in source
-    assert '_display_score(bundle.get("bearish_score"))' not in source
+    The Trade Evidence page used to render its own participation panel and
+    this guard pinned it there. That inline renderer became unreachable when
+    9821ef0 retired the tab that called it, and it has since been deleted --
+    the panels the page installs (market_at_a_glance and
+    market_readiness_score_explanation) own the scores now. The invariant is
+    unchanged: pressure is derived from the participation summary's
+    ce_score/pe_score, never from a bundle's bullish_score/bearish_score.
+    """
+    from pathlib import Path
+
+    ui_dir = Path(__file__).resolve().parents[1] / "ui"
+    panels = (
+        ui_dir / "market_at_a_glance.py",
+        ui_dir / "market_readiness_score_explanation.py",
+    )
+
+    for panel in panels:
+        source = panel.read_text(encoding="utf-8")
+        assert 'summary.get("ce_score")' in source
+        assert 'summary.get("pe_score")' in source
+
+    for path in (*panels, ui_dir / "pages" / "market_readiness.py"):
+        source = path.read_text(encoding="utf-8")
+        assert 'bundle.get("bullish_score")' not in source
+        assert 'bundle.get("bearish_score")' not in source

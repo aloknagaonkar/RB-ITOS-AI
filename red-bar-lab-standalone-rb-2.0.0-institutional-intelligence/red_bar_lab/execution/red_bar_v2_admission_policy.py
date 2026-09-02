@@ -174,9 +174,10 @@ def evaluate_candidate_admission(
     if trade_state.pending_trade_count > 0 or not trade_state.previous_trade_closed:
         return result(False, AdmissionCode.PREVIOUS_TRADE_NOT_CLOSED, "The previous trade or pending order has not reached terminal CLOSED state.")
 
-    if not direction_decision.rsi_aligned:
-        return result(False, AdmissionCode.RSI_NOT_ALIGNED, "The required RSI threshold is not aligned with the candidate direction.")
-
+    # RSI is informational and must not gate admission. Both futures gates
+    # (initial and reversal) treat it that way, so ``rsi_aligned`` is recorded
+    # in ``conditions`` for the audit trail only. AdmissionCode.RSI_NOT_ALIGNED
+    # is retained because historical rows still carry it.
     if not direction_decision.vwap_aligned:
         return result(False, AdmissionCode.VWAP_NOT_ALIGNED, "The completed candle is not on the required side of VWAP.")
 

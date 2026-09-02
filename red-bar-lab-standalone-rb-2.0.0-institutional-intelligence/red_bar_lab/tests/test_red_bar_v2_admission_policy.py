@@ -142,10 +142,13 @@ def test_pending_or_unclosed_previous_trade_blocks_candidate():
     assert result.admission_code == AdmissionCode.PREVIOUS_TRADE_NOT_CLOSED
 
 
-def test_initial_alignment_requires_rsi_vwap_and_midpoint():
-    assert evaluate_candidate_admission(
-        _direction(rsi=False), _trade()
-    ).admission_code == AdmissionCode.RSI_NOT_ALIGNED
+def test_initial_alignment_requires_vwap_and_midpoint():
+    # RSI is informational: an unaligned RSI must not block admission.
+    allowed = evaluate_candidate_admission(_direction(rsi=False), _trade())
+    assert allowed.candidate_allowed is True
+    assert allowed.admission_code != AdmissionCode.RSI_NOT_ALIGNED
+    assert allowed.conditions["rsi_aligned"] is False
+
     assert evaluate_candidate_admission(
         _direction(vwap=False), _trade()
     ).admission_code == AdmissionCode.VWAP_NOT_ALIGNED

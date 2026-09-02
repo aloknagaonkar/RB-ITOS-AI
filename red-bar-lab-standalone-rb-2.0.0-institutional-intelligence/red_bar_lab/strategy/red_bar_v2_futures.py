@@ -150,7 +150,7 @@ def evaluate_initial_direction_futures(
         pcr_value=context.pcr_value,
         morning_pcr_value=context.morning_pcr_value,
         redbar_vwap_aligned=True,
-        rsi_aligned=True,
+        rsi_aligned=rsi_aligned,
         vwap_aligned=True,
         midpoint_aligned=True,
         context_fresh=True,
@@ -266,7 +266,10 @@ def evaluate_reversal_direction_futures(
             pcr_value=context.pcr_value,
             morning_pcr_value=context.morning_pcr_value,
             redbar_vwap_aligned=False,
-            rsi_aligned=False,
+            # RSI is informational, so report the real reading even on the
+            # rejection row. The gating flags below stay False because no
+            # opposite reversal was confirmed.
+            rsi_aligned=rsi_aligned,
             vwap_aligned=False,
             midpoint_aligned=False,
             context_fresh=True,

@@ -349,7 +349,9 @@ def test_read_only_observability_loads_scalar_evidence_without_writes(tmp_path: 
 
 def test_ui_section_is_read_only_and_execution_neutral():
     source = Path("red_bar_lab/ui/pages/red_bar_v2_validation.py").read_text(encoding="utf-8")
-    assert "8. Bundle reservation boundary" in source
+    # Match on the section title only. The leading ordinal moves whenever a
+    # section is inserted above it and is not part of the read-only contract.
+    assert "Reservation Boundary" in source
     assert "RESERVED does not mean ordered or executed" in source
     assert "No capital, order or position was created" in source
     assert "SQLiteCanonicalReservationRepository" not in source
