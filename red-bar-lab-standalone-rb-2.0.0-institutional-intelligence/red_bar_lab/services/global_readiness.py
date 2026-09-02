@@ -64,6 +64,44 @@ def _strength(value: object) -> str:
     return str(text or UNAVAILABLE).strip().upper()
 
 
+DATA_DIMENSION_LABELS = {
+    "underlying": "underlying candles",
+    "option_chain": "option chain",
+    "option_quote": "option quotes",
+    "pcr": "PCR",
+    "futures": "futures contract",
+}
+
+
+def _blocked_reason(
+    data_dimensions: list[str],
+    alignment: str | None,
+) -> str:
+    """Describe what is blocking, not what is merely one possible cause.
+
+    A V2-alignment block is not a market-data gap: the underlying, chain,
+    quote, PCR and futures feeds can all be READY while the Red Bar V2
+    source alignment is not. Naming the wrong subsystem sends the reader
+    hunting for a feed outage that does not exist.
+    """
+    data_text = ", ".join(
+        DATA_DIMENSION_LABELS.get(name, name) for name in data_dimensions
+    )
+    if data_dimensions and alignment:
+        return (
+            "Global readiness is blocked by market-data gaps "
+            f"({data_text}) and Red Bar V2 source alignment ({alignment})."
+        )
+    if data_dimensions:
+        return f"Global readiness is blocked by market-data gaps: {data_text}."
+    if alignment:
+        return (
+            "Global readiness is blocked by Red Bar V2 source alignment "
+            f"({alignment}); market-data feeds are not the cause."
+        )
+    return "Global readiness is blocked."
+
+
 def assess_global_readiness(
     *,
     underlying_candle: object,
@@ -98,6 +136,11 @@ def assess_global_readiness(
     blocking: list[str] = []
     advisory: list[str] = []
     execution: list[str] = []
+    # Dimensions that contributed a blocking reason, kept separate so the
+    # summary text can name what is actually wrong instead of asserting a
+    # market-data gap for every blocker.
+    blocking_data_dimensions: list[str] = []
+    blocking_alignment: str | None = None
 
     data_components = ("underlying", "option_chain", "option_quote", "pcr", "futures")
     advisory_data_statuses = {DEGRADED, "PARTIAL", "STALE", "MARKET_CLOSED", "INSUFFICIENT"}
@@ -112,6 +155,7 @@ def assess_global_readiness(
             advisory.append(f"{code}_{value}")
         elif value in blocking_data_statuses:
             blocking.append(f"{code}_{value}")
+            blocking_data_dimensions.append(name)
         else:
             advisory.append(f"{code}_{value}")
 
@@ -125,6 +169,7 @@ def assess_global_readiness(
     if alignment not in {READY, "ALIGNED", NOT_APPLICABLE}:
         if alignment in {BLOCKED, UNAVAILABLE, "MISSING", "STALE", "MISALIGNED"}:
             blocking.append(f"V2_ALIGNMENT_{alignment}")
+            blocking_alignment = alignment
         else:
             advisory.append(f"V2_ALIGNMENT_{alignment}")
 
@@ -144,7 +189,7 @@ def assess_global_readiness(
         reason = "Global readiness cannot be established from the available observations."
     elif blocking:
         status = BLOCKED
-        reason = "Global readiness has blocking market-data gaps."
+        reason = _blocked_reason(blocking_data_dimensions, blocking_alignment)
     elif advisory or execution:
         status = DEGRADED
         reason = "Global readiness is observationally usable with advisory or execution-policy conditions."

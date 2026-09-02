@@ -11,6 +11,7 @@ import pandas as pd
 
 from red_bar_lab.config import UNDERLYINGS
 from red_bar_lab.intelligence.red_bar_v2_futures_context import (
+    RedBarV2VwapSourceHealth,
     build_red_bar_v2_futures_snapshot,
 )
 from red_bar_lab.intelligence.red_bar_v2_session_health import (
@@ -45,6 +46,11 @@ class MonitoredRedBarV2FuturesReplayResult:
     # Observational PCR context (overall/morning/combined) seen by the
     # cycle. Never consumed by strategy gates.
     pcr_context: Mapping[str, Any] | None = None
+    # Health of the *last per-bar snapshot build* performed by the day
+    # replay. Diagnostic only: it describes one bar on one timeframe, not
+    # the session data sources, so it must never be reported as, or merged
+    # into, `health`.
+    evaluation_health: RedBarV2VwapSourceHealth | None = None
 
 
 def _latest_timestamp(frame: pd.DataFrame) -> pd.Timestamp | None:
@@ -199,15 +205,16 @@ def run_monitored_red_bar_v2_futures_replay(
         vwap_instrument_key=vwap_instrument_key,
     )
 
-    if evaluation_health.status != "READY" and session_health.status == "READY":
-        session_health = RedBarV2SessionVwapHealth(
-            **{
-                **session_health.__dict__,
-                "status": evaluation_health.status,
-                "reason": evaluation_health.reason,
-            }
-        )
-
+    # `evaluation_health` belongs to a single per-bar snapshot build (1M or
+    # 5M, whichever branch the replay touched last) and carries reasons the
+    # session check cannot produce -- RSI_HISTORY_INSUFFICIENT above all.
+    # Copying it onto the session health made a 5M warm-up window look like
+    # a session-wide data-source outage and blocked every downstream gate
+    # that reads `health.status`. The genuine data faults it used to surface
+    # (missing index/futures context, missing futures volume, 1M/5M
+    # timestamp gaps) are all detected independently by
+    # `build_session_vwap_source_health`, so nothing is lost by keeping the
+    # two apart.
     persisted = persist_red_bar_v2_vwap_health(
         session_health,
         artifacts_root=artifacts_root,
@@ -221,6 +228,7 @@ def run_monitored_red_bar_v2_futures_replay(
         health_path=persisted,
         event_episodes=summarize_replay_event_episodes(replay),
         pcr_context=pcr_context,
+        evaluation_health=evaluation_health,
     )
     ui_snapshot = build_red_bar_v2_ui_snapshot_from_replay(
         monitored,
@@ -255,6 +263,20 @@ def run_monitored_red_bar_v2_futures_replay(
                 last_evaluation_timestamp=(
                     latest_index_timestamp + pd.Timedelta(minutes=1)
                 ).isoformat(),
+            )
+        else:
+            # No live 1M context: the prices still on the snapshot came from
+            # the replay's last event and may be hours old. Report the live
+            # failure instead of leaving the session verdict in place, which
+            # would let the paper bridge publish against stale prices.
+            ui_snapshot = replace(
+                ui_snapshot,
+                alignment_status=live_health.status,
+                session_completeness=(
+                    ui_snapshot.session_completeness
+                    if live_health.status == "READY"
+                    else "UNAVAILABLE"
+                ),
             )
 
     persist_red_bar_v2_ui_snapshot(

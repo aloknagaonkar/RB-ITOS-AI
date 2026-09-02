@@ -17,6 +17,15 @@ from red_bar_lab.operations.red_bar_v2_ui_snapshot import (
 
 IST = ZoneInfo("Asia/Kolkata")
 
+# `recorded_at` is stamped when the snapshot artifact is written, which is
+# necessarily *after* the caller captured `now` for the cycle: the paper
+# monitor takes `cycle_started` at the top of the loop and only reaches the
+# freshness check once the day replay and its persistence have finished. A
+# `recorded_at` reading slightly ahead of `now` is therefore the normal,
+# healthy case, and it is tolerated up to this bound. Beyond it the artifact
+# clock is not trustworthy and freshness falls back to the admission stamp.
+MAXIMUM_RECORDED_FORWARD_SKEW_SECONDS = 120.0
+
 
 @dataclass(frozen=True)
 class RedBarV2PaperSignalPublishResult:
@@ -84,12 +93,25 @@ def validate_snapshot_for_paper(
     else:
         current = current.tz_convert("Asia/Kolkata")
     recorded = _timestamp(snapshot.recorded_at)
-    freshness_ref = (
-        recorded
-        if recorded and evaluation <= recorded <= current
-        else evaluation
+    # Freshness is a property of the artifact, so prefer its write time.
+    # The previous `evaluation <= recorded <= current` window could never
+    # hold (see MAXIMUM_RECORDED_FORWARD_SKEW_SECONDS), which silently
+    # pinned freshness to `admission_timestamp` -- a candle stamp that does
+    # not advance while a direction persists -- and blocked the bridge with
+    # V2_SNAPSHOT_STALE for the rest of the session about two minutes after
+    # the day's first admission.
+    recorded_is_usable = (
+        recorded is not None
+        and evaluation <= recorded
+        and (recorded - current).total_seconds()
+        <= MAXIMUM_RECORDED_FORWARD_SKEW_SECONDS
     )
-    age_seconds = float((current - freshness_ref).total_seconds())
+    if recorded is not None and recorded_is_usable:
+        freshness_ref = recorded
+        age_seconds = max(0.0, float((current - recorded).total_seconds()))
+    else:
+        freshness_ref = evaluation
+        age_seconds = float((current - evaluation).total_seconds())
     if freshness_ref.date() != current.date():
         return RedBarV2PaperSignalPublishResult("BLOCKED", "V2_SNAPSHOT_NOT_CURRENT_SESSION")
     if age_seconds < 0 or age_seconds > maximum_age_seconds:
