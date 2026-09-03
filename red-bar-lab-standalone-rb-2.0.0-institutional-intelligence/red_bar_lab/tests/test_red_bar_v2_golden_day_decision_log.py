@@ -10,6 +10,12 @@ each tail isolates exactly one way out of the same position.
 The assertions are properties, not mirrors: the log must be reproducible, its
 rows ordered, its R-multiples internally consistent, and its rejections
 machine-readable.
+
+The day now closes its own trade. The exit policy's verdict is fed back through
+the replay's ``exit_timestamps`` seam, so a ``TRADE_CLOSED`` event appears in the
+event stream and the position is not held to the close by default. That each tail
+still produces exactly one entry is a fact about these four price paths, not a
+cap: after the exit the fixture never offers another admissible condition.
 """
 
 import json
@@ -33,9 +39,16 @@ IST = timezone(timedelta(hours=5, minutes=30))
 UNDERLYING = "NSE_INDEX|Nifty 50"
 FUTURES = "NSE_FO|NIFTY-FUT"
 SESSION_MINUTES = 375
-# The red bar's midpoint on this fixture. A long is structurally broken by a
-# completed close below it, which is what the BREAK tail exercises.
+# The red bar's own low-to-high band, and the midpoint of it. A long is
+# structurally broken by a completed close below the midpoint, which is what the
+# BREAK tail exercises; the band is what decides whether the working reference
+# can be looked for at all.
+BAND_LOW = 94.6
+BAND_HIGH = 104.4
 MIDPOINT = 99.5
+# Where the BREAK tail settles once the collapse stalls: inside the band and
+# below the midpoint, so neither a re-entry nor a deputy is available.
+BREAK_PLATEAU = 97.0
 
 
 def _candles(closes: list[float], volumes: list[float]) -> pd.DataFrame:
@@ -158,7 +171,17 @@ def test_the_log_declares_its_schema_and_day(golden_log):
 
 
 def test_rebuilding_the_same_day_reproduces_the_log_byte_for_byte():
-    assert render_decision_log(_build()) == render_decision_log(_build())
+    once, twice = _build(), _build()
+
+    assert render_decision_log(once) == render_decision_log(twice)
+    # The exit loop is part of the day now, so reproducibility has to cover how
+    # it got there as well as what it produced. A stable log reached in a
+    # different number of passes would mean the loop is resolving entries in an
+    # order that happens to converge, which is not the same as being determinate.
+    assert once["summary"]["resolution_passes"] == twice["summary"]["resolution_passes"]
+    assert [row["timestamp"] for row in once["rows"] if row["kind"] == "EXIT"] == [
+        row["timestamp"] for row in twice["rows"] if row["kind"] == "EXIT"
+    ]
 
 
 def test_the_whole_log_survives_a_json_round_trip(golden_log):
@@ -269,6 +292,74 @@ def test_a_close_back_through_the_midpoint_closes_the_position(break_log):
     assert outcome["exit_price"] > plan["stop_price"]
     assert outcome["exit_timestamp"] < "2026-08-24T10:00"
     assert -1.0 < outcome["r_multiple"] < 0.0
+
+
+def test_the_policys_exit_reaches_the_replay_and_retires_the_trade_row(break_log):
+    """The edge that was missing: the exit moment feeding back into the replay.
+
+    The exit policy always ran, but after the replay had finished, so its verdict
+    was written to a log row and thrown away -- the trade row stayed ACTIVE and the
+    day was capped at one position. Now the resolved exit is fed back through the
+    same ``exit_timestamps`` parameter live uses, so the state machine reaches it
+    and emits ``TRADE_CLOSED``.
+
+    The event lands one minute after the outcome. The policy closes on the bar
+    stamped ``T``, which is not knowable until ``T`` completes, and the replay
+    judges that bar at ``T + 1min`` -- so anything else would be the log claiming
+    the strategy acted on a candle it had not seen.
+    """
+    exit_row = next(row for row in break_log["rows"] if row["kind"] == "EXIT")
+    closed = [
+        row
+        for row in break_log["rows"]
+        if row["kind"] == "EVENT" and row["event_type"] == "TRADE_CLOSED"
+    ]
+
+    assert len(closed) == 1
+    assert closed[0]["trade_id"] == exit_row["trade_id"]
+    assert pd.Timestamp(closed[0]["timestamp"]) == pd.Timestamp(
+        exit_row["timestamp"]
+    ) + timedelta(minutes=1)
+    # One pass to resolve the entry, one to find nothing left. A third would mean
+    # an entry was resolved twice.
+    assert break_log["summary"]["resolution_passes"] == 2
+
+
+def test_one_entry_a_tail_is_starvation_and_not_a_held_position(break_log, golden_log):
+    """Why the count stays at one, now that an open row is no longer the reason.
+
+    This is the honest version of the old ``len(entries) == 1``. That assertion
+    used to hold because the first trade never came off and everything behind it
+    was refused ``ACTIVE_TRADE_BLOCK``. It still holds -- but for a different
+    reason, and the difference is the whole point of the change: no candidate on
+    this fixture is ever refused for an open row. Every refusal is
+    ``NO_ADMISSIBLE_CONDITION``, meaning the rules were consulted and found
+    nothing.
+
+    On BREAK the starvation is exact. Price settles at 97.0, which is inside the
+    red bar's 94.6-104.4 band, so there is no space outside the zone for a working
+    reference to be looked for; and it is below the 99.5 midpoint, so no close
+    ever re-crosses it for a fresh initial entry. Both paths are correctly idle,
+    for five and a half hours, on price that offers neither.
+    """
+    for log in (break_log, golden_log):
+        codes = {
+            row["admission_code"]
+            for row in log["rows"]
+            if row["kind"] == "EVENT" and row["admission_code"] is not None
+        }
+        assert "ACTIVE_TRADE_BLOCK" not in codes
+        assert len([t for t in log["trades"] if t["plan"] is not None]) == 1
+
+    index_candles, _futures = _market_frames(tail="BREAK")
+    exit_row = next(row for row in break_log["rows"] if row["kind"] == "EXIT")
+    after = index_candles.loc[index_candles.index > pd.Timestamp(exit_row["timestamp"])]
+
+    assert not after.empty
+    assert (after["close"] == BREAK_PLATEAU).all()
+    assert BAND_LOW < BREAK_PLATEAU < MIDPOINT < BAND_HIGH
+    assert after["close"].max() < MIDPOINT, "no close re-crosses the midpoint"
+    assert after["high"].max() < BAND_HIGH, "price never leaves the zone either"
 
 
 def test_every_tail_shares_the_same_gate_and_plan(golden_log, drift_log, break_log):

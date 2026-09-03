@@ -206,6 +206,16 @@ def deterministic_research_exit_timestamps(
     *,
     local_times: Iterable[time] | None = None,
 ) -> tuple[pd.Timestamp, ...]:
+    """A fixed grid of exit times for one session: a clock, not a policy.
+
+    Every five minutes from 09:30 to 15:25 IST, unrelated to price. It exists so
+    a replay can be handed *some* exits and made to produce more than one trade
+    per day, and it is a legitimate fixture for that -- but a block count or an
+    R-multiple measured against it is a property of this grid, not of the
+    strategy. Research that wants the strategy's own exits should use
+    ``resolve_red_bar_v2_derived_exits``, which runs the stop, trail, structure
+    and session-flat rules and reports the moments they actually closed on.
+    """
     session_date = (
         trading_date if isinstance(trading_date, date) else date.fromisoformat(trading_date)
     )

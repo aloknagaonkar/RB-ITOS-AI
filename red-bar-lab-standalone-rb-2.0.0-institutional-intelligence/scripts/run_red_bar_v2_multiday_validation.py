@@ -13,6 +13,9 @@ import pandas as pd
 
 from red_bar_lab.config import RedBarSettings
 from red_bar_lab.services.historical_service import RedBarHistoricalService
+from red_bar_lab.services.red_bar_v2_derived_exits import (
+    resolve_red_bar_v2_derived_exits,
+)
 from red_bar_lab.services.red_bar_v2_multiday_validation import (
     RedBarV2ValidationDay,
     run_red_bar_v2_multiday_validation,
@@ -24,6 +27,10 @@ from red_bar_lab.storage.artifacts import ArtifactLayout
 
 
 INDEX_KEY = "NSE_INDEX|Nifty 50"
+
+DERIVED = "derived"
+CLOCKWORK = "clockwork"
+NONE = "none"
 
 
 def _optional_text(value: object) -> str | None:
@@ -51,6 +58,43 @@ def _required(row: pd.Series, name: str) -> str:
     return value
 
 
+def _fallback_exits(
+    source: str,
+    trading_date: date,
+    index_candles: pd.DataFrame,
+    futures_candles: pd.DataFrame,
+    *,
+    index_key: str,
+    futures_key: str,
+) -> tuple[tuple[pd.Timestamp, ...], str]:
+    """Exits for a day the manifest left blank, plus a line describing them.
+
+    ``derived`` runs the exit policy over the day and hands back the moments it
+    actually closed on, so the report measures the strategy. ``clockwork`` is the
+    old five-minute grid, kept only for reproducing earlier reports. ``none``
+    feeds nothing, which leaves the day holding its first position to the close --
+    every later candidate refused ACTIVE_TRADE_BLOCK -- and is almost never what
+    a reader wants.
+    """
+    if source == NONE:
+        return (), "none"
+    if source == CLOCKWORK:
+        exits = deterministic_research_exit_timestamps(trading_date)
+        return exits, f"clockwork({len(exits)})"
+
+    resolution = resolve_red_bar_v2_derived_exits(
+        index_candles,
+        futures_candles,
+        instrument_key=index_key,
+        vwap_instrument_key=futures_key,
+    )
+    held = sum(1 for trade in resolution.trades if trade.exit_timestamp is None)
+    detail = f"derived({len(resolution.exit_timestamps)}/{resolution.iterations}p"
+    if held:
+        detail += f",{held} open at end"
+    return resolution.exit_timestamps, detail + ")"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Run historical-only Red Bar V2 futures/VWAP validation across cached dates."
@@ -62,11 +106,17 @@ def main() -> None:
         help="Underlying index instrument key",
     )
     parser.add_argument(
-        "--research-exits",
-        action="store_true",
+        "--exits",
+        choices=(DERIVED, CLOCKWORK, NONE),
+        default=DERIVED,
         help=(
-            "Inject validation-only exits every five minutes from 09:30 through "
-            "15:25 IST when a manifest row has no explicit exit_timestamps."
+            "Where a day's exits come from when the manifest row has no explicit "
+            "exit_timestamps. 'derived' (default) runs the exit policy -- stop, "
+            "trail, structure, session flat -- and uses the moments it closed on. "
+            "'clockwork' injects the old validation-only grid every five minutes "
+            "from 09:30 to 15:25 IST, which is a clock and not a policy; it is "
+            "kept only for reproducing earlier reports. 'none' feeds no exits, so "
+            "each day holds its first position to the close."
         ),
     )
     args = parser.parse_args()
@@ -83,6 +133,8 @@ def main() -> None:
     historical = RedBarHistoricalService(provider=None, layout=layout)
 
     days: list[RedBarV2ValidationDay] = []
+    exit_sources: list[str] = []
+    print(f"Preparing {len(manifest)} day(s), fallback exits: {args.exits}")
     for _, row in manifest.iterrows():
         trading_date = date.fromisoformat(_required(row, "trading_date"))
         futures_key = _required(row, "futures_instrument_key")
@@ -102,8 +154,22 @@ def main() -> None:
             raise ValueError(f"Missing futures cache for {trading_date}: {futures_key}")
 
         exits = _parse_exit_timestamps(row.get("exit_timestamps"))
-        if args.research_exits and not exits:
-            exits = deterministic_research_exit_timestamps(trading_date)
+        if exits:
+            source = f"manifest({len(exits)})"
+        else:
+            # Deriving replays the day once per resolved entry, so a long manifest
+            # is minutes of work. Report each day as it lands rather than going
+            # quiet for the whole run.
+            exits, source = _fallback_exits(
+                args.exits,
+                trading_date,
+                index_candles,
+                futures_candles,
+                index_key=args.index_key,
+                futures_key=futures_key,
+            )
+        exit_sources.append(source)
+        print(f"  {trading_date} exits={source}", flush=True)
 
         days.append(
             RedBarV2ValidationDay(
@@ -132,7 +198,7 @@ def main() -> None:
     print("Complete sessions:", result.complete_days)
     print("Partial sessions:", result.partial_days)
     print("Regimes:", ", ".join(result.regimes))
-    print("Research exits:", "ENABLED" if args.research_exits else "DISABLED")
+    print("Fallback exits:", args.exits)
     print("Admitted candidates:", result.total_admitted_candidates)
     print("Blocked candidates:", result.total_blocked_candidates)
     print("Closed trades:", result.total_closed_trades)
@@ -142,7 +208,7 @@ def main() -> None:
 
     print("\nPer-day results")
     print("---------------")
-    for item in result.days:
+    for item, source in zip(result.days, exit_sources):
         print(
             item.trading_date,
             item.regime,
@@ -155,6 +221,10 @@ def main() -> None:
             f"admitted={item.admitted_candidates}",
             f"reversals={item.admitted_reversals}",
             f"closed={item.closed_trades}",
+            # Which clock closed this day's trades. A block count or an R-multiple
+            # read without it says nothing: the same day measured against the
+            # clockwork grid and against the policy are different experiments.
+            f"exits={source}",
         )
 
 
