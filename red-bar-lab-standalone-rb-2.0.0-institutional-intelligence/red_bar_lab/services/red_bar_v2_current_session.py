@@ -5,6 +5,7 @@ from red_bar_lab.observability import record_strategy_subcheck
 from dataclasses import dataclass, replace
 from datetime import datetime
 import os
+from pathlib import Path
 from time import perf_counter
 from typing import Any, Mapping
 
@@ -14,6 +15,11 @@ from red_bar_lab.operations.red_bar_v2_ui_snapshot import (
     persist_red_bar_v2_ui_snapshot,
     read_red_bar_v2_ui_snapshot,
 )
+from red_bar_lab.services.red_bar_v2_derived_exit_store import (
+    persist_red_bar_v2_derived_exit,
+    read_red_bar_v2_derived_exits,
+)
+from red_bar_lab.services.red_bar_v2_derived_exits import resolve_next_derived_exit
 from red_bar_lab.services.red_bar_v2_futures_replay_service import (
     run_monitored_red_bar_v2_futures_replay,
 )
@@ -59,6 +65,7 @@ class CurrentSessionV2Result:
     latest_admission: Mapping[str, Any] | None = None
     rule_state: Mapping[str, Any] | None = None
     pcr_context: Mapping[str, Any] | None = None
+    derived_exits: tuple[Mapping[str, Any], ...] = ()
 
 
 def _active_v2_order_exists(rows: list[Mapping[str, Any]]) -> bool:
@@ -79,6 +86,24 @@ def _latest_allowed_admission(events: Any) -> Any | None:
     return None
 
 
+def _derived_exit_store_path(database: Any, settings: Any) -> Path | None:
+    """Where settled exits are recorded, or None if this caller has no file.
+
+    Live passes a ``RedBarDatabase`` and a settings object that each know the
+    path; a caller that knows neither has nowhere to carry a resolved exit to,
+    and an exit that cannot outlive its own cycle is one the next cycle derives
+    again and discards again. So the mechanism is skipped rather than run for
+    nothing.
+    """
+    for candidate in (
+        getattr(database, "path", None),
+        getattr(settings, "database_path", None),
+    ):
+        if candidate:
+            return Path(candidate)
+    return None
+
+
 def _ordered_candles(frame: pd.DataFrame) -> tuple[pd.DataFrame, str | None]:
     work = frame.copy()
     timestamp_column = next(
@@ -95,6 +120,129 @@ def _ordered_candles(frame: pd.DataFrame) -> tuple[pd.DataFrame, str | None]:
         )
         work = work.dropna(subset=[timestamp_column]).sort_values(timestamp_column)
     return work.reset_index(drop=True), timestamp_column
+
+
+def _session_trading_date(frame: pd.DataFrame) -> str | None:
+    """The session's own date, taken from its earliest candle.
+
+    This is the replay's own rule -- it reads ``frame.index[0]`` off the sorted,
+    normalised frame -- reached without paying for a second normalisation. What
+    the key actually has to be is stable across a day's cycles, and the first
+    candle of an intraday pull is.
+    """
+    work, timestamp_column = _ordered_candles(frame)
+    if timestamp_column is not None and not work.empty:
+        stamp = pd.Timestamp(work[timestamp_column].iloc[0])
+    elif isinstance(frame.index, pd.DatetimeIndex) and len(frame.index):
+        stamp = pd.Timestamp(frame.index.min())
+    else:
+        return None
+    return None if pd.isna(stamp) else stamp.date().isoformat()
+
+
+def _cached_derived_exits(
+    database: Any,
+    settings: Any,
+    *,
+    trading_date: str | None,
+    instrument_key: str,
+) -> list[Mapping[str, Any]]:
+    """Exits this session settled on an earlier cycle, earliest entry first."""
+    path = _derived_exit_store_path(database, settings)
+    if path is None or not trading_date:
+        return []
+    return list(
+        read_red_bar_v2_derived_exits(
+            path,
+            trading_date=trading_date,
+            instrument_key=instrument_key,
+        )
+    )
+
+
+def _settle_next_derived_exit(
+    replay: Any,
+    index_candles: pd.DataFrame,
+    futures_candles: pd.DataFrame,
+    *,
+    database: Any,
+    settings: Any,
+    trading_date: str | None,
+    instrument_key: str,
+    cached: list[Mapping[str, Any]],
+) -> tuple[tuple[Mapping[str, Any], ...], dict[str, Any]]:
+    """Settle at most one more of this session's entries and record the verdict.
+
+    The cycles are the iteration. ``resolve_next_derived_exit`` is handed the
+    replay this cycle already ran -- it performs none of its own -- and prices the
+    earliest admitted entry that has no exit yet. The result is deliberately not
+    fed into this cycle's replay: that replay is finished, and re-running it would
+    write its artifacts a second time. The next cycle reads the row and hands it
+    to its own replay, so a session converges one entry per cycle and the steady
+    state costs a query that finds nothing new.
+
+    Only a settled exit is written. ``fed_at is None`` means the position is still
+    open on the candles available, which on a live session reads "not closed yet",
+    not "held to the close" -- recording it would freeze a verdict the next candle
+    can still overturn.
+
+    The returned audit carries the same keys whatever happened, so two cycles of
+    ``strategy_subcheck`` rows stay diffable.
+    """
+    audit: dict[str, Any] = {
+        "carried": len(cached),
+        "settled": 0,
+        "entry_timestamp": None,
+        "fed_at": None,
+        "exit_reason": None,
+        "rejection": None,
+        "r_multiple": None,
+        "status": None,
+    }
+    path = _derived_exit_store_path(database, settings)
+    if path is None or not trading_date:
+        audit["status"] = "NO_STORE"
+        return tuple(cached), audit
+
+    resolved = resolve_next_derived_exit(
+        replay,
+        index_candles,
+        futures_candles,
+        resolved_entries=[
+            row["entry_timestamp"] for row in cached if row.get("entry_timestamp")
+        ],
+    )
+    if resolved is None:
+        # Every admitted entry already has its exit. This is the steady state.
+        audit["status"] = "SETTLED"
+        return tuple(cached), audit
+
+    audit["entry_timestamp"] = resolved.entry_timestamp.isoformat()
+    audit["rejection"] = resolved.rejection
+    if resolved.fed_at is None:
+        audit["status"] = resolved.status or "OPEN"
+        return tuple(cached), audit
+
+    persist_red_bar_v2_derived_exit(
+        path,
+        trading_date=trading_date,
+        instrument_key=instrument_key,
+        exit=resolved,
+    )
+    outcome = resolved.outcome
+    audit.update(
+        settled=1,
+        fed_at=resolved.fed_at.isoformat(),
+        exit_reason=getattr(getattr(outcome, "exit_reason", None), "value", None),
+        r_multiple=getattr(outcome, "r_multiple", None),
+        status="RECORDED",
+    )
+    rows = read_red_bar_v2_derived_exits(
+        path,
+        trading_date=trading_date,
+        instrument_key=instrument_key,
+    )
+    return tuple(rows), audit
 
 
 def _latest_completed_1m_candle(
@@ -431,6 +579,23 @@ def evaluate_current_session_red_bar_v2(
         if value:
             exit_timestamps.append(value)
 
+    # The second source of exits, and on an observational session the only one.
+    # A cycle replays the whole day from scratch, so an exit the policy settled on
+    # an earlier pass has to be handed back or it never happened: the day's first
+    # trade is open again, every later candidate is refused ACTIVE_TRADE_BLOCK, and
+    # the displayed direction stays frozen on whatever was admitted first.
+    trading_date = _session_trading_date(index_candles)
+    cached_derived_exits = _cached_derived_exits(
+        database,
+        settings,
+        trading_date=trading_date,
+        instrument_key=instrument_key,
+    )
+    for row in cached_derived_exits:
+        value = row.get("fed_at")
+        if value:
+            exit_timestamps.append(value)
+
     monitored = run_monitored_red_bar_v2_futures_replay(
         index_candles,
         futures_candles,
@@ -441,6 +606,22 @@ def evaluate_current_session_red_bar_v2(
         futures_symbol=(futures_symbol or (previous.futures_symbol if previous else None)),
         futures_expiry=(futures_expiry or (previous.futures_expiry if previous else None)),
         exit_timestamps=exit_timestamps,
+    )
+    derived_exits, derived_exit_audit = _settle_next_derived_exit(
+        monitored.replay,
+        index_candles,
+        futures_candles,
+        database=database,
+        settings=settings,
+        trading_date=trading_date,
+        instrument_key=instrument_key,
+        cached=cached_derived_exits,
+    )
+    record_strategy_subcheck(
+        database,
+        run_id=run_id,
+        step_name="derived_exit_resolution",
+        artifacts=derived_exit_audit,
     )
     # Surface the strategy's candidate scan as a sub-step. The
     # ``monitored`` object holds the events the strategy engine
@@ -734,4 +915,5 @@ def evaluate_current_session_red_bar_v2(
         latest_admission=admission_summary,
         rule_state=getattr(monitored.replay, "rule_state", None),
         pcr_context=getattr(monitored, "pcr_context", None),
+        derived_exits=derived_exits,
     )

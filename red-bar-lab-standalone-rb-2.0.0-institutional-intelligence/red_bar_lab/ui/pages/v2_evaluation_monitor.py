@@ -214,6 +214,81 @@ def _rule_six_sentence(row: dict[str, Any], state: dict[str, Any]) -> str | None
     )
 
 
+def _admission_staleness(row: dict[str, Any], state: dict[str, Any]) -> str | None:
+    """Why the displayed direction may no longer be a live verdict.
+
+    The direction shown is the last admission the replay *allowed*, and the
+    replay clears its direction in exactly one place: when a trade row closes.
+    A refused candidate never touches it. So once a row is open and no exit
+    reaches the replay, the field is frozen on whatever was admitted first and
+    is redisplayed unchanged for the rest of the session, however far price has
+    moved since.
+
+    Two independent things make it stale, and both are worth saying because they
+    fail separately. The *reason* for the direction can be gone -- price back
+    through the midpoint that justified it -- and the strategy can additionally
+    be unable to act on that, every later candidate refused for the open row.
+    The first is what makes the display wrong; the second is why it stays wrong.
+    """
+    direction = str(
+        row.get("admission_direction") or state.get("current_direction") or ""
+    ).upper()
+    if direction not in {"BULLISH", "BEARISH"}:
+        return None
+
+    admission = state.get("admission") or {}
+    reversal = state.get("reversal") or {}
+    reference = state.get("reference") or {}
+
+    contradictions: list[str] = []
+    midpoint = reference.get("midpoint")
+    if midpoint is None:
+        midpoint = row.get("reference_midpoint")
+    close = row.get("index_close")
+    if midpoint is not None and close is not None:
+        try:
+            close = float(close)
+            midpoint = float(midpoint)
+        except (TypeError, ValueError):
+            close = midpoint = None
+    if close is not None and midpoint is not None:
+        wrong_side = close > midpoint if direction == "BEARISH" else close < midpoint
+        if wrong_side:
+            side = "above" if direction == "BEARISH" else "below"
+            contradictions.append(
+                f"index close {_fmt_number(close)} is now {side} the "
+                f"{_fmt_number(midpoint)} midpoint that justified {direction} "
+                f"({close - midpoint:+,.2f} pts)"
+            )
+
+    pending_direction = str(reversal.get("last_direction") or "").upper()
+    if reversal.get("pending") and pending_direction and pending_direction != direction:
+        contradictions.append(
+            f"a {pending_direction} reversal has been pending since "
+            f"{_fmt_time(reversal.get('last_detected_at'))}"
+        )
+
+    # An open row on its own is not staleness -- that is a position behaving
+    # normally. It only earns a mention as the reason a contradiction cannot be
+    # acted on, so it never fires this note by itself.
+    if not contradictions:
+        return None
+
+    if str(admission.get("last_block_code") or "").upper() == "ACTIVE_TRADE_BLOCK":
+        contradictions.append(
+            f"every candidate since has been refused ACTIVE_TRADE_BLOCK "
+            f"({int(admission.get('blocked') or 0)} blocked, last at "
+            f"{_fmt_time(admission.get('last_block_at'))}) because the trade row "
+            f"is still {admission.get('trade_state') or '—'}"
+        )
+
+    return (
+        f"{direction} is the last ADMITTED direction, from "
+        f"{_fmt_time(admission.get('last_admitted_at'))} — it is not a live "
+        "verdict: " + "; ".join(contradictions) + "."
+    )
+
+
 def _render_latest_cycle(row: dict[str, Any]) -> None:
     observed = _parse(row.get("observed_at"))
     cols = st.columns(5)
@@ -335,11 +410,23 @@ def _render_strategy_values(row: dict[str, Any]) -> None:
 
 def _render_candidates(row: dict[str, Any]) -> None:
     st.markdown("#### 3 · Candidates & admission")
+    state = row.get("rule_state") or {}
+    stale = _admission_staleness(row, state)
     cols = st.columns(4)
     cols[0].metric("Candidate events scanned", row.get("candidate_events_scanned") or 0)
     cols[1].metric("Admitted candidates", row.get("admitted_candidates") or 0)
-    cols[2].metric("Direction", row.get("admission_direction") or "—")
+    cols[2].metric(
+        "Direction",
+        row.get("admission_direction") or "—",
+        delta="STALE" if stale else None,
+        delta_color="off",
+    )
     cols[3].metric("Admission code", row.get("admission_code") or "—")
+    if stale:
+        # Displayed without this note, the metric above reads as the strategy's
+        # current opinion. It is a historical one, and a reader acting on it
+        # would be acting on a decision whose premise has already failed.
+        st.warning(stale)
     if row.get("admission_reason"):
         st.caption(f"Admission reason: {row['admission_reason']}")
     elif not row.get("admitted_candidates"):
@@ -368,9 +455,13 @@ def _render_rule_state(row: dict[str, Any]) -> None:
 
     direction = state.get("current_direction")
     side = "CE" if direction == "BULLISH" else "PE" if direction == "BEARISH" else "—"
+    stale = _admission_staleness(row, state)
     cols = st.columns(5)
     cols[0].metric(
-        "Current direction", f"{direction} ({side})" if direction else "FLAT"
+        "Current direction",
+        f"{direction} ({side})" if direction else "FLAT",
+        delta="STALE — see §3" if stale else None,
+        delta_color="off",
     )
     cols[1].metric(
         "Rule 0 · Red bar",

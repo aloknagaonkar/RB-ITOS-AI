@@ -46,7 +46,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, time
-from typing import Any
+from typing import Any, Iterable
 
 import pandas as pd
 
@@ -515,6 +515,68 @@ def resolve_red_bar_v2_derived_exits(
     )
 
 
+def resolve_next_derived_exit(
+    replay: RedBarV2ReplayResult,
+    index_candles: pd.DataFrame,
+    futures_candles: pd.DataFrame,
+    *,
+    resolved_entries: Iterable[Any] = (),
+    reward_multiple: float | None = None,
+    minimum_risk_points: float | None = None,
+    maximum_risk_points: float | None = None,
+    trail_activation_r: float | None = None,
+    session_flat_time: time | None = None,
+    trigger_resolution: TriggerResolution = TriggerResolution.LATEST,
+) -> DerivedExit | None:
+    """One pass of the loop, against a replay the caller already ran.
+
+    ``resolve_red_bar_v2_derived_exits`` runs the replay itself, once per entry,
+    because it has to settle a finished day in a single call. A live cycle is not
+    in that position: it replays the session every pass anyway, and the cycles
+    *are* the iteration. So this resolves the earliest admitted entry that has no
+    exit yet and costs no replay of its own -- the caller feeds the result back on
+    its next pass, and one entry is settled per cycle until none are left.
+
+    Returns ``None`` when every admitted entry is already resolved, which is the
+    steady state and therefore the cheap one. A returned exit with ``fed_at is
+    None`` is a position still open on the data available; on a live session that
+    means "not closed yet", not "held to the close", so it must not be recorded as
+    settled -- ask again next cycle.
+    """
+    frame = replay_frame(index_candles)
+    futures_frame = replay_frame(futures_candles)
+    already = {
+        _align_to_index(frame.index, _to_datetime(stamp)) for stamp in resolved_entries
+    }
+    pending = next(
+        (
+            (stamp, event)
+            for stamp, event in _admitted_entries(replay, frame.index)
+            if stamp not in already
+        ),
+        None,
+    )
+    if pending is None:
+        return None
+
+    stamp, event = pending
+    return _resolve_entry(
+        event,
+        stamp,
+        frame=frame,
+        futures_frame=futures_frame,
+        index_bars_1m=one_minute_bars(frame),
+        trigger_resolution=trigger_resolution,
+        policy=_policy_overrides(
+            reward_multiple,
+            minimum_risk_points,
+            maximum_risk_points,
+            trail_activation_r,
+            session_flat_time,
+        ),
+    )
+
+
 __all__ = [
     "DerivedExit",
     "DerivedExitResolution",
@@ -525,5 +587,6 @@ __all__ = [
     "OPEN_AT_END",
     "one_minute_bars",
     "replay_frame",
+    "resolve_next_derived_exit",
     "resolve_red_bar_v2_derived_exits",
 ]

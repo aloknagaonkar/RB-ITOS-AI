@@ -35,11 +35,17 @@ import pandas as pd
 import pytest
 
 from red_bar_lab.domain.red_bar_v2 import ExitReason, RiskPlanRejection
+from red_bar_lab.services import red_bar_v2_derived_exits as derived_exits_module
+from red_bar_lab.services.red_bar_v2_derived_exit_store import (
+    persist_red_bar_v2_derived_exit,
+    read_red_bar_v2_derived_exits,
+)
 from red_bar_lab.services.red_bar_v2_derived_exits import (
     MISSING_EVIDENCE,
     OPEN_AT_END,
     DerivedExitsDidNotConverge,
     _assert_prefix_unchanged,
+    resolve_next_derived_exit,
     resolve_red_bar_v2_derived_exits,
 )
 from red_bar_lab.services.red_bar_v2_futures_historical_replay import (
@@ -446,3 +452,166 @@ def test_the_resolution_indexes_its_trades_by_entry(resolution):
     assert list(by_entry) == [trade.entry_timestamp for trade in resolution.trades]
     assert all(stamp == trade.entry_timestamp for stamp, trade in by_entry.items())
     assert MISSING_EVIDENCE not in {trade.rejection for trade in resolution.trades}
+
+
+# --- One step at a time: the shape a live session resolves exits in -----------
+#
+# The research loop settles a finished day in one call and pays a replay per
+# entry. A live cycle is already replaying the whole session every pass, so the
+# cycles *are* the iteration -- it needs the body of the loop, not the loop.
+
+
+def _cycles(frames, *, limit: int = 12):
+    """Drive ``resolve_next_derived_exit`` the way the live cycles drive it.
+
+    One replay per cycle, at most one exit resolved per cycle, the result carried
+    forward to the next. Nothing here re-runs a replay to consume what it just
+    resolved -- that is what makes it a cycle rather than a loop.
+    """
+    fed: list = []
+    resolved: list = []
+    for count in range(1, limit + 1):
+        replay = _replay(*frames, exit_timestamps=tuple(fed))
+        settled = resolve_next_derived_exit(
+            replay,
+            *frames,
+            resolved_entries=[trade.entry_timestamp for trade in resolved],
+        )
+        if settled is None:
+            return tuple(fed), tuple(resolved), count
+        resolved.append(settled)
+        if settled.fed_at is None:
+            return tuple(fed), tuple(resolved), count
+        fed.append(settled.fed_at)
+    raise AssertionError(f"{limit} cycles did not settle the day")
+
+
+def test_settling_one_exit_a_cycle_reaches_the_same_day_as_the_loop(
+    frames, resolution
+):
+    """The equivalence that lets live and research share one exit brain.
+
+    If the cycle-at-a-time path could reach a different day, every R-multiple
+    measured in research would be describing a session production never has. Same
+    candles, same exits, same trades, and the same number of passes to get there.
+    """
+    fed, settled, cycles = _cycles(frames)
+
+    assert fed == resolution.exit_timestamps
+    assert cycles == resolution.iterations
+    assert [trade.entry_timestamp for trade in settled] == [
+        trade.entry_timestamp for trade in resolution.trades
+    ]
+    assert [trade.outcome.exit_reason for trade in settled] == [
+        trade.outcome.exit_reason for trade in resolution.trades
+    ]
+    assert [trade.outcome.r_multiple for trade in settled] == [
+        trade.outcome.r_multiple for trade in resolution.trades
+    ]
+
+
+def test_the_single_step_resolver_runs_no_replay_of_its_own(frames, monkeypatch):
+    """Why the live path can afford this: it costs the cycle nothing extra.
+
+    A cycle already replays the full session, so the one thing this must not do is
+    replay it again -- at roughly four seconds a pass, every ~32 seconds, a second
+    replay is not a detail. Patching the replay to raise proves it by construction
+    rather than by reading the code, and the loop raising under the same patch
+    proves the patch was in force.
+    """
+    def boom(*_args, **_kwargs):
+        raise AssertionError("the single-step resolver must not replay the day")
+
+    replay = _replay(*frames)
+    monkeypatch.setattr(
+        derived_exits_module, "replay_red_bar_v2_day_with_futures_vwap", boom
+    )
+
+    settled = resolve_next_derived_exit(replay, *frames)
+
+    assert settled is not None
+    assert settled.outcome.exit_reason is ExitReason.STRUCTURE
+    with pytest.raises(AssertionError, match="must not replay"):
+        _resolve(*frames)
+
+
+def test_a_settled_day_asks_and_is_told_there_is_nothing_left(frames, resolution):
+    """The steady state, which is where a live session spends its afternoon.
+
+    Once every admitted entry has an exit there is nothing to resolve, and saying
+    so has to be the cheap answer -- it is the answer on all but a handful of the
+    day's cycles.
+    """
+    derived = _replay(*frames, exit_timestamps=resolution.exit_timestamps)
+
+    assert (
+        resolve_next_derived_exit(
+            derived,
+            *frames,
+            resolved_entries=[t.entry_timestamp for t in resolution.trades],
+        )
+        is None
+    )
+    # Told about no exits at all, it resolves the first entry again rather than
+    # reporting nothing: what is already settled is the caller's memory, not the
+    # replay's.
+    assert resolve_next_derived_exit(derived, *frames) is not None
+
+
+def test_already_resolved_entries_are_recognised_from_their_stored_text(
+    frames, resolution
+):
+    """The memory arrives back as strings, because it arrives back out of SQLite.
+
+    A live cycle reads its resolved entries from a table, so they are ISO text by
+    the time they are handed back. Text that failed to match the replay's own
+    stamps would make every cycle re-resolve the first entry and never reach the
+    second.
+    """
+    derived = _replay(*frames, exit_timestamps=resolution.exit_timestamps)
+    stored = [trade.entry_timestamp.isoformat() for trade in resolution.trades[:1]]
+
+    settled = resolve_next_derived_exit(derived, *frames, resolved_entries=stored)
+
+    assert settled is not None
+    assert settled.entry_timestamp == resolution.trades[1].entry_timestamp
+    assert (
+        resolve_next_derived_exit(
+            derived,
+            *frames,
+            resolved_entries=[t.entry_timestamp.isoformat() for t in resolution.trades],
+        )
+        is None
+    )
+
+
+def test_a_resolved_exit_survives_the_store_and_still_closes_the_row(
+    frames, resolution, tmp_path
+):
+    """End to end for the live carry: resolve, write, read, feed, closed.
+
+    Persisting is what makes the cycles an iteration, and the round trip is not
+    free of consequence -- a ``fed_at`` becomes text and comes back as text. If the
+    replay could not consume the stored form, the row would reopen every pass and
+    the direction would stay frozen exactly as it does today.
+    """
+    path = tmp_path / "derived.db"
+    first = resolution.trades[0]
+    persist_red_bar_v2_derived_exit(
+        path,
+        trading_date="2026-08-24",
+        instrument_key=UNDERLYING,
+        exit=first,
+    )
+    (row,) = read_red_bar_v2_derived_exits(
+        path, trading_date="2026-08-24", instrument_key=UNDERLYING
+    )
+
+    assert row["fed_at"] == first.fed_at.isoformat()
+    fed_from_store = _replay(*frames, exit_timestamps=(row["fed_at"],))
+
+    assert fed_from_store.closed_trades == 1
+    assert len(_admitted(fed_from_store)) == 2, (
+        "the stored exit retired the first row, so the deputy half of the day is "
+        "reachable from the table alone"
+    )

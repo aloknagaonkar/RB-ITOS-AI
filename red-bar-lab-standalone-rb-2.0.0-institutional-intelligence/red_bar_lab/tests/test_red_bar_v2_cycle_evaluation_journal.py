@@ -611,6 +611,128 @@ def test_rule_sentence_builders():
     assert page._rule_two_sentence(row, {"reversal": {}}) is None
 
 
+def _frozen_bearish_cycle() -> tuple[dict, dict]:
+    """The 2026-09-03 live row, reduced to the fields the note reads.
+
+    Reference established 09:20 on a red bar with midpoint 23973.15; the 09:25
+    close was below it with futures below VWAP, so BEARISH/PE was admitted and
+    was correct at 09:25. By 10:21 the index was 18 points *above* that midpoint
+    and a BULLISH reversal had been pending since 09:30 -- and the display still
+    read BEARISH, because the 09:25 trade row never closed.
+    """
+    row = {
+        "admission_direction": "BEARISH",
+        "admission_code": "INITIAL_BEARISH_ALIGNMENT",
+        "index_close": 23991.15,
+        "reference_midpoint": 23973.15,
+    }
+    state = {
+        "current_direction": "BEARISH",
+        "reference": {"midpoint": 23973.15},
+        "initial": {"status": "ESTABLISHED", "direction": "BEARISH"},
+        "reversal": {
+            "pending": True,
+            "monitoring": True,
+            "detections": 1,
+            "last_direction": "BULLISH",
+            "last_detected_at": "2026-09-03T09:30:00+05:30",
+        },
+        "admission": {
+            "admitted": 1,
+            "blocked": 49,
+            "active_trade_count": 1,
+            "trade_state": "ACTIVE",
+            "last_admitted_at": "2026-09-03T09:25:00+05:30",
+            "last_block_code": "ACTIVE_TRADE_BLOCK",
+            "last_block_at": "2026-09-03T10:18:00+05:30",
+        },
+    }
+    return row, state
+
+
+def test_a_frozen_direction_is_reported_as_stale():
+    from red_bar_lab.ui.pages import v2_evaluation_monitor as page
+
+    row, state = _frozen_bearish_cycle()
+    note = page._admission_staleness(row, state)
+
+    assert note is not None
+    # It must say the direction is historical, and when it was taken -- a reader
+    # cannot judge a verdict without its age.
+    assert "last ADMITTED direction" in note
+    assert "09:25:00" in note
+    assert "not a live verdict" in note
+    # Both failures, separately: the premise is gone, and it cannot be acted on.
+    assert "above the 23,973.15 midpoint" in note
+    assert "+18.00 pts" in note
+    assert "BULLISH reversal has been pending since 09:30:00" in note
+    assert "ACTIVE_TRADE_BLOCK" in note
+    assert "49 blocked" in note
+
+
+def test_an_aligned_direction_is_not_called_stale():
+    """An open position with price on its own side is a trade, not a defect."""
+    from red_bar_lab.ui.pages import v2_evaluation_monitor as page
+
+    row, state = _frozen_bearish_cycle()
+    row["index_close"] = 23950.0
+    state["reversal"] = {"pending": False, "monitoring": True}
+
+    # ACTIVE_TRADE_BLOCK is still the last block code and the row is still ACTIVE
+    # -- neither is staleness on its own, or every healthy position would warn.
+    assert page._admission_staleness(row, state) is None
+
+
+def test_price_through_the_midpoint_is_stale_even_with_no_reversal_detected():
+    """The premise failing does not depend on the reversal machinery firing.
+
+    Reversal detection is a 5-minute rule with its own gates; if it has not
+    fired, or fired and was discarded, the displayed direction is still being
+    contradicted by the index close and must still say so.
+    """
+    from red_bar_lab.ui.pages import v2_evaluation_monitor as page
+
+    row, state = _frozen_bearish_cycle()
+    state["reversal"] = {"pending": False, "monitoring": True, "detections": 0}
+    note = page._admission_staleness(row, state)
+
+    assert note is not None
+    assert "above the 23,973.15 midpoint" in note
+    assert "reversal has been pending" not in note
+
+
+def test_staleness_reads_either_direction_field_and_survives_thin_rows():
+    from red_bar_lab.ui.pages import v2_evaluation_monitor as page
+
+    row, state = _frozen_bearish_cycle()
+    # Journal rows written before ``admission_direction`` existed fall back to
+    # the rule state, so section 4's metric can be marked as well as section 3's.
+    del row["admission_direction"]
+    assert page._admission_staleness(row, state) is not None
+
+    # No direction, no midpoint, no state: a note is impossible, not an error.
+    assert page._admission_staleness({}, {}) is None
+    assert page._admission_staleness({"admission_direction": "—"}, {}) is None
+    assert page._admission_staleness({"admission_direction": "BEARISH"}, {}) is None
+    assert (
+        page._admission_staleness(
+            {"admission_direction": "BEARISH", "index_close": "n/a"},
+            {"reference": {"midpoint": "n/a"}},
+        )
+        is None
+    )
+
+
+def test_the_monitor_page_surfaces_staleness_where_direction_is_shown():
+    from red_bar_lab.ui.pages import v2_evaluation_monitor
+
+    source = inspect.getsource(v2_evaluation_monitor)
+    # Both places that print a direction must consult the same helper, or one of
+    # them goes on presenting a frozen verdict as current.
+    assert source.count("_admission_staleness(row, state)") == 2
+    assert "STALE" in source
+
+
 def test_monitor_page_renders_pcr_and_sentences():
     from red_bar_lab.ui.pages import v2_evaluation_monitor
 
