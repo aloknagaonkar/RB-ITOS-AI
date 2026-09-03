@@ -34,6 +34,12 @@ from red_bar_lab.execution.candidate_lifecycle import CandidateLifecycleManager,
 from red_bar_lab.execution.institutional_execution import InstitutionalExecutionCommittee
 from red_bar_lab.execution.opportunity_engine import OpportunityIntelligenceEngine
 from red_bar_lab.execution.performance_selection import PerformanceTradeSelectionEngine
+from red_bar_lab.operations.red_bar_v2_ui_snapshot import (
+    read_red_bar_v2_ui_snapshot,
+)
+from red_bar_lab.services.red_bar_v2_structural_exit import (
+    evaluate_red_bar_v2_structural_exit,
+)
 
 
 def _record_pipeline_subcheck(
@@ -1847,9 +1853,13 @@ class RedBarPaperAutomationService:
     def monitor_and_exit(self) -> tuple[int, list[str]]:
         """Manage open CE/PE paper positions.
 
-        Operational hierarchy:
-        earned effective premium stop -> EOD -> observational trade health.
-        Red Bar V2 initial RSI recovery exit is owned by paper_monitor.
+        Operational hierarchy: earned effective premium stop -> EOD -> the Red
+        Bar V2 structural exit -> observational trade health.
+
+        The structural exit is a V2 row's initial-loss authority: a completed
+        1-minute close against the governing level, read off the V2 UI snapshot
+        the evaluation cycle refreshes. It is the reason the configured premium
+        stop is excluded for those rows, so it must be asked on every pass.
 
         Breakeven and trailing protection update the paper stop. OI/PCR/Greeks
         remain shadow-only in RB-0.7.9.
@@ -1890,6 +1900,16 @@ class RedBarPaperAutomationService:
             trading_date,
         )
         exit_engine = PaperExitEngine()
+
+        # One read per cycle, shared by every open row: the governing level is a
+        # property of the session, not of a position. A missing or unreadable
+        # snapshot leaves it None, and the structural exit then reports
+        # LEVEL_UNAVAILABLE rather than blocking the rest of the exit monitor.
+        v2_snapshot = None
+        try:
+            v2_snapshot = read_red_bar_v2_ui_snapshot(self.settings.artifacts_root)
+        except Exception as exc:
+            errors.append(f"v2-structural-snapshot: {exc}")
 
         for row in open_rows:
             try:
@@ -1987,6 +2007,12 @@ class RedBarPaperAutomationService:
                     default_stop_loss_pct=self.stop_loss_pct,
                     default_target_pct=self.target_pct,
                 )
+                structural_exit = evaluate_red_bar_v2_structural_exit(
+                    position=row,
+                    signal=signal,
+                    snapshot=v2_snapshot,
+                    now=now,
+                )
                 exit_health = exit_engine.evaluate(
                     position=row,
                     option_candle=option_candle,
@@ -1998,6 +2024,7 @@ class RedBarPaperAutomationService:
                     opposite_red_bar_confirmed=opposite_confirmed,
                     eod_due=now.time() >= self.eod_exit_time,
                     exit_mode=execution_policy.exit_mode,
+                    structural_exit=structural_exit,
                 )
 
                 # Never loosen protection.
@@ -2066,6 +2093,14 @@ class RedBarPaperAutomationService:
                     exit_detail=" | ".join(exit_health.reasons),
                 )
 
+                structure_note = f"structure={exit_health.structural_exit}"
+                if exit_health.governing_midpoint is not None:
+                    structure_note += (
+                        f"@{exit_health.governing_reference or 'GOVERNING'}"
+                        f" {exit_health.governing_midpoint:.2f}"
+                        f" close={exit_health.governing_close}"
+                    )
+
                 if exit_health.hard_exit_reason:
                     reason = (
                         "AUTO_TARGET"
@@ -2100,7 +2135,7 @@ class RedBarPaperAutomationService:
                         detail=(
                             f"{reason}; combined={combined_reason}; "
                             f"health={exit_health.health_score:.1f}; "
-                            f"stop={effective_stop}"
+                            f"stop={effective_stop}; {structure_note}"
                         ),
                     )
                     closed_row = self.engine.close_position(
@@ -2132,7 +2167,8 @@ class RedBarPaperAutomationService:
                             f"health={exit_health.health_score:.1f}; "
                             f"stop={effective_stop}; "
                             f"thesis={exit_health.nifty_thesis}; "
-                            f"technical_failures={exit_health.technical_failures}"
+                            f"technical_failures={exit_health.technical_failures}; "
+                            f"{structure_note}"
                         ),
                     )
             except Exception as exc:

@@ -42,6 +42,16 @@ class RedBarV2UISnapshot:
     provisional_confirmed_state: str = "NOT_APPLICABLE"
     midpoint_confirmation: str = "WAITING"
     midpoint_aligned: bool | None = None
+    # The level in force at the last completed candle, and that candle's close.
+    # Unlike ``index_close``/``index_timestamp``, which are read off the latest
+    # *event* and so freeze between admissions, these advance every minute --
+    # which is what makes them usable as an exit rule rather than a display.
+    governing_reference: str | None = None
+    governing_midpoint: float | None = None
+    governing_close: float | None = None
+    governing_close_timestamp: str | None = None
+    governing_zone_position: str | None = None
+    governing_distance_points: float | None = None
     last_evaluation_timestamp: str | None = None
     session_completeness: str = "UNAVAILABLE"
     futures_instrument_key: str | None = None
@@ -68,6 +78,26 @@ def _iso(value: Any) -> str | None:
 def _details(event: Any | None) -> Mapping[str, Any]:
     payload = getattr(event, "details", None)
     return payload if isinstance(payload, Mapping) else {}
+
+
+def _float(value: Any) -> float | None:
+    try:
+        return None if value is None else float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _governing(replay: Any) -> Mapping[str, Any]:
+    """The governing-level block, or an empty mapping if the replay has none.
+
+    Read defensively because the snapshot is also built from replay results
+    recorded before the block existed, and a missing level has to leave every
+    field ``None`` rather than raise -- the structural exit then simply declines
+    to act, which is the fail-closed direction.
+    """
+    rule_state = getattr(replay, "rule_state", None)
+    block = rule_state.get("governing") if isinstance(rule_state, Mapping) else None
+    return block if isinstance(block, Mapping) else {}
 
 
 def build_red_bar_v2_ui_snapshot_from_replay(
@@ -128,6 +158,7 @@ def build_red_bar_v2_ui_snapshot_from_replay(
         provisional_confirmed = "CONFIRMED"
 
     latest_details = _details(latest_event)
+    governing = _governing(replay)
     return RedBarV2UISnapshot(
         mode=mode,
         execution_scope=str(getattr(health, "execution_scope", None) or "HISTORICAL_REPLAY_ONLY"),
@@ -155,6 +186,12 @@ def build_red_bar_v2_ui_snapshot_from_replay(
         provisional_confirmed_state=provisional_confirmed,
         midpoint_confirmation=midpoint_confirmation,
         midpoint_aligned=midpoint_aligned if isinstance(midpoint_aligned, bool) else None,
+        governing_reference=_iso(governing.get("reference")),
+        governing_midpoint=_float(governing.get("midpoint")),
+        governing_close=_float(governing.get("close")),
+        governing_close_timestamp=_iso(governing.get("close_timestamp")),
+        governing_zone_position=_iso(governing.get("zone_position")),
+        governing_distance_points=_float(governing.get("distance_points")),
         last_evaluation_timestamp=_iso(getattr(latest_event, "timestamp", None)),
         session_completeness="ALIGNED_SESSION" if str(getattr(health, "status", "")) == "READY" else "UNAVAILABLE",
         futures_instrument_key=futures_instrument_key,

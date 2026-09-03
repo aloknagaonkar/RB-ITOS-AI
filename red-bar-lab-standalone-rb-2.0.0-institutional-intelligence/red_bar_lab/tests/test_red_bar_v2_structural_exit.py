@@ -69,3 +69,34 @@ def test_stale_reference_session_cannot_close_current_position():
     assert result.reason == "REFERENCE_SESSION_MISMATCH"
     assert result.exited_orders == 0
     assert closed == []
+
+
+def test_a_position_opened_outside_the_band_is_not_closed_by_its_own_entry():
+    """A deputy-born CE lives below the reference low from the moment it exists.
+
+    Every completed close after such an entry is below ``reference_low``, so
+    without reading the entry level this rule would close the position on its
+    first cycle -- reporting the geometry of the entry as its invalidation. The
+    guard only ever suppresses an exit, and only when the entry level is recorded
+    and provably outside, so a row without one behaves exactly as before.
+    """
+    snapshot = RedBarV2UISnapshot(
+        reference_timestamp="2026-08-26T09:20:00+05:30",
+        reference_high=24250.0,
+        reference_low=24200.0,
+    )
+    closed: list[tuple[str, str]] = []
+    outside = dict(_order("CE"), underlying_price_entry=24150.0)
+    inside = dict(_order("CE"), order_id="CE-INSIDE", underlying_price_entry=24225.0)
+    unrecorded = _order("CE")
+    unrecorded["order_id"] = "CE-UNRECORDED"
+
+    result = execute_structural_stop_exits(
+        snapshot=snapshot, completed_1m_close=24180.0,
+        completed_1m_timestamp="2026-08-26T10:01:00+05:30",
+        open_orders=[outside, inside, unrecorded],
+        close_position=lambda order_id, reason: closed.append((order_id, reason)),
+    )
+
+    assert result.exited_orders == 2
+    assert [order_id for order_id, _ in closed] == ["CE-INSIDE", "CE-UNRECORDED"]

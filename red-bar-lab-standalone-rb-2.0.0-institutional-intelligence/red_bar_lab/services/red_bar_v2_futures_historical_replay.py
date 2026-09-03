@@ -46,6 +46,7 @@ from red_bar_lab.strategy.red_bar_v2_working_reference import (
     RedBarV2WorkingReference,
     build_working_reference,
     select_governing_reference,
+    zone_position,
 )
 
 
@@ -647,6 +648,47 @@ def replay_red_bar_v2_day_with_futures_vwap(
 
     final_state = observe_trade_state(trade_rows, instrument_key=instrument_key)
     trading_date = pd.Timestamp(frame.index[0]).date().isoformat()
+    # The level an open position is judged against, as at the last completed
+    # candle. ``select_governing_reference`` is consulted inside the loop only
+    # while a deputy search is live, so the red-bar case -- most of the day --
+    # would otherwise never be published at all. Recomputing it here from the
+    # final close is equivalent by construction: precedence is a pure function of
+    # the close with no latch, and a deputy that had lost authority was already
+    # discarded during the pass that saw it lose it.
+    #
+    # This is the only per-candle close the result carries. The event stream
+    # cannot serve one: events are emitted on candidates, admissions, upgrades
+    # and closures, so anything read off the latest event freezes between them --
+    # which is how a stale admission direction survived 103 consecutive cycles.
+    #
+    # A deputy is retired the moment it produces an entry (see the WORKING
+    # admission above), so for most of the life of a deputy-born position the
+    # level published here is the red bar -- a level that position was opened on
+    # the far side of. Judging it against that level would close it instantly, so
+    # the consumer is required to check the entry against the level before acting;
+    # ``evaluate_red_bar_v2_structural_exit`` refuses with ENTRY_ON_FAILING_SIDE.
+    governing_state: dict[str, object] = {
+        "reference": None,
+        "midpoint": None,
+        "close": None,
+        "close_timestamp": None,
+        "zone_position": None,
+        "distance_points": None,
+    }
+    if reference is not None and len(frame.index) > 0:
+        final_close = float(frame.iloc[-1]["close"])
+        governing_reference, governing_name = select_governing_reference(
+            reference, working_reference, final_close
+        )
+        governing_midpoint = float(governing_reference.midpoint)
+        governing_state = {
+            "reference": governing_name,
+            "midpoint": governing_midpoint,
+            "close": final_close,
+            "close_timestamp": pd.Timestamp(frame.index[-1]).isoformat(),
+            "zone_position": zone_position(reference, final_close).value,
+            "distance_points": round(final_close - governing_midpoint, 2),
+        }
     rule_state: dict[str, object] = {
         "as_of": last_evaluation_iso,
         "current_direction": current_direction,
@@ -719,6 +761,11 @@ def replay_red_bar_v2_day_with_futures_vwap(
             "discards": working_discards,
             "last_discarded_at": working_last_discarded_at,
         },
+        # The level in force, and the completed close to judge it against. An
+        # open position's structural exit reads this and nothing else: the
+        # position carries its own direction, so the pair here is all that is
+        # needed to ask whether the reason it exists has gone.
+        "governing": governing_state,
         "admission": {
             "admitted": admitted,
             "blocked": blocked,
