@@ -12,7 +12,8 @@ Stage 1's own logic with the colour flipped -- and its high, low and midpoint
 stand in for the red bar's while price is outside the red bar's own low-to-high
 band.
 
-Two rules keep it subordinate:
+Three rules constrain it -- the first keeps it subordinate to the red bar, the
+other two decide whether a candle is allowed to become one at all:
 
 * **Precedence by location.** The red bar is senior. The deputy governs only
   the side of the band it was born on, and a close back inside the band -- or
@@ -24,6 +25,13 @@ Two rules keep it subordinate:
   wick, and requiring real displacement is the cheapest available filter: the
   threshold is a ratio, so it is dimensionless and travels across instruments
   and volatility regimes without tuning.
+* **Displacement against the recent range.** The candle must also close beyond
+  the previous completed 5-minute candle's extreme -- above its high for a
+  bullish deputy, below its low for a bearish one. The body ratio only says the
+  candle was decisive about itself; a tall candle can still close inside the
+  range it started in. This is the one entry path that runs with no futures VWAP
+  gate behind it, so the candle that authorises it has to have taken something
+  out.
 
 A weak candle is skipped and waiting continues. If none ever qualifies there is
 no working reference and no entry, which is the fail-closed direction.
@@ -143,6 +151,15 @@ def build_working_reference(
     red bar's band are considered -- inside it the red bar is already in charge,
     so a deputy there would have nothing to govern.
 
+    Three tests, in order of increasing cost: the candle must close outside the
+    band, its body must be at least `minimum_body_ratio` of its own range, and
+    its close must be beyond the *immediately preceding* completed 5-minute
+    candle's extreme. That last comparison is taken from the unfiltered frame,
+    not from the colour-filtered candidates: the point is to have cleared
+    whatever the market last did, and against the previous same-colour candle it
+    would be a far weaker claim. A candle with nothing before it in the frame is
+    skipped, because there is nothing it can have broken out of.
+
     `after` is normally the moment the previous trade closed. The comparison is
     strict, so the candle a trade exited on cannot immediately become the
     reference for re-entering it.
@@ -163,6 +180,13 @@ def build_working_reference(
     green = bars["close"] > bars["open"]
     colour = green if wanted == "BULLISH" else bars["close"] < bars["open"]
     eligible = bars[(bars.index > pd.Timestamp(after)) & colour]
+    # Position in the *unfiltered* frame, so the breakout test below can reach
+    # the candle that actually preceded a candidate rather than the previous
+    # candidate. `eligible` has both a timestamp and a colour filter applied, so
+    # its own neighbour is the previous same-colour candle -- a green candle
+    # closing above the last green candle's high proves much less than one
+    # closing above the high of the red candle that just printed.
+    offsets = {stamp: offset for offset, stamp in enumerate(bars.index)}
 
     for timestamp, row in eligible.iterrows():
         open_price = float(row["open"])
@@ -174,6 +198,19 @@ def build_working_reference(
             continue
         ratio = body_ratio(open_price, high, low, close)
         if ratio < minimum_body_ratio:
+            continue
+        offset = offsets[timestamp]
+        if offset == 0:
+            # Nothing precedes it, so there is no range it can be shown to have
+            # taken out. Skipping is the fail-closed reading.
+            continue
+        previous = bars.iloc[offset - 1]
+        broke_out = (
+            close > float(previous["high"])
+            if wanted == "BULLISH"
+            else close < float(previous["low"])
+        )
+        if not broke_out:
             continue
         stamp = pd.Timestamp(timestamp)
         return RedBarV2WorkingReference(

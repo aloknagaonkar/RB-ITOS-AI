@@ -40,6 +40,12 @@ from red_bar_lab.strategy.red_bar_v2 import (
 from red_bar_lab.strategy.red_bar_v2_futures import (
     evaluate_initial_direction_futures,
     evaluate_reversal_direction_futures,
+    evaluate_working_reference_direction_futures,
+)
+from red_bar_lab.strategy.red_bar_v2_working_reference import (
+    RedBarV2WorkingReference,
+    build_working_reference,
+    select_governing_reference,
 )
 
 
@@ -70,6 +76,13 @@ def replay_red_bar_v2_day_with_futures_vwap(
     provisional_state: RedBarV2State | None = None
     waiting_for_red_bar_touch = False
     reentry_touch_state: str | None = None
+    # The deputy that governs the space outside the red bar's band after an exit.
+    # ``working_search_after`` is the exit moment the search runs from, and is
+    # cleared the moment control returns to the red bar, so a deputy is never
+    # revived by a later excursion -- only a fresh exit starts a fresh search.
+    working_reference: RedBarV2WorkingReference | None = None
+    working_search_after: pd.Timestamp | None = None
+    working_search_direction: str | None = None
     reference = None
     exit_index = 0
     admitted = 0
@@ -106,6 +119,10 @@ def replay_red_bar_v2_day_with_futures_vwap(
     reentry_last_touch_direction: str | None = None
     reentry_last_vwap_confirmed: bool | None = None
     reentry_last_direction: str | None = None
+    working_established_at: str | None = None
+    working_entries = 0
+    working_discards = 0
+    working_last_discarded_at: str | None = None
     last_admitted_at: str | None = None
     last_admission_code: str | None = None
     last_block_code: str | None = None
@@ -137,6 +154,27 @@ def replay_red_bar_v2_day_with_futures_vwap(
                 # A closed trade must not reverse immediately. A later
                 # completed 1m candle must touch the fixed midpoint before the
                 # normal initial-direction rules can create another entry.
+                #
+                # That wait used to be the only way out of a closed trade, which
+                # left the strategy flat through any move that never came back to
+                # the midpoint. Start a deputy search alongside it: the first
+                # completed 5-minute candle of the opposite colour after this
+                # moment can govern the space price has run off to, and the two
+                # mechanisms cover disjoint locations, so neither can pre-empt the
+                # other. The direction is read before ``current_direction`` is
+                # cleared below; an exit with no recorded direction starts no
+                # search rather than guessing one.
+                working_search_direction = (
+                    "BEARISH"
+                    if current_direction == "BULLISH"
+                    else "BULLISH"
+                    if current_direction == "BEARISH"
+                    else None
+                )
+                working_search_after = (
+                    exits[exit_index] if working_search_direction is not None else None
+                )
+                working_reference = None
                 waiting_for_red_bar_touch = True
                 current_direction = None
                 provisional_state = None
@@ -192,8 +230,84 @@ def replay_red_bar_v2_day_with_futures_vwap(
         decision: RedBarV2DirectionDecision | None = None
         decision_snapshot: RedBarV2FuturesSnapshot | None = None
         decision_health: RedBarV2VwapSourceHealth | None = None
+        # The level the decision was actually judged against. It is the red bar on
+        # every path but the deputy's, and the evidence row has to describe the
+        # level that was in force or it documents a comparison nobody made.
+        decision_reference: object = reference
 
-        if waiting_for_red_bar_touch:
+        # Precedence by location, recomputed from this close with no latch. The
+        # deputy is consulted first only because it governs a region the red bar
+        # does not; where the red bar governs, this block does nothing but drop a
+        # deputy that has lost its authority.
+        #
+        # The gate is the live search, not ``waiting_for_red_bar_touch``. A failed
+        # re-entry switches that wait off while leaving the strategy flat, and
+        # tying the deputy to it would let a disagreeing futures VWAP -- which this
+        # path never reads -- retire a structural level that is still valid. The
+        # search is started by an exit and ended by an admission or a hand-back,
+        # which is exactly the window the deputy is meant to cover.
+        deputy_decision: RedBarV2DirectionDecision | None = None
+        deputy_snapshot: RedBarV2FuturesSnapshot | None = None
+        deputy_health: RedBarV2VwapSourceHealth | None = None
+        deputy_governs = False
+        if working_search_after is not None:
+            close_price = float(frame.loc[candle_timestamp]["close"])
+            # Retry the promotion once per completed five-minute slot. The search
+            # returns the first qualifying candle after the exit, and a completed
+            # bucket cannot be rewritten by later candles, so one success is final
+            # and the frame is only re-read while the search keeps failing.
+            if working_reference is None and evaluation_time.minute % 5 == 0:
+                working_reference = build_working_reference(
+                    frame,
+                    instrument_key=instrument_key,
+                    evaluation_time=evaluation_time,
+                    red_bar=reference,
+                    after=working_search_after,
+                    required_direction=working_search_direction,
+                )
+                if working_reference is not None:
+                    working_established_at = evaluation_time.isoformat()
+            _, governing_name = select_governing_reference(
+                reference, working_reference, close_price
+            )
+            if governing_name == "WORKING":
+                deputy_governs = True
+                deputy_snapshot, deputy_health = build_red_bar_v2_futures_snapshot(
+                    frame,
+                    futures_frame,
+                    instrument_key=instrument_key,
+                    vwap_instrument_key=vwap_instrument_key,
+                    timeframe="1M",
+                    evaluation_time=evaluation_time,
+                    expected_timestamp=candle_timestamp,
+                )
+                latest_health = deputy_health
+                candidate = evaluate_working_reference_direction_futures(
+                    working_reference,
+                    deputy_snapshot,
+                    red_bar=reference,
+                )
+                if _event_is_due(candidate, evaluation_time):
+                    deputy_decision = candidate
+            elif working_reference is not None:
+                # The close is back inside the red bar's band, or out the far side
+                # of it. Control returns to the senior reference, and the deputy is
+                # discarded rather than parked: a level that a later excursion could
+                # revive is the latch this design exists to avoid.
+                working_reference = None
+                working_search_after = None
+                working_search_direction = None
+                working_discards += 1
+                working_last_discarded_at = evaluation_time.isoformat()
+
+        if deputy_governs:
+            # Only one reference is in force, so the red bar's midpoint-touch wait
+            # does not also run on this candle -- this close is not in its band.
+            decision = deputy_decision
+            decision_snapshot = deputy_snapshot
+            decision_health = deputy_health
+            decision_reference = working_reference
+        elif waiting_for_red_bar_touch:
             row = frame.loc[candle_timestamp]
             candle_low = float(row["low"])
             candle_high = float(row["high"])
@@ -412,6 +526,14 @@ def replay_red_bar_v2_day_with_futures_vwap(
                 pending_reversal_snapshot = None
                 pending_reversal_health = None
                 waiting_for_red_bar_touch = False
+                # This deputy has done its job. Retiring it with its search means
+                # the next exit starts a fresh one rather than re-entering off a
+                # level the market has already traded through.
+                if admission.entry_type == "WORKING":
+                    working_entries += 1
+                working_reference = None
+                working_search_after = None
+                working_search_direction = None
             else:
                 blocked += 1
                 last_block_code = admission.admission_code.value
@@ -461,7 +583,7 @@ def replay_red_bar_v2_day_with_futures_vwap(
                     underlying_instrument_key=instrument_key,
                     futures_instrument_key=vwap_instrument_key,
                     direction_decision=decision,
-                    reference=reference,
+                    reference=decision_reference,
                     index_context=decision_snapshot,
                     futures_context=decision_snapshot,
                 )
@@ -577,6 +699,25 @@ def replay_red_bar_v2_day_with_futures_vwap(
             "last_outcome": reentry_last_outcome,
             "last_outcome_at": reentry_last_outcome_at,
             "last_direction": reentry_last_direction,
+        },
+        "working_reference": {
+            # The deputy covers the space the midpoint wait cannot reach, so its
+            # counters are read against ``reentry``'s: a day with a long wait and
+            # no working entry is a day the strategy sat out.
+            "active": working_reference is not None,
+            "searching": working_search_after is not None
+            and working_reference is None,
+            "direction": working_search_direction,
+            "established_at": working_established_at,
+            "zone_side": (
+                working_reference.zone_side if working_reference is not None else None
+            ),
+            "body_ratio": (
+                working_reference.body_ratio if working_reference is not None else None
+            ),
+            "entries": working_entries,
+            "discards": working_discards,
+            "last_discarded_at": working_last_discarded_at,
         },
         "admission": {
             "admitted": admitted,

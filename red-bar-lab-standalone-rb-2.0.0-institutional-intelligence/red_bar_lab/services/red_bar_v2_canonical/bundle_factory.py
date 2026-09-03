@@ -5,6 +5,7 @@ from datetime import datetime
 from red_bar_lab.domain.red_bar_v2 import (
     AdmissionOutcome,
     BundleLifecycleStatus,
+    EntryType,
     RedBarV2Decision,
     RedBarV2SignalBundle,
     build_red_bar_v2_bundle_id,
@@ -31,7 +32,9 @@ def create_red_bar_v2_signal_bundle(
         raise CanonicalResolutionError("allowed decision requires a reference")
     if decision.entry_type is None or decision.direction is None or decision.option_side is None:
         raise CanonicalResolutionError("allowed decision is missing bundle identity fields")
-    if decision.futures_vwap is None:
+    # A working-reference entry consults no futures VWAP, so it is the one
+    # admitted decision that legitimately carries no VWAP evidence.
+    if decision.futures_vwap is None and decision.entry_type is not EntryType.WORKING:
         raise CanonicalResolutionError("allowed decision requires futures VWAP evidence")
 
     trading_date = decision.reference.trading_date

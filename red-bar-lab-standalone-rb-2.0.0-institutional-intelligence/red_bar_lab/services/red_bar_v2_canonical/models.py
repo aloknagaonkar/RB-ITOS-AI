@@ -62,7 +62,11 @@ class LegacyV2DecisionEvidence:
     bullish_rsi_threshold: float
     bearish_rsi_threshold: float
     futures_comparison_price: float
-    futures_vwap: float
+    # None on a working-reference entry. That path is judged against the deputy
+    # candle governing the space outside the red bar's band and consults no VWAP,
+    # so a required float here would make every working entry unbuildable -- the
+    # same failure mode the RSI warm-up had above.
+    futures_vwap: float | None
     futures_volume: float
     futures_fresh: bool
     index_context_timestamp: datetime

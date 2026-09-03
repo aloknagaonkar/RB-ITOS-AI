@@ -14,13 +14,16 @@ def _required(source: object, name: str) -> object:
 
 
 def _optional_number(source: object, name: str) -> float | None:
-    """Read an informational numeric field that is legitimately absent.
+    """Read a numeric field that is legitimately absent on some paths.
 
-    Used for RSI, which is NaN for the whole Wilder RSI(14) warm-up and does
-    not gate admission. ``_required`` would abort the evidence build instead.
+    Two of them: RSI, which is NaN for the whole Wilder RSI(14) warm-up and does
+    not gate admission, and the futures VWAP on a working-reference entry, which
+    is judged against the deputy candle and consults no VWAP at all.
+    ``_required`` would abort the evidence build instead.
     """
     value = getattr(source, name, None)
     return None if value is None else float(value)
+
 
 
 def build_legacy_v2_decision_evidence(
@@ -57,7 +60,7 @@ def build_legacy_v2_decision_evidence(
         bullish_rsi_threshold=bullish_rsi_threshold,
         bearish_rsi_threshold=bearish_rsi_threshold,
         futures_comparison_price=float(_required(futures_context, "vwap_comparison_price")),
-        futures_vwap=float(_required(direction_decision, "vwap_value")),
+        futures_vwap=_optional_number(direction_decision, "vwap_value"),
         futures_volume=float(_required(futures_context, "vwap_source_volume")),
         futures_fresh=bool(_required(direction_decision, "context_fresh")),
         index_context_timestamp=_required(index_context, "candle_timestamp"),
@@ -143,7 +146,7 @@ def evidence_from_event_details(details: Mapping[str, object]) -> LegacyV2Decisi
         bullish_rsi_threshold=number("bullish_rsi_threshold"),
         bearish_rsi_threshold=number("bearish_rsi_threshold"),
         futures_comparison_price=number("futures_comparison_price"),
-        futures_vwap=number("futures_vwap"),
+        futures_vwap=optional_number("futures_vwap"),
         futures_volume=number("futures_volume"),
         futures_fresh=fresh,
         index_context_timestamp=timestamp("index_context_timestamp"),
