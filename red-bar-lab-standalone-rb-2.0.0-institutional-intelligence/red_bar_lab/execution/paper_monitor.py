@@ -63,8 +63,6 @@ from red_bar_lab.services.red_bar_v2_paper_signal_bridge import (
     RedBarV2PaperSignalPublishResult,
     publish_v2_snapshot_to_paper_signals,
 )
-from red_bar_lab.services.red_bar_v2_rsi_exit import execute_rsi_threshold_exits
-from red_bar_lab.services.red_bar_v2_structural_exit import execute_structural_stop_exits
 from red_bar_lab.services.upstox_instrument_search import UpstoxInstrumentSearchTransport
 from red_bar_lab.services.upstox_service import RedBarUpstoxService
 from red_bar_lab.storage.database import RedBarDatabase
@@ -161,7 +159,10 @@ def _legacy_stage_latency_rows(cycle_timings_ms, report, live_v2):
     ]
 
 
-def _partition_cycle_messages(report_errors, exit_errors):
+def _partition_cycle_messages(report_errors, exit_errors=()):
+    # ``exit_errors`` outlives the two exits this cycle used to run: any failure
+    # raised outside the cycle report still has to reach the monitor status row
+    # as an error rather than a warning. The cycle passes nothing today.
     warnings: list[str] = []
     errors: list[str] = [str(message) for message in exit_errors]
     for message in report_errors:
@@ -480,42 +481,16 @@ def main() -> int:
             stage_perf_started = perf_counter()
 
             v2_snapshot = read_red_bar_v2_ui_snapshot(settings.artifacts_root)
-            structural_exit = execute_structural_stop_exits(
-                snapshot=v2_snapshot,
-                completed_1m_close=live_v2.completed_1m_close,
-                completed_1m_timestamp=live_v2.completed_1m_timestamp,
-                open_orders=database.read_open_paper_execution_orders("PAPER-STD"),
-                close_position=lambda order_id, reason: automation.engine.close_position(
-                    zerodha=adapter,
-                    order_id=order_id,
-                    exit_reason=reason,
-                ),
-            )
-            if structural_exit.exited_orders:
-                totals["orders_closed"] += int(structural_exit.exited_orders)
-
-            rsi_exit = execute_rsi_threshold_exits(
-                completed_1m_rsi=live_v2.completed_1m_rsi,
-                completed_1m_timestamp=live_v2.completed_1m_timestamp,
-                open_orders=database.read_open_paper_execution_orders("PAPER-STD"),
-                close_position=lambda order_id, reason: automation.engine.close_position(
-                    zerodha=adapter,
-                    order_id=order_id,
-                    exit_reason=reason,
-                ),
-            )
-            if rsi_exit.exited_orders:
-                totals["orders_closed"] += int(rsi_exit.exited_orders)
-
-            if structural_exit.exited_orders or rsi_exit.exited_orders:
-                live_v2 = evaluate_current_session_red_bar_v2(
-                    upstox=upstox,
-                    database=database,
-                    settings=settings,
-                    instrument_key=UNDERLYINGS[args.underlying],
-                    run_id=cycle_run_id,
-                )
-                v2_snapshot = read_red_bar_v2_ui_snapshot(settings.artifacts_root)
+            # This cycle closes nothing. It runs with monitor_positions=False and
+            # the two exits it used to own here -- a completed 1m close beyond the
+            # red bar's high/low, and a completed-candle RSI threshold -- are gone:
+            # the first is subsumed by the governing-level midpoint rule and the
+            # second came from a gate the strategy retired. Exit authority for a V2
+            # row is now entirely in the position_monitor child process, where
+            # automation.monitor_and_exit ranks the structural verdict against the
+            # earned premium stop and EOD inside PaperExitEngine. The stage name
+            # stays because the cadence panel and the cycle log line read it; what
+            # it measures is the snapshot read the rest of the cycle needs.
             cycle_timings_ms["exit_management"] = (
                 perf_counter() - stage_perf_started
             ) * 1000.0
@@ -705,10 +680,7 @@ def main() -> int:
                 totals["signals_qualified"] += 1
 
             heartbeat = datetime.now(ist).isoformat()
-            cycle_errors, cycle_warnings = _partition_cycle_messages(
-                report.errors,
-                tuple(structural_exit.errors) + tuple(rsi_exit.errors),
-            )
+            cycle_errors, cycle_warnings = _partition_cycle_messages(report.errors)
             database.upsert_paper_monitor_status(
                 {
                     "monitor_id": "PAPER-MONITOR",
@@ -851,9 +823,7 @@ def main() -> int:
                 report.signals_seen,
                 report.candidates_scored,
                 report.paper_orders_opened,
-                report.paper_orders_closed
-                + structural_exit.exited_orders
-                + rsi_exit.exited_orders,
+                report.paper_orders_closed,
                 report.skipped,
                 last_decision,
                 last_reason,

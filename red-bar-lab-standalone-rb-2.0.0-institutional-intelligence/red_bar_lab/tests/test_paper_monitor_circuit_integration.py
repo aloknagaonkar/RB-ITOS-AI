@@ -3,16 +3,31 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MONITOR = ROOT / "execution" / "paper_monitor.py"
+POSITION_MONITOR = ROOT / "execution" / "position_monitor.py"
+CHILD_PROCESS = ROOT / "platform" / "child_process.py"
 
 
 def test_monitor_wires_entry_circuit_without_disabling_exits():
+    """The circuit suspends entries only -- and exits live in another process.
+
+    This used to be proved by finding an exit call in this file. Both of the
+    exits it ran here are now deleted (the reference-boundary sweep and the RSI
+    threshold), so the claim has to be made where it is actually true: exit
+    authority is a separately supervised child process, which the entry circuit
+    cannot suspend because it does not run there.
+    """
     source = MONITOR.read_text(encoding="utf-8")
 
     assert "PaperMonitorCircuitBreaker(" in source
     assert "critical_market_data_failure(" in source
-    assert "execute_rsi_threshold_exits(" in source
     assert "POSITION_MANAGEMENT_ONLY" in source
     assert "ENTRY_SUSPENDED" in source
+
+    specs = CHILD_PROCESS.read_text(encoding="utf-8")
+    assert 'module="red_bar_lab.execution.position_monitor"' in specs
+    assert "automation.monitor_and_exit()" in POSITION_MONITOR.read_text(
+        encoding="utf-8"
+    )
 
 
 def test_real_monitor_persists_circuit_state_under_artifacts_root():

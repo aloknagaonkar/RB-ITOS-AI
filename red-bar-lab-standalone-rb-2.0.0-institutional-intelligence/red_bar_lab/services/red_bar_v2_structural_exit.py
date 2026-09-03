@@ -1,39 +1,27 @@
-"""The two structural exits for a live Red Bar V2 position.
+"""The structural exit for a live Red Bar V2 position.
 
-Both ask the same question -- *has the level this trade was taken on failed?* --
-and they differ in which level they are allowed to see.
+It asks one question -- *has the level this trade was taken on failed?* -- and it
+is the rule from the agreed table: *exit any open position on a completed
+1-minute close against the governing level*. It is called per open row from
+``automation.monitor_and_exit`` and its verdict is ranked inside
+``PaperExitEngine``, so it is weighed against the premium protections rather than
+firing beside them.
 
-``execute_structural_stop_exits`` is the older of the two and has been live all
-along, called once per ~32-second cycle from ``paper_monitor``. It exits a PE on
-a completed 1-minute close above the reference **high** and a CE on a close below
-the reference **low**: price has to clear the whole red bar band before it acts,
-and it knows nothing about the working reference, so a position opened on a
-deputy is judged against a band it was never taken on. It is on its way out --
-the agreed exit set is the earned premium stop, EOD, and the midpoint rule below
--- and it survives only until every open row can be shown to carry a stamped
-entry level.
+Why it has to exist at all: for a V2 row the configured entry-time premium stop
+is deliberately excluded (``red_bar_v2_external_initial_exit`` in the exit
+engine) on the grounds that V2 carries its own initial-loss authority. This is
+that authority, at the distance the strategy actually reasons about. Together
+with the earned premium stop and EOD it is the whole of a V2 row's exit set.
 
-``evaluate_red_bar_v2_structural_exit`` is the rule from the agreed table --
-*exit any open position on a completed 1-minute close against the governing
-level* -- and it had no production caller at all. ``structure_failed`` existed,
-was tested, and was reachable only from research code that threw its verdict
-away. It is called per open row from ``automation.monitor_and_exit`` and its
-verdict is ranked inside ``PaperExitEngine``, so it can be weighed against the
-premium protections rather than firing beside them.
-
-The midpoint rule subsumes the boundary rule: any close beyond the high is also
-beyond the midpoint, so the boundary exit can now only fire where the midpoint
-verdict declined -- no level available, a close too stale to trust, or a close
-the entry already knew about.
-
-What is *not* covered by either, and is the reason this rule matters: for a V2
-row the configured premium stop is deliberately excluded
-(``red_bar_v2_external_initial_exit`` in the exit engine) on the stated grounds
-that V2 carries its own initial-loss authority. That authority was a
-completed-candle RSI exit (on thresholds rather than on structure) plus the
-boundary rule above -- a stop a full half-band away from the level the trade was
-actually taken on. The midpoint rule is the missing authority, at the distance
-the strategy actually reasons about.
+It replaced two rules that used to run beside it in ``paper_monitor``, both now
+deleted. One was a reference-**boundary** sweep: it exited a PE on a close above
+the red bar high and a CE on a close below the low, so price had to clear the
+whole band, and it knew nothing about the working reference -- a deputy-born
+position was judged against a band it was never taken on. The other was a
+completed-candle RSI threshold exit, from a gate the strategy has since retired.
+The midpoint rule subsumes the first (any close beyond the high is also beyond
+the midpoint) and, once every open row carries a stamped entry level, does so on
+the deputy's path too -- which is what made the deletion safe.
 
 Four things make it safe to act on:
 
@@ -63,13 +51,10 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
-from typing import Any, Callable, Iterable, Mapping
+from typing import Any, Mapping
 
 from red_bar_lab.execution.execution_policy import RED_BAR_V2_STRATEGY_SOURCE
-from red_bar_lab.operations.red_bar_v2_ui_snapshot import RedBarV2UISnapshot
 from red_bar_lab.strategy.red_bar_v2_working_reference import structure_failed
-
-_OPEN_STATUSES = {"OPEN", "ACTIVE", "PENDING", "APPROVED", "EXECUTING"}
 
 STRUCTURAL_EXIT_REASON = "RED_BAR_V2_STRUCTURE"
 """What the engine reports. ``monitor_and_exit`` prefixes it with ``AUTO_``."""
@@ -416,126 +401,13 @@ def evaluate_red_bar_v2_structural_exit(
     )
 
 
-@dataclass(frozen=True)
-class RedBarV2StructuralExitResult:
-    """What the reference-boundary sweep did across every open row.
-
-    Kept distinct from :class:`RedBarV2StructuralExit`, which is one verdict for
-    one position and fires nothing itself. This one closed orders.
-    """
-
-    status: str
-    reason: str
-    completed_close: float | None = None
-    exited_orders: int = 0
-    errors: tuple[str, ...] = ()
-
-
-def _exit_reason(
-    order: Mapping[str, Any], *, close: float, high: float, low: float
-) -> str | None:
-    if str(order.get("execution_strategy_source") or "").upper() != "RED_BAR_V2":
-        return None
-    if str(order.get("status") or "").upper() not in _OPEN_STATUSES:
-        return None
-    option_type = str(order.get("option_type") or "").upper()
-    # A position opened outside the band is on the far side of this boundary from
-    # the moment it exists -- a deputy-born CE taken below the red bar low is the
-    # standing case -- and closing it on the next completed close would be reading
-    # the entry itself as the invalidation. Only skip when the entry level is
-    # readable and provably outside; an unrecorded level keeps the older
-    # behaviour, so this can only ever prevent an exit, never cause one.
-    entry_level = entry_index_level(order)
-    if option_type == "PE" and close > high:
-        if entry_level is not None and entry_level > high:
-            return None
-        return "AUTO_REFERENCE_HIGH_INVALIDATION"
-    if option_type == "CE" and close < low:
-        if entry_level is not None and entry_level < low:
-            return None
-        return "AUTO_REFERENCE_LOW_INVALIDATION"
-    return None
-
-
-def execute_structural_stop_exits(
-    *,
-    snapshot: RedBarV2UISnapshot | None,
-    completed_1m_close: float | None,
-    completed_1m_timestamp: str | None,
-    open_orders: Iterable[Mapping[str, Any]],
-    close_position: Callable[[str, str], Any],
-) -> RedBarV2StructuralExitResult:
-    """Exit V2 positions after a completed 1m close beyond reference geometry.
-
-    The backstop described in the module docstring: a full band away from the
-    level the trade was taken on, red bar only, and unaware of any deputy. It
-    stays because it is the one of the two rules that still acts when no
-    governing level has been published for the session.
-    """
-    if snapshot is None or snapshot.reference_high is None or snapshot.reference_low is None:
-        return RedBarV2StructuralExitResult("NO_ACTION", "REFERENCE_GEOMETRY_UNAVAILABLE")
-    if completed_1m_close is None or not completed_1m_timestamp:
-        return RedBarV2StructuralExitResult("NO_ACTION", "COMPLETED_1M_CLOSE_UNAVAILABLE")
-    try:
-        reference_date = datetime.fromisoformat(
-            str(snapshot.reference_timestamp).replace("Z", "+00:00")
-        ).date()
-        completed_date = datetime.fromisoformat(
-            str(completed_1m_timestamp).replace("Z", "+00:00")
-        ).date()
-    except (TypeError, ValueError):
-        return RedBarV2StructuralExitResult(
-            "NO_ACTION", "REFERENCE_SESSION_UNAVAILABLE"
-        )
-    if reference_date != completed_date:
-        return RedBarV2StructuralExitResult(
-            "NO_ACTION", "REFERENCE_SESSION_MISMATCH"
-        )
-
-    close = float(completed_1m_close)
-    high = float(snapshot.reference_high)
-    low = float(snapshot.reference_low)
-    exited = 0
-    errors: list[str] = []
-    triggered = False
-    for raw_order in open_orders:
-        order = dict(raw_order)
-        reason = _exit_reason(order, close=close, high=high, low=low)
-        if reason is None:
-            continue
-        triggered = True
-        order_id = str(order.get("order_id") or "")
-        if not order_id:
-            errors.append("MISSING_ORDER_ID")
-            continue
-        try:
-            close_position(order_id, reason)
-            exited += 1
-        except Exception as exc:
-            errors.append(f"{order_id}:{type(exc).__name__}:{exc}")
-
-    if not triggered:
-        return RedBarV2StructuralExitResult(
-            "NO_ACTION", "REFERENCE_BOUNDARY_HELD", completed_close=close
-        )
-    return RedBarV2StructuralExitResult(
-        status="EXITED" if exited and not errors else "PARTIAL" if exited else "ERROR",
-        reason="RED_BAR_V2_STRUCTURAL_STOP",
-        completed_close=close,
-        exited_orders=exited,
-        errors=tuple(errors),
-    )
-
-
 __all__ = [
     "BAR_SECONDS",
     "MAX_CLOSE_AGE_SECONDS",
     "RedBarV2StructuralExit",
-    "RedBarV2StructuralExitResult",
     "STRUCTURAL_EXIT_REASON",
     "entry_index_level",
     "evaluate_red_bar_v2_structural_exit",
-    "execute_structural_stop_exits",
     "governing_level",
     "position_direction",
 ]
