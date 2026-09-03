@@ -177,6 +177,25 @@ def publish_v2_snapshot_to_paper_signals(
         if {"confirmation_high", "confirmation_low"}.issubset(available):
             columns.extend(("confirmation_high", "confirmation_low"))
             values.extend((snapshot.reference_high, snapshot.reference_low))
+        # The level this admission was judged against, carried so the exit can ask
+        # about *that* level rather than whichever one governs the session by the
+        # time the position is being monitored. `level_value` above is always the
+        # red bar's midpoint and must stay so -- `execution_policy` resolves a V2
+        # row by `level_type` and the panels read `level_value` as the session's
+        # reference -- so the entry's own level needs its own columns.
+        entry_level = {
+            "entry_type": snapshot.admission_entry_type,
+            "governing_reference": snapshot.admission_reference,
+            "governing_midpoint": (
+                float(snapshot.admission_midpoint)
+                if snapshot.admission_midpoint is not None
+                else None
+            ),
+        }
+        for column, value in entry_level.items():
+            if column in available:
+                columns.append(column)
+                values.append(value)
         columns.extend(("confirmation_delay_minutes", "created_at"))
         values.extend((0, created_at))
         placeholders = ",".join("?" for _ in columns)

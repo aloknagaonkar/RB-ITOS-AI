@@ -25,6 +25,7 @@ from red_bar_lab.execution.execution_policy import (
     RED_BAR_V2_STRATEGY_SOURCE,
     RSI_EXIT_MODE,
 )
+from red_bar_lab.execution.paper_strategy_authority import PaperStrategyAuthority
 from red_bar_lab.execution.exit_engine import PaperExitEngine
 from red_bar_lab.operations.red_bar_v2_ui_snapshot import (
     RedBarV2UISnapshot,
@@ -35,11 +36,15 @@ from red_bar_lab.operations.red_bar_v2_ui_snapshot import (
 from red_bar_lab.services.red_bar_v2_futures_historical_replay import (
     replay_red_bar_v2_day_with_futures_vwap,
 )
+from red_bar_lab.services.red_bar_v2_paper_signal_bridge import (
+    publish_v2_snapshot_to_paper_signals,
+)
 from red_bar_lab.services.red_bar_v2_structural_exit import (
     BAR_SECONDS,
     MAX_CLOSE_AGE_SECONDS,
     STRUCTURAL_EXIT_REASON,
     evaluate_red_bar_v2_structural_exit,
+    governing_level,
     position_direction,
 )
 from red_bar_lab.tests.test_execution_foundation import (
@@ -827,3 +832,329 @@ def test_the_live_cycle_leaves_a_row_open_when_the_level_still_holds(
         for row in monitored
     )
 
+
+
+# ---------------------------------------------------------------------------
+# The level stamped on the row at admission
+# ---------------------------------------------------------------------------
+
+DEPUTY_MIDPOINT = 23_897.5
+"""The deputy's own midpoint in the committed working-reference fixture.
+
+A CE admitted off that deputy enters on the rally at 23950.0 -- above the
+deputy's 23940.4 high, so comfortably above its midpoint -- while the red bar
+midpoint 23997.0 sits above the entry. The two levels disagree about this
+position, and only one of them ever justified it.
+"""
+
+RED_BAR_MIDPOINT = 23_997.0
+
+
+def _deputy_born(**overrides: object) -> dict[str, object]:
+    """A WORKING CE carrying the level it was actually taken on."""
+    stamped: dict[str, object] = {
+        "underlying_price_entry": 23_950.0,
+        "entry_type": "WORKING",
+        "governing_reference": "WORKING",
+        "governing_midpoint": DEPUTY_MIDPOINT,
+    }
+    stamped.update(overrides)
+    return _order("CE", **stamped)
+
+
+def _session_publishes_the_red_bar(close: float) -> RedBarV2UISnapshot:
+    """What the snapshot says once the deputy has been retired on admission."""
+    return _snapshot(
+        governing_reference="RED_BAR",
+        governing_midpoint=RED_BAR_MIDPOINT,
+        governing_close=close,
+    )
+
+
+def test_a_deputy_born_position_finally_has_a_structural_exit():
+    """The point of stamping the level: the WORKING row can now be closed.
+
+    Same row and same session block as
+    ``test_a_deputy_born_position_is_not_closed_by_the_level_it_opened_beneath``,
+    which asserts that without the stamp every verdict is
+    ``ENTRY_ON_FAILING_SIDE`` -- correct, and yet it leaves the position with no
+    index-level authority at all. With the deputy's midpoint on the row the rule
+    holds above 23897.5 and closes below it, which is the level the trade was
+    actually taken on.
+    """
+    holding = evaluate_red_bar_v2_structural_exit(
+        position=_deputy_born(),
+        snapshot=_session_publishes_the_red_bar(23_960.0),
+        now=FRESH_NOW,
+    )
+    breached = evaluate_red_bar_v2_structural_exit(
+        position=_deputy_born(),
+        snapshot=_session_publishes_the_red_bar(23_890.0),
+        now=FRESH_NOW,
+    )
+
+    assert (holding.status, holding.breached) == ("HOLDING", False)
+    assert (breached.status, breached.breached) == ("BREACHED", True)
+    for verdict in (holding, breached):
+        assert verdict.level_source == "ENTRY"
+        assert verdict.governing_reference == "WORKING"
+        assert verdict.governing_midpoint == pytest.approx(DEPUTY_MIDPOINT)
+    assert holding.distance_points == pytest.approx(62.5)
+    assert breached.distance_points == pytest.approx(-7.5)
+
+
+def test_the_stamp_is_read_off_the_signal_row_as_well_as_the_order():
+    """The live shape: ``signal_attempts`` is where the bridge writes it."""
+    verdict = evaluate_red_bar_v2_structural_exit(
+        position=_order("CE", underlying_price_entry=23_950.0),
+        signal={
+            "entry_type": "WORKING",
+            "governing_reference": "WORKING",
+            "governing_midpoint": DEPUTY_MIDPOINT,
+        },
+        snapshot=_session_publishes_the_red_bar(23_890.0),
+        now=FRESH_NOW,
+    )
+
+    assert verdict.breached is True
+    assert verdict.level_source == "ENTRY"
+    assert verdict.governing_midpoint == pytest.approx(DEPUTY_MIDPOINT)
+
+
+def test_a_stamped_level_the_entry_was_outside_of_is_still_refused():
+    """Stamping does not weaken the guard, it only gives it a truer level.
+
+    A recorded level is evidence about the entry, not permission to act on it: if
+    the row says the trade opened below the very level it is being judged
+    against, the two facts contradict each other and the exit declines.
+    """
+    verdict = evaluate_red_bar_v2_structural_exit(
+        position=_deputy_born(governing_midpoint=23_980.0),
+        snapshot=_session_publishes_the_red_bar(23_890.0),
+        now=FRESH_NOW,
+    )
+
+    assert verdict.status == "ENTRY_ON_FAILING_SIDE"
+    assert verdict.breached is False
+    assert verdict.level_source == "ENTRY"
+
+
+def test_an_unstamped_row_falls_back_to_the_session_level_unchanged():
+    """Every row opened before the columns existed keeps its old behaviour."""
+    verdict = evaluate_red_bar_v2_structural_exit(
+        position=_order("CE"),
+        snapshot=_snapshot(governing_close=MIDPOINT - 20.0),
+        now=FRESH_NOW,
+    )
+
+    assert verdict.level_source == "SESSION"
+    assert verdict.governing_reference == "RED_BAR"
+    assert verdict.governing_midpoint == pytest.approx(MIDPOINT)
+    assert verdict.breached is True
+
+
+def test_the_level_resolves_in_a_fixed_order_and_skips_what_it_cannot_use():
+    """Order row, then signal row, then the session -- and a zero is not a level.
+
+    ``level_value`` on a signal row is ``NOT NULL`` and defaults to 0.0 in more
+    than one legacy writer, so a falsy stamp has to fall through rather than be
+    read as a midpoint at the bottom of the index.
+    """
+    order = {"governing_midpoint": 100.0, "governing_reference": "WORKING"}
+    signal = {"governing_midpoint": 200.0, "governing_reference": "RED_BAR"}
+    snapshot = _snapshot()
+
+    assert governing_level(order, signal, snapshot)[:2] == (100.0, "WORKING")
+    assert governing_level({}, signal, snapshot)[:2] == (200.0, "RED_BAR")
+    assert governing_level({}, {}, snapshot) == (MIDPOINT, "RED_BAR", "SESSION")
+    assert governing_level({"governing_midpoint": 0.0}, None, snapshot)[2] == "SESSION"
+    assert governing_level({}, None, None) == (None, None, "SESSION")
+    # A level with no name is still a level; the detail text says "governing".
+    assert governing_level({"governing_midpoint": 300.0}, None, None) == (
+        300.0,
+        None,
+        "ENTRY",
+    )
+
+
+def test_the_snapshot_freezes_the_admitted_deputy_after_it_is_retired(tmp_path):
+    """The end the stamping depends on: the deputy's midpoint outlives the deputy.
+
+    ``rule_state["governing"]`` says ``RED_BAR`` the instant the WORKING entry is
+    admitted -- asserted in
+    ``test_the_replay_publishes_the_deputy_only_while_it_is_still_alive`` -- so if
+    the admission block did not keep the deputy's own level, nothing downstream
+    could ever recover it.
+    """
+    from red_bar_lab.tests.test_red_bar_v2_working_reference_replay import (
+        DEPUTY_UNDER_THE_BAND,
+        RALLY_UNDER_THE_BAND,
+        _replay,
+    )
+
+    replay = _replay(DEPUTY_UNDER_THE_BAND, RALLY_UNDER_THE_BAND)
+    built = build_red_bar_v2_ui_snapshot_from_replay(
+        SimpleNamespace(replay=replay, health=SimpleNamespace(status="READY")),
+        futures_instrument_key="NSE_FO|NIFTY-FUT",
+    )
+
+    # The last admission *event* on this day is a blocked REVERSAL, judged against
+    # the red bar. A candidate the strategy refused must not restate the level the
+    # open position is answerable to, so the entry block skips it.
+    candidates = [
+        event for event in replay.events
+        if event.event_type == "CANDIDATE_ADMISSION"
+    ]
+    assert candidates[-1].details["entry_type"] == "REVERSAL"
+    assert candidates[-1].candidate_allowed is False
+    assert built.admission_code == "ACTIVE_TRADE_BLOCK"
+
+    assert built.admission_entry_type == "WORKING"
+    assert built.admission_reference == "WORKING"
+    assert built.admission_midpoint == pytest.approx(DEPUTY_MIDPOINT)
+    # ... while the session block has already handed control back to the red bar.
+    assert built.governing_reference == "RED_BAR"
+    assert built.governing_midpoint == pytest.approx(RED_BAR_MIDPOINT)
+
+    persist_red_bar_v2_ui_snapshot(built, artifacts_root=tmp_path)
+    reloaded = read_red_bar_v2_ui_snapshot(tmp_path)
+    assert reloaded is not None
+    for field in ("admission_entry_type", "admission_reference", "admission_midpoint"):
+        assert getattr(reloaded, field) == getattr(built, field), field
+
+
+def _paper_authority() -> PaperStrategyAuthority:
+    return PaperStrategyAuthority(
+        primary_red_bar_version="v2",
+        red_bar_v2_enabled=True,
+        red_bar_v2_mode="paper",
+        legacy_red_bar_v1_enabled=False,
+        dri_strategy_enabled=False,
+        rsi_extreme_reversal_enabled=False,
+        broker_execution_enabled=False,
+    )
+
+
+def test_the_bridge_writes_the_entry_level_and_the_exit_reads_it_back(tmp_path):
+    """Snapshot to ``signal_attempts`` to verdict, with nothing hand-fed.
+
+    The one path that proves the three columns, the PRAGMA guard, the upsert and
+    the exit's preference all agree on the same level. ``level_value`` stays the
+    red bar's midpoint -- ``execution_policy`` resolves a V2 row by ``level_type``
+    and the panels read ``level_value`` as the session reference -- so the two
+    levels must be visible side by side on one row.
+    """
+    settings, db = _setup(tmp_path)
+    now = datetime.now(IST)
+    snapshot = RedBarV2UISnapshot(
+        correlation_id="RBV2-RUNTIME",
+        alignment_status="READY",
+        admission_allowed=True,
+        admission_code="WORKING_BULLISH_ALIGNMENT",
+        direction="BULLISH",
+        option_side="CE",
+        admission_timestamp=(now - timedelta(minutes=4)).isoformat(),
+        reference_timestamp=(now - timedelta(minutes=40)).isoformat(),
+        reference_midpoint=RED_BAR_MIDPOINT,
+        index_close=23_950.0,
+        admission_entry_type="WORKING",
+        admission_reference="WORKING",
+        admission_midpoint=DEPUTY_MIDPOINT,
+        recorded_at=now.isoformat(),
+    )
+    persist_red_bar_v2_ui_snapshot(snapshot, artifacts_root=settings.artifacts_root)
+
+    published = publish_v2_snapshot_to_paper_signals(
+        database_path=db.path,
+        artifacts_root=settings.artifacts_root,
+        instrument_key="NSE_INDEX|Nifty 50",
+        authority=_paper_authority(),
+        now=now,
+    )
+
+    assert published.status == "PUBLISHED"
+    assert published.signal_id is not None
+    row = db.read_signal_attempt_by_id(published.signal_id)
+    assert row is not None
+    assert row["entry_type"] == "WORKING"
+    assert row["governing_reference"] == "WORKING"
+    assert row["governing_midpoint"] == pytest.approx(DEPUTY_MIDPOINT)
+    # The session reference is untouched, and it is the other number.
+    assert row["level_type"] == "RED_BAR_V2"
+    assert row["level_value"] == pytest.approx(RED_BAR_MIDPOINT)
+
+    verdict = evaluate_red_bar_v2_structural_exit(
+        position=_order(
+            "CE",
+            underlying_price_entry=23_950.0,
+            entry_timestamp=(now - timedelta(minutes=3)).isoformat(),
+        ),
+        signal=row,
+        snapshot=_snapshot(
+            governing_reference="RED_BAR",
+            governing_midpoint=RED_BAR_MIDPOINT,
+            governing_close=23_890.0,
+            governing_close_timestamp=(now - timedelta(seconds=90)).isoformat(),
+        ),
+        now=now,
+    )
+
+    assert verdict.level_source == "ENTRY"
+    assert verdict.governing_reference == "WORKING"
+    assert verdict.governing_midpoint == pytest.approx(DEPUTY_MIDPOINT)
+    assert verdict.breached is True
+
+
+def test_the_bridge_still_publishes_into_a_database_without_the_columns(tmp_path):
+    """The PRAGMA guard, exercised rather than assumed.
+
+    A database that has not been reopened through ``initialize`` since the columns
+    were added must still take the signal -- losing the entry level, which the exit
+    handles as the ``SESSION`` fallback, and not the whole publication.
+    """
+    settings, db = _setup(tmp_path)
+    with sqlite3.connect(db.path) as conn:
+        for column in ("entry_type", "governing_reference", "governing_midpoint"):
+            conn.execute(f"ALTER TABLE signal_attempts DROP COLUMN {column}")
+        conn.commit()
+    now = datetime.now(IST)
+    persist_red_bar_v2_ui_snapshot(
+        RedBarV2UISnapshot(
+            correlation_id="RBV2-RUNTIME",
+            alignment_status="READY",
+            admission_allowed=True,
+            admission_code="INITIAL_BULLISH_ALIGNMENT",
+            direction="BULLISH",
+            option_side="CE",
+            admission_timestamp=(now - timedelta(minutes=4)).isoformat(),
+            reference_timestamp=(now - timedelta(minutes=40)).isoformat(),
+            reference_midpoint=RED_BAR_MIDPOINT,
+            index_close=24_010.0,
+            admission_entry_type="INITIAL",
+            admission_reference="RED_BAR",
+            admission_midpoint=RED_BAR_MIDPOINT,
+            recorded_at=now.isoformat(),
+        ),
+        artifacts_root=settings.artifacts_root,
+    )
+
+    published = publish_v2_snapshot_to_paper_signals(
+        database_path=db.path,
+        artifacts_root=settings.artifacts_root,
+        instrument_key="NSE_INDEX|Nifty 50",
+        authority=_paper_authority(),
+        now=now,
+    )
+
+    assert published.status == "PUBLISHED"
+    with sqlite3.connect(db.path) as conn:
+        conn.row_factory = sqlite3.Row
+        row = dict(
+            conn.execute(
+                "SELECT * FROM signal_attempts WHERE signal_id=?",
+                (published.signal_id,),
+            ).fetchone()
+        )
+    assert "governing_midpoint" not in row
+    assert row["level_value"] == pytest.approx(RED_BAR_MIDPOINT)
+    assert governing_level(row, None, _snapshot())[2] == "SESSION"

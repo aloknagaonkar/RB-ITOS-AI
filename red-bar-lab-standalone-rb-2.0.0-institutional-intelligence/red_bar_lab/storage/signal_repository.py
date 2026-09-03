@@ -167,6 +167,7 @@ class SignalRepository:
                        level_type,level_value,direction,state,
                        cross_timestamp,confirmation_timestamp,
                        underlying_entry,confirmation_delay_minutes,
+                       entry_type,governing_reference,governing_midpoint,
                        created_at
                 FROM signal_attempts
                 WHERE signal_id=?
@@ -197,6 +198,7 @@ class SignalRepository:
                            level_type,level_value,direction,state,
                            cross_timestamp,confirmation_timestamp,
                            underlying_entry,confirmation_delay_minutes,
+                           entry_type,governing_reference,governing_midpoint,
                            created_at
                     FROM signal_attempts
                     WHERE signal_id IN ({placeholders})

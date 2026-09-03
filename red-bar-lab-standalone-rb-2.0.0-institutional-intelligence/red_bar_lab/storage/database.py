@@ -65,6 +65,9 @@ CREATE TABLE IF NOT EXISTS signal_attempts (
     confirmation_low REAL,
     confirmation_close REAL,
     confirmation_delay_minutes INTEGER,
+    entry_type TEXT,
+    governing_reference TEXT,
+    governing_midpoint REAL,
     created_at TEXT NOT NULL
 );
 
@@ -928,6 +931,14 @@ _SIGNAL_COLUMNS = {
     "confirmation_low": "REAL",
     "confirmation_close": "REAL",
     "confirmation_delay_minutes": "INTEGER",
+    # Frozen at admission, for the exit to judge a position against the level it
+    # was actually taken on. ``signal_attempts.level_value`` is always the red
+    # bar's midpoint, so a deputy-born (WORKING) entry -- taken outside the red
+    # bar band, against a level the red bar cannot describe -- is otherwise
+    # indistinguishable from an INITIAL one once the deputy has been retired.
+    "entry_type": "TEXT",
+    "governing_reference": "TEXT",
+    "governing_midpoint": "REAL",
 }
 
 

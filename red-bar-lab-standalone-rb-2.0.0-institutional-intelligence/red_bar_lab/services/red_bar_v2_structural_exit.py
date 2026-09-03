@@ -8,7 +8,10 @@ along, called once per ~32-second cycle from ``paper_monitor``. It exits a PE on
 a completed 1-minute close above the reference **high** and a CE on a close below
 the reference **low**: price has to clear the whole red bar band before it acts,
 and it knows nothing about the working reference, so a position opened on a
-deputy is judged against a band it was never taken on.
+deputy is judged against a band it was never taken on. It is on its way out --
+the agreed exit set is the earned premium stop, EOD, and the midpoint rule below
+-- and it survives only until every open row can be shown to carry a stamped
+entry level.
 
 ``evaluate_red_bar_v2_structural_exit`` is the rule from the agreed table --
 *exit any open position on a completed 1-minute close against the governing
@@ -18,26 +21,30 @@ away. It is called per open row from ``automation.monitor_and_exit`` and its
 verdict is ranked inside ``PaperExitEngine``, so it can be weighed against the
 premium protections rather than firing beside them.
 
-The midpoint rule subsumes the boundary rule wherever both may act: any close
-beyond the high is also beyond the midpoint, so for an INITIAL or REVERSAL
-position the boundary exit now only fires where the midpoint verdict declined --
-no level published yet, a close too stale to trust, or a close the entry already
-knew about. That is why the boundary rule stays: it is the backstop for exactly
-the cases the new rule refuses, and for a deputy-born position it is the only
-structural exit either rule can offer at all.
+The midpoint rule subsumes the boundary rule: any close beyond the high is also
+beyond the midpoint, so the boundary exit can now only fire where the midpoint
+verdict declined -- no level available, a close too stale to trust, or a close
+the entry already knew about.
 
 What is *not* covered by either, and is the reason this rule matters: for a V2
 row the configured premium stop is deliberately excluded
 (``red_bar_v2_external_initial_exit`` in the exit engine) on the stated grounds
 that V2 carries its own initial-loss authority. That authority was a
-completed-candle RSI exit (still live at ``paper_monitor``, on thresholds rather
-than on structure) plus the boundary rule above -- a stop a full half-band away
-from the level the trade was actually taken on. The midpoint rule is the missing
-authority, at the distance the strategy actually reasons about.
+completed-candle RSI exit (on thresholds rather than on structure) plus the
+boundary rule above -- a stop a full half-band away from the level the trade was
+actually taken on. The midpoint rule is the missing authority, at the distance
+the strategy actually reasons about.
 
-Three things make it safe to act on:
+Four things make it safe to act on:
 
-*   **The level comes from the replay's ``rule_state``, not from an event.**
+*   **The level is the entry's own, not the session's.** ``governing_level``
+    prefers the reference stamped on the row at admission
+    (``signal_attempts.governing_reference`` / ``governing_midpoint``, written by
+    the paper signal bridge) over the snapshot's live block. The distinction is
+    the whole reason a deputy-born position can be exited at all: the replay
+    retires a deputy the instant it produces an entry, so the session's governing
+    level for a WORKING position is a red bar it opened on the far side of.
+*   **The close comes from the replay's ``rule_state``, not from an event.**
     ``index_close`` on the snapshot is read off the latest event, and events are
     emitted only on candidates, admissions, upgrades and closures -- so it
     freezes for as long as nothing happens, which on 2026-09-03 was 56 minutes.
@@ -47,21 +54,9 @@ Three things make it safe to act on:
     exactly the value that went stale; a CE row is long the index whatever the
     strategy currently thinks.
 *   **A close the entry already knew about cannot invalidate the entry.** The
-    close is only consulted if it became known after the order was placed.
-*   **A level the entry was already on the failing side of is not that
-    position's invalidation.** The replay retires a deputy the moment it produces
-    an entry, so a WORKING position taken below the red bar band is published
-    against the red bar midpoint from its first cycle onward. Without this the
-    rule would close such a position on its very next completed close; with it,
-    the position keeps the boundary backstop and the premium protections and
-    waits for a level it was actually taken on. The same reasoning is now applied
-    to the boundary rule, which had the identical exposure and no guard.
-
-The practical shape of the two rules together, then: the midpoint rule is the
-authority for INITIAL and REVERSAL positions, where the level sits behind the
-entry by construction; the boundary rule remains the only structural authority a
-deputy-born position has, and neither can be triggered by the geometry of its own
-entry.
+    close is only consulted if it became known after the order was placed, and a
+    level the entry was already on the failing side of is refused outright --
+    which is what protects a row from before the stamping existed.
 """
 
 from __future__ import annotations
@@ -116,6 +111,7 @@ class RedBarV2StructuralExit:
     status: str
     governing_reference: str | None = None
     governing_midpoint: float | None = None
+    level_source: str = "SESSION"
     direction: str | None = None
     close: float | None = None
     close_timestamp: str | None = None
@@ -200,6 +196,37 @@ def entry_index_level(
     return None
 
 
+def governing_level(
+    position: Mapping[str, Any],
+    signal: Mapping[str, Any] | None = None,
+    snapshot: Any | None = None,
+) -> tuple[float | None, str | None, str]:
+    """The level this position is answerable to, and where that level came from.
+
+    The order matters. A level recorded on the row itself was stamped at
+    admission and is the level the trade was actually taken on. The snapshot's
+    ``governing_*`` block is whichever level governs *now* -- which for a
+    deputy-born position is a red bar it opened on the far side of, because the
+    replay retires a deputy the instant it produces an entry. Preferring the
+    recorded level is what gives a WORKING position a structural exit at all;
+    without it the entry guard below correctly declines on every cycle and the
+    position has no index-level authority whatsoever.
+
+    Rows written before the columns existed carry nothing and fall back to the
+    session level, which is exactly the previous behaviour.
+    """
+    for source in (position, signal):
+        recorded = _float(_get(source, "governing_midpoint"))
+        if recorded is not None and recorded > 0.0:
+            name = _get(source, "governing_reference")
+            return recorded, (str(name) if name else None), "ENTRY"
+    return (
+        _float(_get(snapshot, "governing_midpoint")),
+        _get(snapshot, "governing_reference"),
+        "SESSION",
+    )
+
+
 def evaluate_red_bar_v2_structural_exit(
     *,
     position: Mapping[str, Any],
@@ -211,12 +238,15 @@ def evaluate_red_bar_v2_structural_exit(
     """Ask whether this position's governing level has been closed through.
 
     Pure: every input is already fetched, nothing is read or written here. The
-    caller does one snapshot read per cycle and asks this per open row.
+    caller does one snapshot read per cycle and asks this per open row. The level
+    is resolved by ``governing_level`` -- the row's own stamped reference where it
+    has one, the session's otherwise -- and the close always comes from the
+    snapshot, since only the snapshot advances every minute.
 
-    A non-V2 row, a snapshot with no governing level, an unreadable direction, a
-    level the entry was already on the failing side of, an unrecorded entry level,
-    a stale close, or a close the entry already knew about all return
-    ``breached=False`` with a status saying which -- never an exit on a guess.
+    A non-V2 row, no level to judge against, an unreadable direction, a level the
+    entry was already on the failing side of, an unrecorded entry level, a stale
+    close, or a close the entry already knew about all return ``breached=False``
+    with a status saying which -- never an exit on a guess.
     """
     source = str(_get(position, "execution_strategy_source") or "").strip()
     if not source:
@@ -228,16 +258,16 @@ def evaluate_red_bar_v2_structural_exit(
             detail=f"strategy source {source or 'UNKNOWN'} is not Red Bar V2",
         )
 
-    midpoint = _float(_get(snapshot, "governing_midpoint"))
+    midpoint, reference, level_source = governing_level(position, signal, snapshot)
     close = _float(_get(snapshot, "governing_close"))
     close_stamp = _get(snapshot, "governing_close_timestamp")
-    reference = _get(snapshot, "governing_reference")
     if midpoint is None or close is None or close_stamp is None:
         return RedBarV2StructuralExit(
             breached=False,
             status="LEVEL_UNAVAILABLE",
             governing_reference=reference,
             governing_midpoint=midpoint,
+            level_source=level_source,
             close=close,
             close_timestamp=close_stamp,
             detail="no governing level published for this session yet",
@@ -250,6 +280,7 @@ def evaluate_red_bar_v2_structural_exit(
             status="DIRECTION_UNAVAILABLE",
             governing_reference=reference,
             governing_midpoint=midpoint,
+            level_source=level_source,
             close=close,
             close_timestamp=close_stamp,
             detail="position carries no readable option type or direction",
@@ -261,6 +292,7 @@ def evaluate_red_bar_v2_structural_exit(
         status="HOLDING",
         governing_reference=reference,
         governing_midpoint=midpoint,
+        level_source=level_source,
         direction=direction,
         close=close,
         close_timestamp=(
@@ -272,21 +304,18 @@ def evaluate_red_bar_v2_structural_exit(
     )
 
     # A level the position was *already* on the failing side of when it opened
-    # never justified the entry, so it cannot invalidate it. This is not a corner
-    # case: a deputy is retired the moment it produces an entry, so a WORKING
-    # position taken below the red bar band is published against the red bar
-    # midpoint from its first cycle onward, and without this guard would be closed
-    # on the very next completed close. Reusing ``structure_failed`` on the entry
-    # level is exactly the right test -- the question is the same question, asked
-    # of the entry instead of the current close.
+    # never justified the entry, so it cannot invalidate it. With the entry's own
+    # level stamped on the row this is a no-op on every path -- admission required
+    # the close to be on the winning side of whichever reference was in force --
+    # and it stays as the guard that makes that claim checkable rather than
+    # assumed. It is load-bearing for the ``SESSION`` fallback: a row written
+    # before the stamping existed publishes a deputy-born position against the red
+    # bar midpoint, and without this guard would be closed on its very next
+    # completed close.
     #
     # Unreadable entry level refuses rather than proceeds. The asymmetry is
     # deliberate: acting on an unverified level risks closing a sound position
-    # instantly, while declining leaves the reference-boundary backstop and the
-    # premium protections in force. For an INITIAL entry the guard is a no-op by
-    # construction -- admission required the close to be on the winning side --
-    # apart from a straddle of a tick or two between the candle close and the spot
-    # read at order time, which resolves as a decline to act.
+    # instantly, while declining leaves the premium protections in force.
     entry_level = entry_index_level(position, signal)
     if entry_level is None:
         return RedBarV2StructuralExit(
@@ -507,5 +536,6 @@ __all__ = [
     "entry_index_level",
     "evaluate_red_bar_v2_structural_exit",
     "execute_structural_stop_exits",
+    "governing_level",
     "position_direction",
 ]
