@@ -59,6 +59,7 @@ from red_bar_lab.domain.red_bar_v2 import (
     TriggerResolution,
     advance,
     build_risk_plan,
+    entry_candle_stop,
     find_stop_trigger,
     open_position,
 )
@@ -194,8 +195,17 @@ def _walk_to_outcome(
     """Advance the position bar by bar until the policy closes it.
 
     `governing_midpoint` is the level the entry was taken against, so a close
-    back through it is a structural break. The entry bar itself cannot break it:
-    admission required that bar's close to be beyond the level already.
+    back through it is a structural break. The candle that fired the entry
+    cannot break it: admission required *that* candle's close to be beyond the
+    level already.
+
+    The walk starts at ``entry_timestamp`` inclusive, and that is not the
+    triggering candle. The replay evaluates candle T at T+1min and stamps the
+    admission with the evaluation time, so a close above the midpoint at 09:27
+    produces an entry stamped 09:27 + 1min. The bar carrying that stamp is the
+    first bar the position was *held* -- its range prints after the fill -- so it
+    can legitimately be the bar that takes the trade off. Skipping it would hide
+    a first-minute stop-out and hand the position a free bar.
     """
     position = open_position(plan)
     outcome = None
@@ -360,6 +370,17 @@ def _resolve_entry(
             entry_timestamp=entry_timestamp,
             resolution=trigger_resolution,
         )
+        if trigger is None:
+            # No completed 5m candle crossed either level. Fall back to the
+            # one-minute candle that fired the entry rather than discarding a
+            # signal the strategy admitted -- that discard is why 5 of 8
+            # admissions went unmeasured on 2026-09-03. The whole day's bars are
+            # safe to hand over: the helper reads only what closed strictly
+            # before the entry stamp.
+            trigger = entry_candle_stop(
+                index_bars_1m=index_bars_1m,
+                entry_timestamp=entry_timestamp,
+            )
         plan = build_risk_plan(
             direction=Direction(event.direction),
             entry_timestamp=entry_timestamp,
