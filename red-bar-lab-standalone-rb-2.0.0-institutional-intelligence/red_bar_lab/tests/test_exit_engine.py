@@ -1,7 +1,17 @@
 from datetime import datetime, timedelta, timezone
 
-from red_bar_lab.execution.execution_policy import RSI_EXIT_MODE
+import pytest
+
+from red_bar_lab.execution.execution_policy import (
+    DIRECTIONAL_REGIME_STRATEGY_SOURCE,
+    RED_BAR_V2_STRATEGY_SOURCE,
+    RSI_EXIT_MODE,
+)
 from red_bar_lab.execution.exit_engine import PaperExitEngine
+from red_bar_lab.services.red_bar_v2_structural_exit import (
+    STRUCTURAL_EXIT_REASON,
+    RedBarV2StructuralExit,
+)
 
 
 def _position(
@@ -248,3 +258,288 @@ def test_rsi_breakeven_arms_after_five_minute_delay():
     assert result.breakeven_armed is True
     assert result.effective_stop == 100.0
     assert result.hard_exit_reason == "BREAKEVEN_STOP"
+
+
+# ---------------------------------------------------------------------------
+# A Red Bar V2 row has exactly three exits: earned premium protection, EOD, and
+# a completed 1-minute close against the governing level. Everything else this
+# engine computes about a V2 row is evidence and cannot close it.
+#
+# The gate keys on strategy identity, not on ``exit_mode``. Live already passes
+# the premium-protection mode for every source, so the proxies were shadowed
+# there by accident; research and the read-only panels pass no mode at all.
+# ---------------------------------------------------------------------------
+
+
+def _v2_position(**overrides):
+    position = _position(**overrides)
+    position["execution_strategy_source"] = RED_BAR_V2_STRATEGY_SOURCE
+    return position
+
+
+def _broken_option_candle():
+    """Option VWAP and EMA both lost -- two technical failures, weak volume."""
+    return {
+        "close": 96.0,
+        "vwap": 100.0,
+        "ema9": 97.0,
+        "ema21": 99.0,
+        "momentum_pct": 0.1,
+        "relative_volume": 0.8,
+    }
+
+
+def _invalidating_signal():
+    return {
+        "direction": "BEARISH",
+        "confirmation_high": 24600.0,
+        "confirmation_low": 24550.0,
+    }
+
+
+# Each case is a set of ``evaluate`` arguments under which a row with no
+# strategy identity exits on exactly one option-premium or correlation proxy.
+PROXY_CASES = {
+    "BULLISH_EMA10_EXIT": dict(
+        option_candle=_healthy_candle(),
+        signal=_ema_signal("BULLISH", 24540.0, 24550.0),
+        current_underlying=24540.0,
+    ),
+    "NIFTY_INVALIDATION": dict(
+        option_candle=_healthy_candle(),
+        signal=_invalidating_signal(),
+        current_underlying=24610.0,
+    ),
+    "OPPOSITE_RED_BAR": dict(
+        option_candle=_healthy_candle(),
+        opposite_red_bar_confirmed=True,
+    ),
+    "OPTION_TECHNICAL_BREAKDOWN": dict(
+        option_candle=_broken_option_candle(),
+    ),
+}
+
+
+@pytest.mark.parametrize("expected", sorted(PROXY_CASES))
+def test_a_proxy_that_closes_an_ordinary_row_cannot_close_a_red_bar_v2_row(expected):
+    arguments = PROXY_CASES[expected]
+
+    ordinary = PaperExitEngine().evaluate(
+        position=_position(current=104.0),
+        **arguments,
+    )
+    v2 = PaperExitEngine().evaluate(
+        position=_v2_position(current=104.0),
+        **arguments,
+    )
+
+    assert ordinary.hard_exit_reason == expected
+    assert ordinary.action == "EXIT"
+
+    assert v2.hard_exit_reason is None
+    assert v2.action == "HOLD"
+    # The proxy is not silenced, only disarmed: it still says its name.
+    shadowed = [
+        reason for reason in v2.reasons
+        if reason.startswith("SHADOW_EXIT_WARNINGS=")
+    ]
+    assert shadowed, v2.reasons
+    assert expected in shadowed[0]
+
+
+def test_every_proxy_is_reported_together_on_a_red_bar_v2_row():
+    """One cycle, all four proxies broken: one warning line, nothing closed."""
+    result = PaperExitEngine().evaluate(
+        position=_v2_position(current=96.0),
+        option_candle=_broken_option_candle(),
+        signal={
+            **_ema_signal("BULLISH", 24540.0, 24550.0),
+            "confirmation_low": 24600.0,
+        },
+        current_underlying=24540.0,
+        opposite_red_bar_confirmed=True,
+    )
+
+    assert result.hard_exit_reason is None
+    assert result.action == "HOLD"
+    assert (
+        "Structural and premium-protection exits remain authoritative."
+        in result.reasons
+    )
+    warning = next(
+        reason for reason in result.reasons
+        if reason.startswith("SHADOW_EXIT_WARNINGS=")
+    )
+    for name in (
+        "BULLISH_EMA10_EXIT",
+        "NIFTY_INVALIDATION",
+        "OPPOSITE_RED_BAR",
+        "OPTION_TECHNICAL_BREAKDOWN",
+    ):
+        assert name in warning
+    # The evidence still scores, which is the whole point of keeping it.
+    assert result.health_score < 50
+    assert result.nifty_thesis == "INVALID"
+    assert result.ema10_trend == "LOST"
+    assert result.technical_failures == 2
+
+
+def test_weak_evidence_advises_a_tighten_on_an_ordinary_row_and_a_hold_on_v2():
+    """No panel should advise an action the engine would refuse to take."""
+    candle = {
+        "close": 99.0,
+        "vwap": 100.0,
+        "ema9": 108.0,
+        "ema21": 106.0,
+        "momentum_pct": 1.0,
+        "relative_volume": 0.8,
+    }
+
+    ordinary = PaperExitEngine().evaluate(
+        position=_position(current=99.0),
+        option_candle=candle,
+    )
+    v2 = PaperExitEngine().evaluate(
+        position=_v2_position(current=99.0),
+        option_candle=candle,
+    )
+
+    assert ordinary.technical_failures == 1
+    assert ordinary.hard_exit_reason is None
+    assert ordinary.action == "TIGHTEN"
+
+    assert v2.health_score == ordinary.health_score
+    assert v2.hard_exit_reason is None
+    assert v2.action == "HOLD"
+
+
+def test_a_red_bar_v2_row_keeps_its_earned_premium_stop():
+    result = PaperExitEngine().evaluate(
+        position=_v2_position(current=118.0, mfe=25.0),
+        option_candle=_healthy_candle(),
+    )
+
+    assert result.trailing_active is True
+    assert result.trailing_stop == 118.75
+    assert result.hard_exit_reason == "TRAILING_STOP"
+    assert result.action == "EXIT"
+
+
+def test_a_red_bar_v2_row_keeps_eod():
+    result = PaperExitEngine().evaluate(
+        position=_v2_position(current=104.0),
+        option_candle=_healthy_candle(),
+        eod_due=True,
+    )
+
+    assert result.effective_stop is None
+    assert result.hard_exit_reason == "EOD_EXIT"
+    assert result.action == "EXIT"
+
+
+def test_a_red_bar_v2_row_keeps_the_structural_exit():
+    result = PaperExitEngine().evaluate(
+        position=_v2_position(current=104.0),
+        option_candle=_healthy_candle(),
+        structural_exit=RedBarV2StructuralExit(
+            breached=True,
+            status="STRUCTURE_BREACHED",
+            governing_reference="WORKING",
+            governing_midpoint=23_897.5,
+            level_source="ENTRY",
+            direction="BULLISH",
+            close=23_890.0,
+            distance_points=-7.5,
+        ),
+    )
+
+    assert result.hard_exit_reason == STRUCTURAL_EXIT_REASON
+    assert result.action == "EXIT"
+    assert result.governing_midpoint == 23_897.5
+
+
+def test_the_three_surviving_exits_keep_their_order_of_authority():
+    """Stop, then EOD, then structure -- with all three due at once."""
+    breached = RedBarV2StructuralExit(
+        breached=True,
+        status="STRUCTURE_BREACHED",
+        governing_reference="RED_BAR",
+        governing_midpoint=23_997.0,
+        close=23_990.0,
+    )
+
+    everything = PaperExitEngine().evaluate(
+        position=_v2_position(current=118.0, mfe=25.0),
+        option_candle=_broken_option_candle(),
+        eod_due=True,
+        structural_exit=breached,
+    )
+    without_the_stop = PaperExitEngine().evaluate(
+        position=_v2_position(current=104.0),
+        option_candle=_broken_option_candle(),
+        eod_due=True,
+        structural_exit=breached,
+    )
+    structure_alone = PaperExitEngine().evaluate(
+        position=_v2_position(current=104.0),
+        option_candle=_broken_option_candle(),
+        structural_exit=breached,
+    )
+
+    assert everything.hard_exit_reason == "TRAILING_STOP"
+    assert without_the_stop.hard_exit_reason == "EOD_EXIT"
+    assert structure_alone.hard_exit_reason == STRUCTURAL_EXIT_REASON
+
+
+@pytest.mark.parametrize(
+    "position_extra,signal",
+    [
+        ({"execution_strategy_source": RED_BAR_V2_STRATEGY_SOURCE}, None),
+        ({}, {"level_type": "RED_BAR_V2"}),
+        ({}, {"signal_id": "RBV2-ABCDEF0123456789"}),
+        ({"signal_id": "RBV2-ABCDEF0123456789"}, None),
+    ],
+)
+def test_v2_identity_disarms_the_proxies_however_it_arrives(position_extra, signal):
+    """The gate is only as good as the identity resolution behind it."""
+    position = _position(current=104.0)
+    position.update(position_extra)
+
+    result = PaperExitEngine().evaluate(
+        position=position,
+        option_candle=_healthy_candle(),
+        signal=signal,
+        opposite_red_bar_confirmed=True,
+    )
+
+    assert result.opposite_red_bar == "YES"
+    assert result.hard_exit_reason is None
+    assert result.action == "HOLD"
+
+
+def test_a_directional_regime_row_keeps_every_proxy():
+    """This engine is shared. Trimming V2's exits must not trim anyone else's."""
+    position = _position(current=104.0)
+    position["execution_strategy_source"] = DIRECTIONAL_REGIME_STRATEGY_SOURCE
+
+    result = PaperExitEngine().evaluate(
+        position=position,
+        option_candle=_healthy_candle(),
+        opposite_red_bar_confirmed=True,
+    )
+
+    assert result.hard_exit_reason == "OPPOSITE_RED_BAR"
+    assert result.action == "EXIT"
+
+
+def test_a_red_bar_v2_row_is_not_told_to_watch_a_trigger_that_cannot_fire():
+    result = PaperExitEngine().evaluate(
+        position=_v2_position(current=104.0),
+        option_candle=_healthy_candle(),
+        signal=_ema_signal("BULLISH", 24560.0, 24550.0),
+        current_underlying=24560.0,
+    )
+
+    assert result.ema10_trend == "VALID"
+    assert "EMA10" not in result.next_trigger
+    assert result.next_trigger == "EOD session flat"

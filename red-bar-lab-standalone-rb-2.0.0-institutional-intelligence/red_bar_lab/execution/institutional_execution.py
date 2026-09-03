@@ -5,6 +5,8 @@ import json
 import math
 from typing import Iterable
 
+from red_bar_lab.execution.execution_policy import RED_BAR_V2_STRATEGY_SOURCE
+
 
 def _num(value, default=0.0) -> float:
     try:
@@ -280,6 +282,7 @@ class InstitutionalExecutionCommittee:
         historical_shadow: Iterable[dict[str, object]],
         stop_loss_pct: float,
         target_pct: float,
+        strategy_source: str = "",
     ) -> InstitutionalExecutionEvaluation:
         history = selection.historical
         modules = self._module_reliability(
@@ -394,31 +397,65 @@ class InstitutionalExecutionCommittee:
         probability = adjusted_probability
 
         blockers: list[str] = []
+        shadow_blockers: list[str] = []
+        # Red Bar V2's entry authority is its own rule table -- a completed close
+        # against the governing midpoint, futures VWAP alignment, one position at
+        # a time, the 15:00 cutoff, a priceable stop inside the risk band, and a
+        # tradable contract. Composite scores built from eight sub-scores are not
+        # on that table, so for V2 rows they are recorded as evidence and scored
+        # later rather than silently deciding the trade. Every other source keeps
+        # the committee exactly as it was.
+        v2_primary = (
+            str(strategy_source or "").upper() == RED_BAR_V2_STRATEGY_SOURCE
+        )
         if not bool(selection.eligible):
             blockers.append(f"PERFORMANCE_HARD_BLOCK[{selection.reason}]")
 
         # Reward consumption is no longer terminal. EMA10 continuation is owned by
         # the trend-aware Opportunity Engine. Structural/opposite-signal failures
         # remain authoritative.
+        #
+        # Match whole `|`-separated tokens, never substrings. The upstream engine
+        # says "this no longer vetoes an entry" by appending a suffix -- e.g.
+        # BEARISH_EMA10_LOST_INFORMATIONAL_ONLY, emitted with eligible=True -- and
+        # a substring test reads the disclaimer as the blocker it disclaims. That
+        # inversion blocked 23 already-eligible PE entries on 2026-09-03 alone.
+        # A shadow line (SHADOW_ENTRY_WARNINGS=A,B) is likewise one token that
+        # matches no code, which is what keeps demoted gates demoted here.
         opportunity_reason = str(getattr(opportunity, "reason", "") or "").upper()
+        opportunity_tokens = {
+            token.strip()
+            for token in opportunity_reason.split("|")
+            if token.strip()
+        }
         terminal_opportunity = [
             code for code in ("OPPOSITE_RED_BAR", "STRUCTURE_INVALID", "BEARISH_EMA10_LOST", "BULLISH_EMA10_LOST", "EMA10_DATA_UNAVAILABLE")
-            if code in opportunity_reason
+            if code in opportunity_tokens
         ]
         if terminal_opportunity:
-            blockers.append("OPPORTUNITY_TERMINAL[" + ",".join(terminal_opportunity) + "]")
+            (shadow_blockers if v2_primary else blockers).append(
+                "OPPORTUNITY_TERMINAL[" + ",".join(terminal_opportunity) + "]"
+            )
         if probability < self.minimum_execution_probability_pct:
-            blockers.append(
+            (shadow_blockers if v2_primary else blockers).append(
                 f"EXECUTION_PROBABILITY={probability:.2f}<MIN={self.minimum_execution_probability_pct:.2f}"
             )
 
         eligible = not blockers
+        shadow_line = (
+            "SHADOW_ENTRY_WARNINGS="
+            + ",".join(dict.fromkeys(shadow_blockers))
+            if shadow_blockers
+            else ""
+        )
         committee_reason = (
             f"EXECUTION_COMMITTEE_APPROVED | {selection.reason} | PAYOFF_METRICS_INFORMATIONAL_ONLY"
             if eligible
             else " | ".join(blockers)
             + f" | PERFORMANCE_DETAIL[{selection.reason}] | PAYOFF_METRICS_INFORMATIONAL_ONLY"
         )
+        if shadow_line:
+            committee_reason = f"{committee_reason} | {shadow_line}"
         return InstitutionalExecutionEvaluation(
             execution_probability_pct=probability,
             expected_value_pct=expected_value,

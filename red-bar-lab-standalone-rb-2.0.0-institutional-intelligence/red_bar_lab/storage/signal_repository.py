@@ -141,7 +141,9 @@ class SignalRepository:
                           cross_timestamp,confirmation_timestamp,underlying_entry,
                           cross_open,cross_high,cross_low,cross_close,
                           confirmation_open,confirmation_high,confirmation_low,
-                          confirmation_close,confirmation_delay_minutes
+                          confirmation_close,confirmation_delay_minutes,
+                          risk_plan_tradable,risk_plan_code,risk_plan_detail,
+                          risk_stop_price,risk_points,risk_stop_trigger
                    FROM signal_attempts
                    WHERE instrument_key=? AND trading_date=?"""
         params: tuple[object, ...] = (instrument_key, trading_date)
@@ -167,6 +169,9 @@ class SignalRepository:
                        level_type,level_value,direction,state,
                        cross_timestamp,confirmation_timestamp,
                        underlying_entry,confirmation_delay_minutes,
+                       entry_type,governing_reference,governing_midpoint,
+                       risk_plan_tradable,risk_plan_code,risk_plan_detail,
+                       risk_stop_price,risk_points,risk_stop_trigger,
                        created_at
                 FROM signal_attempts
                 WHERE signal_id=?
@@ -197,6 +202,9 @@ class SignalRepository:
                            level_type,level_value,direction,state,
                            cross_timestamp,confirmation_timestamp,
                            underlying_entry,confirmation_delay_minutes,
+                           entry_type,governing_reference,governing_midpoint,
+                           risk_plan_tradable,risk_plan_code,risk_plan_detail,
+                           risk_stop_price,risk_points,risk_stop_trigger,
                            created_at
                     FROM signal_attempts
                     WHERE signal_id IN ({placeholders})

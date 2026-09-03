@@ -8,8 +8,15 @@ from time import monotonic
 import pandas as pd
 
 from red_bar_lab.execution.automation import RedBarPaperAutomationService
-from red_bar_lab.execution.execution_policy import is_rsi_primary
-from red_bar_lab.execution.opportunity_engine import OpportunityIntelligenceEngine
+from red_bar_lab.execution.execution_policy import (
+    RED_BAR_V2_STRATEGY_SOURCE,
+    execution_strategy_source,
+    is_rsi_primary,
+)
+from red_bar_lab.execution.opportunity_engine import (
+    SHADOW_ENTRY_WARNINGS_PREFIX,
+    OpportunityIntelligenceEngine,
+)
 from red_bar_lab.execution.paper_engine import RedBarPaperExecutionEngine
 
 
@@ -26,8 +33,17 @@ class EMA10OpportunityIntelligenceEngine(OpportunityIntelligenceEngine):
     """Add completed-underlying 5m EMA10 continuation to Opportunity Health."""
 
     def evaluate(self, **kwargs):
-        result = super().evaluate(**kwargs)
         signal = kwargs.get("signal") or {}
+        # This class owns the completed-candle trend data, so it is also the layer
+        # that can hand the base engine a completed close to judge structure on
+        # instead of a live tick. See OpportunityIntelligenceEngine.evaluate.
+        if kwargs.get("structure_close") is None and bool(
+            signal.get("_ema10_5m_ready")
+        ):
+            close_5m = signal.get("_ema10_5m_close")
+            if close_5m is not None:
+                kwargs["structure_close"] = float(close_5m)
+        result = super().evaluate(**kwargs)
         direction = str(signal.get("direction") or "").upper()
         ready = bool(signal.get("_ema10_5m_ready"))
         close = signal.get("_ema10_5m_close")
@@ -59,15 +75,35 @@ class EMA10OpportunityIntelligenceEngine(OpportunityIntelligenceEngine):
             "REWARD_METRICS_INFORMATIONAL_ONLY",
             "REWARD_CONSUMED",
         }
+        # The base engine may have demoted its own gates for a Red Bar V2 row. That
+        # line is evidence, not a blocker -- re-promoting it here would undo the
+        # demotion one layer later.
+        inherited_shadow = [
+            item.strip()[len(SHADOW_ENTRY_WARNINGS_PREFIX):]
+            for item in str(result.reason or "").split("|")
+            if item.strip().startswith(SHADOW_ENTRY_WARNINGS_PREFIX)
+        ]
         blockers = [
             item.strip()
             for item in str(result.reason or "").split("|")
-            if item.strip() and item.strip() not in informational_tokens
+            if item.strip()
+            and item.strip() not in informational_tokens
+            and not item.strip().startswith(SHADOW_ENTRY_WARNINGS_PREFIX)
         ]
+        shadow: list[str] = [
+            code
+            for line in inherited_shadow
+            for code in line.split(",")
+            if code
+        ]
+        v2_primary = (
+            execution_strategy_source(signal) == RED_BAR_V2_STRATEGY_SOURCE
+        )
         ema_status = "EMA10_TREND_VALID"
 
         if not ready or close is None or ema10 is None:
-            blockers.append("EMA10_DATA_UNAVAILABLE")
+            # Absent EMA10 data cannot invalidate a rule that does not use EMA10.
+            (shadow if v2_primary else blockers).append("EMA10_DATA_UNAVAILABLE")
             ema_status = "EMA10_DATA_UNAVAILABLE"
         else:
             close_value = float(close)
@@ -78,14 +114,35 @@ class EMA10OpportunityIntelligenceEngine(OpportunityIntelligenceEngine):
                 # otherwise eligible PE entry.
                 ema_status = "BEARISH_EMA10_LOST_INFORMATIONAL_ONLY"
             elif direction == "BULLISH" and close_value < ema_value:
-                blockers.append("BULLISH_EMA10_LOST")
-                ema_status = "BULLISH_EMA10_LOST"
+                # The bearish half was already informational. Symmetry for V2:
+                # EMA10 is not on the V2 rule table in either direction.
+                (shadow if v2_primary else blockers).append("BULLISH_EMA10_LOST")
+                ema_status = (
+                    "BULLISH_EMA10_LOST_INFORMATIONAL_ONLY"
+                    if v2_primary
+                    else "BULLISH_EMA10_LOST"
+                )
             elif direction not in {"BULLISH", "BEARISH"}:
+                # Data integrity, not a strategy opinion: an unknown direction
+                # cannot pick an option type. Stays terminal for every source.
                 blockers.append("EMA10_DIRECTION_UNKNOWN")
                 ema_status = "EMA10_DIRECTION_UNKNOWN"
 
         blockers = list(dict.fromkeys(blockers))
         eligible = not blockers
+        shadow_line = (
+            SHADOW_ENTRY_WARNINGS_PREFIX + ",".join(dict.fromkeys(shadow))
+            if shadow
+            else ""
+        )
+        reason = (
+            f"OPPORTUNITY_HEALTH_PASS | {ema_status} | "
+            "REWARD_METRICS_INFORMATIONAL_ONLY"
+            if eligible
+            else " | ".join(blockers)
+        )
+        if shadow_line:
+            reason = f"{reason} | {shadow_line}"
         return replace(
             result,
             eligible=eligible,
@@ -93,12 +150,7 @@ class EMA10OpportunityIntelligenceEngine(OpportunityIntelligenceEngine):
                 f"BUY {kwargs['candidate'].contract.option_type}"
                 if eligible else "SKIP"
             ),
-            reason=(
-                f"OPPORTUNITY_HEALTH_PASS | {ema_status} | "
-                "REWARD_METRICS_INFORMATIONAL_ONLY"
-                if eligible
-                else " | ".join(blockers)
-            ),
+            reason=reason,
         )
 
 

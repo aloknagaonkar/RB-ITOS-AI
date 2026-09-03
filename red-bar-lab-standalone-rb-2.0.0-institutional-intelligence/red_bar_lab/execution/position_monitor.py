@@ -125,6 +125,10 @@ def main() -> int:
         underlying_name=args.underlying,
         initial_capital=args.capital,
         minimum_candidate_score=args.minimum_score,
+        # Match paper_monitor.py. Left at the default True, this process admitted
+        # stale signals as OPPORTUNITY_EXTENSION while the other process was
+        # blocking them, so the two live monitors disagreed on entry policy.
+        enable_opportunity_extension=False,
     )
 
     logging.info(

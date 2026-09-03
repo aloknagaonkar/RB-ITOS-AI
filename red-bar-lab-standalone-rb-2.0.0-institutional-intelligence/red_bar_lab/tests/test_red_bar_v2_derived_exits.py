@@ -283,13 +283,19 @@ def test_the_second_entry_is_reachable_only_because_the_first_one_closed(
     ]
 
 
-def _stopped_on_its_entry_bar() -> tuple[pd.DataFrame, pd.DataFrame]:
-    """The canonical day with the 09:28 candle reaching down to the stop exactly.
+def _stopped_on_the_first_held_bar() -> tuple[pd.DataFrame, pd.DataFrame]:
+    """The canonical day stopped at the earliest moment a stop can act.
 
-    The stop is the crossing slot's low and 09:28 is inside that slot, so the only
-    way for the entry bar to breach its own stop is to tie with it. That is enough:
-    the policy closes on ``low <= stop``, so the position comes off on the first
-    bar it was ever held, and the exit and the entry carry the same stamp.
+    Only one bar is touched, and which one it is carries the whole point. The
+    replay judges the 09:27 close and stamps the admission 09:28, so 09:28 is the
+    first bar the *position* is held on -- its range prints after the fill, and it
+    is therefore allowed to be what takes the trade off. Reaching its low down to
+    the crossing slot's low makes it do exactly that.
+
+    The candle that fired the entry is 09:27, and nothing here touches it. That
+    separation is what the ENTRY_CANDLE fallback depends on: a stop drawn from the
+    triggering candle is not breached by the triggering candle, because the
+    triggering candle had already closed when the stop was drawn.
     """
     index_candles, futures_candles = _day()
     index_candles = index_candles.copy()
@@ -297,17 +303,18 @@ def _stopped_on_its_entry_bar() -> tuple[pd.DataFrame, pd.DataFrame]:
     return index_candles, futures_candles
 
 
-def test_an_exit_on_the_entry_bar_is_fed_a_minute_late_or_it_is_lost():
+def test_an_exit_on_the_first_held_bar_is_fed_a_minute_late_or_it_is_lost():
     """The two clocks, and why an outcome cannot be fed back at face value.
 
     The replay judges the candle stamped ``T`` at ``T + 1min`` and creates the
-    trade row there, but it consumes exits at the *top* of that minute. An exit
-    stamped ``T`` therefore arrives before the row exists, matches nothing, and is
-    discarded -- and the loop, seeing an entry it has already resolved, would feed
-    nothing else. The position would be held for the rest of the day on the
-    strength of a stop that had already been hit.
+    trade row there, but it consumes exits at the *top* of that minute. So the
+    earliest exit there can be -- the first held bar, carrying the entry's own
+    stamp -- arrives in the same evaluation that creates the row, before it
+    exists, and matches nothing. The loop, seeing an entry it has already
+    resolved, would feed nothing else, and the position would be held for the rest
+    of the day on the strength of a stop that had already been hit.
     """
-    frames = _stopped_on_its_entry_bar()
+    frames = _stopped_on_the_first_held_bar()
     resolution = _resolve(*frames)
     first = resolution.trades[0]
 
@@ -323,9 +330,9 @@ def test_an_exit_on_the_entry_bar_is_fed_a_minute_late_or_it_is_lost():
     assert lagged.closed_trades == 1
 
 
-def test_a_stop_out_on_the_entry_bar_still_leaves_the_day_its_re_entry():
+def test_a_stop_out_on_the_first_held_bar_still_leaves_the_day_its_re_entry():
     """Instant loss, and the day gets on with it: three trades where there was one."""
-    frames = _stopped_on_its_entry_bar()
+    frames = _stopped_on_the_first_held_bar()
     resolution = _resolve(*frames)
     derived = _replay(*frames, exit_timestamps=resolution.exit_timestamps)
 

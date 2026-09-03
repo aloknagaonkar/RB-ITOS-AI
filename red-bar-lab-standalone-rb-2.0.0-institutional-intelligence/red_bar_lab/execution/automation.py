@@ -13,7 +13,10 @@ import pandas as pd
 from red_bar_lab.execution.checkpoint import TradeCheckpointService
 from red_bar_lab.execution.option_telemetry import OptionExecutionTelemetryService
 from red_bar_lab.execution.exit_engine import PaperExitEngine
-from red_bar_lab.execution.execution_policy import resolve_execution_policy
+from red_bar_lab.execution.execution_policy import (
+    RED_BAR_V2_STRATEGY_SOURCE,
+    resolve_execution_policy,
+)
 from red_bar_lab.execution.rsi_approval_policy import (
     apply_rsi_approval_policy,
     apply_rsi_entry_limit,
@@ -194,6 +197,7 @@ class RedBarPaperAutomationService:
         allow_stale_signals: bool = False,
         candidate_recheck_seconds: int = 30,
         enable_opportunity_extension: bool = True,
+        red_bar_v2_signal_expiry_seconds: float | None = None,
         minimum_opportunity_score: float = 75.0,
         minimum_extended_candidate_score: float = 85.0,
         minimum_reward_remaining_pct: float = 40.0,
@@ -249,6 +253,15 @@ class RedBarPaperAutomationService:
         self.candidate_recheck_seconds = int(candidate_recheck_seconds)
         self.enable_opportunity_extension = bool(
             enable_opportunity_extension
+        )
+        # Defaults to the already-configured freshness window rather than a new
+        # number, so this makes the existing intent binding for V2 instead of
+        # inventing a second policy. Kept separate so it can be tuned without
+        # touching non-V2 sources.
+        self.red_bar_v2_signal_expiry_seconds = float(
+            self.max_signal_age_seconds
+            if red_bar_v2_signal_expiry_seconds is None
+            else red_bar_v2_signal_expiry_seconds
         )
         self.opportunity_engine = OpportunityIntelligenceEngine(
             minimum_opportunity_score=float(minimum_opportunity_score),
@@ -763,6 +776,87 @@ class RedBarPaperAutomationService:
 
             # RB-1.5.0: age alone never blocks an otherwise healthy opportunity.
             # ``stale_for_extension`` is retained only for audit/entry-mode labeling.
+            #
+            # Red Bar V2 is the exception, and deliberately so. Its rule table has
+            # no re-offer: an entry is taken on the completed close that qualified
+            # it, against a midpoint and a futures VWAP reading from that moment.
+            # Re-offering the same signal every cycle for the rest of the session
+            # trades a decision made hours ago on prices that have moved -- on
+            # 2026-09-03 one signal confirmed at 09:25 was still being evaluated at
+            # 15:13 (age 20,934 s), and the day's only trade was a 25-minute-old
+            # signal admitted this way, for -520. Past its expiry a V2 signal is
+            # retired and the strategy waits for the next completed close.
+            v2_signal = (
+                execution_policy.strategy_source == RED_BAR_V2_STRATEGY_SOURCE
+            )
+            v2_expired = bool(
+                v2_signal
+                and not self.allow_stale_signals
+                and age_seconds > self.red_bar_v2_signal_expiry_seconds
+            )
+            if v2_expired:
+                reason = (
+                    "RED_BAR_V2_SIGNAL_EXPIRED"
+                    f"={age_seconds:.0f}s>MAX="
+                    f"{self.red_bar_v2_signal_expiry_seconds:.0f}s"
+                )
+                self.database.expire_execution_queue_for_signal(
+                    signal_id=signal_id, reason=reason
+                )
+                diagnostic["final_decision"] = "EXPIRED"
+                diagnostic["reason"] = (
+                    f"{reason}; ACTION=AWAIT_NEW_COMPLETED_CLOSE"
+                )
+                self.database.insert_paper_signal_diagnostic(diagnostic)
+                self._record_state(
+                    signal_id=signal_id,
+                    state="RED_BAR_V2_SIGNAL_EXPIRED",
+                    detail=(
+                        f"{reason}; entry_mode_retired=OPPORTUNITY_EXTENSION; "
+                        "action=AWAIT_NEW_COMPLETED_CLOSE"
+                    ),
+                    score=float(age_seconds),
+                )
+                skipped += 1
+                continue
+
+            # Gate 5 of the agreed entry table, and the last of the six that had
+            # no live enforcement: an entry whose invalidation level cannot be
+            # priced, or whose risk falls outside the 8-60 point band, is not a
+            # tradable entry. The verdict is not computed here -- it is read off
+            # the signal row, where the strategy froze it at the qualifying
+            # minute. Recomputing it now would price the stop from 5-minute bars
+            # that have since finished, which is exactly the lookahead the
+            # research path spent a commit removing.
+            #
+            # Only a strategy refusal blocks. A candle outage stamps
+            # RISK_PLAN_UNAVAILABLE with tradable=1, and an unstamped row -- a
+            # signal published before this column existed, or from a non-V2
+            # source -- is left alone rather than blocked on absent evidence.
+            risk_tradable = signal.get("risk_plan_tradable")
+            if v2_signal and risk_tradable is not None and not int(risk_tradable):
+                risk_code = str(signal.get("risk_plan_code") or "RISK_PLAN_REJECTED")
+                risk_detail = str(signal.get("risk_plan_detail") or "")
+                reason = f"RED_BAR_V2_RISK_PLAN_REJECTED[{risk_code}]"
+                self.database.expire_execution_queue_for_signal(
+                    signal_id=signal_id, reason=reason
+                )
+                diagnostic["final_decision"] = "SKIPPED"
+                diagnostic["reason"] = f"{reason}; {risk_detail}"
+                self.database.insert_paper_signal_diagnostic(diagnostic)
+                self._record_state(
+                    signal_id=signal_id,
+                    state="RED_BAR_V2_RISK_PLAN_REJECTED",
+                    detail=(
+                        f"{reason}; {risk_detail}; "
+                        f"stop={signal.get('risk_stop_price')}; "
+                        f"risk_points={signal.get('risk_points')}; "
+                        f"trigger={signal.get('risk_stop_trigger')}"
+                    ),
+                    score=float(signal.get("risk_points") or 0.0),
+                )
+                skipped += 1
+                continue
 
             previous_events = self.database.read_execution_state_events(
                 signal_id=signal_id, limit=1
@@ -1167,6 +1261,7 @@ class RedBarPaperAutomationService:
                         historical_shadow=historical_shadow,
                         stop_loss_pct=execution_policy.stop_loss_pct,
                         target_pct=policy_target_pct,
+                        strategy_source=execution_policy.strategy_source,
                     )
                     committee = apply_rsi_approval_policy(
                         committee,

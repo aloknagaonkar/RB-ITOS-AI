@@ -1448,11 +1448,13 @@ def _render_paper_exit_engine_panel(
 
     st.markdown("### Paper Exit Engine")
     st.caption(
-        "Operational exit authority: premium protection, completed NIFTY "
-        "5-minute EMA10 trend exit, EOD, NIFTY thesis, opposite Red Bar "
-        "and option technical health. Fixed profit targets are informational "
-        "only and have no exit authority. PCR/OI/Greeks remain SHADOW EXIT "
-        "evidence only."
+        "Operational exit authority: earned premium protection (breakeven, "
+        "profit lock, trail), EOD, and -- for Red Bar V2 -- a completed "
+        "1-minute close against the governing level. Fixed profit targets are "
+        "informational only and have no exit authority. EMA10, NIFTY thesis, "
+        "opposite Red Bar, option technical health and PCR/OI/Greeks are "
+        "evidence: they score health and explain the row, and on a Red Bar V2 "
+        "row they cannot close it."
     )
 
     entry = float(position.get("entry_price") or 0.0)

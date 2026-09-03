@@ -54,6 +54,7 @@ from .risk import (
     StopTriggerCandle,
     TriggerResolution,
     build_risk_plan,
+    entry_candle_stop,
     find_stop_trigger,
 )
 from .serialization import (
@@ -107,6 +108,7 @@ __all__ = [
     "build_red_bar_v2_idempotency_key",
     "build_red_bar_v2_signal_id",
     "build_risk_plan",
+    "entry_candle_stop",
     "find_stop_trigger",
     "open_position",
     "red_bar_v2_bundle_from_dict",

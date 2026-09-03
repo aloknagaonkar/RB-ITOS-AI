@@ -19,6 +19,7 @@ from red_bar_lab.domain.red_bar_v2 import (
     TriggerResolution,
     advance,
     build_risk_plan,
+    entry_candle_stop,
     find_stop_trigger,
     open_position,
 )
@@ -166,6 +167,105 @@ def test_untradable_risk_is_rejected_rather_than_sized(stop, rejection):
     with pytest.raises(RiskPlanRejected) as caught:
         _plan(entry=100.0, stop=stop)
     assert caught.value.rejection is rejection
+
+
+# The fallback stop, and the one thing it must not do. An admission is stamped a
+# minute after the candle whose close produced it -- the replay judges candle T
+# once T has closed, at T+1min -- so the bar carrying the entry stamp is the
+# first bar the position is *held*, and its range has not printed yet when the
+# stop is priced. Reading it would set the stop at an extreme that same bar has
+# already made, which stops every fallback-priced entry on its first minute for
+# exactly -1R.
+_TRIGGERING = _bar(9, 30, 100.0, 101.0, 90.0, 100.0)
+_FIRST_HELD = _bar(9, 31, 100.0, 102.0, 95.0, 101.0)
+_ENTRY_STAMP = _ts(9, 31)
+
+
+def test_the_fallback_stop_is_read_off_the_candle_that_fired_the_entry():
+    trigger = entry_candle_stop(
+        index_bars_1m=[_bar(9, 29, 99.0, 100.5, 98.0, 100.0), _TRIGGERING, _FIRST_HELD],
+        entry_timestamp=_ENTRY_STAMP,
+    )
+    assert trigger.trigger is StopTrigger.ENTRY_CANDLE
+    assert trigger.timestamp == _ts(9, 30)
+    assert trigger.index_low == pytest.approx(90.0)
+    assert trigger.index_low != pytest.approx(_FIRST_HELD.low)
+
+
+def test_a_fallback_priced_entry_is_not_stopped_on_the_bar_it_is_first_held():
+    """The regression in one assertion: a fallback plan gets to live past 09:31.
+
+    The first held bar pulls back to 95.0 and the position survives, because the
+    stop belongs to 09:30 and sits at 90.0. Priced off 09:31 instead the stop
+    would be 95.0 -- that bar's own low -- and ``low <= stop`` would take the
+    trade out at exactly -1R on the first minute it was held, every single time,
+    without price having done anything.
+    """
+    trigger = entry_candle_stop(
+        index_bars_1m=[_TRIGGERING, _FIRST_HELD],
+        entry_timestamp=_ENTRY_STAMP,
+    )
+    plan = build_risk_plan(
+        direction=Direction.BULLISH,
+        entry_timestamp=_ENTRY_STAMP,
+        entry_price=_TRIGGERING.close,
+        trigger_candle=trigger,
+    )
+    assert plan.stop_price == pytest.approx(90.0)
+    assert plan.risk_points == pytest.approx(10.0)
+
+    position, outcome = advance(open_position(plan), _FIRST_HELD)
+    assert outcome is None
+    assert position.bars_held == 1
+
+
+def test_the_fallback_stop_steps_back_over_a_gap_in_the_series():
+    """A missing minute costs the plan precision, never the discipline.
+
+    Selecting the last candle *before* the stamp rather than subtracting a fixed
+    minute is what makes this work: with 09:30 absent from the feed the stop comes
+    from 09:29, and never from the bar the position is being held on.
+    """
+    trigger = entry_candle_stop(
+        index_bars_1m=[_bar(9, 29, 99.0, 100.5, 92.0, 100.0), _FIRST_HELD],
+        entry_timestamp=_ENTRY_STAMP,
+    )
+    assert trigger.timestamp == _ts(9, 29)
+    assert trigger.index_low == pytest.approx(92.0)
+
+
+def test_a_bearish_fallback_takes_the_triggering_candle_high():
+    trigger = entry_candle_stop(
+        index_bars_1m=[_TRIGGERING, _FIRST_HELD],
+        entry_timestamp=_ENTRY_STAMP,
+    )
+    plan = build_risk_plan(
+        direction=Direction.BEARISH,
+        entry_timestamp=_ENTRY_STAMP,
+        entry_price=90.0,
+        trigger_candle=trigger,
+    )
+    assert plan.stop_price == pytest.approx(101.0)
+    assert plan.risk_points == pytest.approx(11.0)
+
+
+def test_nothing_before_the_entry_stamp_leaves_the_entry_unpriced():
+    """A data fault, and it is reported as one rather than guessed around."""
+    assert entry_candle_stop(
+        index_bars_1m=[_FIRST_HELD, _bar(9, 32, 101.0, 103.0, 100.0, 102.0)],
+        entry_timestamp=_ENTRY_STAMP,
+    ) is None
+
+    with pytest.raises(RiskPlanRejected) as caught:
+        build_risk_plan(
+            direction=Direction.BULLISH,
+            entry_timestamp=_ENTRY_STAMP,
+            entry_price=100.0,
+            trigger_candle=entry_candle_stop(
+                index_bars_1m=[_FIRST_HELD], entry_timestamp=_ENTRY_STAMP
+            ),
+        )
+    assert caught.value.rejection is RiskPlanRejection.NO_TRIGGER_CANDLE
 
 
 MIDPOINT = 100.0

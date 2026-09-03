@@ -23,6 +23,11 @@ from red_bar_lab.services.red_bar_v2_derived_exits import resolve_next_derived_e
 from red_bar_lab.services.red_bar_v2_futures_replay_service import (
     run_monitored_red_bar_v2_futures_replay,
 )
+from red_bar_lab.services.red_bar_v2_live_risk_plan import (
+    RISK_PLAN_UNAVAILABLE,
+    LiveRiskPlanVerdict,
+    evaluate_live_red_bar_v2_risk_plan,
+)
 from red_bar_lab.services.red_bar_v2_live_shadow import (
     build_latest_live_correlation_id,
     submit_latest_live_canonical_shadow,
@@ -478,6 +483,45 @@ def _restore_live_candidate_when_replay_only_blocked(
     )
 
 
+def _live_risk_plan_verdict(
+    monitored: Any,
+    *,
+    index_candles: pd.DataFrame,
+    futures_candles: pd.DataFrame,
+) -> LiveRiskPlanVerdict | None:
+    """Price the stop for the last *allowed* admission, or None if there is none.
+
+    The last allowed admission -- not the last candidate. A refused REVERSAL
+    fires an admission event of its own, and pricing a stop for an entry the
+    strategy declined would put a risk verdict on the panel for a trade that
+    cannot exist, then hand that verdict to the bridge as if it belonged to the
+    signal being published.
+    """
+    events = list(getattr(getattr(monitored, "replay", None), "events", ()) or ())
+    allowed = [
+        event
+        for event in events
+        if str(getattr(event, "event_type", "")) == "CANDIDATE_ADMISSION"
+        and getattr(event, "candidate_allowed", None) is True
+    ]
+    if not allowed:
+        return None
+    try:
+        return evaluate_live_red_bar_v2_risk_plan(
+            event=allowed[-1],
+            index_candles=index_candles,
+            futures_candles=futures_candles,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        # A pricing fault must not take the cycle down, and must not silently
+        # look like a refusal either: RISK_PLAN_UNAVAILABLE stays tradable.
+        return LiveRiskPlanVerdict(
+            tradable=True,
+            code=RISK_PLAN_UNAVAILABLE,
+            detail=f"risk plan raised {type(exc).__name__}",
+        )
+
+
 def evaluate_current_session_red_bar_v2(
     *,
     upstox: Any,
@@ -810,6 +854,26 @@ def evaluate_current_session_red_bar_v2(
             monitored,
             active_v2_order_exists=active_v2_order_exists,
         )
+        # Gate 5, decided here because here is the only place it can be decided
+        # honestly: the stop comes off 5-minute bars truncated at the qualifying
+        # minute, and by the time the order path sees this signal those bars have
+        # finished. Computed against the last *allowed* admission -- the entry a
+        # position would be taken on -- and left absent when there is none.
+        risk_verdict = _live_risk_plan_verdict(
+            monitored,
+            index_candles=index_candles,
+            futures_candles=futures_candles,
+        )
+        record_strategy_subcheck(
+            database,
+            run_id=run_id,
+            step_name="entry_risk_plan",
+            artifacts=(
+                risk_verdict.as_dict()
+                if risk_verdict is not None
+                else {"risk_plan_code": "NO_ADMITTED_ENTRY"}
+            ),
+        )
         live = _live_market_snapshot_fields(
             index_candles=index_candles,
             futures_candles=futures_candles,
@@ -858,6 +922,39 @@ def evaluate_current_session_red_bar_v2(
                 futures_instrument_key=futures_key,
                 futures_symbol=(futures_symbol or snapshot.futures_symbol),
                 futures_expiry=(futures_expiry or snapshot.futures_expiry),
+                # Absent verdict leaves the previous cycle's numbers in place
+                # rather than blanking them: the admission they describe has not
+                # changed, and a blank would read as "no stop" on the panel.
+                risk_plan_tradable=(
+                    snapshot.risk_plan_tradable
+                    if risk_verdict is None
+                    else risk_verdict.tradable
+                ),
+                risk_plan_code=(
+                    snapshot.risk_plan_code
+                    if risk_verdict is None
+                    else risk_verdict.code
+                ),
+                risk_plan_detail=(
+                    snapshot.risk_plan_detail
+                    if risk_verdict is None
+                    else risk_verdict.detail
+                ),
+                risk_stop_price=(
+                    snapshot.risk_stop_price
+                    if risk_verdict is None
+                    else risk_verdict.stop_price
+                ),
+                risk_points=(
+                    snapshot.risk_points
+                    if risk_verdict is None
+                    else risk_verdict.risk_points
+                ),
+                risk_stop_trigger=(
+                    snapshot.risk_stop_trigger
+                    if risk_verdict is None
+                    else risk_verdict.stop_trigger
+                ),
                 recorded_at=datetime.now().astimezone().isoformat(),
             ),
             artifacts_root=settings.artifacts_root,

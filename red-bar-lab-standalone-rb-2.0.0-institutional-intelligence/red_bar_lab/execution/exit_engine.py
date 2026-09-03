@@ -131,11 +131,23 @@ class PaperExitEngine:
     """CE/PE paper exit decision engine.
 
     Operational exit authority is deterministic. The fixed profit target is
-    informational-only. A Red Bar V2 row's initial loss authority is the
-    structural exit -- a completed 1-minute close against the governing level,
-    supplied by the caller as ``structural_exit`` -- and the configured premium
-    stop stays excluded for those rows so the two cannot both fire. Earned
-    premium protection remains here. OI/PCR/Greeks remain shadow.
+    informational-only. OI/PCR/Greeks remain shadow.
+
+    A Red Bar V2 row has exactly three exits, in this order of authority:
+
+    1. the earned premium stop -- breakeven at +5%, profit lock at +8%, trail
+       at +12% back to 5% below peak -- all of it protection *earned* from a
+       favourable premium move, never an entry-time premium stop;
+    2. EOD, supplied by the caller as ``eod_due``;
+    3. the structural exit -- a completed 1-minute close against the governing
+       level, supplied by the caller as ``structural_exit``.
+
+    The configured premium stop stays excluded for those rows, because (3) is
+    their initial-loss authority and the two must not both fire. Every other
+    signal here -- EMA10, the confirmation-extreme thesis, the opposite red
+    bar, the option VWAP/EMA/momentum trio, volume, and the health score --
+    remains computed and reported for a V2 row but cannot close it. Other
+    strategies keep all of them.
     """
 
     def __init__(
@@ -267,6 +279,28 @@ class PaperExitEngine:
         red_bar_v2_external_initial_exit = (
             strategy_source == RED_BAR_V2_STRATEGY_SOURCE
         )
+        # A Red Bar V2 row's exits are exactly three: the earned premium stop,
+        # the session flat, and a completed 1-minute close against the governing
+        # level. Everything below that could otherwise close a position -- the
+        # EMA10 trend loss, the confirmation-extreme "NIFTY thesis", the opposite
+        # red bar, the option VWAP/EMA/momentum trio, and the health score -- is
+        # an option-premium or correlation proxy for a thesis the structural exit
+        # now states directly. They keep scoring health and keep explaining
+        # themselves in ``reasons``; they no longer close anything, and they no
+        # longer let a panel advise a close the engine would refuse to take.
+        #
+        # Gating on strategy identity rather than on ``exit_mode`` is deliberate.
+        # ``resolve_execution_policy`` happens to return the premium-protection
+        # mode for every source today, so the live path already shadowed these
+        # proxies by accident; research (``historical_decision_replay``) and the
+        # read-only panels pass no mode at all and did not. V2's exit set is a
+        # property of V2, not of a mode string that could be widened later.
+        #
+        # Non-V2 rows are untouched: DIRECTIONAL_REGIME_INTELLIGENCE shares this
+        # engine and still owns every proxy below.
+        proxies_may_close = not (
+            premium_protection_only or red_bar_v2_external_initial_exit
+        )
         if red_bar_v2_external_initial_exit and not (
             bool(position.get("breakeven_armed"))
             or bool(position.get("trailing_active"))
@@ -384,16 +418,16 @@ class PaperExitEngine:
             hard_exit_reason = "EOD_EXIT"
         elif structural_breach:
             hard_exit_reason = STRUCTURAL_EXIT_REASON
-        elif not premium_protection_only and ema10_exit_reason:
+        elif proxies_may_close and ema10_exit_reason:
             hard_exit_reason = ema10_exit_reason
-        elif not premium_protection_only and nifty_thesis == "INVALID":
+        elif proxies_may_close and nifty_thesis == "INVALID":
             hard_exit_reason = "NIFTY_INVALIDATION"
-        elif not premium_protection_only and opposite_red_bar_confirmed:
+        elif proxies_may_close and opposite_red_bar_confirmed:
             hard_exit_reason = "OPPOSITE_RED_BAR"
-        elif not premium_protection_only and technical_failures >= 2:
+        elif proxies_may_close and technical_failures >= 2:
             hard_exit_reason = "OPTION_TECHNICAL_BREAKDOWN"
 
-        if premium_protection_only:
+        if not proxies_may_close:
             shadow_warnings = []
             if ema10_exit_reason:
                 shadow_warnings.append(ema10_exit_reason)
@@ -443,15 +477,19 @@ class PaperExitEngine:
         elif breakeven_armed:
             action = "HOLD / PROTECT"
             reasons.append("Breakeven protection armed.")
-        elif health < 50 and not premium_protection_only:
+        elif health < 50 and proxies_may_close:
             action = "EXIT"
             reasons.append("Trade health below 50.")
-        elif health < 70 and not premium_protection_only:
+        elif health < 70 and proxies_may_close:
             action = "TIGHTEN"
             reasons.append("Trade health weakening.")
-        elif premium_protection_only:
+        elif not proxies_may_close:
             action = "HOLD"
-            reasons.append("Premium-protection exit remains authoritative.")
+            reasons.append(
+                "Structural and premium-protection exits remain authoritative."
+                if red_bar_v2_external_initial_exit
+                else "Premium-protection exit remains authoritative."
+            )
         else:
             action = "HOLD"
             reasons.append("No operational exit trigger.")
@@ -484,11 +522,13 @@ class PaperExitEngine:
                 f"{structural_exit.governing_reference or 'governing'} midpoint "
                 f"{structural_exit.governing_midpoint:,.2f}"
             )
-        if ema10_trend in {"VALID", "UNKNOWN"}:
+        if proxies_may_close and ema10_trend in {"VALID", "UNKNOWN"}:
             trigger_parts.append("completed 5m EMA10 trend loss")
         next_trigger = (
             " or ".join(trigger_parts)
-            if trigger_parts else "Monitor EMA10 / health"
+            if trigger_parts
+            else "Monitor EMA10 / health" if proxies_may_close
+            else "EOD session flat"
         )
 
         return ExitHealth(

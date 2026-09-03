@@ -38,6 +38,29 @@ class RedBarV2UISnapshot:
     admission_timestamp: str | None = None
     admission_code: str | None = None
     admission_reason: str | None = None
+    # The level the *admitted entry* was judged against, frozen at that moment.
+    # Distinct from the ``governing_*`` block below in both time and meaning: this
+    # is the one level that can invalidate this position, and for a deputy-born
+    # (WORKING) entry it is the deputy's midpoint -- a level the live block can no
+    # longer name, because the replay retires a deputy the instant it produces an
+    # entry. ``admission_midpoint`` therefore does not track price; it stays put
+    # until the next admission replaces it.
+    admission_entry_type: str | None = None
+    admission_reference: str | None = None
+    admission_midpoint: float | None = None
+    # Gate 5 of the entry table, decided at admission and frozen here: the stop
+    # is priced from 5-minute bars truncated at the qualifying minute, so it can
+    # only be computed then. ``risk_plan_tradable`` is False only when the plan
+    # was refused on a strategy ground (no priceable stop, stop on the wrong
+    # side, risk outside the band); a candle outage reports
+    # RISK_PLAN_UNAVAILABLE and stays True, because a feed problem is not a
+    # verdict about this trade.
+    risk_plan_tradable: bool | None = None
+    risk_plan_code: str | None = None
+    risk_plan_detail: str | None = None
+    risk_stop_price: float | None = None
+    risk_points: float | None = None
+    risk_stop_trigger: str | None = None
     trend_strength: str | None = None
     provisional_confirmed_state: str = "NOT_APPLICABLE"
     midpoint_confirmation: str = "WAITING"
@@ -118,6 +141,19 @@ def build_red_bar_v2_ui_snapshot_from_replay(
     latest_admission = admissions[-1] if admissions else None
     latest_upgrade = upgrades[-1] if upgrades else None
     admission_details = _details(latest_admission)
+    # The last *allowed* admission, which is a different event from the last
+    # candidate: a blocked REVERSAL fires an admission event of its own, carrying
+    # its own reference, while the position that is actually open was taken on an
+    # earlier one. Everything else in the ``admission_*`` block describes the last
+    # candidate on purpose -- the panel has to be able to say "blocked, and why" --
+    # but the level a live row is answerable to must not move when a candidate the
+    # strategy refused happens to be judged against a different reference.
+    entries = [
+        event for event in admissions
+        if getattr(event, "candidate_allowed", None) is True
+    ]
+    entry_details = _details(entries[-1] if entries else None)
+    admitted_entry_type = str(entry_details.get("entry_type") or "").upper()
     admission_conditions = admission_details.get("conditions")
     if not isinstance(admission_conditions, Mapping):
         admission_conditions = {}
@@ -182,6 +218,16 @@ def build_red_bar_v2_ui_snapshot_from_replay(
         admission_timestamp=_iso(getattr(latest_admission, "timestamp", None)),
         admission_code=getattr(latest_admission, "admission_code", None),
         admission_reason=admission_details.get("admission_reason"),
+        admission_entry_type=admitted_entry_type or None,
+        admission_reference=(
+            str(entry_details.get("governing_reference"))
+            if entry_details.get("governing_reference")
+            else None
+        ),
+        # ``reference_midpoint`` in the admission evidence is built from the
+        # reference the decision was actually judged against, so on the deputy's
+        # path this is the deputy's midpoint and not the red bar's.
+        admission_midpoint=_float(entry_details.get("reference_midpoint")),
         trend_strength=str(trend_strength) if trend_strength else None,
         provisional_confirmed_state=provisional_confirmed,
         midpoint_confirmation=midpoint_confirmation,

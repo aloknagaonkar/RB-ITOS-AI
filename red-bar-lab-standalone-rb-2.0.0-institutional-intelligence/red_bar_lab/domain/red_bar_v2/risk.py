@@ -53,6 +53,11 @@ class StopTrigger(StrEnum):
 
     MIDPOINT_CROSS = "MIDPOINT_CROSS"
     FUTURES_VWAP_CROSS = "FUTURES_VWAP_CROSS"
+    # No completed 5-minute candle crossed either level, so the stop comes from
+    # the one-minute candle that fired the entry. Named separately because the
+    # distinction is the difference between a stop the setup earned and a stop of
+    # last resort, and every R-multiple downstream should be readable as such.
+    ENTRY_CANDLE = "ENTRY_CANDLE"
 
 
 class TriggerResolution(StrEnum):
@@ -97,7 +102,12 @@ class Bar:
 
 @dataclass(frozen=True)
 class StopTriggerCandle:
-    """The 5-minute candle whose index high/low becomes the initial stop."""
+    """The candle whose index high/low becomes the initial stop.
+
+    Normally the 5-minute candle that crossed the reference level. When no such
+    candle exists it is the one-minute candle that fired the entry -- see
+    ``entry_candle_stop`` -- and ``trigger`` says which.
+    """
 
     trigger: StopTrigger
     timestamp: datetime
@@ -211,6 +221,59 @@ def find_stop_trigger(
     if direction is Direction.BULLISH:
         return min(candidates, key=lambda candle: candle.index_low)
     return max(candidates, key=lambda candle: candle.index_high)
+
+
+def entry_candle_stop(
+    *,
+    index_bars_1m: Sequence[Bar],
+    entry_timestamp: datetime,
+) -> StopTriggerCandle | None:
+    """The stop of last resort: the one-minute candle that fired the entry.
+
+    ``find_stop_trigger`` returns None whenever the setup completed without a
+    *completed* 5-minute candle closing across the midpoint or the futures VWAP.
+    That is common rather than exceptional -- on 2026-09-03 it was 5 of 8
+    admissions -- and the old behaviour was to reject the entry outright, so the
+    strategy's own admitted signals went unsized and unmeasured.
+
+    The entry fires on a completed one-minute close, and that candle is the one
+    that produced the decision. Its extreme is therefore the narrowest level
+    whose loss means the decision was wrong, it is always available, and the risk
+    number stays the strategy's own rather than borrowed from a candle that had
+    nothing to do with the entry.
+
+    ``entry_timestamp`` is the stamp the *decision* carries, which is one minute
+    after the candle that produced it: the replay evaluates candle T once T has
+    closed, at T+1min, and stamps the admission with the evaluation time. So the
+    triggering candle is the last one to close strictly *before* that stamp --
+    not the bar carrying it, which is the first bar the position is held and has
+    not printed yet when the stop is priced. Reading that bar instead set the
+    stop at an extreme the very same bar had already made, turning every
+    fallback-priced entry into an instant -1R.
+
+    Selecting the last bar before the stamp rather than subtracting a fixed
+    minute keeps this correct across a gap in the series, and keeps the callers
+    from having to know the replay's clock.
+
+    Returns None only when no candle precedes the entry stamp, which is a data
+    fault rather than a strategy verdict; ``build_risk_plan`` then rejects with
+    NO_TRIGGER_CANDLE as before.
+    """
+    triggering: Bar | None = None
+    for bar in index_bars_1m:
+        if bar.timestamp >= entry_timestamp:
+            continue
+        if triggering is None or bar.timestamp > triggering.timestamp:
+            triggering = bar
+    if triggering is None:
+        return None
+    return StopTriggerCandle(
+        trigger=StopTrigger.ENTRY_CANDLE,
+        timestamp=triggering.timestamp,
+        index_high=triggering.high,
+        index_low=triggering.low,
+    )
+
 
 @dataclass(frozen=True)
 class RiskPlan:
