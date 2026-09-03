@@ -12,7 +12,7 @@ import signal
 import subprocess
 import sys
 from threading import Event
-from time import monotonic
+from time import monotonic, sleep
 from typing import Callable, Mapping, Protocol
 
 from red_bar_lab.config import RedBarSettings
@@ -161,11 +161,28 @@ def _safe_reason(value: object) -> str:
     return (cleaned or "UNKNOWN")[:64]
 
 
+_REPLACE_ATTEMPTS = 5
+_REPLACE_BACKOFF_SECONDS = 0.02
+
+
 def _atomic_json(path: Path, payload: Mapping[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + f".{os.getpid()}.tmp")
     temporary.write_text(json.dumps(payload, sort_keys=True, indent=2), encoding="utf-8")
-    os.replace(temporary, path)
+    # On Windows the rename fails outright while anything else holds the
+    # destination open -- an antivirus scan of the file we just published is
+    # enough, and the supervisor rewrites this path on every heartbeat. The
+    # condition clears in milliseconds, so retry rather than let a scanner
+    # take down the process whose job is to stay up.
+    for attempt in range(_REPLACE_ATTEMPTS):
+        try:
+            os.replace(temporary, path)
+            return
+        except PermissionError:
+            if attempt == _REPLACE_ATTEMPTS - 1:
+                temporary.unlink(missing_ok=True)
+                raise
+            sleep(_REPLACE_BACKOFF_SECONDS * (attempt + 1))
 
 
 def read_supervisor_state(path: Path) -> dict[str, object] | None:
