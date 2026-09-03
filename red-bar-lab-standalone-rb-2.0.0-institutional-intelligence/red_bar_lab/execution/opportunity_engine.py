@@ -3,7 +3,17 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from red_bar_lab.execution.execution_policy import is_rsi_primary
+from red_bar_lab.execution.execution_policy import (
+    RED_BAR_V2_STRATEGY_SOURCE,
+    execution_strategy_source,
+    is_rsi_primary,
+)
+
+# One `|`-separated token carrying every gate that was evaluated, found failing,
+# and deliberately given no authority over this entry. Downstream readers must
+# treat it as evidence: the committee matches whole tokens so it never sees the
+# codes inside, and the EMA10 subclass carries the line forward untouched.
+SHADOW_ENTRY_WARNINGS_PREFIX = "SHADOW_ENTRY_WARNINGS="
 
 
 def _num(value: Any, default: float = 0.0) -> float:
@@ -150,6 +160,7 @@ class OpportunityIntelligenceEngine:
         signal_age_seconds: float,
         opposite_red_bar_confirmed: bool,
         freshness_seconds: float = 180.0,
+        structure_close: float | None = None,
     ) -> OpportunityEvaluation:
         direction = str(signal.get("direction") or "").upper()
         signal_id = str(signal.get("signal_id") or "")
@@ -185,12 +196,22 @@ class OpportunityIntelligenceEngine:
             _num(signal.get("underlying_entry"), spot_price),
         )
 
+        # Judge structure on a completed close when the caller can supply one.
+        # Live spot is a tick mid-candle: it re-tests a finished setup against a
+        # price that has not closed anywhere, so the same signal flips valid and
+        # invalid between cycles. Falls back to spot when no completed close is
+        # available, which keeps every existing caller's behaviour unchanged.
+        structure_price = (
+            float(spot_price)
+            if structure_close is None
+            else float(structure_close)
+        )
         structure_valid = (
             True
             if rsi_primary
             else self._structure_valid(
                 direction=direction,
-                spot_price=float(spot_price),
+                spot_price=structure_price,
                 confirmation_high=high,
                 confirmation_low=low,
             )
@@ -246,21 +267,42 @@ class OpportunityIntelligenceEngine:
         )
 
         blockers: list[str] = []
+        shadow: list[str] = []
+        # Red Bar V2 owns a structure test of its own: a *completed* close against
+        # the governing midpoint, applied at admission. The two gates below judge
+        # *live spot* against the confirmation candle's band, which is a different
+        # and contradictory test -- on a falling day it fails every CE and passes
+        # every PE regardless of the strategy's own verdict (0 of 50 bullish
+        # evaluations passed it on 2026-09-03). For V2 rows they are recorded and
+        # scored later. Every other source keeps them as blockers.
+        v2_primary = (
+            execution_strategy_source(signal) == RED_BAR_V2_STRATEGY_SOURCE
+        )
+        structure_gates: list[str] = []
         if not rsi_primary and not structure_valid:
-            blockers.append("STRUCTURE_INVALID")
+            structure_gates.append("STRUCTURE_INVALID")
         if not rsi_primary and effective_opposite_red_bar:
-            blockers.append("OPPOSITE_RED_BAR")
+            structure_gates.append("OPPOSITE_RED_BAR")
+        (shadow if v2_primary else blockers).extend(structure_gates)
         # REWARD_CONSUMED intentionally removed from execution blockers.
+        # SPREAD and LIQUIDITY stay authoritative for every source: an entry with
+        # no tradable contract is not an entry.
         if spread_score <= 0:
             blockers.append("SPREAD")
         if liquidity_score <= 0:
             blockers.append("LIQUIDITY")
         if opportunity_score < self.minimum_opportunity_score:
-            blockers.append(
+            # A composite of eight sub-scores, two of which are dead weight.
+            (shadow if v2_primary else blockers).append(
                 f"OPPORTUNITY_HEALTH={opportunity_score:.2f}<MIN={self.minimum_opportunity_score:.2f}"
             )
 
         eligible = not blockers
+        shadow_line = (
+            SHADOW_ENTRY_WARNINGS_PREFIX + ",".join(dict.fromkeys(shadow))
+            if shadow
+            else ""
+        )
         decision = f"BUY {candidate.contract.option_type}" if eligible else "SKIP"
         reason = (
             "RSI_ENTRY_POLICY_PASS | EMA_RED_BAR_DRI_INFORMATIONAL_ONLY"
@@ -269,6 +311,8 @@ class OpportunityIntelligenceEngine:
             if eligible
             else " | ".join(blockers)
         )
+        if shadow_line:
+            reason = f"{reason} | {shadow_line}"
 
         return OpportunityEvaluation(
             signal_id=signal_id,

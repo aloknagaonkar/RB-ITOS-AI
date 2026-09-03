@@ -1167,6 +1167,7 @@ class RedBarPaperAutomationService:
                         historical_shadow=historical_shadow,
                         stop_loss_pct=execution_policy.stop_loss_pct,
                         target_pct=policy_target_pct,
+                        strategy_source=execution_policy.strategy_source,
                     )
                     committee = apply_rsi_approval_policy(
                         committee,
