@@ -31,7 +31,9 @@ from red_bar_lab.services.red_bar_v2_historical_replay import (
 )
 from red_bar_lab.strategy.red_bar_v2 import (
     RedBarV2DirectionDecision,
+    RedBarV2Reference,
     RedBarV2State,
+    annotate_reference_vwap_position,
     build_red_bar_v2_reference,
     evaluate_midpoint_upgrade,
 )
@@ -77,6 +79,7 @@ def replay_red_bar_v2_day_with_futures_vwap(
 
     # Observational rule-state accumulators (no effect on strategy logic).
     rule_reference: dict[str, object] | None = None
+    annotated_reference: RedBarV2Reference | None = None
     initial_evaluations = 0
     initial_last_evaluated: str | None = None
     initial_last_result: str | None = None
@@ -88,8 +91,9 @@ def replay_red_bar_v2_day_with_futures_vwap(
     reversal_detections = 0
     reversal_last_at: str | None = None
     reversal_last_direction: str | None = None
-    reversal_last_aligned: bool | None = None
-    mid_session_tracker: dict[str, object] = {"latest": None, "blocked": 0}
+    # The grade, not the midpoint flag. Every admitted reversal now clears the
+    # midpoint, so that flag can no longer tell CONFIRMED from PROVISIONAL.
+    reversal_last_strength: str | None = None
     upgrade_count = 0
     upgrade_last_at: str | None = None
     upgrade_last_direction: str | None = None
@@ -108,22 +112,6 @@ def replay_red_bar_v2_day_with_futures_vwap(
     last_block_reason: str | None = None
     last_block_at: str | None = None
     last_evaluation_iso: str | None = None
-
-    def _track_mid_session(
-        decision: RedBarV2DirectionDecision, evaluation_time: pd.Timestamp
-    ) -> None:
-        if not getattr(decision, "mid_session_active", False):
-            return
-        mid_session_tracker["latest"] = {
-            "active": True,
-            "passed": decision.mid_session_passed,
-            "reason": decision.mid_session_reason,
-            "evaluated_at": evaluation_time.isoformat(),
-        }
-        if decision.mid_session_passed is False:
-            mid_session_tracker["blocked"] = int(
-                mid_session_tracker.get("blocked", 0)
-            ) + 1
 
     for candle_timestamp in frame.index:
         evaluation_time = pd.Timestamp(candle_timestamp) + pd.Timedelta(minutes=1)
@@ -162,13 +150,24 @@ def replay_red_bar_v2_day_with_futures_vwap(
                 reentry_last_vwap_confirmed = None
             exit_index += 1
 
-        reference = build_red_bar_v2_reference(
-            frame,
-            instrument_key=instrument_key,
-            evaluation_time=evaluation_time,
-        )
-        if reference is None:
-            continue
+        if annotated_reference is None:
+            reference = build_red_bar_v2_reference(
+                frame,
+                instrument_key=instrument_key,
+                evaluation_time=evaluation_time,
+            )
+            if reference is None:
+                continue
+            # Attach the informational futures-VWAP position of the red bar
+            # itself. `build_red_bar_v2_reference` is deterministic across the
+            # session -- it always returns the first red 5m bar at or after
+            # 09:20, and completing more candles cannot change an earlier row --
+            # so annotating once and reusing is equivalent to recomputing on
+            # every candle, minus a session-VWAP pass per candle.
+            annotated_reference = annotate_reference_vwap_position(
+                reference, futures_frame
+            )
+        reference = annotated_reference
         if rule_reference is None:
             rule_reference = {
                 "timestamp": reference.reference_timestamp.isoformat(),
@@ -177,6 +176,16 @@ def replay_red_bar_v2_day_with_futures_vwap(
                 "low": reference.reference_low,
                 "close": reference.reference_close,
                 "midpoint": reference.midpoint,
+                # Informational: gates no decision, see
+                # `annotate_reference_vwap_position`.
+                "vwap_value": reference.reference_vwap_value,
+                "vwap_comparison_price": reference.reference_vwap_comparison_price,
+                "vwap_position": reference.reference_vwap_position,
+                "vwap_timestamp": (
+                    reference.reference_vwap_timestamp.isoformat()
+                    if reference.reference_vwap_timestamp is not None
+                    else None
+                ),
             }
 
         trade_state = observe_trade_state(trade_rows, instrument_key=instrument_key)
@@ -234,7 +243,6 @@ def replay_red_bar_v2_day_with_futures_vwap(
                         reentry_last_outcome_at = evaluation_time.isoformat()
                         reentry_last_vwap_confirmed = True
                         reentry_last_direction = decision.direction
-                        _track_mid_session(decision, evaluation_time)
                         # Re-entry validation: re-entry allowed.
                         if database is not None:
                             try:
@@ -323,7 +331,6 @@ def replay_red_bar_v2_day_with_futures_vwap(
             initial_last_evaluated = evaluation_time.isoformat()
             initial_last_result = initial.event_type.value
             initial_last_reason = initial.reason
-            _track_mid_session(initial, evaluation_time)
             if _event_is_due(initial, evaluation_time):
                 decision = initial
                 decision_snapshot = snapshot
@@ -357,7 +364,7 @@ def replay_red_bar_v2_day_with_futures_vwap(
                         reversal_detections += 1
                         reversal_last_at = evaluation_time.isoformat()
                         reversal_last_direction = reversal.direction
-                        reversal_last_aligned = bool(reversal.midpoint_aligned)
+                        reversal_last_strength = reversal.trend_strength
                         decision = reversal
                         decision_snapshot = snapshot
                         pending_reversal = reversal
@@ -434,6 +441,19 @@ def replay_red_bar_v2_day_with_futures_vwap(
                 "vwap_source_instrument": vwap_instrument_key,
                 "execution_scope": "HISTORICAL_REPLAY_ONLY",
             }
+            # Stage 3 geometry: which reference was in force, where the close sat
+            # relative to the Red Bar band, and how far past the level it closed.
+            # These gate nothing, but without them a replay row cannot be told
+            # apart from one taken against a different level entirely.
+            for field in (
+                "zone_position",
+                "governing_reference",
+                "midpoint_distance_points",
+                "working_body_ratio",
+            ):
+                value = getattr(decision, field, None)
+                if value is not None:
+                    details[field] = value
             if decision_health is not None:
                 details["vwap_source_health"] = decision_health.to_dict()
             if decision_snapshot is not None:
@@ -505,7 +525,6 @@ def replay_red_bar_v2_day_with_futures_vwap(
 
     final_state = observe_trade_state(trade_rows, instrument_key=instrument_key)
     trading_date = pd.Timestamp(frame.index[0]).date().isoformat()
-    mid_session_latest = mid_session_tracker.get("latest")
     rule_state: dict[str, object] = {
         "as_of": last_evaluation_iso,
         "current_direction": current_direction,
@@ -535,27 +554,8 @@ def replay_red_bar_v2_day_with_futures_vwap(
             "detections": reversal_detections,
             "last_detected_at": reversal_last_at,
             "last_direction": reversal_last_direction,
-            "last_midpoint_aligned": reversal_last_aligned,
+            "last_trend_strength": reversal_last_strength,
             "pending": pending_reversal is not None,
-        },
-        "mid_session": {
-            "active": bool(mid_session_latest),
-            "passed": (
-                mid_session_latest.get("passed")
-                if isinstance(mid_session_latest, dict)
-                else None
-            ),
-            "reason": (
-                mid_session_latest.get("reason")
-                if isinstance(mid_session_latest, dict)
-                else None
-            ),
-            "evaluated_at": (
-                mid_session_latest.get("evaluated_at")
-                if isinstance(mid_session_latest, dict)
-                else None
-            ),
-            "blocked_count": int(mid_session_tracker.get("blocked", 0)),
         },
         "upgrade": {
             "provisional_state": (

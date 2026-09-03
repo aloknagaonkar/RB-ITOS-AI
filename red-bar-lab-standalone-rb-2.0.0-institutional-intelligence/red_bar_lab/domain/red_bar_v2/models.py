@@ -275,17 +275,20 @@ class RedBarV2Decision:
         if state_strength is not None and self.trend_strength is not state_strength:
             raise DomainValidationError("trend_strength must match provisional/confirmed current_state")
         if self.admission_outcome is AdmissionOutcome.ALLOWED:
+            # `rsi` is deliberately absent from this set. RSI is informational
+            # under the futures gates, and requiring the evidence block made an
+            # otherwise-valid warm-up admission unrepresentable.
             required = {
                 "entry_type": self.entry_type, "direction": self.direction,
                 "option_side": self.option_side, "reference": self.reference,
-                "rsi": self.rsi, "futures_vwap": self.futures_vwap,
+                "futures_vwap": self.futures_vwap,
                 "midpoint": self.midpoint,
             }
             missing = [name for name, value in required.items() if value is None]
             if missing:
                 raise DomainValidationError(f"ALLOWED decision missing: {', '.join(missing)}")
             assert self.entry_type is not None and self.direction is not None
-            assert self.reference is not None and self.rsi is not None
+            assert self.reference is not None
             assert self.futures_vwap is not None and self.midpoint is not None
             if self.context_status is not ContextStatus.FRESH:
                 raise DomainValidationError("ALLOWED decision requires fresh context")
@@ -307,19 +310,35 @@ class RedBarV2Decision:
             ) if self.direction is Direction.BULLISH else (
                 self.midpoint.bearish_aligned and not self.midpoint.bullish_aligned
             )
+            # The midpoint is a gate, and it applies to every Red Bar entry.
+            # REVERSAL used to be exempt, with the midpoint demoted to a grade,
+            # which let a decision be admitted with the index close on the wrong
+            # side of the level the strategy is named for.
+            if not midpoint_aligned:
+                raise DomainValidationError("ALLOWED admission requires midpoint alignment")
+            # The grade is separate geometry: CONFIRMED means the close took out
+            # the reference candle's own extreme, which is where the initial stop
+            # is measured from, so it lands at roughly +1R. Every admitted entry
+            # cleared the midpoint, so the midpoint cannot be what distinguishes
+            # the two grades. The comparison is restated here rather than imported
+            # from ``strategy.red_bar_v2.grade_against_reference``: this validator
+            # exists to re-derive the claim from the attached evidence, and code it
+            # shared with the producer could never contradict it.
+            cleared = (
+                self.midpoint.index_close > self.reference.high
+                if self.direction is Direction.BULLISH
+                else self.midpoint.index_close < self.reference.low
+            )
             expected_state = (
                 RedBarV2State.CONFIRMED_BULLISH if self.direction is Direction.BULLISH else RedBarV2State.CONFIRMED_BEARISH
-            ) if midpoint_aligned else (
+            ) if cleared else (
                 RedBarV2State.PROVISIONAL_BULLISH if self.direction is Direction.BULLISH else RedBarV2State.PROVISIONAL_BEARISH
             )
-            expected_strength = TrendStrength.CONFIRMED if midpoint_aligned else TrendStrength.PROVISIONAL
-            if self.entry_type is EntryType.INITIAL:
-                if not midpoint_aligned:
-                    raise DomainValidationError("INITIAL admission requires midpoint alignment")
-                if self.current_state is not expected_state or self.trend_strength is not TrendStrength.CONFIRMED:
-                    raise DomainValidationError("INITIAL admission must be confirmed")
-            elif self.current_state is not expected_state or self.trend_strength is not expected_strength:
-                raise DomainValidationError("REVERSAL state and trend_strength must match midpoint confirmation")
+            expected_strength = TrendStrength.CONFIRMED if cleared else TrendStrength.PROVISIONAL
+            if self.current_state is not expected_state or self.trend_strength is not expected_strength:
+                raise DomainValidationError(
+                    "state and trend_strength must match the reference-candle grade"
+                )
             if not isclose(float(self.midpoint.midpoint), float(self.reference.midpoint), rel_tol=0.0, abs_tol=_MIDPOINT_ABS_TOLERANCE):
                 raise DomainValidationError("midpoint evidence must match reference midpoint")
             _require_text("admission_code", self.admission_code)

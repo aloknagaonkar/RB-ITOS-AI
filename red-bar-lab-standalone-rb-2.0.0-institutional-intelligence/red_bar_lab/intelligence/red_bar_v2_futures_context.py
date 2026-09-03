@@ -11,6 +11,7 @@ from red_bar_lab.intelligence.market_context import (
     add_market_indicators,
     aggregate_completed_5m,
     completed_candles,
+    rsi_alignment_state,
     session_vwap,
 )
 
@@ -210,12 +211,19 @@ def build_red_bar_v2_futures_snapshot(
 
     rsi_raw = index_latest_row["rsi"]
     vwap_raw = futures_vwap.iloc[-1]
-    if pd.isna(rsi_raw):
-        return None, health("BLOCKED", "RSI_HISTORY_INSUFFICIENT")
     if pd.isna(vwap_raw):
         return None, health("BLOCKED", "FUTURES_VWAP_UNAVAILABLE")
 
-    rsi_value = float(rsi_raw)
+    # RSI is informational: it colours the decision row but no longer gates
+    # admission. Discarding the whole snapshot while Wilder RSI warms up
+    # therefore suppressed evaluation rather than an unsafe signal -- and the
+    # warm-up is long. Wilder RSI(14) needs 15 completed candles, so the 1M
+    # initial path went blind until 09:30 and the 5M reversal path until
+    # 10:30 IST. The snapshot is now emitted with `rsi_value=None` and a
+    # non-blocking health reason; the gating VWAP and midpoint evidence is
+    # fully formed from the first completed candle.
+    rsi_missing = bool(pd.isna(rsi_raw))
+    rsi_value = None if rsi_missing else float(rsi_raw)
     vwap_value = float(vwap_raw)
     index_close = float(index_latest_row["close"])
     futures_close = float(futures_latest_row["close"])
@@ -227,8 +235,12 @@ def build_red_bar_v2_futures_snapshot(
     else:
         price_vs_vwap = "AT"
 
-    bullish = rsi_value > bullish_threshold and futures_close > vwap_value
-    bearish = rsi_value < bearish_threshold and futures_close < vwap_value
+    # This stage emits no direction. Under the Red Bar V2 rules direction is
+    # decided downstream from two things only: which side of the reference
+    # midpoint the index closed on, and whether the futures price is above or
+    # below the futures VWAP. The former `bullish_context`/`bearish_context`
+    # pair bundled RSI into that verdict and was read by nobody on the live
+    # path, so it has been replaced by an informational `rsi_state`.
     timestamp = index_latest.to_pydatetime()
     snapshot = RedBarV2FuturesSnapshot(
         instrument_key=instrument_key,
@@ -244,11 +256,17 @@ def build_red_bar_v2_futures_snapshot(
         rsi_value=rsi_value,
         vwap_value=vwap_value,
         price_vs_vwap=price_vs_vwap,
-        bullish_context=bool(bullish),
-        bearish_context=bool(bearish),
+        rsi_state=rsi_alignment_state(
+            rsi_value,
+            bullish_threshold=bullish_threshold,
+            bearish_threshold=bearish_threshold,
+        ),
         source="RED_BAR_V2_INDEX_RSI_FUTURES_VWAP_V1",
         data_quality="VALID",
         fresh=True,
+        # The comparison price is the FUTURES close, deliberately: it is the
+        # only side that shares the futures basis with the futures VWAP. See
+        # the module docstring note in the test suite for the measured basis.
         vwap_comparison_price=futures_close,
         vwap_source_instrument_key=vwap_instrument_key,
         vwap_source_timestamp=futures_latest.to_pydatetime(),
@@ -256,4 +274,7 @@ def build_red_bar_v2_futures_snapshot(
         pcr_value=pcr_value,
         morning_pcr_value=morning_pcr_value,
     )
-    return snapshot, health("READY", "FULL_TIMESTAMP_ALIGNMENT")
+    return snapshot, health(
+        "READY",
+        "RSI_WARMING_UP" if rsi_missing else "FULL_TIMESTAMP_ALIGNMENT",
+    )

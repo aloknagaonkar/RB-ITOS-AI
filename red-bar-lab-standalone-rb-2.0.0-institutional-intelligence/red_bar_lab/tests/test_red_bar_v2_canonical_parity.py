@@ -40,7 +40,10 @@ def _event() -> ReplayEvent:
             "conditions": {
                 "rsi_aligned": True,
                 "vwap_aligned": True,
-                "midpoint_aligned": False,
+                # A PROVISIONAL reversal still cleared the midpoint: that is the
+                # gate. PROVISIONAL says only that the close stopped short of the
+                # reference candle's own high.
+                "midpoint_aligned": True,
             },
         },
     )
@@ -97,7 +100,9 @@ def _resolution():
         futures_instrument_key=FUTURES,
         evaluation_timestamp=EVALUATED_AT,
         evaluation_timeframe="5m",
-        index_close=24790.0,
+        # Past the 24800.0 midpoint but short of the 24820.0 reference high, which
+        # is exactly what PROVISIONAL means.
+        index_close=24810.0,
         rsi_value=62.0,
         bullish_rsi_threshold=60.0,
         bearish_rsi_threshold=40.0,
@@ -167,7 +172,10 @@ def test_matching_real_provisional_reversal_parity():
         (lambda event: _with_detail(event, context_timestamp=(EVALUATED_AT + timedelta(minutes=5)).isoformat()), "evaluation_timestamp"),
         (lambda event: _with_condition(event, "rsi_aligned", False), "rsi_aligned"),
         (lambda event: _with_condition(event, "vwap_aligned", False), "vwap_aligned"),
-        (lambda event: _with_condition(event, "midpoint_aligned", True), "midpoint_aligned"),
+        # The canonical decision is midpoint-aligned, so a legacy event claiming it
+        # is not must be reported. The polarity is the reverse of what it was when
+        # the midpoint doubled as the grade discriminator.
+        (lambda event: _with_condition(event, "midpoint_aligned", False), "midpoint_aligned"),
     ],
 )
 def test_nested_real_event_parity_reports_each_required_mismatch(mutator, expected):

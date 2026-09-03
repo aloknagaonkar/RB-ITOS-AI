@@ -26,8 +26,7 @@ class MarketIndicatorSnapshot:
     rsi_value: float | None
     vwap_value: float | None
     price_vs_vwap: str
-    bullish_context: bool
-    bearish_context: bool
+    rsi_state: str | None
     source: str
     data_quality: str
     fresh: bool
@@ -36,6 +35,37 @@ class MarketIndicatorSnapshot:
         payload = asdict(self)
         payload["candle_timestamp"] = self.candle_timestamp.isoformat()
         return payload
+
+
+RSI_BULLISH_THRESHOLD = 55.0
+RSI_BEARISH_THRESHOLD = 45.0
+
+
+def rsi_alignment_state(
+    rsi_value: float | None,
+    *,
+    bullish_threshold: float = RSI_BULLISH_THRESHOLD,
+    bearish_threshold: float = RSI_BEARISH_THRESHOLD,
+) -> str | None:
+    """Classify an RSI reading as BULLISH, BEARISH or NEUTRAL.
+
+    Informational only. RSI does not gate Red Bar V2 admission -- direction is
+    decided by the Red Bar reference and the futures VWAP. ``None`` means no
+    reading exists yet: Wilder RSI(14) is NaN until 15 candles have completed,
+    so the 1-minute timeframe has no value before 09:30 IST and the 5-minute
+    timeframe none before 10:30.
+
+    This replaces the former ``bullish_context``/``bearish_context`` pair, which
+    silently bundled RSI with the VWAP comparison and so could not be read as a
+    statement about RSI at all.
+    """
+    if rsi_value is None:
+        return None
+    if rsi_value > bullish_threshold:
+        return "BULLISH"
+    if rsi_value < bearish_threshold:
+        return "BEARISH"
+    return "NEUTRAL"
 
 
 class MarketContextError(ValueError):
@@ -232,22 +262,6 @@ def build_latest_snapshot(
     else:
         price_vs_vwap = "AT"
 
-    valid = data_quality == "VALID"
-    bullish = bool(
-        valid
-        and rsi_value is not None
-        and vwap_value is not None
-        and rsi_value > bullish_threshold
-        and close > vwap_value
-    )
-    bearish = bool(
-        valid
-        and rsi_value is not None
-        and vwap_value is not None
-        and rsi_value < bearish_threshold
-        and close < vwap_value
-    )
-
     candle_datetime = timestamp.to_pydatetime()
     return MarketIndicatorSnapshot(
         instrument_key=instrument_key,
@@ -263,8 +277,11 @@ def build_latest_snapshot(
         rsi_value=rsi_value,
         vwap_value=vwap_value,
         price_vs_vwap=price_vs_vwap,
-        bullish_context=bullish,
-        bearish_context=bearish,
+        rsi_state=rsi_alignment_state(
+            rsi_value,
+            bullish_threshold=bullish_threshold,
+            bearish_threshold=bearish_threshold,
+        ),
         source=source,
         data_quality=data_quality,
         fresh=fresh,

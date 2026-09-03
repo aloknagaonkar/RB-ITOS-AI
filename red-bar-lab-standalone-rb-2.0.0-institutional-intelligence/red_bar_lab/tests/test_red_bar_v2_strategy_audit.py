@@ -719,79 +719,49 @@ def test_opportunity_extension_audit_helper_records_failure(tmp_path: Path):
 # (decision dataclass output) and at the audit row level (process_evidence).
 
 
-def test_mid_session_rule_active_outside_window_is_inactive():
-    """Outside 12:45-1:15 IST, mid_session_active is False and
-    mid_session_passed is None (the rule is implicitly passed, not
-    evaluated)."""
-    from datetime import datetime, timezone
-    from red_bar_lab.strategy.red_bar_v2_futures import _is_mid_session_window
+def test_the_mid_session_rule_is_gone_from_the_strategy_module():
+    """The 12:45-13:15 rule and its two helpers were deleted, not disabled.
 
-    # 9:30 AM - well before 12:45
-    assert _is_mid_session_window(
-        datetime(2026, 9, 1, 9, 30, tzinfo=timezone.utc)
-    ) is False
-    # 3:00 PM - well after 1:15
-    assert _is_mid_session_window(
-        datetime(2026, 9, 1, 15, 0, tzinfo=timezone.utc)
-    ) is False
+    It fired only on exact float equality between a close and the midpoint, and
+    when it did fire it read the wrong candle. The replacement is the working
+    reference plus the zone hand-back, which apply at every hour instead of one.
+    """
+    from dataclasses import fields
 
+    from red_bar_lab.strategy import red_bar_v2_futures
+    from red_bar_lab.strategy.red_bar_v2 import RedBarV2DirectionDecision
 
-def test_mid_session_rule_active_in_window():
-    """Inside 12:45-1:15 IST, the rule is active. The 12:50 close
-    is checked against the reference midpoint."""
-    from datetime import datetime, timezone
-    from red_bar_lab.strategy.red_bar_v2_futures import _is_mid_session_window
+    assert not hasattr(red_bar_v2_futures, "_is_mid_session_window")
+    assert not hasattr(red_bar_v2_futures, "_evaluate_mid_session")
 
-    # 12:50 PM
-    assert _is_mid_session_window(
-        datetime(2026, 9, 1, 12, 50, tzinfo=timezone.utc)
-    ) is True
-    # 1:10 PM
-    assert _is_mid_session_window(
-        datetime(2026, 9, 1, 13, 10, tzinfo=timezone.utc)
-    ) is True
+    names = {field.name for field in fields(RedBarV2DirectionDecision)}
+    assert not names & {
+        "mid_session_active",
+        "mid_session_passed",
+        "mid_session_reason",
+    }
 
 
-def test_mid_session_evaluate_passes_when_12_50_close_above_midpoint():
-    """When the 12:50 close is above the reference midpoint, the rule
-    passes with a BULLISH confirmation."""
-    from datetime import datetime, timezone
-    from red_bar_lab.strategy.red_bar_v2_futures import _evaluate_mid_session
+def test_the_geometric_grade_replaces_the_hardcoded_confirmed_label():
+    """CONFIRMED means the close took out the reference candle's own extreme.
 
-    candle_ts = datetime(2026, 9, 1, 12, 50, tzinfo=timezone.utc)
-    midpoint = 24800.0
-    close = 24820.0  # 20 points above midpoint
-    passed, reason = _evaluate_mid_session(candle_ts, midpoint, close)
-    assert passed is True
-    assert "BULLISH" in reason
+    Reference high 105 / low 95 / midpoint 100. A close at 101 has crossed the
+    midpoint but not the high, so it is a setup, not a confirmation; a close at
+    106 has taken out the whole candle. The old code labelled both CONFIRMED.
+    """
+    from red_bar_lab.strategy.red_bar_v2_futures import _grade
 
+    provisional, cleared_low = _grade(bullish=True, close=101.0, high=105.0, low=95.0)
+    confirmed, cleared_high = _grade(bullish=True, close=106.0, high=105.0, low=95.0)
 
-def test_mid_session_evaluate_passes_when_12_50_close_below_midpoint():
-    """When the 12:50 close is below the reference midpoint, the rule
-    passes with a BEARISH confirmation."""
-    from datetime import datetime, timezone
-    from red_bar_lab.strategy.red_bar_v2_futures import _evaluate_mid_session
+    assert (provisional, cleared_low) == ("PROVISIONAL", False)
+    assert (confirmed, cleared_high) == ("CONFIRMED", True)
 
-    candle_ts = datetime(2026, 9, 1, 12, 50, tzinfo=timezone.utc)
-    midpoint = 24800.0
-    close = 24780.0
-    passed, reason = _evaluate_mid_session(candle_ts, midpoint, close)
-    assert passed is True
-    assert "BEARISH" in reason
-
-
-def test_mid_session_evaluate_blocks_when_12_50_close_equals_midpoint():
-    """When the 12:50 close exactly equals the midpoint, the rule
-    returns (False, ...) — the signal is blocked because no
-    direction is established."""
-    from datetime import datetime, timezone
-    from red_bar_lab.strategy.red_bar_v2_futures import _evaluate_mid_session
-
-    candle_ts = datetime(2026, 9, 1, 12, 50, tzinfo=timezone.utc)
-    midpoint = 24800.0
-    close = 24800.0
-    passed, reason = _evaluate_mid_session(candle_ts, midpoint, close)
-    assert passed is False
+    # Exactly on the extreme is not through it: the strict comparison keeps ties
+    # fail-closed, matching how the midpoint gate already treats them.
+    assert _grade(bullish=True, close=105.0, high=105.0, low=95.0)[0] == "PROVISIONAL"
+    assert _grade(bullish=False, close=95.0, high=105.0, low=95.0)[0] == "PROVISIONAL"
+    assert _grade(bullish=False, close=94.0, high=105.0, low=95.0)[0] == "CONFIRMED"
 
 
 def test_redbar_v2_decision_has_pcr_and_morning_pcr_fields():
@@ -813,8 +783,10 @@ def test_redbar_v2_decision_has_pcr_and_morning_pcr_fields():
     assert hasattr(decision, "pcr_value")
     assert hasattr(decision, "morning_pcr_value")
     assert hasattr(decision, "redbar_vwap_aligned")
-    assert hasattr(decision, "mid_session_active")
-    assert hasattr(decision, "mid_session_passed")
+    assert hasattr(decision, "zone_position")
+    assert hasattr(decision, "governing_reference")
+    assert hasattr(decision, "midpoint_distance_points")
+    assert hasattr(decision, "working_body_ratio")
     assert hasattr(decision, "reentry_state")
     assert hasattr(decision, "reentry_alignment_passed")
 

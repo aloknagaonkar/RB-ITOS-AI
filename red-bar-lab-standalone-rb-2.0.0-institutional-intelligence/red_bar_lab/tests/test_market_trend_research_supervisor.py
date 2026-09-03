@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ from red_bar_lab.execution.run_market_trend_research_supervisor import (
     MarketTrendResearchSupervisor,
     SupervisorConfig,
     SupervisorConfigurationError,
+    _atomic_json,
     read_supervisor_state,
 )
 
@@ -176,6 +178,52 @@ def test_malformed_status_is_unavailable(tmp_path):
     path = tmp_path / "state.json"
     path.write_text("{not-json", encoding="utf-8")
     assert read_supervisor_state(path) is None
+
+
+def test_a_scanner_holding_the_state_file_does_not_kill_the_supervisor(
+    tmp_path, monkeypatch
+):
+    """A transient lock on the destination is retried, not fatal.
+
+    The supervisor rewrites its state file on every heartbeat, and on Windows a
+    virus scanner opening the file we just published makes the next rename fail
+    with PermissionError. That used to propagate out of ``run()``.
+    """
+    path = tmp_path / "state.json"
+    real_replace = os.replace
+    attempts = []
+
+    def flaky_replace(source, destination):
+        attempts.append(source)
+        if len(attempts) < 3:
+            raise PermissionError(5, "Access is denied")
+        real_replace(source, destination)
+
+    monkeypatch.setattr(
+        "red_bar_lab.execution.run_market_trend_research_supervisor.os.replace",
+        flaky_replace,
+    )
+    _atomic_json(path, {"supervisor_state": "RUNNING"})
+    assert len(attempts) == 3
+    assert read_supervisor_state(path) == {"supervisor_state": "RUNNING"}
+
+
+def test_a_lock_that_never_clears_is_reported_and_leaves_no_debris(
+    tmp_path, monkeypatch
+):
+    """Retrying is not swallowing: a genuine failure still surfaces."""
+    path = tmp_path / "state.json"
+
+    def always_denied(source, destination):
+        raise PermissionError(5, "Access is denied")
+
+    monkeypatch.setattr(
+        "red_bar_lab.execution.run_market_trend_research_supervisor.os.replace",
+        always_denied,
+    )
+    with pytest.raises(PermissionError):
+        _atomic_json(path, {"supervisor_state": "RUNNING"})
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_supervisor_has_no_trading_authority_imports():

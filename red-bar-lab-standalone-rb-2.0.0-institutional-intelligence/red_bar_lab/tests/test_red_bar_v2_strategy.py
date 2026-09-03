@@ -1,8 +1,12 @@
 from datetime import datetime
 
 import pandas as pd
+import pytest
 
-from red_bar_lab.intelligence.market_context import MarketIndicatorSnapshot
+from red_bar_lab.intelligence.market_context import (
+    MarketIndicatorSnapshot,
+    rsi_alignment_state,
+)
 from red_bar_lab.strategy.red_bar_v2 import (
     RedBarV2EventType,
     RedBarV2Reference,
@@ -66,7 +70,7 @@ def _context(
     *,
     timeframe: str,
     close: float,
-    rsi: float,
+    rsi: float | None,
     vwap: float,
     timestamp: str = "2026-08-21 10:00",
     data_quality: str = "VALID",
@@ -87,8 +91,7 @@ def _context(
         rsi_value=rsi,
         vwap_value=vwap,
         price_vs_vwap="ABOVE" if close > vwap else "BELOW" if close < vwap else "AT",
-        bullish_context=data_quality == "VALID" and fresh and rsi > 55 and close > vwap,
-        bearish_context=data_quality == "VALID" and fresh and rsi < 45 and close < vwap,
+        rsi_state=rsi_alignment_state(rsi),
         source="TEST",
         data_quality=data_quality,
         fresh=fresh,
@@ -147,19 +150,98 @@ def test_initial_direction_requires_midpoint_alignment():
     assert decision.state == RedBarV2State.NEUTRAL
 
 
-def test_bullish_reversal_can_be_provisional_before_midpoint():
+def test_a_first_entry_inside_the_reference_candle_is_provisional():
+    """Past the 100.0 midpoint, short of the 104.0 high: admitted, not confirmed.
+
+    This path used to hardcode CONFIRMED for every admitted first entry, so the
+    grade said nothing and a setup worth about +0.25R was reported as one worth
+    +1R.
+    """
+    decision = evaluate_initial_direction(
+        _reference(),
+        _context(timeframe="1M", close=102.0, rsi=62.0, vwap=101.0),
+    )
+    assert decision.event_type == RedBarV2EventType.INITIAL_BULLISH_ALIGNMENT
+    assert decision.state == RedBarV2State.PROVISIONAL_BULLISH
+    assert decision.trend_strength == "PROVISIONAL"
+    assert decision.option_side == "CE"
+
+
+@pytest.mark.parametrize(
+    ("rsi", "aligned"),
+    [
+        # Flat, so the reading claims nothing either way.
+        (50.0, False),
+        # Decisively bearish while the price gates are bullish. It is reported as
+        # a reading that means something and it still gets no vote.
+        (38.0, True),
+        # The Wilder RSI(14) warm-up, which used to discard the whole context and
+        # leave this path blind for the first 15 candles of the session.
+        (None, False),
+    ],
+)
+def test_rsi_never_gates_a_first_entry(rsi, aligned):
+    decision = evaluate_initial_direction(
+        _reference(),
+        _context(timeframe="1M", close=105.0, rsi=rsi, vwap=102.0),
+    )
+    assert decision.event_type == RedBarV2EventType.INITIAL_BULLISH_ALIGNMENT
+    assert decision.direction == "BULLISH"
+    assert decision.trend_strength == "CONFIRMED"
+    assert decision.rsi_aligned is aligned
+
+
+@pytest.mark.parametrize(
+    ("rsi", "aligned"), [(50.0, False), (62.0, True), (None, False)]
+)
+def test_rsi_never_gates_a_reversal(rsi, aligned):
+    decision = evaluate_reversal_direction(
+        _reference(),
+        _context(timeframe="5M", close=95.0, rsi=rsi, vwap=97.0),
+        previous_direction="BULLISH",
+    )
+    assert decision.event_type == RedBarV2EventType.BEARISH_REVERSAL_DETECTED
+    assert decision.direction == "BEARISH"
+    assert decision.rsi_aligned is aligned
+
+
+def test_a_reversal_short_of_the_midpoint_is_no_alignment_at_all():
+    """The midpoint is a gate on the reversal path too, not a grade.
+
+    A bullish RSI and a close above VWAP used to be enough to admit a reversal and
+    call it PROVISIONAL, which let a bullish entry be taken with the index close
+    below the level the strategy is named for.
+    """
     decision = evaluate_reversal_direction(
         _reference(midpoint=110.0),
         _context(timeframe="5M", close=105.0, rsi=61.0, vwap=102.0),
         previous_direction="BEARISH",
     )
+    assert decision.event_type == RedBarV2EventType.NO_DIRECTIONAL_ALIGNMENT
+    assert decision.state == RedBarV2State.NEUTRAL
+    assert decision.direction is None
+    assert decision.option_side is None
+
+
+def test_bullish_reversal_is_provisional_inside_the_reference_candle():
+    """Past the 100.0 midpoint, short of the 104.0 reference high.
+
+    Admitted, because the gate is the midpoint; PROVISIONAL, because the grade is
+    the reference candle's own high and this close has not taken it out.
+    """
+    decision = evaluate_reversal_direction(
+        _reference(midpoint=100.0),
+        _context(timeframe="5M", close=102.0, rsi=61.0, vwap=101.0),
+        previous_direction="BEARISH",
+    )
     assert decision.event_type == RedBarV2EventType.BULLISH_REVERSAL_DETECTED
     assert decision.state == RedBarV2State.PROVISIONAL_BULLISH
     assert decision.option_side == "CE"
-    assert decision.midpoint_aligned is False
+    assert decision.midpoint_aligned is True
 
 
-def test_bearish_reversal_is_confirmed_when_midpoint_is_aligned():
+def test_bearish_reversal_is_confirmed_when_it_takes_out_the_reference_low():
+    """Below the 100.0 midpoint to clear the gate, below the 96.0 low to be graded."""
     decision = evaluate_reversal_direction(
         _reference(midpoint=100.0),
         _context(timeframe="5M", close=95.0, rsi=39.0, vwap=97.0),

@@ -57,7 +57,10 @@ def _decision(
         vwap_value=102.0 if direction == "BULLISH" else 98.0,
         rsi_aligned=direction is not None,
         vwap_aligned=direction is not None,
-        midpoint_aligned=not provisional and direction is not None,
+        # PROVISIONAL is a grade, not a gate verdict: it says how much of the
+        # reference candle the close took out. Every admitted entry clears the
+        # midpoint, whatever its grade, so the two are independent here.
+        midpoint_aligned=direction is not None,
         context_fresh=True,
         reason="parity-test",
     )

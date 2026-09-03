@@ -147,10 +147,15 @@ def _rule_two_sentence(row: dict[str, Any], state: dict[str, Any]) -> str | None
     previous = "BEARISH" if new_direction == "BULLISH" else "BULLISH"
     position = str(row.get("price_vs_vwap") or "").upper()
     operator = ">" if position == "ABOVE" else "<" if position == "BELOW" else "="
+    # The reversal cleared the midpoint to be admitted at all; the grade says
+    # whether it also took out the reference candle's own extreme.
+    grade = str(reversal.get("last_trend_strength") or "").upper()
     alignment = (
-        "midpoint aligned (confirmed)"
-        if reversal.get("last_midpoint_aligned")
-        else "midpoint not aligned (provisional)"
+        "took out the reference candle (confirmed)"
+        if grade == "CONFIRMED"
+        else "inside the reference candle (provisional)"
+        if grade == "PROVISIONAL"
+        else "grade unavailable"
     )
     return (
         f"Currently {previous} + futures close {operator} futures VWAP → "
@@ -357,7 +362,6 @@ def _render_rule_state(row: dict[str, Any]) -> None:
     reference = state.get("reference") or {}
     initial = state.get("initial") or {}
     reversal = state.get("reversal") or {}
-    mid_session = state.get("mid_session") or {}
     upgrade = state.get("upgrade") or {}
     reentry = state.get("reentry") or {}
     admission = state.get("admission") or {}
@@ -411,29 +415,13 @@ def _render_rule_state(row: dict[str, Any]) -> None:
         f"detections {int(reversal.get('detections') or 0)}",
     ]
     if reversal.get("last_detected_at"):
-        aligned = (
-            "confirmed" if reversal.get("last_midpoint_aligned") else "provisional"
-        )
+        grade = str(reversal.get("last_trend_strength") or "").lower() or "ungraded"
         reversal_detail.append(
             f"last {reversal.get('last_direction') or '—'} at "
-            f"{_fmt_time(reversal.get('last_detected_at'))} ({aligned})"
+            f"{_fmt_time(reversal.get('last_detected_at'))} ({grade})"
         )
     if reversal.get("pending"):
         reversal_detail.append("PENDING")
-
-    if mid_session.get("active"):
-        mid_status = (
-            "PASSED" if mid_session.get("passed") else "BLOCKING"
-        )
-        mid_detail = [mid_session.get("reason") or "—"]
-        if mid_session.get("evaluated_at"):
-            mid_detail.append(f"checked {_fmt_time(mid_session.get('evaluated_at'))}")
-        blocked_count = int(mid_session.get("blocked_count") or 0)
-        if blocked_count:
-            mid_detail.append(f"{blocked_count} blocked alignment(s)")
-    else:
-        mid_status = "INACTIVE"
-        mid_detail = ["Outside the 12:45–13:15 IST window (or not yet evaluated)."]
 
     upgrade_detail = [f"upgrades {int(upgrade.get('upgrades') or 0)}"]
     if upgrade.get("last_upgrade_at"):
@@ -490,19 +478,7 @@ def _render_rule_state(row: dict[str, Any]) -> None:
             "PCR info": pcr_info,
         },
         {
-            "Rule": "3 · Mid-session 12:45",
-            "Status": (
-                "🟢 PASSED"
-                if mid_status == "PASSED"
-                else "🔴 BLOCKING"
-                if mid_status == "BLOCKING"
-                else "⚪ INACTIVE"
-            ),
-            "Detail": " · ".join(mid_detail) or "—",
-            "PCR info": pcr_info,
-        },
-        {
-            "Rule": "4 · State upgrade",
+            "Rule": "3 · State upgrade",
             "Status": (
                 f"🟡 {upgrade.get('provisional_state')}"
                 if upgrade.get("provisional_state")
@@ -512,7 +488,7 @@ def _render_rule_state(row: dict[str, Any]) -> None:
             "PCR info": pcr_info,
         },
         {
-            "Rule": "5 · Re-entry gate",
+            "Rule": "4 · Re-entry gate",
             "Status": (
                 "🟡 " + reentry_status if reentry.get("waiting") else "⚪ " + reentry_status
             ),
@@ -520,7 +496,7 @@ def _render_rule_state(row: dict[str, Any]) -> None:
             "PCR info": pcr_info,
         },
         {
-            "Rule": "6 · Admission",
+            "Rule": "5 · Admission",
             "Status": (
                 "🟢 TRADE ACTIVE"
                 if int(admission.get("active_trade_count") or 0) > 0
@@ -546,8 +522,8 @@ def _render_rule_state(row: dict[str, Any]) -> None:
     sentences = (
         ("Rule 1 · Initial entry", _rule_one_sentence(row, state)),
         ("Rule 2 · Reversal detection", _rule_two_sentence(row, state)),
-        ("Rule 5 · Re-entry", _rule_five_sentence(state)),
-        ("Rule 6 · Active trade", _rule_six_sentence(row, state)),
+        ("Rule 4 · Re-entry", _rule_five_sentence(state)),
+        ("Rule 5 · Active trade", _rule_six_sentence(row, state)),
     )
     for label, sentence in sentences:
         if sentence:

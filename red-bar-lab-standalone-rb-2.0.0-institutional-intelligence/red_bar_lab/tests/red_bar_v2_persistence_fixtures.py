@@ -122,10 +122,14 @@ def make_resolution(
             True,
         ) if is_allowed else None,
         midpoint=MidpointEvidence(
-            24790.0 if provisional else 24810.0,
+            # Both grades clear the 24800.0 midpoint, because clearing it is the
+            # gate every admitted entry passes. What separates them is the
+            # reference candle's own high: 24825.0 has taken the whole candle out
+            # (CONFIRMED), 24810.0 is past the midpoint only (PROVISIONAL).
+            24810.0 if provisional else 24825.0,
             24800.0,
-            not provisional,
-            provisional,
+            True,
+            False,
         ) if is_allowed else None,
         context_status=ContextStatus.FRESH,
         admission_outcome=admission_outcome,

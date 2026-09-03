@@ -81,7 +81,9 @@ def evidence(*, provisional=False):
         futures_instrument_key=FUTURES,
         evaluation_timestamp=EVALUATED_AT,
         evaluation_timeframe="5m" if provisional else "1m",
-        index_close=24790.0 if provisional else 24810.0,
+        # Both grades clear the 24800.0 midpoint. CONFIRMED went past the 24820.0
+        # reference high as well; PROVISIONAL stopped between the two.
+        index_close=24810.0 if provisional else 24825.0,
         rsi_value=62.0,
         bullish_rsi_threshold=60.0,
         bearish_rsi_threshold=40.0,
@@ -118,7 +120,9 @@ def event(*, allowed=True, provisional=False):
             "conditions": {
                 "rsi_aligned": True,
                 "vwap_aligned": True,
-                "midpoint_aligned": not provisional,
+                # The midpoint is the gate, so an admitted candidate cleared it at
+                # either grade.
+                "midpoint_aligned": True,
             },
         },
     )

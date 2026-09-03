@@ -1,5 +1,6 @@
 import pandas as pd
 
+from red_bar_lab.intelligence.market_context import rsi_alignment_state
 from red_bar_lab.intelligence.red_bar_v2_futures_context import (
     RedBarV2FuturesSnapshot,
 )
@@ -42,8 +43,7 @@ def _snapshot(*, index_close, futures_close, vwap, rsi):
         rsi_value=rsi,
         vwap_value=vwap,
         price_vs_vwap="ABOVE" if futures_close > vwap else "BELOW",
-        bullish_context=rsi > 55 and futures_close > vwap,
-        bearish_context=rsi < 45 and futures_close < vwap,
+        rsi_state=rsi_alignment_state(rsi),
         source="TEST",
         data_quality="VALID",
         fresh=True,
