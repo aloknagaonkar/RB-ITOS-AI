@@ -55,9 +55,17 @@ def _require_positive(name: str, value: float) -> None:
 
 
 def _require_entry_timeframe(entry_type: EntryType, evaluation_timeframe: str) -> None:
-    expected = "1m" if entry_type is EntryType.INITIAL else "5m"
+    """Only a reversal is judged on five minutes.
+
+    A reversal is a counter-trend re-entry inside a band roughly sixty points
+    wide, so a one-minute close would fire, invalidate and re-fire around the
+    midpoint; the extra four minutes buy evidence where it is worth most. The
+    initial entry and the working-reference entry both act on a one-minute close.
+    """
+    expected = "5m" if entry_type is EntryType.REVERSAL else "1m"
     if evaluation_timeframe != expected:
         raise DomainValidationError(f"{entry_type.value} entry requires {expected} evaluation_timeframe")
+
 
 
 def _require_alignment_truth(
@@ -229,6 +237,21 @@ class MidpointEvidence:
 
 @dataclass(frozen=True, slots=True)
 class RedBarV2Decision:
+    """One evaluation of the strategy, with the evidence that justifies it.
+
+    `reference` carries the **governing** reference -- the level this particular
+    decision was judged against, not always the red bar. On an INITIAL or
+    REVERSAL entry that is the red bar. On a WORKING entry it is the deputy
+    candle, with `source="WORKING_OPPOSITE_CANDLE"`, because the deputy is what
+    the close was actually compared to while price was outside the red bar's band.
+
+    There is deliberately no second `governing_reference` slot. One slot means the
+    midpoint-match and grade invariants below re-derive their claims against
+    whichever level was in force, without having to know which path produced the
+    decision; `entry_type` and `reference.source` remain the machine-readable
+    markers for readers that care.
+    """
+
     strategy_id: str
     strategy_version: str
     evaluation_timestamp: datetime
@@ -275,36 +298,52 @@ class RedBarV2Decision:
         if state_strength is not None and self.trend_strength is not state_strength:
             raise DomainValidationError("trend_strength must match provisional/confirmed current_state")
         if self.admission_outcome is AdmissionOutcome.ALLOWED:
-            # `rsi` is deliberately absent from this set. RSI is informational
-            # under the futures gates, and requiring the evidence block made an
-            # otherwise-valid warm-up admission unrepresentable.
+            # Two evidence blocks are deliberately absent from this set.
+            #
+            # `rsi` is informational under the futures gates, and requiring the
+            # evidence block made an otherwise-valid warm-up admission
+            # unrepresentable.
+            #
+            # `futures_vwap` is required for the two red bar paths and not for
+            # WORKING. A working entry is judged against the deputy that governs
+            # the space outside the red bar's band, and that path consults no VWAP
+            # at all -- the deputy's body and its close beyond the previous
+            # five-minute extreme are its evidence. Requiring VWAP here would make
+            # every working entry unrepresentable, exactly as requiring RSI did for
+            # a warm-up admission.
+            requires_vwap = self.entry_type is not EntryType.WORKING
             required = {
                 "entry_type": self.entry_type, "direction": self.direction,
                 "option_side": self.option_side, "reference": self.reference,
-                "futures_vwap": self.futures_vwap,
                 "midpoint": self.midpoint,
             }
+            if requires_vwap:
+                required["futures_vwap"] = self.futures_vwap
             missing = [name for name, value in required.items() if value is None]
             if missing:
                 raise DomainValidationError(f"ALLOWED decision missing: {', '.join(missing)}")
             assert self.entry_type is not None and self.direction is not None
             assert self.reference is not None
-            assert self.futures_vwap is not None and self.midpoint is not None
+            assert self.midpoint is not None
             if self.context_status is not ContextStatus.FRESH:
                 raise DomainValidationError("ALLOWED decision requires fresh context")
-            if not self.futures_vwap.fresh:
-                raise DomainValidationError("ALLOWED decision requires fresh futures VWAP evidence")
+            if requires_vwap:
+                assert self.futures_vwap is not None
+                if not self.futures_vwap.fresh:
+                    raise DomainValidationError("ALLOWED decision requires fresh futures VWAP evidence")
             _require_entry_timeframe(self.entry_type, self.evaluation_timeframe)
             # RSI is informational under the futures gates (RedBar reference +
             # VWAP decide direction), so RSI evidence must not invalidate an
             # ALLOWED decision. It is still carried for observability.
-            vwap_aligned = (
-                self.futures_vwap.bullish_aligned and not self.futures_vwap.bearish_aligned
-            ) if self.direction is Direction.BULLISH else (
-                self.futures_vwap.bearish_aligned and not self.futures_vwap.bullish_aligned
-            )
-            if not vwap_aligned:
-                raise DomainValidationError("ALLOWED decision VWAP evidence must align with direction")
+            if requires_vwap:
+                vwap_aligned = (
+                    self.futures_vwap.bullish_aligned and not self.futures_vwap.bearish_aligned
+                ) if self.direction is Direction.BULLISH else (
+                    self.futures_vwap.bearish_aligned and not self.futures_vwap.bullish_aligned
+                )
+                if not vwap_aligned:
+                    raise DomainValidationError("ALLOWED decision VWAP evidence must align with direction")
+
             midpoint_aligned = (
                 self.midpoint.bullish_aligned and not self.midpoint.bearish_aligned
             ) if self.direction is Direction.BULLISH else (
@@ -317,13 +356,17 @@ class RedBarV2Decision:
             if not midpoint_aligned:
                 raise DomainValidationError("ALLOWED admission requires midpoint alignment")
             # The grade is separate geometry: CONFIRMED means the close took out
-            # the reference candle's own extreme, which is where the initial stop
-            # is measured from, so it lands at roughly +1R. Every admitted entry
-            # cleared the midpoint, so the midpoint cannot be what distinguishes
-            # the two grades. The comparison is restated here rather than imported
-            # from ``strategy.red_bar_v2.grade_against_reference``: this validator
+            # the governing reference candle's own extreme, so the whole candle was
+            # cleared rather than just its midpoint. It is a strength label, not a
+            # statement about R -- the initial stop comes from the five-minute
+            # candle that crossed the level, which is a different candle, so the
+            # two numbers are unrelated. Every admitted entry cleared the midpoint,
+            # so the midpoint cannot be what distinguishes the two grades. The
+            # comparison is restated here rather than imported from
+            # ``strategy.red_bar_v2.grade_against_reference``: this validator
             # exists to re-derive the claim from the attached evidence, and code it
             # shared with the producer could never contradict it.
+
             cleared = (
                 self.midpoint.index_close > self.reference.high
                 if self.direction is Direction.BULLISH
@@ -402,12 +445,23 @@ class RedBarV2SignalBundle:
             raise DomainValidationError("bundle evaluation timestamp date must match trading_date")
         if decision.reference is None or decision.reference.trading_date != self.trading_date:
             raise DomainValidationError("bundle reference trading_date must match bundle trading_date")
-        if decision.futures_vwap is None:
+        # Futures VWAP evidence is absent on a working-reference entry by design.
+        # It is also the fallback that names the instrument on a schema-1.0
+        # bundle, so a bundle without it has to carry its own `instrument_key` --
+        # which schema 1.1 requires of every bundle anyway.
+        if decision.futures_vwap is None and decision.entry_type is not EntryType.WORKING:
             raise DomainValidationError("signal bundle requires futures VWAP evidence")
 
         from .identity import build_red_bar_v2_bundle_id, build_red_bar_v2_idempotency_key, build_red_bar_v2_signal_id
 
-        identity_instrument = self.instrument_key or decision.futures_vwap.instrument_key
+        identity_instrument = self.instrument_key or (
+            None if decision.futures_vwap is None else decision.futures_vwap.instrument_key
+        )
+        if identity_instrument is None:
+            raise DomainValidationError(
+                "signal bundle without futures VWAP evidence requires instrument_key"
+            )
+
         expected_signal = build_red_bar_v2_signal_id(
             strategy_version=self.strategy_version,
             instrument_key=identity_instrument,

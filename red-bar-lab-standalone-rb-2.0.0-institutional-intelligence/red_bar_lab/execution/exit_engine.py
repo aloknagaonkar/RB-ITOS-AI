@@ -11,6 +11,10 @@ from red_bar_lab.execution.execution_policy import (
     RSI_STRATEGY_SOURCE,
     execution_strategy_source,
 )
+from red_bar_lab.services.red_bar_v2_structural_exit import (
+    STRUCTURAL_EXIT_REASON,
+    RedBarV2StructuralExit,
+)
 
 # Retired RB-0.7.9 compatibility markers. These strings are intentionally
 # non-executable and exist only for legacy source-inspection tests:
@@ -110,6 +114,14 @@ class ExitHealth:
     underlying_5m_close: float | None = None
     underlying_ema10: float | None = None
     ema10_trend: str = "UNKNOWN"
+    # The level a Red Bar V2 position is judged against, and what happened when
+    # it was asked. ``NOT_EVALUATED`` means the caller passed nothing, which is
+    # every non-V2 row and every read-only panel.
+    structural_exit: str = "NOT_EVALUATED"
+    governing_reference: str | None = None
+    governing_midpoint: float | None = None
+    governing_close: float | None = None
+    governing_close_timestamp: str | None = None
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -119,9 +131,11 @@ class PaperExitEngine:
     """CE/PE paper exit decision engine.
 
     Operational exit authority is deterministic. The fixed profit target is
-    informational-only. Red Bar V2 initial loss authority is handled by its
-    completed-candle RSI exit; earned premium protection remains here.
-    OI/PCR/Greeks remain shadow.
+    informational-only. A Red Bar V2 row's initial loss authority is the
+    structural exit -- a completed 1-minute close against the governing level,
+    supplied by the caller as ``structural_exit`` -- and the configured premium
+    stop stays excluded for those rows so the two cannot both fire. Earned
+    premium protection remains here. OI/PCR/Greeks remain shadow.
     """
 
     def __init__(
@@ -176,6 +190,7 @@ class PaperExitEngine:
         greeks_supportive: bool | None = None,
         eod_due: bool = False,
         exit_mode: str = "STANDARD_MULTI_FACTOR",
+        structural_exit: RedBarV2StructuralExit | None = None,
     ) -> ExitHealth:
         entry = _num(position.get("entry_price"))
         current = _num(position.get("current_price"), entry)
@@ -351,10 +366,24 @@ class PaperExitEngine:
         # Legacy source-compatibility marker only; this is intentionally NOT an
         # executable target exit after Change 5:
         # hard_exit_reason = "TARGET_1"
+        #
+        # The structural exit sits directly under the realised stop and the
+        # session flat, and above every option-premium proxy below it. Those
+        # proxies are correlated stand-ins for a thesis; this is the thesis --
+        # the level the position was actually taken on. It is also the one hard
+        # exit here that ``premium_protection_only`` must not shadow, because
+        # for a V2 row it *is* the initial-loss authority: the configured
+        # premium stop is excluded above on exactly that understanding, so
+        # deferring here would leave an unprotected position with nothing.
+        structural_breach = bool(
+            structural_exit is not None and structural_exit.breached
+        )
         if effective_stop is not None and current <= effective_stop:
             hard_exit_reason = effective_stop_reason
         elif eod_due:
             hard_exit_reason = "EOD_EXIT"
+        elif structural_breach:
+            hard_exit_reason = STRUCTURAL_EXIT_REASON
         elif not premium_protection_only and ema10_exit_reason:
             hard_exit_reason = ema10_exit_reason
         elif not premium_protection_only and nifty_thesis == "INVALID":
@@ -380,6 +409,8 @@ class PaperExitEngine:
                 )
 
         health = 100.0
+        if structural_breach:
+            health -= 40
         if nifty_thesis == "INVALID":
             health -= 35
         elif nifty_thesis == "UNKNOWN":
@@ -435,10 +466,24 @@ class PaperExitEngine:
             reasons.append("EMA9 remains above EMA21.")
         if option_momentum == "PASS":
             reasons.append("Option momentum remains non-negative.")
+        if structural_exit is not None:
+            # Recorded whether or not it fired: "the level held" and "no level
+            # was published" are different answers to "why is this still open",
+            # and ``exit_detail`` is the only place a live row keeps either.
+            reasons.append(
+                f"STRUCTURE[{structural_exit.status}] "
+                f"{structural_exit.detail or 'no detail'}"
+            )
 
         trigger_parts = []
         if effective_stop is not None:
             trigger_parts.append(f"Stop ₹{effective_stop:.2f}")
+        if structural_exit is not None and structural_exit.governing_midpoint is not None:
+            trigger_parts.append(
+                "1m close through "
+                f"{structural_exit.governing_reference or 'governing'} midpoint "
+                f"{structural_exit.governing_midpoint:,.2f}"
+            )
         if ema10_trend in {"VALID", "UNKNOWN"}:
             trigger_parts.append("completed 5m EMA10 trend loss")
         next_trigger = (
@@ -476,4 +521,27 @@ class PaperExitEngine:
             underlying_5m_close=round(underlying_5m_close, 2) if underlying_5m_close is not None else None,
             underlying_ema10=round(underlying_ema10, 2) if underlying_ema10 is not None else None,
             ema10_trend=ema10_trend,
+            structural_exit=(
+                structural_exit.status
+                if structural_exit is not None
+                else "NOT_EVALUATED"
+            ),
+            governing_reference=(
+                structural_exit.governing_reference
+                if structural_exit is not None
+                else None
+            ),
+            governing_midpoint=(
+                structural_exit.governing_midpoint
+                if structural_exit is not None
+                else None
+            ),
+            governing_close=(
+                structural_exit.close if structural_exit is not None else None
+            ),
+            governing_close_timestamp=(
+                structural_exit.close_timestamp
+                if structural_exit is not None
+                else None
+            ),
         )

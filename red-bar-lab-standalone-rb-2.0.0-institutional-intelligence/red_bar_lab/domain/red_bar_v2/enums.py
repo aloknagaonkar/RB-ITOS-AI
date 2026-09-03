@@ -31,8 +31,18 @@ class RedBarV2State(StrEnum):
 
 
 class EntryType(StrEnum):
+    """Which reference authorised the entry, and therefore which gates applied.
+
+    INITIAL and REVERSAL are both judged against the red bar: INITIAL is the
+    day's first entry, REVERSAL a re-entry once price is back inside the red
+    bar's band. WORKING is judged against the deputy reference that governs the
+    space *outside* that band, and is the one path that consults no futures VWAP.
+    """
+
     INITIAL = "INITIAL"
     REVERSAL = "REVERSAL"
+    WORKING = "WORKING"
+
 
 
 class Direction(StrEnum):

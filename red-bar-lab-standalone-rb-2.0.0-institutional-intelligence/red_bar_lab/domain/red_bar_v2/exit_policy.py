@@ -45,6 +45,22 @@ except ImportError:  # pragma: no cover - Python 3.10 compatibility
 
 
 class ExitReason(StrEnum):
+    """Why an index-level V2 position was closed.
+
+    Deliberately *not* ``strategy.trade_models.ExitReason``, and the two must not
+    be merged on the grounds that they look similar. This one names index-level
+    outcomes of the V2 risk plan; that one names option-premium outcomes of the
+    legacy trade engine, has ``OPEN``/``NOT_EVALUABLE``/``BREAK_EVEN`` states
+    this one has no use for, and has no ``STRUCTURE`` because the legacy engine
+    cannot see a reference level. No value crosses between them today: the live
+    structural exit records the free-text ``AUTO_RED_BAR_V2_STRUCTURE`` on the
+    order row, and the only ``ExitReason(...)`` parse of a stored string
+    (``red_bar_v2_decision_log``) reads rows this enum wrote. A single enum
+    becomes the right answer when ``TradeOutcome`` is persisted into
+    ``paper_trade_outcomes`` alongside premium outcomes -- until then it would
+    just add members nothing can produce.
+    """
+
     STOP_LOSS = "STOP_LOSS"
     TRAILING_STOP = "TRAILING_STOP"
     TARGET = "TARGET"

@@ -231,15 +231,24 @@ def build_canonical_decision(
                 bullish_aligned=evidence.rsi_value > evidence.bullish_rsi_threshold,
                 bearish_aligned=evidence.rsi_value < evidence.bearish_rsi_threshold,
             )
-        futures_vwap = FuturesVwapEvidence(
-            instrument_key=evidence.futures_instrument_key,
-            comparison_price=evidence.futures_comparison_price,
-            vwap=evidence.futures_vwap,
-            volume=evidence.futures_volume,
-            bullish_aligned=evidence.futures_comparison_price > evidence.futures_vwap,
-            bearish_aligned=evidence.futures_comparison_price < evidence.futures_vwap,
-            fresh=evidence.futures_fresh,
-        )
+        # Same reasoning one level down for the futures VWAP. A working-reference
+        # entry consults no VWAP, and `FuturesVwapEvidence` promises truthful
+        # alignment flags against a real number -- there is nothing to compare
+        # against here, and inventing a comparison would assert an alignment the
+        # strategy never tested. `RedBarV2Decision.futures_vwap` is optional for
+        # the working path for exactly this reason.
+        futures_vwap = None
+        if evidence.futures_vwap is not None:
+            futures_vwap = FuturesVwapEvidence(
+                instrument_key=evidence.futures_instrument_key,
+                comparison_price=evidence.futures_comparison_price,
+                vwap=evidence.futures_vwap,
+                volume=evidence.futures_volume,
+                bullish_aligned=evidence.futures_comparison_price > evidence.futures_vwap,
+                bearish_aligned=evidence.futures_comparison_price < evidence.futures_vwap,
+                fresh=evidence.futures_fresh,
+            )
+
         midpoint = MidpointEvidence(
             index_close=evidence.index_close,
             midpoint=evidence.reference_midpoint,

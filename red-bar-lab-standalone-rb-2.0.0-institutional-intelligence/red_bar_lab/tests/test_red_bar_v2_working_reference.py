@@ -3,6 +3,12 @@
 Each test states a property the deputy needs for it to stay subordinate to the red
 bar. The red bar throughout is high 104.0, low 96.0, midpoint 100.0, so "outside
 the band" means a close strictly above 104.0 or strictly below 96.0.
+
+Every candidate has to close beyond the previous completed 5-minute candle's
+extreme, so ``_candles`` puts a flat ``RUNWAY`` bar in front of the specs unless a
+test asks for it to be left out. It sits inside the band with a narrow range, so
+it can never be promoted itself and never stands in a candidate's way -- it is
+there purely to give the first spec something to have cleared.
 """
 
 import pandas as pd
@@ -25,11 +31,19 @@ FIRST_BUCKET = pd.Timestamp("2026-09-02 09:15", tz=IST)
 EVALUATED_AT = pd.Timestamp("2026-09-02 11:00", tz=IST)
 
 # Five-minute shapes as (open, high, low, close).
+RUNWAY = (100.0, 100.5, 99.5, 100.0)
 STRONG_UP_ABOVE = (105.0, 108.0, 104.5, 107.5)
-DOJI_ABOVE = (106.0, 108.0, 104.5, 106.2)
+STRONG_UP_HIGHER = (108.0, 111.0, 107.5, 110.5)
+DOJI_ABOVE = (106.0, 107.0, 105.0, 106.2)
 STRONG_UP_INSIDE = (97.0, 102.5, 96.5, 102.0)
 STRONG_DOWN_BELOW = (95.0, 95.5, 91.0, 91.5)
 RED_INSIDE = (100.0, 101.0, 99.0, 99.5)
+# Wrong-colour neighbours, used to pin down which candle the breakout is measured
+# against. Both are skipped as candidates; only their extremes matter.
+TALL_RED_ABOVE = (110.0, 111.0, 105.0, 105.5)
+SHORT_RED_ABOVE = (107.0, 107.2, 105.0, 105.5)
+TALL_GREEN_BELOW = (91.0, 95.0, 90.0, 94.5)
+SHORT_GREEN_BELOW = (93.0, 95.0, 93.0, 94.5)
 
 
 def _red_bar() -> RedBarV2Reference:
@@ -49,7 +63,9 @@ def _bucket(index: int) -> pd.Timestamp:
     return FIRST_BUCKET + pd.Timedelta(minutes=5 * index)
 
 
-def _candles(*specs: tuple[float, float, float, float]) -> pd.DataFrame:
+def _candles(
+    *specs: tuple[float, float, float, float], runway: bool = True
+) -> pd.DataFrame:
     """Expand five-minute (open, high, low, close) specs into 1-minute rows.
 
     The first minute of each bucket carries the extremes and the last carries the
@@ -57,9 +73,15 @@ def _candles(*specs: tuple[float, float, float, float]) -> pd.DataFrame:
     aggregation. Going through it rather than fabricating 5-minute rows directly is
     the point: the deputy has to be reachable from the data the strategy really
     gets, including the rule that a partial bucket does not aggregate at all.
+
+    ``runway`` prepends one flat bucket before the specs, so ``_bucket(0)`` still
+    names the first spec and every existing timestamp assertion keeps its meaning.
+    It sits before the default ``after``, so it is never itself a candidate.
     """
+    ordered = ((RUNWAY, -1),) if runway else ()
+    ordered = ordered + tuple((spec, offset) for offset, spec in enumerate(specs))
     rows = []
-    for bucket, (open_price, high, low, close) in enumerate(specs):
+    for (open_price, high, low, close), bucket in ordered:
         inner_high = max(open_price, close)
         inner_low = min(open_price, close)
         for minute in range(5):
@@ -76,9 +98,11 @@ def _candles(*specs: tuple[float, float, float, float]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _build(*specs, after=None, direction="BULLISH", evaluation_time=EVALUATED_AT):
+def _build(
+    *specs, after=None, direction="BULLISH", evaluation_time=EVALUATED_AT, runway=True
+):
     return build_working_reference(
-        _candles(*specs),
+        _candles(*specs, runway=runway),
         instrument_key="NIFTY",
         evaluation_time=evaluation_time,
         red_bar=_red_bar(),
@@ -157,12 +181,57 @@ def test_a_bullish_deputy_ignores_red_candles_and_vice_versa():
 
 def test_the_candle_a_trade_exited_on_cannot_become_its_own_re_entry_reference():
     """``after`` is compared strictly, so the exit bar is not a re-entry level."""
-    both = (STRONG_UP_ABOVE, STRONG_UP_ABOVE)
+    both = (STRONG_UP_ABOVE, STRONG_UP_HIGHER)
     assert _build(*both, after=_bucket(0)).reference_timestamp == _bucket(1)
     # One minute earlier and the same first candle would have been taken, so the
     # exclusion is the comparison and not something else about the bar.
     earlier = _bucket(0) - pd.Timedelta(minutes=1)
     assert _build(*both, after=earlier).reference_timestamp == _bucket(0)
+
+
+def test_a_candle_that_closes_inside_the_previous_range_has_not_displaced_anything():
+    """Body quality is about the candle; this is about what the candle took out.
+
+    Same candidate in both halves -- only the neighbour's high moves. A strong
+    green body that closes back inside the range of the bar before it has not
+    established anything for a counter-trend entry to lean on, and this is the one
+    entry path with no futures VWAP gate behind it.
+    """
+    assert _build(TALL_RED_ABOVE, STRONG_UP_ABOVE) is None
+    cleared = _build(SHORT_RED_ABOVE, STRONG_UP_ABOVE)
+    assert cleared is not None
+    assert cleared.reference_timestamp == _bucket(1)
+
+
+def test_the_breakout_is_measured_against_the_bar_before_not_the_last_same_colour_bar():
+    """The neighbour is taken from the unfiltered frame, colour included.
+
+    ``TALL_RED_ABOVE`` is the wrong colour to be a bullish candidate, so a
+    comparison drawn from the surviving candidates would skip straight past it to
+    the flat runway and promote a candle that never cleared 111.0. Reaching it
+    requires reading the frame the aggregation produced.
+    """
+    assert _build(TALL_RED_ABOVE, STRONG_UP_ABOVE) is None
+    assert _build(TALL_GREEN_BELOW, STRONG_DOWN_BELOW, direction="BEARISH") is None
+
+
+def test_a_bearish_deputy_has_to_close_below_the_previous_low():
+    """The mirror image, with the same single moving part: the neighbour's low."""
+    assert _build(TALL_GREEN_BELOW, STRONG_DOWN_BELOW, direction="BEARISH") is None
+    cleared = _build(SHORT_GREEN_BELOW, STRONG_DOWN_BELOW, direction="BEARISH")
+    assert cleared is not None
+    assert cleared.reference_timestamp == _bucket(1)
+    assert cleared.zone_side == ZonePosition.BELOW.value
+
+
+def test_a_candle_with_nothing_in_front_of_it_cannot_qualify():
+    """No predecessor means no range to have taken out, so it fails closed.
+
+    The candle is identical in both halves and passes colour, location and body in
+    both; the only difference is whether anything preceded it.
+    """
+    assert _build(STRONG_UP_ABOVE, runway=False) is None
+    assert _build(STRONG_UP_ABOVE) is not None
 
 
 def test_a_partial_five_minute_bucket_is_not_a_deputy_yet():

@@ -145,6 +145,101 @@ def bundle() -> RedBarV2SignalBundle:
     )
 
 
+def working_reference() -> RedBarV2Reference:
+    """The deputy: an opposite-colour candle sitting entirely above the red bar.
+
+    Its whole range (24840-24900) is clear of the red bar's high of 24820, which
+    is what lets the tests below tell the two levels apart -- a close can be past
+    one and short of the other.
+    """
+    return RedBarV2Reference(
+        reference_id="RBV2-REF-20260824-1055",
+        trading_date=TRADING_DATE,
+        timestamp=datetime(2026, 8, 24, 10, 55, tzinfo=IST),
+        high=24900.0,
+        low=24840.0,
+        midpoint=24870.0,
+        source="WORKING_OPPOSITE_CANDLE",
+    )
+
+
+def working_decision(*, index_close: float = 24910.0) -> RedBarV2Decision:
+    """An admitted working-reference entry, with no futures VWAP evidence at all.
+
+    `index_close` is the one moving part: past the deputy's high it grades
+    CONFIRMED, between its midpoint and its high PROVISIONAL.
+    """
+    deputy = working_reference()
+    cleared = index_close > deputy.high
+    return RedBarV2Decision(
+        strategy_id="RED_BAR_V2",
+        strategy_version="2.0.0",
+        evaluation_timestamp=EVALUATED_AT,
+        evaluation_timeframe="1m",
+        entry_type=EntryType.WORKING,
+        previous_state=RedBarV2State.SIGNAL_WAITING,
+        current_state=(
+            RedBarV2State.CONFIRMED_BULLISH
+            if cleared
+            else RedBarV2State.PROVISIONAL_BULLISH
+        ),
+        direction=Direction.BULLISH,
+        option_side=OptionSide.CE,
+        trend_strength=(
+            TrendStrength.CONFIRMED if cleared else TrendStrength.PROVISIONAL
+        ),
+        reference=deputy,
+        rsi=None,
+        futures_vwap=None,
+        midpoint=MidpointEvidence(index_close, deputy.midpoint, True, False),
+        context_status=ContextStatus.FRESH,
+        admission_outcome=AdmissionOutcome.ALLOWED,
+        admission_code="RBV2_WORKING_REFERENCE_CONFIRMED_FLAT",
+        admission_reason="Working reference breakout confirmed on structure alone",
+    )
+
+
+def working_bundle() -> RedBarV2SignalBundle:
+    """A schema-1.1 bundle for a working entry.
+
+    Schema 1.1 carries the underlying `instrument_key` itself, which is what makes
+    a bundle with no futures VWAP evidence identifiable at all -- on 1.0 the VWAP
+    block is the only thing naming an instrument.
+    """
+    resolved = working_decision()
+    instrument_key = "NSE_INDEX|Nifty 50"
+    signal_id = build_red_bar_v2_signal_id(
+        strategy_version=resolved.strategy_version,
+        instrument_key=instrument_key,
+        trading_date=TRADING_DATE,
+        reference_id=resolved.reference.reference_id,
+        evaluation_timestamp=resolved.evaluation_timestamp,
+        entry_type=resolved.entry_type,
+        direction=resolved.direction,
+    )
+    return RedBarV2SignalBundle(
+        schema_version="1.1",
+        bundle_id=build_red_bar_v2_bundle_id(signal_id=signal_id, schema_version="1.1"),
+        signal_id=signal_id,
+        strategy_id="RED_BAR_V2",
+        strategy_version="2.0.0",
+        trading_date=TRADING_DATE,
+        evaluation_timestamp=EVALUATED_AT,
+        evaluation_timeframe="1m",
+        entry_type=EntryType.WORKING,
+        direction=Direction.BULLISH,
+        option_side=OptionSide.CE,
+        decision=resolved,
+        idempotency_key=build_red_bar_v2_idempotency_key(
+            signal_id=signal_id,
+            option_side=OptionSide.CE,
+        ),
+        lifecycle_status=BundleLifecycleStatus.AVAILABLE,
+        created_at=datetime(2026, 8, 24, 10, 5, 1, tzinfo=IST),
+        instrument_key=instrument_key,
+    )
+
+
 def test_contracts_are_frozen_and_nested_evidence_is_immutable():
     value = bundle()
     with pytest.raises(FrozenInstanceError):
@@ -314,3 +409,89 @@ def test_deserialization_rejects_identity_mismatch():
     payload["signal_id"] = "RBV2-SIGNAL-WRONG"
     with pytest.raises(BundleIdentityError):
         red_bar_v2_bundle_from_dict(payload)
+
+
+def test_a_working_entry_is_allowed_with_no_futures_vwap_evidence_at_all():
+    """The deputy path consults no VWAP, so requiring one would forbid every entry.
+
+    The exemption is granted to WORKING specifically and not to the two red bar
+    paths, which is what the two rejections pin down. Each variant below differs
+    from an allowed decision in exactly one way, so the error can only be the
+    missing VWAP -- the reversal gets 5m at the same time, or it would fail on the
+    timeframe instead and prove nothing about VWAP.
+    """
+    assert working_decision().futures_vwap is None
+    assert working_decision().admission_outcome is AdmissionOutcome.ALLOWED
+
+    with pytest.raises(DomainValidationError, match="futures_vwap"):
+        replace(working_decision(), entry_type=EntryType.INITIAL)
+    with pytest.raises(DomainValidationError, match="futures_vwap"):
+        replace(
+            working_decision(),
+            entry_type=EntryType.REVERSAL,
+            evaluation_timeframe="5m",
+        )
+
+
+def test_only_a_reversal_is_judged_on_five_minutes():
+    """A working entry acts on a 1-minute close, like the day's initial entry.
+
+    Both halves are the same decision with one field moved, and the messages name
+    the timeframe each path requires, so this cannot pass by raising for some other
+    reason.
+    """
+    with pytest.raises(DomainValidationError, match="requires 1m"):
+        replace(working_decision(), evaluation_timeframe="5m")
+    with pytest.raises(DomainValidationError, match="requires 5m"):
+        replace(decision(), entry_type=EntryType.REVERSAL)
+
+
+def test_the_grade_is_measured_against_whichever_reference_governed():
+    """`reference` holds the governing level, so the grade follows the deputy.
+
+    24880.0 is above the red bar's own high of 24820.0 and below the deputy's
+    24900.0. If the invariant re-derived the grade from the red bar it would demand
+    CONFIRMED here; against the deputy that actually governed, PROVISIONAL is the
+    only valid answer, and claiming CONFIRMED is rejected.
+    """
+    confirmed = working_decision()
+    assert confirmed.reference.source == "WORKING_OPPOSITE_CANDLE"
+    assert confirmed.trend_strength is TrendStrength.CONFIRMED
+
+    provisional = working_decision(index_close=24880.0)
+    assert provisional.trend_strength is TrendStrength.PROVISIONAL
+    assert provisional.midpoint.index_close > reference().high
+    with pytest.raises(DomainValidationError, match="reference-candle grade"):
+        replace(
+            provisional,
+            current_state=RedBarV2State.CONFIRMED_BULLISH,
+            trend_strength=TrendStrength.CONFIRMED,
+        )
+
+
+def test_a_working_bundle_round_trips_with_its_deputy_intact():
+    """The deputy has to survive serialization or the audit trail loses the level.
+
+    Nothing else records which reference a working entry was judged against, so
+    `source` coming back as anything else would leave a decision that cannot be
+    re-checked.
+    """
+    value = working_bundle()
+    payload = red_bar_v2_bundle_to_dict(value)
+    assert payload["entry_type"] == "WORKING"
+    assert payload["decision"]["futures_vwap"] is None
+    assert payload["decision"]["reference"]["source"] == "WORKING_OPPOSITE_CANDLE"
+    restored = red_bar_v2_bundle_from_dict(payload)
+    assert restored == value
+    assert restored.decision.reference.source == "WORKING_OPPOSITE_CANDLE"
+
+
+def test_a_bundle_with_no_vwap_evidence_must_name_its_own_instrument():
+    """On schema 1.0 the VWAP block is the only thing that names an instrument.
+
+    A working entry has no VWAP block, so without `instrument_key` there is nothing
+    to build the signal identity from -- and an unidentifiable bundle is worse than
+    a rejected one.
+    """
+    with pytest.raises(DomainValidationError, match="instrument_key"):
+        replace(working_bundle(), schema_version="1.0", instrument_key=None)
