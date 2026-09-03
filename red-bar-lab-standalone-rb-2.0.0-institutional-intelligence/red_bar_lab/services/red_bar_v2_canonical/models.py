@@ -54,7 +54,11 @@ class LegacyV2DecisionEvidence:
     evaluation_timestamp: datetime
     evaluation_timeframe: str
     index_close: float
-    rsi_value: float
+    # RSI is informational under the futures gates, and Wilder RSI(14) is NaN
+    # for the first 15 completed candles. A required float here would make the
+    # whole evidence bundle unbuildable during the warm-up and take the
+    # decision down with it, so a warm-up reading is carried as None.
+    rsi_value: float | None
     bullish_rsi_threshold: float
     bearish_rsi_threshold: float
     futures_comparison_price: float

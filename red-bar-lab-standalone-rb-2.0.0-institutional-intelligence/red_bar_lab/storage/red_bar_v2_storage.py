@@ -25,8 +25,7 @@ CREATE TABLE IF NOT EXISTS market_indicator_snapshots (
     rsi_value REAL,
     vwap_value REAL,
     price_vs_vwap TEXT,
-    bullish_context INTEGER NOT NULL DEFAULT 0,
-    bearish_context INTEGER NOT NULL DEFAULT 0,
+    rsi_state TEXT,
     source TEXT NOT NULL,
     data_quality TEXT NOT NULL DEFAULT 'VALID',
     created_at TEXT NOT NULL,
@@ -170,8 +169,7 @@ class IndicatorSnapshot:
     rsi_value: float | None = None
     vwap_value: float | None = None
     price_vs_vwap: str | None = None
-    bullish_context: bool = False
-    bearish_context: bool = False
+    rsi_state: str | None = None
     data_quality: str = "VALID"
 
 
@@ -236,7 +234,27 @@ class RedBarV2Storage:
         with sqlite3.connect(self.path) as conn:
             conn.execute("PRAGMA foreign_keys = ON")
             conn.executescript(RED_BAR_V2_SCHEMA)
+            self._migrate_indicator_snapshots(conn)
             conn.commit()
+
+    @staticmethod
+    def _migrate_indicator_snapshots(conn: sqlite3.Connection) -> None:
+        """Add `rsi_state` to databases created before it existed.
+
+        The schema above runs as CREATE TABLE IF NOT EXISTS, so an existing
+        deployment keeps whatever columns it was created with. The retired
+        `bullish_context`/`bearish_context` columns are left in place -- they are
+        NOT NULL DEFAULT 0, so an INSERT that omits them still succeeds, and
+        dropping them would mean rebuilding a live table for no gain.
+        """
+        existing = {
+            str(row[1])
+            for row in conn.execute("PRAGMA table_info(market_indicator_snapshots)")
+        }
+        if existing and "rsi_state" not in existing:
+            conn.execute(
+                "ALTER TABLE market_indicator_snapshots ADD COLUMN rsi_state TEXT"
+            )
 
     def upsert_indicator_snapshot(self, snapshot: IndicatorSnapshot) -> str:
         self.initialize()
@@ -254,9 +272,9 @@ class RedBarV2Storage:
                 INSERT INTO market_indicator_snapshots(
                     snapshot_id,instrument_key,trading_date,timeframe,candle_timestamp,
                     candle_open,candle_high,candle_low,candle_close,candle_volume,
-                    rsi_period,rsi_value,vwap_value,price_vs_vwap,bullish_context,
-                    bearish_context,source,data_quality,created_at,updated_at
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    rsi_period,rsi_value,vwap_value,price_vs_vwap,rsi_state,
+                    source,data_quality,created_at,updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(snapshot_id) DO UPDATE SET
                     candle_open=excluded.candle_open,
                     candle_high=excluded.candle_high,
@@ -266,8 +284,7 @@ class RedBarV2Storage:
                     rsi_value=excluded.rsi_value,
                     vwap_value=excluded.vwap_value,
                     price_vs_vwap=excluded.price_vs_vwap,
-                    bullish_context=excluded.bullish_context,
-                    bearish_context=excluded.bearish_context,
+                    rsi_state=excluded.rsi_state,
                     source=excluded.source,
                     data_quality=excluded.data_quality,
                     updated_at=excluded.updated_at
@@ -287,8 +304,7 @@ class RedBarV2Storage:
                     row["rsi_value"],
                     row["vwap_value"],
                     row["price_vs_vwap"],
-                    int(row["bullish_context"]),
-                    int(row["bearish_context"]),
+                    row["rsi_state"],
                     row["source"],
                     row["data_quality"],
                     now,

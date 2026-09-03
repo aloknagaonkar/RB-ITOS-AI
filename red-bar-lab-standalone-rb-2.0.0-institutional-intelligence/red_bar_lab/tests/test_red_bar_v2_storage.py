@@ -55,7 +55,7 @@ def test_indicator_snapshot_is_deterministic_and_idempotent(tmp_path):
         rsi_value=43.2,
         vwap_value=24804.0,
         price_vs_vwap="BELOW",
-        bearish_context=True,
+        rsi_state="BEARISH",
         source="HISTORICAL_REPLAY",
     )
 
@@ -73,7 +73,7 @@ def test_indicator_snapshot_is_deterministic_and_idempotent(tmp_path):
     assert row is not None
     assert row["rsi_value"] == 43.2
     assert row["vwap_value"] == 24804.0
-    assert row["bearish_context"] == 1
+    assert row["rsi_state"] == "BEARISH"
 
 
 def test_direction_event_can_be_marked_consumed(tmp_path):

@@ -306,14 +306,17 @@ def replay_red_bar_v2_day(
                         ),
                         "rsi_value": getattr(decision, "rsi_value", None),
                         "vwap_value": getattr(decision, "vwap_value", None),
-                        "mid_session_active": getattr(
-                            decision, "mid_session_active", False
+                        # Stage 3 geometry: where the decision was taken, so a
+                        # replayed day can be measured after the fact.
+                        "zone_position": getattr(decision, "zone_position", None),
+                        "governing_reference": getattr(
+                            decision, "governing_reference", None
                         ),
-                        "mid_session_passed": getattr(
-                            decision, "mid_session_passed", None
+                        "midpoint_distance_points": getattr(
+                            decision, "midpoint_distance_points", None
                         ),
-                        "mid_session_reason": getattr(
-                            decision, "mid_session_reason", None
+                        "working_body_ratio": getattr(
+                            decision, "working_body_ratio", None
                         ),
                     },
                 )

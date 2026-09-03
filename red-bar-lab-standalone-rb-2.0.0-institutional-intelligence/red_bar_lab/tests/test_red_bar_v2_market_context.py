@@ -83,7 +83,7 @@ def test_aggregate_completed_5m_discards_partial_group() -> None:
     assert aggregated.iloc[0]["volume"] == pytest.approx(500.0)
 
 
-def test_latest_one_minute_snapshot_marks_bullish_alignment() -> None:
+def test_latest_one_minute_snapshot_reports_bullish_rsi_state() -> None:
     frame = _candles(20)
     expected = frame.index[-1]
 
@@ -100,8 +100,7 @@ def test_latest_one_minute_snapshot_marks_bullish_alignment() -> None:
     assert snapshot.fresh is True
     assert snapshot.rsi_value == pytest.approx(100.0)
     assert snapshot.price_vs_vwap == "ABOVE"
-    assert snapshot.bullish_context is True
-    assert snapshot.bearish_context is False
+    assert snapshot.rsi_state == "BULLISH"
     assert snapshot.to_storage_payload()["candle_timestamp"] == expected.isoformat()
 
 
@@ -124,7 +123,15 @@ def test_latest_five_minute_snapshot_uses_only_complete_groups() -> None:
     assert snapshot.data_quality == "VALID"
 
 
-def test_stale_expected_timestamp_blocks_directional_flags() -> None:
+def test_stale_expected_timestamp_is_reported_through_freshness_only() -> None:
+    """Staleness must not be smuggled into the RSI reading.
+
+    The retired `bullish_context`/`bearish_context` pair was forced to False
+    whenever the snapshot was stale, which made the pair unreadable: a False
+    could mean "RSI disagrees" or "the data is old". `rsi_state` is now a
+    statement about RSI and nothing else, and callers read `fresh` /
+    `data_quality` to learn the snapshot is not usable.
+    """
     frame = _candles(20)
 
     snapshot = build_latest_snapshot(
@@ -138,8 +145,7 @@ def test_stale_expected_timestamp_blocks_directional_flags() -> None:
     assert snapshot is not None
     assert snapshot.data_quality == "STALE_CONTEXT"
     assert snapshot.fresh is False
-    assert snapshot.bullish_context is False
-    assert snapshot.bearish_context is False
+    assert snapshot.rsi_state == "BULLISH"
 
 
 def test_insufficient_rsi_history_is_explicit() -> None:
@@ -155,7 +161,7 @@ def test_insufficient_rsi_history_is_explicit() -> None:
     assert snapshot is not None
     assert snapshot.rsi_value is None
     assert snapshot.data_quality == "INSUFFICIENT_RSI_HISTORY"
-    assert snapshot.bullish_context is False
+    assert snapshot.rsi_state is None, "no reading means no classification"
 
 
 def test_missing_volume_is_rejected() -> None:

@@ -93,14 +93,26 @@ def metadata(*, status=ContextStatus.FRESH, with_reference=True):
     )
 
 
-def evidence(*, direction="BULLISH", entry_type="INITIAL", midpoint_aligned=True):
+def evidence(*, direction="BULLISH", entry_type="INITIAL", cleared=True):
+    """Event-time evidence for one admitted candidate.
+
+    ``cleared`` picks the grade by geometry: a close past the reference candle's
+    own extreme (24820.0 high / 24780.0 low) has taken the whole candle out and is
+    CONFIRMED, while a close past the 24800.0 midpoint only is PROVISIONAL. Both
+    clear the midpoint, because clearing it is the gate every admitted entry
+    passes, so the midpoint cannot be what tells the two grades apart.
+    """
     bullish = direction == "BULLISH"
+    if bullish:
+        index_close = 24825.0 if cleared else 24810.0
+    else:
+        index_close = 24775.0 if cleared else 24790.0
     return LegacyV2DecisionEvidence(
         underlying_instrument_key=UNDERLYING,
         futures_instrument_key=FUTURES,
         evaluation_timestamp=EVALUATED_AT,
         evaluation_timeframe="1m" if entry_type == "INITIAL" else "5m",
-        index_close=(24810.0 if midpoint_aligned else 24790.0) if bullish else (24790.0 if midpoint_aligned else 24810.0),
+        index_close=index_close,
         rsi_value=62.0 if bullish else 38.0,
         bullish_rsi_threshold=60.0,
         bearish_rsi_threshold=40.0,
@@ -121,7 +133,6 @@ def evidence(*, direction="BULLISH", entry_type="INITIAL", midpoint_aligned=True
 
 def event(*, direction="BULLISH", entry_type="INITIAL", strength="CONFIRMED", allowed=True):
     bullish = direction == "BULLISH"
-    midpoint_aligned = strength == "CONFIRMED"
     return ReplayEvent(
         timestamp=EVALUATED_AT,
         event_type="CANDIDATE_ADMISSION",
@@ -139,7 +150,9 @@ def event(*, direction="BULLISH", entry_type="INITIAL", strength="CONFIRMED", al
             "conditions": {
                 "rsi_aligned": True,
                 "vwap_aligned": True,
-                "midpoint_aligned": midpoint_aligned,
+                # True at both grades: the midpoint is the gate, and an admitted
+                # candidate cleared it whatever its grade.
+                "midpoint_aligned": True,
             },
         },
     )
@@ -205,7 +218,7 @@ def test_real_initial_event_maps_without_recalculation(direction, expected_state
 
 
 @pytest.mark.parametrize(
-    "direction,midpoint_aligned,expected_state,expected_strength",
+    "direction,cleared,expected_state,expected_strength",
     [
         ("BULLISH", True, RedBarV2State.CONFIRMED_BULLISH, TrendStrength.CONFIRMED),
         ("BEARISH", True, RedBarV2State.CONFIRMED_BEARISH, TrendStrength.CONFIRMED),
@@ -213,12 +226,18 @@ def test_real_initial_event_maps_without_recalculation(direction, expected_state
         ("BEARISH", False, RedBarV2State.PROVISIONAL_BEARISH, TrendStrength.PROVISIONAL),
     ],
 )
-def test_real_reversal_event_preserves_confirmed_and_provisional_semantics(direction, midpoint_aligned, expected_state, expected_strength):
-    strength = "CONFIRMED" if midpoint_aligned else "PROVISIONAL"
+def test_real_reversal_event_preserves_confirmed_and_provisional_semantics(direction, cleared, expected_state, expected_strength):
+    """Both grades map through the adapter untouched, and both are admissible.
+
+    The grade travels with the decision instead of being recomputed here, so a
+    PROVISIONAL reversal is representable end to end. What separates the two is
+    whether the close took out the reference candle's own extreme.
+    """
+    strength = "CONFIRMED" if cleared else "PROVISIONAL"
     result = build_canonical_decision(
         replay_event=event(direction=direction, entry_type="REVERSAL", strength=strength),
         readiness=readiness(),
-        evidence=evidence(direction=direction, entry_type="REVERSAL", midpoint_aligned=midpoint_aligned),
+        evidence=evidence(direction=direction, entry_type="REVERSAL", cleared=cleared),
     )
     assert result.current_state is expected_state
     assert result.trend_strength is expected_strength

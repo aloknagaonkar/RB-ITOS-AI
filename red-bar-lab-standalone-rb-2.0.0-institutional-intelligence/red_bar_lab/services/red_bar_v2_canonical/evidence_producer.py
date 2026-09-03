@@ -13,6 +13,16 @@ def _required(source: object, name: str) -> object:
     return value
 
 
+def _optional_number(source: object, name: str) -> float | None:
+    """Read an informational numeric field that is legitimately absent.
+
+    Used for RSI, which is NaN for the whole Wilder RSI(14) warm-up and does
+    not gate admission. ``_required`` would abort the evidence build instead.
+    """
+    value = getattr(source, name, None)
+    return None if value is None else float(value)
+
+
 def build_legacy_v2_decision_evidence(
     *,
     underlying_instrument_key: str,
@@ -43,7 +53,7 @@ def build_legacy_v2_decision_evidence(
         evaluation_timestamp=_required(direction_decision, "context_timestamp"),
         evaluation_timeframe=evaluation_timeframe,
         index_close=float(_required(index_context, "candle_close")),
-        rsi_value=float(_required(direction_decision, "rsi_value")),
+        rsi_value=_optional_number(direction_decision, "rsi_value"),
         bullish_rsi_threshold=bullish_rsi_threshold,
         bearish_rsi_threshold=bearish_rsi_threshold,
         futures_comparison_price=float(_required(futures_context, "vwap_comparison_price")),
@@ -114,6 +124,12 @@ def evidence_from_event_details(details: Mapping[str, object]) -> LegacyV2Decisi
             raise LegacyMappingError(f"event evidence {name} must be numeric")
         return float(value)
 
+    def optional_number(name: str) -> float | None:
+        """Accept an absent or explicitly null informational reading."""
+        if details.get(name) is None:
+            return None
+        return number(name)
+
     fresh = details.get("futures_fresh")
     if not isinstance(fresh, bool):
         raise LegacyMappingError("event evidence futures_fresh must be a bool")
@@ -123,7 +139,7 @@ def evidence_from_event_details(details: Mapping[str, object]) -> LegacyV2Decisi
         evaluation_timestamp=timestamp("context_timestamp") if "context_timestamp" in details else timestamp("futures_source_timestamp"),
         evaluation_timeframe=text("evaluation_timeframe"),
         index_close=number("index_close"),
-        rsi_value=number("rsi_value"),
+        rsi_value=optional_number("rsi_value"),
         bullish_rsi_threshold=number("bullish_rsi_threshold"),
         bearish_rsi_threshold=number("bearish_rsi_threshold"),
         futures_comparison_price=number("futures_comparison_price"),

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from datetime import time
 from enum import Enum
 from hashlib import sha256
 from typing import Any
@@ -21,6 +22,8 @@ class AdmissionCode(str, Enum):
     INITIAL_BULLISH_ALIGNMENT = "INITIAL_BULLISH_ALIGNMENT"
     INITIAL_BEARISH_ALIGNMENT = "INITIAL_BEARISH_ALIGNMENT"
     REVERSAL_CONTEXT_ALIGNED_FLAT = "REVERSAL_CONTEXT_ALIGNED_FLAT"
+    WORKING_REFERENCE_CONFIRMED_FLAT = "WORKING_REFERENCE_CONFIRMED_FLAT"
+    WORKING_REFERENCE_NOT_CONFIRMED = "WORKING_REFERENCE_NOT_CONFIRMED"
     FULL_DIRECTIONAL_ALIGNMENT = "FULL_DIRECTIONAL_ALIGNMENT"
     ACTIVE_TRADE_BLOCK = "ACTIVE_TRADE_BLOCK"
     PREVIOUS_TRADE_NOT_CLOSED = "PREVIOUS_TRADE_NOT_CLOSED"
@@ -28,8 +31,13 @@ class AdmissionCode(str, Enum):
     VWAP_NOT_ALIGNED = "VWAP_NOT_ALIGNED"
     MIDPOINT_NOT_ALIGNED = "MIDPOINT_NOT_ALIGNED"
     CONTEXT_STALE = "CONTEXT_STALE"
+    ENTRY_WINDOW_CLOSED = "ENTRY_WINDOW_CLOSED"
     DUPLICATE_SIGNAL = "DUPLICATE_SIGNAL"
     REVERSAL_ALREADY_CONSUMED = "REVERSAL_ALREADY_CONSUMED"
+    NO_ADMISSIBLE_CONDITION = "NO_ADMISSIBLE_CONDITION"
+
+
+DEFAULT_ENTRY_CUTOFF = time(15, 0)
 
 
 @dataclass(frozen=True)
@@ -102,9 +110,16 @@ def evaluate_candidate_admission(
     *,
     duplicate_signal: bool = False,
     reversal_already_consumed: bool = False,
+    entry_cutoff: time | None = DEFAULT_ENTRY_CUTOFF,
     strategy_version: str = "RED_BAR_V2",
 ) -> CandidateAdmissionDecision:
-    """Apply the Red Bar V2 candidate gate without creating or closing orders."""
+    """Apply the Red Bar V2 candidate gate without creating or closing orders.
+
+    ``entry_cutoff`` is the last wall-clock time a *new* candidate may be
+    admitted; pass None to disable it. Only entries are affected -- this function
+    judges nothing but new candidates, so an open position keeps running under
+    the exit policy after the window shuts.
+    """
     reversal_event_id = build_reversal_event_id(
         direction_decision,
         strategy_version=strategy_version,
@@ -118,10 +133,27 @@ def evaluate_candidate_admission(
         if trade_state.latest_executed_trade is not None
         else None
     )
+    context_time = (
+        direction_decision.context_timestamp.time()
+        if direction_decision.context_timestamp is not None
+        else None
+    )
+    # Unknown time counts as open. A missing context timestamp is already a hard
+    # CONTEXT_STALE reject below, so this never widens the window -- it only keeps
+    # the reported reason accurate about which check actually failed.
+    entry_window_open = (
+        entry_cutoff is None or context_time is None or context_time < entry_cutoff
+    )
     conditions = {
         "reference_ready": direction_decision.reference_timestamp is not None,
         "context_fresh": direction_decision.context_fresh,
+        "entry_window_open": entry_window_open,
         "rsi_aligned": direction_decision.rsi_aligned,
+        # The canonical RedBar + VWAP check. It was computed by the strategy
+        # and then dropped here, so the audit trail could never write a
+        # `check:redbar_vwap_aligned` row and the UI silently skipped the one
+        # gate it advertises first.
+        "redbar_vwap_aligned": direction_decision.redbar_vwap_aligned,
         "vwap_aligned": direction_decision.vwap_aligned,
         "midpoint_aligned": direction_decision.midpoint_aligned,
         "duplicate_signal": duplicate_signal,
@@ -162,6 +194,18 @@ def evaluate_candidate_admission(
     ):
         return result(False, AdmissionCode.CONTEXT_STALE, "The RSI/VWAP context is missing, stale, incomplete, or timestamp-misaligned.")
 
+    # A closed window dominates every alignment question, so it is asked before
+    # them: a perfectly aligned 15:10 candle is still not a tradeable entry, and
+    # reporting VWAP_NOT_ALIGNED for it would send the reader looking at the
+    # wrong thing.
+    if not entry_window_open:
+        return result(
+            False,
+            AdmissionCode.ENTRY_WINDOW_CLOSED,
+            f"New entries close at {entry_cutoff.isoformat(timespec='minutes')}; "
+            "open positions continue under the exit policy.",
+        )
+
     if duplicate_signal:
         return result(False, AdmissionCode.DUPLICATE_SIGNAL, "An identical deterministic candidate has already been processed.")
 
@@ -174,6 +218,25 @@ def evaluate_candidate_admission(
     if trade_state.pending_trade_count > 0 or not trade_state.previous_trade_closed:
         return result(False, AdmissionCode.PREVIOUS_TRADE_NOT_CLOSED, "The previous trade or pending order has not reached terminal CLOSED state.")
 
+    # The working reference is judged on structure alone, so it is settled before
+    # the VWAP and midpoint checks -- those describe the Red Bar's gate and this
+    # path never consults a VWAP at all. Running it through them would reject
+    # every deputy entry on a check it was designed not to use.
+    if direction_decision.entry_type == "WORKING":
+        if direction_decision.trend_strength != "CONFIRMED":
+            return result(
+                False,
+                AdmissionCode.WORKING_REFERENCE_NOT_CONFIRMED,
+                "The close crossed the working reference midpoint but has not "
+                "taken out its high or low, so no entry is triggered.",
+            )
+        return result(
+            True,
+            AdmissionCode.WORKING_REFERENCE_CONFIRMED_FLAT,
+            "The close has taken out the working reference extreme outside the "
+            "Red Bar band while execution is flat.",
+        )
+
     # RSI is informational and must not gate admission. Both futures gates
     # (initial and reversal) treat it that way, so ``rsi_aligned`` is recorded
     # in ``conditions`` for the audit trail only. AdmissionCode.RSI_NOT_ALIGNED
@@ -181,15 +244,19 @@ def evaluate_candidate_admission(
     if not direction_decision.vwap_aligned:
         return result(False, AdmissionCode.VWAP_NOT_ALIGNED, "The completed candle is not on the required side of VWAP.")
 
-    is_reversal = direction_decision.entry_type == "REVERSAL"
-    if not direction_decision.midpoint_aligned and not is_reversal:
-        return result(False, AdmissionCode.MIDPOINT_NOT_ALIGNED, "Initial entry requires alignment with the fixed Red Bar midpoint.")
+    # No reversal exemption. The reversal path used to be admitted on the VWAP
+    # alone, with the midpoint downgraded to a grade, which let it enter with
+    # price on the wrong side of the very level the strategy is named for. Inside
+    # the Red Bar's band every entry answers to the Red Bar's own rule.
+    if not direction_decision.midpoint_aligned:
+        return result(False, AdmissionCode.MIDPOINT_NOT_ALIGNED, "Entry requires alignment with the fixed Red Bar midpoint.")
 
-    if is_reversal:
+    if direction_decision.entry_type == "REVERSAL":
         return result(
             True,
             AdmissionCode.REVERSAL_CONTEXT_ALIGNED_FLAT,
-            "Opposite 5-minute RSI/VWAP reversal is aligned and execution is flat; midpoint confirmation may remain provisional.",
+            "The opposite 5-minute reversal clears the fixed midpoint and the "
+            "futures VWAP together while execution is flat.",
         )
 
     if direction_decision.event_type == RedBarV2EventType.INITIAL_BULLISH_ALIGNMENT:
@@ -204,4 +271,8 @@ def evaluate_candidate_admission(
             return result(False, AdmissionCode.DUPLICATE_SIGNAL, "Midpoint confirmation upgrades the existing state and must not create a second candidate.")
         return result(True, AdmissionCode.FULL_DIRECTIONAL_ALIGNMENT, "RSI, VWAP, and the fixed midpoint are fully aligned while execution is flat.")
 
-    return result(False, AdmissionCode.MIDPOINT_NOT_ALIGNED, "No admissible Red Bar V2 candidate condition is fully aligned.")
+    # Reached only when every named gate passed but no event type claimed the
+    # decision -- e.g. NO_DIRECTIONAL_ALIGNMENT. This used to report
+    # MIDPOINT_NOT_ALIGNED with a reason that contradicted it, so a reader
+    # chasing a midpoint problem found a perfectly aligned midpoint.
+    return result(False, AdmissionCode.NO_ADMISSIBLE_CONDITION, "No admissible Red Bar V2 candidate condition is fully aligned.")

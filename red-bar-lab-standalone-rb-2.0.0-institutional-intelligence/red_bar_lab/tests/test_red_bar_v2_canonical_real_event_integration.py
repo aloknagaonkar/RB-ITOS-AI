@@ -29,7 +29,9 @@ def evidence(*, underlying=UNDERLYING) -> LegacyV2DecisionEvidence:
         futures_instrument_key=FUTURES,
         evaluation_timestamp=EVALUATED_AT,
         evaluation_timeframe="5m",
-        index_close=24790.0,
+        # Past the 24800.0 midpoint that every admitted entry has to clear, short
+        # of the 24820.0 reference high that would grade it CONFIRMED.
+        index_close=24810.0,
         rsi_value=62.0,
         bullish_rsi_threshold=55.0,
         bearish_rsi_threshold=45.0,
@@ -108,7 +110,7 @@ def event_from_evidence(value: LegacyV2DecisionEvidence) -> ReplayEvent:
             "conditions": {
                 "rsi_aligned": True,
                 "vwap_aligned": True,
-                "midpoint_aligned": False,
+                "midpoint_aligned": True,
             },
         }
     )

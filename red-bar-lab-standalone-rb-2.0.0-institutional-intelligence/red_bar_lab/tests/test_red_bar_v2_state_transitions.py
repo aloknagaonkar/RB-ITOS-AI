@@ -14,7 +14,10 @@ from red_bar_lab.execution.trade_state_observer import (
     TradeLifecycleState,
     observe_trade_state,
 )
-from red_bar_lab.intelligence.market_context import MarketIndicatorSnapshot
+from red_bar_lab.intelligence.market_context import (
+    MarketIndicatorSnapshot,
+    rsi_alignment_state,
+)
 from red_bar_lab.strategy.red_bar_v2 import (
     RedBarV2EventType,
     RedBarV2Reference,
@@ -29,6 +32,12 @@ IST = "Asia/Kolkata"
 
 
 def _reference(midpoint: float = 100.0) -> RedBarV2Reference:
+    """The frozen red bar these tests judge against.
+
+    The 105.0 closes below clear the 100.0 midpoint but stay under the 106.0
+    reference high, so a reversal built on them is detected and graded
+    PROVISIONAL: the gate passed, the whole candle was not taken out.
+    """
     return RedBarV2Reference(
         instrument_key="NIFTY",
         trading_date="2026-08-21",
@@ -70,8 +79,7 @@ def _context(
         price_vs_vwap=(
             "ABOVE" if close > vwap else "BELOW" if close < vwap else "AT"
         ),
-        bullish_context=quality == "VALID" and fresh and rsi > 55 and close > vwap,
-        bearish_context=quality == "VALID" and fresh and rsi < 45 and close < vwap,
+        rsi_state=rsi_alignment_state(rsi),
         source="PHASE_6_TEST",
         data_quality=quality,
         fresh=fresh,
@@ -120,7 +128,8 @@ def test_initial_bearish_alignment_is_admitted_when_flat():
         _context(
             timeframe="1M",
             timestamp="2026-08-21 10:00",
-            close=95.0,
+            # Through the 94.0 reference low, so this one is graded CONFIRMED.
+            close=93.0,
             rsi=38.0,
             vwap=97.0,
         ),
@@ -151,11 +160,15 @@ def test_initial_bullish_alignment_is_admitted_when_previous_trade_closed():
     assert admission.candidate_allowed is True
     assert admission.admission_code == AdmissionCode.INITIAL_BULLISH_ALIGNMENT
     assert admission.previous_trade_status == TradeLifecycleState.CLOSED.value
+    # 105.0 cleared the 100.0 midpoint but not the 106.0 reference high. A first
+    # entry can be PROVISIONAL now; this path used to call every one of them
+    # CONFIRMED, which made the grade unreadable on the whole legacy path.
+    assert admission.trend_strength == "PROVISIONAL"
 
 
 def test_reversal_before_exit_is_detected_but_blocked_by_active_trade():
     reversal = evaluate_reversal_direction(
-        _reference(midpoint=110.0),
+        _reference(midpoint=100.0),
         _context(
             timeframe="5M",
             timestamp="2026-08-21 10:20",
@@ -177,7 +190,7 @@ def test_reversal_before_exit_is_detected_but_blocked_by_active_trade():
 
 def test_same_reversal_is_admitted_after_old_trade_closes():
     reversal = evaluate_reversal_direction(
-        _reference(midpoint=110.0),
+        _reference(midpoint=100.0),
         _context(
             timeframe="5M",
             timestamp="2026-08-21 10:20",
@@ -205,7 +218,9 @@ def test_exit_before_reversal_allows_reversal_immediately():
         _context(
             timeframe="5M",
             timestamp="2026-08-21 10:30",
-            close=105.0,
+            # Past the 106.0 reference high, so the whole candle is taken out and
+            # the grade is CONFIRMED rather than PROVISIONAL.
+            close=107.0,
             rsi=63.0,
             vwap=102.0,
         ),
@@ -233,7 +248,7 @@ def test_pending_exit_blocks_reversal_until_terminal_close():
         ]
     )
     reversal = evaluate_reversal_direction(
-        _reference(midpoint=110.0),
+        _reference(midpoint=100.0),
         _context(
             timeframe="5M",
             timestamp="2026-08-21 10:20",
@@ -297,7 +312,7 @@ def test_duplicate_signal_has_priority_over_active_trade_block():
 
 def test_consumed_reversal_has_priority_over_execution_state():
     reversal = evaluate_reversal_direction(
-        _reference(midpoint=110.0),
+        _reference(midpoint=100.0),
         _context(
             timeframe="5M",
             timestamp="2026-08-21 10:20",
@@ -320,7 +335,7 @@ def test_consumed_reversal_has_priority_over_execution_state():
 
 def test_candidate_and_reversal_identities_are_deterministic():
     reversal = evaluate_reversal_direction(
-        _reference(midpoint=110.0),
+        _reference(midpoint=100.0),
         _context(
             timeframe="5M",
             timestamp="2026-08-21 10:20",

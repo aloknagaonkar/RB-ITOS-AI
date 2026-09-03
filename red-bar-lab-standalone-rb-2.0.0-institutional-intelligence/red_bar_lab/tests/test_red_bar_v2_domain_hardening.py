@@ -81,7 +81,9 @@ def _decision(
             True,
         ),
         midpoint=MidpointEvidence(
-            24810.0 if bullish else 24790.0,
+            # CONFIRMED, so the close is past the reference candle's own extreme
+            # (24820.0 high / 24780.0 low) rather than just past the midpoint.
+            24825.0 if bullish else 24775.0,
             24800.0,
             bullish,
             not bullish,

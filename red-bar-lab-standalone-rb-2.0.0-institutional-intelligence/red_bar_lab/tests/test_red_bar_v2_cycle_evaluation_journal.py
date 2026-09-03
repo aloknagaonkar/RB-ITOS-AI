@@ -261,13 +261,16 @@ def test_replay_rule_state_reports_every_rule():
         "reference",
         "initial",
         "reversal",
-        "mid_session",
         "upgrade",
         "reentry",
         "admission",
     ):
         assert section in state
     assert state["as_of"] is not None
+    # The 12:45-13:15 rule was deleted, so the section it reported is gone too.
+    # Leaving an always-inactive section behind would keep advertising a rule the
+    # strategy no longer has.
+    assert "mid_session" not in state
 
     assert state["reference"]["established"] is True
     assert isinstance(state["reference"]["midpoint"], float)
@@ -277,7 +280,6 @@ def test_replay_rule_state_reports_every_rule():
     assert state["initial"]["evaluations"] > 0
     assert state["admission"]["admitted"] >= 1
     assert state["admission"]["last_admission_code"]
-    assert state["mid_session"]["active"] is False
     assert state["reentry"]["waiting"] is False
     assert state["upgrade"]["provisional_state"] is None
     assert state["current_direction"] in {"BULLISH", "BEARISH"}
@@ -555,7 +557,7 @@ def test_rule_sentence_builders():
         "reversal": {
             "last_direction": "BULLISH",
             "last_detected_at": "2026-08-31T10:35:00+05:30",
-            "last_midpoint_aligned": True,
+            "last_trend_strength": "CONFIRMED",
         },
         "reentry": {
             "waiting": True,
@@ -579,6 +581,16 @@ def test_rule_sentence_builders():
     assert "Currently BEARISH + futures close > futures VWAP" in rule_two
     assert "BULLISH reversal detected at 10:35:00" in rule_two
     assert "confirmed" in rule_two
+
+    # The grade has to come from the grade, not from midpoint alignment: every
+    # admitted reversal clears the midpoint, so reading it off that flag would
+    # report every reversal as confirmed and hide the provisional ones.
+    provisional = dict(state)
+    provisional["reversal"] = {
+        **state["reversal"],
+        "last_trend_strength": "PROVISIONAL",
+    }
+    assert "provisional" in page._rule_two_sentence(row, provisional)
 
     rule_five = page._rule_five_sentence(state)
     assert "trade closed at 13:02:00" in rule_five

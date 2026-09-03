@@ -506,10 +506,11 @@ def evaluate_current_session_red_bar_v2(
                 "reason": str(reason_text),
             },
         )
-        # Write one row per gate. The 5 boolean gates are now:
+        # Write one row per gate. The boolean gates are now:
         # - reference_ready (gating)
         # - context_fresh (gating)
-        # - vwap_aligned (gating, combined with RedBar reference)
+        # - redbar_vwap_aligned (gating, the canonical combined check)
+        # - vwap_aligned (gating, one half of the combined check)
         # - midpoint_aligned (gating, alias for RedBar reference)
         # - rsi_aligned is now informational; we don't gate on it
         # ReplayEvent.details["conditions"] carries the per-gate booleans
@@ -532,6 +533,10 @@ def evaluate_current_session_red_bar_v2(
                 bool(conditions.get("context_fresh", False)),
                 {"passed": conditions.get("context_fresh", False)},
             ),
+            "redbar_vwap_aligned": (
+                bool(conditions.get("redbar_vwap_aligned", False)),
+                {"passed": conditions.get("redbar_vwap_aligned", False)},
+            ),
             "vwap_aligned": (
                 bool(conditions.get("vwap_aligned", False)),
                 {"passed": conditions.get("vwap_aligned", False)},
@@ -544,7 +549,7 @@ def evaluate_current_session_red_bar_v2(
                 True,  # informational; always "passed" in audit terms
                 {
                     "passed": True,
-                    "rsi_value": conditions.get("rsi_aligned"),
+                    "rsi_aligned": conditions.get("rsi_aligned"),
                 },
             ),
         }
@@ -556,23 +561,28 @@ def evaluate_current_session_red_bar_v2(
                 status="OK" if passed else "ERROR",
                 artifacts=artifact,
             )
-        # Mid-session 12:45-1:15 rule (only fires if the rule is active)
-        if details.get("mid_session_active", False):
-            mid_passed = details.get("mid_session_passed")
+        # Stage 3 geometry (informational): where the decision was taken. These
+        # gate nothing on their own, but without them the audit trail cannot say
+        # which reference was in force or how far past it price closed.
+        geometry = {
+            key: details.get(key)
+            for key in (
+                "zone_position",
+                "governing_reference",
+                "midpoint_distance_points",
+                "working_body_ratio",
+            )
+            if details.get(key) is not None
+        }
+        if geometry:
             record_strategy_subcheck(
                 database,
                 run_id=run_id,
-                step_name="check:mid_session",
-                status=(
-                    "OK"
-                    if mid_passed is True
-                    else "ERROR"
-                    if mid_passed is False
-                    else "RUNNING"
-                ),
+                step_name="check:zone_geometry",
+                status="OK",
                 artifacts={
-                    "passed": mid_passed,
-                    "reason": details.get("mid_session_reason"),
+                    "passed": True,
+                    **geometry,
                     "candle_timestamp": str(details.get("context_timestamp")),
                 },
             )

@@ -217,13 +217,20 @@ def build_canonical_decision(
         evaluation_timestamp = evidence.evaluation_timestamp
         evaluation_timeframe = evidence.evaluation_timeframe
         reference = _canonical_reference(evidence, readiness.trading_date)
-        rsi = RsiEvidence(
-            value=evidence.rsi_value,
-            bullish_threshold=evidence.bullish_rsi_threshold,
-            bearish_threshold=evidence.bearish_rsi_threshold,
-            bullish_aligned=evidence.rsi_value > evidence.bullish_rsi_threshold,
-            bearish_aligned=evidence.rsi_value < evidence.bearish_rsi_threshold,
-        )
+        # No reading means no evidence block. `RsiEvidence` promises a finite
+        # value in [0, 100] with truthful alignment flags, so fabricating one
+        # during the Wilder RSI(14) warm-up would either break that promise or
+        # assert an alignment nobody measured. `RedBarV2Decision.rsi` is
+        # already optional for exactly this case.
+        rsi = None
+        if evidence.rsi_value is not None:
+            rsi = RsiEvidence(
+                value=evidence.rsi_value,
+                bullish_threshold=evidence.bullish_rsi_threshold,
+                bearish_threshold=evidence.bearish_rsi_threshold,
+                bullish_aligned=evidence.rsi_value > evidence.bullish_rsi_threshold,
+                bearish_aligned=evidence.rsi_value < evidence.bearish_rsi_threshold,
+            )
         futures_vwap = FuturesVwapEvidence(
             instrument_key=evidence.futures_instrument_key,
             comparison_price=evidence.futures_comparison_price,

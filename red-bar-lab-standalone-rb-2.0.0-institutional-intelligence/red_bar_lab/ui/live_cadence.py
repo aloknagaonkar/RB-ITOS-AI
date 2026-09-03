@@ -1000,22 +1000,27 @@ def _render_why_this_signal_fired(
             if "state" in artifacts:
                 extra = f"  · state={artifacts['state']}"
             st.caption(f"  {icon} {label}{extra}")
-        # Render mid-session 12:45 rule if active.
-        for name in ("check:mid_session", "check:mid_session_1245"):
-            row = rows_by_name.get(name)
-            if row is None:
-                continue
-            artifacts = row.get("artifacts") or {}
+        # Render the Stage 3 zone geometry when the strategy recorded it.
+        geometry_row = rows_by_name.get("check:zone_geometry")
+        if geometry_row is not None:
+            artifacts = geometry_row.get("artifacts") or {}
             if not isinstance(artifacts, dict):
                 artifacts = {}
-            passed = bool(artifacts.get("passed"))
-            status = str(row.get("status") or "—")
-            icon = "✓" if passed and status == "OK" else "✗"
-            reason = artifacts.get("reason") or ""
-            st.caption(
-                f"  {icon} Mid-session 12:45 (active in 12:45-1:15 window) — "
-                f"{reason}"
-            )
+            parts = []
+            governing = artifacts.get("governing_reference")
+            if governing:
+                parts.append(f"governed by {governing}")
+            zone = artifacts.get("zone_position")
+            if zone:
+                parts.append(f"{zone} the Red Bar band")
+            distance = artifacts.get("midpoint_distance_points")
+            if distance is not None:
+                parts.append(f"{float(distance):+.2f} pts past the midpoint")
+            body = artifacts.get("working_body_ratio")
+            if body is not None:
+                parts.append(f"deputy body ratio {float(body):.2f}")
+            if parts:
+                st.caption("  · Zone geometry — " + ", ".join(parts))
         # Render re-entry validation state.
         reentry = rows_by_name.get("check:reentry_validation")
         if reentry is not None:

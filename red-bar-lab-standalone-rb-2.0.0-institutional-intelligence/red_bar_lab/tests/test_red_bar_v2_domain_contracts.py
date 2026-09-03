@@ -97,7 +97,10 @@ def decision(
             True,
         ) if outcome is AdmissionOutcome.ALLOWED else None,
         midpoint=MidpointEvidence(
-            24810.0 if bullish else 24790.0,
+            # This builder is CONFIRMED throughout, so the close has to be past the
+            # reference candle's own extreme (24820.0 high / 24780.0 low), not just
+            # past the 24800.0 midpoint every admitted entry clears.
+            24825.0 if bullish else 24775.0,
             24800.0,
             bullish,
             not bullish,
@@ -225,8 +228,16 @@ def test_direction_option_side_and_allowed_evidence_invariants():
         decision(direction=Direction.BULLISH, option_side=OptionSide.PE)
     with pytest.raises(DomainValidationError):
         decision(direction=Direction.BEARISH, option_side=OptionSide.CE)
+    # RSI is informational under the futures gates, so an ALLOWED decision
+    # stays valid without an RSI evidence block. Wilder RSI(14) is NaN for the
+    # first 15 completed candles, and requiring the block here made every
+    # warm-up admission unrepresentable.
+    assert replace(decision(), rsi=None).rsi is None
+    # The gating evidence blocks are still mandatory.
     with pytest.raises(DomainValidationError):
-        replace(decision(), rsi=None)
+        replace(decision(), futures_vwap=None)
+    with pytest.raises(DomainValidationError):
+        replace(decision(), midpoint=None)
     with pytest.raises(DomainValidationError):
         replace(decision(), context_status=ContextStatus.STALE)
     with pytest.raises(DomainValidationError):
