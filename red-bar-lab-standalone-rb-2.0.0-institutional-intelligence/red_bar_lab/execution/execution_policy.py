@@ -9,9 +9,10 @@ DIRECTIONAL_REGIME_STRATEGY_SOURCE = "DIRECTIONAL_REGIME_INTELLIGENCE"
 STANDARD_EXIT_MODE = "STANDARD_MULTI_FACTOR"
 RSI_EXIT_MODE = "RSI_PREMIUM_PROTECTION_ONLY"
 
-# Profit-protection thresholds are shared. Red Bar V2 uses completed one-minute
-# RSI recovery for its initial exit; the other strategies retain the
-# option-premium hard stop.
+# Profit-protection thresholds are shared. Red Bar V2 has no entry-time premium
+# stop -- its initial-loss authority is the structural exit, a completed
+# one-minute close against the governing level -- while the other strategies
+# retain the option-premium hard stop.
 REVERSAL_STYLE_STOP_LOSS_PCT = 7.0
 REVERSAL_STYLE_TARGET_PCT = None
 IMMEDIATE_DYNAMIC_PROTECTION_DELAY_SECONDS = 0.0
@@ -78,7 +79,8 @@ def resolve_execution_policy(
     Red Bar, RSI Extreme Reversal, and Directional Regime Intelligence retain
     the same profit-protection thresholds:
 
-    - Red Bar V2: no initial option-premium stop; completed 1m RSI owns it
+    - Red Bar V2: no initial option-premium stop; the structural exit owns it,
+      and the option-premium proxies cannot close a V2 row at all
     - RSI and Directional Regime: 7% option-premium hard stop
     - no fixed target exit
     - breakeven, profit lock, and trailing protection
