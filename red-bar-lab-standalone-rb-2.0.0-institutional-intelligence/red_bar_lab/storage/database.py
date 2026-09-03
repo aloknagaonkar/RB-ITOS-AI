@@ -68,6 +68,12 @@ CREATE TABLE IF NOT EXISTS signal_attempts (
     entry_type TEXT,
     governing_reference TEXT,
     governing_midpoint REAL,
+    risk_plan_tradable INTEGER,
+    risk_plan_code TEXT,
+    risk_plan_detail TEXT,
+    risk_stop_price REAL,
+    risk_points REAL,
+    risk_stop_trigger TEXT,
     created_at TEXT NOT NULL
 );
 
@@ -939,6 +945,18 @@ _SIGNAL_COLUMNS = {
     "entry_type": "TEXT",
     "governing_reference": "TEXT",
     "governing_midpoint": "REAL",
+    # Also frozen at admission, and for a stricter reason: the stop is priced
+    # from 5-minute bars truncated at the qualifying minute, so it can only be
+    # computed *then*. By the time the order path looks at this signal those
+    # bars have finished and the same arithmetic would read price that printed
+    # after the decision. ``risk_plan_tradable`` is the live entry gate;
+    # ``risk_points`` is the denominator of the trade's R-multiple.
+    "risk_plan_tradable": "INTEGER",
+    "risk_plan_code": "TEXT",
+    "risk_plan_detail": "TEXT",
+    "risk_stop_price": "REAL",
+    "risk_points": "REAL",
+    "risk_stop_trigger": "TEXT",
 }
 
 

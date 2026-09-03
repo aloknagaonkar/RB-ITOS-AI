@@ -196,6 +196,35 @@ def publish_v2_snapshot_to_paper_signals(
             if column in available:
                 columns.append(column)
                 values.append(value)
+        # The entry's risk plan, carried for the same reason as the entry level:
+        # it was decided at the qualifying minute and cannot be recomputed later
+        # without reading price that printed after the decision. The order path
+        # reads ``risk_plan_tradable`` as gate 5; the rest is the arithmetic
+        # behind it, so a refusal can be audited rather than trusted.
+        risk_plan = {
+            "risk_plan_tradable": (
+                None
+                if snapshot.risk_plan_tradable is None
+                else int(bool(snapshot.risk_plan_tradable))
+            ),
+            "risk_plan_code": snapshot.risk_plan_code,
+            "risk_plan_detail": snapshot.risk_plan_detail,
+            "risk_stop_price": (
+                float(snapshot.risk_stop_price)
+                if snapshot.risk_stop_price is not None
+                else None
+            ),
+            "risk_points": (
+                float(snapshot.risk_points)
+                if snapshot.risk_points is not None
+                else None
+            ),
+            "risk_stop_trigger": snapshot.risk_stop_trigger,
+        }
+        for column, value in risk_plan.items():
+            if column in available:
+                columns.append(column)
+                values.append(value)
         columns.extend(("confirmation_delay_minutes", "created_at"))
         values.extend((0, created_at))
         placeholders = ",".join("?" for _ in columns)

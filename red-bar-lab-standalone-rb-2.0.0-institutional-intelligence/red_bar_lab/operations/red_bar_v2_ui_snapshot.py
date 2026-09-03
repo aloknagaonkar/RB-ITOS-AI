@@ -48,6 +48,19 @@ class RedBarV2UISnapshot:
     admission_entry_type: str | None = None
     admission_reference: str | None = None
     admission_midpoint: float | None = None
+    # Gate 5 of the entry table, decided at admission and frozen here: the stop
+    # is priced from 5-minute bars truncated at the qualifying minute, so it can
+    # only be computed then. ``risk_plan_tradable`` is False only when the plan
+    # was refused on a strategy ground (no priceable stop, stop on the wrong
+    # side, risk outside the band); a candle outage reports
+    # RISK_PLAN_UNAVAILABLE and stays True, because a feed problem is not a
+    # verdict about this trade.
+    risk_plan_tradable: bool | None = None
+    risk_plan_code: str | None = None
+    risk_plan_detail: str | None = None
+    risk_stop_price: float | None = None
+    risk_points: float | None = None
+    risk_stop_trigger: str | None = None
     trend_strength: str | None = None
     provisional_confirmed_state: str = "NOT_APPLICABLE"
     midpoint_confirmation: str = "WAITING"
