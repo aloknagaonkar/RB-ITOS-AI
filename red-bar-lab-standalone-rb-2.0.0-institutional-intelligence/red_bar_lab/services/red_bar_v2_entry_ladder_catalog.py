@@ -249,6 +249,17 @@ ADMITTING_CODES = frozenset(
     }
 )
 
+#: Lifecycle states read for context and for nothing else. No checkpoint may key
+#: off them: they record which contracts the execution committee ranked and how it
+#: scored them, which is worth reading beside a ladder and decides none of it.
+#: ``DECISION_RECORDED`` in particular is written once per ranked contract and
+#: appears on signals that opened a position as readily as on ones passed over.
+CONTEXT_EVENT_STATES: tuple[str, ...] = (
+    "EXECUTION_COMMITTEE",
+    "DECISION_RECORDED",
+    "CANDIDATE_SELECTION",
+)
+
 _ORDER_PATH_CHECKPOINTS: tuple[EntryCheckpoint, ...] = (
     EntryCheckpoint(
         number=13,
@@ -299,7 +310,13 @@ _ORDER_PATH_CHECKPOINTS: tuple[EntryCheckpoint, ...] = (
         title="Execution committee queued it",
         phase=ORDER_PATH_PHASE,
         pass_states=("QUEUED",),
-        blocking_codes=("DECISION_RECORDED", "SKIPPED_OPPORTUNITY"),
+        # DECISION_RECORDED is deliberately neither. Production writes one per
+        # ranked candidate contract -- the committee's scoring log -- and it
+        # appears on signals that went on to open a position as readily as on
+        # ones that were passed over, so it carries no verdict. SKIPPED_OPPORTUNITY
+        # is the refusal; a signal that was scored and then neither queued nor
+        # skipped leaves this rung unanswered, which is the honest reading.
+        blocking_codes=("SKIPPED_OPPORTUNITY",),
     ),
     EntryCheckpoint(
         number=19,
@@ -359,4 +376,30 @@ def gate_evidence_steps() -> tuple[str, ...]:
         for checkpoint in _ADMISSION_CHECKPOINTS
         if checkpoint.evidence_step
     )
+
+
+def order_path_event_states() -> tuple[str, ...]:
+    """Every ``execution_state_events`` state the order-path half reads.
+
+    A caller narrows its read to these. Without that narrowing it has to take a
+    window off one end of a signal's event stream and hope the answer is in it,
+    and neither end holds: an open position writes an ``EXIT_MONITOR`` row per
+    candle so the newest rows are exit telemetry, while a signal passed over by
+    the committee is marked ``SKIPPED_OPPORTUNITY`` in the end-of-session sweep,
+    hours after the rows at the oldest end.
+
+    ``OPPORTUNITY_EVALUATED`` earns its place twice over: it clears checkpoint 14
+    by itself and it is the row whose reason string carries the spread and
+    liquidity tokens checkpoint 17 reads.
+
+    ``CONTEXT_EVENT_STATES`` come along for the ride. They answer no checkpoint
+    and no rung may key off them -- they are here so a reader can see which
+    contracts the committee ranked and why, which is half the answer to "why this
+    trade" even though it decides nothing.
+    """
+    states: set[str] = set(CONTEXT_EVENT_STATES)
+    for checkpoint in _ORDER_PATH_CHECKPOINTS:
+        states.update(checkpoint.pass_states)
+        states.update(checkpoint.blocking_codes)
+    return tuple(sorted(states))
 

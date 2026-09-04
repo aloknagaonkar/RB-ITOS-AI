@@ -399,34 +399,64 @@ class EvaluationRepository:
         signal_ids: Iterable[str],
         *,
         per_signal_limit: int = 50,
+        oldest_first: bool = False,
+        states: Iterable[str] | None = None,
+        per_state_limit: int | None = None,
     ) -> dict[str, list[dict[str, object]]]:
-        """Batch-load newest lifecycle events for multiple signals."""
+        """Batch-load lifecycle events for multiple signals.
+
+        ``oldest_first`` takes the *earliest* events per signal instead of the
+        latest, and returns them in that order.
+
+        ``states`` keeps only the named states.
+
+        ``per_state_limit`` caps per ``(signal, state)`` pair rather than per
+        signal, and replaces ``per_signal_limit`` when given. It exists because a
+        plain per-signal window cannot promise a caller that a state present in
+        the data will be in the answer, and for a reader asking "how far did this
+        signal get?" an absent state is indistinguishable from one that never
+        happened. One signal on one day ran to 234 rows across eighteen states,
+        so any single window loses a tail: newest-first buries the states that
+        opened a trade under its exit telemetry, oldest-first buries the
+        end-of-session refusal under the day's committee chatter. Capping per
+        state cannot crowd one out with another, and bounds the read at states
+        times the cap.
+        """
         self._db.initialize()
         ids = tuple(dict.fromkeys(str(item) for item in signal_ids if str(item)))
         if not ids:
             return {}
-        limit = max(1, int(per_signal_limit))
+        wanted = tuple(dict.fromkeys(str(item) for item in (states or ()) if str(item)))
+        by_state = per_state_limit is not None
+        limit = max(1, int(per_state_limit if by_state else per_signal_limit))
+        partition = "signal_id, state" if by_state else "signal_id"
+        direction = "ASC" if oldest_first else "DESC"
         result: dict[str, list[dict[str, object]]] = {key: [] for key in ids}
         with self._db._connect() as conn:
             conn.row_factory = sqlite3.Row
             for start in range(0, len(ids), 400):
                 chunk = ids[start:start + 400]
                 placeholders = ",".join("?" for _ in chunk)
+                state_clause = ""
+                if wanted:
+                    state_clause = " AND state IN (%s)" % ",".join(
+                        "?" for _ in wanted
+                    )
                 query = f"""
                     SELECT event_id,signal_id,order_id,state,detail,candidate_score,timestamp
                     FROM (
                         SELECT *,
                                ROW_NUMBER() OVER (
-                                   PARTITION BY signal_id
-                                   ORDER BY timestamp DESC
+                                   PARTITION BY {partition}
+                                   ORDER BY timestamp {direction}
                                ) AS rn
                         FROM execution_state_events
-                        WHERE signal_id IN ({placeholders})
+                        WHERE signal_id IN ({placeholders}){state_clause}
                     ) ranked
                     WHERE rn <= ?
-                    ORDER BY signal_id, timestamp DESC
+                    ORDER BY signal_id, timestamp {direction}
                 """
-                rows = conn.execute(query, chunk + (limit,)).fetchall()
+                rows = conn.execute(query, chunk + wanted + (limit,)).fetchall()
                 for row in rows:
                     key = str(row["signal_id"] or "")
                     if key:
@@ -1210,6 +1240,7 @@ class EvaluationRepository:
         process_name: str,
         step_name: str,
         date_prefix: str | None = None,
+        artifact_contains: str | None = None,
         limit: int = 200,
     ) -> list[dict[str, object]]:
         """Return the newest run_ids that recorded a given step, one row each.
@@ -1218,6 +1249,13 @@ class EvaluationRepository:
         an ISO timestamp -- so a ``YYYY-MM-DD`` prefix scopes the read to one day.
         Needed because the ladder page must find the cycles for a chosen date, and
         every other evidence reader here is keyed by run_id or is global.
+
+        ``artifact_contains`` keeps only runs whose ``artifacts_json`` holds the
+        given substring. It exists so a caller can find the cycle that saw a
+        particular candle without knowing its run_id, which is the only way to
+        correlate a strategy cycle with a published signal: the two stores mint
+        run_ids in separate namespaces. Matched with ``instr`` rather than ``LIKE``
+        so an underscore in the needle cannot act as a wildcard.
 
         Note that ``record_strategy_subcheck`` stamps ``started_at`` in UTC. For a
         session that trades 09:15-15:30 IST the UTC date is the same date, so a
@@ -1230,6 +1268,9 @@ class EvaluationRepository:
         if date_prefix:
             clauses.append("started_at LIKE ?")
             params.append(f"{date_prefix}%")
+        if artifact_contains:
+            clauses.append("instr(COALESCE(artifacts_json,''), ?) > 0")
+            params.append(artifact_contains)
         params.append(max(1, int(limit)))
         with self._db._connect() as conn:
             conn.row_factory = sqlite3.Row

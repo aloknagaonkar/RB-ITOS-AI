@@ -9,6 +9,7 @@ ladder that describes gates the strategy no longer runs.
 from __future__ import annotations
 
 import inspect
+import json
 import re
 import sqlite3
 from types import SimpleNamespace
@@ -18,12 +19,14 @@ from red_bar_lab.execution.red_bar_v2_admission_policy import AdmissionCode
 from red_bar_lab.services.red_bar_v2_current_session import _ranked_admission
 from red_bar_lab.services.red_bar_v2_entry_ladder_catalog import (
     ADMISSION_PHASE,
+    CONTEXT_EVENT_STATES,
     ENTRY_LADDER,
     ORDER_PATH_PHASE,
     RETIRED_ADMISSION_CODES,
     admission_checkpoints,
     checkpoint_for_code,
     order_path_checkpoints,
+    order_path_event_states,
 )
 from red_bar_lab.services.red_bar_v2_entry_ladder_view import (
     STATE_FAIL,
@@ -98,7 +101,13 @@ class FakeLadderDatabase:
         ]
 
     def read_evidence_run_ids(
-        self, *, process_name, step_name, date_prefix=None, limit=200
+        self,
+        *,
+        process_name,
+        step_name,
+        date_prefix=None,
+        artifact_contains=None,
+        limit=200,
     ):
         matches = [
             run_id
@@ -109,6 +118,10 @@ class FakeLadderDatabase:
                     date_prefix is None
                     or str(row.get("started_at") or "").startswith(date_prefix)
                 )
+                and (
+                    artifact_contains is None
+                    or artifact_contains in json.dumps(row.get("artifacts") or {})
+                )
                 for row in self.evidence.get(run_id, [])
             )
         ]
@@ -118,11 +131,40 @@ class FakeLadderDatabase:
         self.evidence_reads.append(run_id)
         return list(self.evidence.get(run_id, []))
 
-    def read_execution_state_events_for_signals(self, signal_ids, *, per_signal_limit=50):
-        return {
-            str(signal_id): list(self.events.get(str(signal_id), []))
-            for signal_id in signal_ids
-        }
+    def read_execution_state_events_for_signals(
+        self,
+        signal_ids,
+        *,
+        per_signal_limit=50,
+        oldest_first=False,
+        states=None,
+        per_state_limit=None,
+    ):
+        wanted = {str(item) for item in (states or ())}
+        result = {}
+        for signal_id in signal_ids:
+            rows = [
+                event
+                for event in self.events.get(str(signal_id), [])
+                if not wanted or str(event.get("state") or "") in wanted
+            ]
+            rows.sort(
+                key=lambda event: str(event.get("timestamp") or ""),
+                reverse=not oldest_first,
+            )
+            if per_state_limit is not None:
+                seen: dict[str, int] = {}
+                kept = []
+                for event in rows:
+                    key = str(event.get("state") or "")
+                    seen[key] = seen.get(key, 0) + 1
+                    if seen[key] <= max(1, int(per_state_limit)):
+                        kept.append(event)
+                rows = kept
+            else:
+                rows = rows[:max(1, int(per_signal_limit))]
+            result[str(signal_id)] = rows
+        return result
 
 
 def _states(signal) -> dict[int, str]:
@@ -263,13 +305,21 @@ def test_the_furthest_refusal_is_the_one_recorded() -> None:
     assert _ranked_admission([]) is None
     assert checkpoint_for_code(AdmissionCode.CONTEXT_STALE.value).number == 2
 
-def _admitted_case(entry_type: str, code: str, *, events: list[dict] | None = None):
+def _admitted_case(
+    entry_type: str,
+    code: str,
+    *,
+    events: list[dict] | None = None,
+    gates: list[dict] | None = None,
+    attempt_entry_type: str | None = None,
+    decision_entry_type: str | None = None,
+):
     attempt = {
         "signal_id": "sig-1",
         "run_id": "run-a",
         "trading_date": "2026-09-03",
         "direction": "BEARISH",
-        "entry_type": entry_type,
+        "entry_type": entry_type if attempt_entry_type is None else attempt_entry_type,
         "governing_reference": "RED_BAR",
         "governing_midpoint": 24000.0,
         "cross_timestamp": "2026-09-03T11:30:00",
@@ -283,7 +333,14 @@ def _admitted_case(entry_type: str, code: str, *, events: list[dict] | None = No
     evidence = {
         "run-a": [
             _gate_row("candidate_scan", "OK", {"candidate_count": 1}, "2026-09-03T11:42:00"),
-            _decision_row(code=code, allowed=True, entry_type=entry_type),
+            *(gates or []),
+            _decision_row(
+                code=code,
+                allowed=True,
+                entry_type=(
+                    entry_type if decision_entry_type is None else decision_entry_type
+                ),
+            ),
         ]
     }
     database = FakeLadderDatabase(
@@ -402,6 +459,228 @@ def test_an_order_path_refusal_stops_the_ladder_there() -> None:
     assert stopped is not None and stopped.number == 15
 
 
+def test_a_refusal_caps_how_far_the_candidate_is_said_to_have_reached() -> None:
+    """The summary line may not contradict the stopper.
+
+    The order path is a trail rather than a chain, so a candidate refused for
+    staleness at 15 can still leave a committee row at 18. Reporting 18 as the
+    reach would read as "stopped at 15, reached 18" in one breath.
+    """
+    signal = _admitted_case(
+        "INITIAL",
+        AdmissionCode.INITIAL_BEARISH_ALIGNMENT.value,
+        events=[
+            {"state": "OPPORTUNITY_EVALUATED", "detail": "OK", "timestamp": "2026-09-03T11:42:05"},
+            {
+                "state": "RED_BAR_V2_SIGNAL_EXPIRED",
+                "detail": "age 512s",
+                "timestamp": "2026-09-03T11:42:20",
+            },
+            {
+                "state": "QUEUED",
+                "detail": "committee",
+                "timestamp": "2026-09-03T11:42:30",
+            },
+        ],
+    )
+    assert signal is not None
+    states = _states(signal)
+    assert states[15] == STATE_FAIL
+    assert states[18] == STATE_OK, "the later answer stays on its own row"
+    stopped = signal.stopped_at
+    assert stopped is not None and stopped.number == 15
+    assert signal.reached_number == 15
+
+
+def test_a_recorded_refusal_outranks_a_derived_pass() -> None:
+    """A gate row that says ERROR is not overruled by the chain.
+
+    Rungs below the stopper are marked ok by derivation rather than by reading
+    anything, so a rung whose own row recorded a refusal would otherwise be
+    painted green by inference -- hiding a recorder bug behind the screen built
+    to expose it.
+    """
+    signal = _admitted_case(
+        "INITIAL",
+        AdmissionCode.INITIAL_BEARISH_ALIGNMENT.value,
+        gates=[
+            _gate_row(
+                "check:entry_window_open",
+                "ERROR",
+                {"reached": True, "candle_timestamp": "2026-09-03T15:04:00"},
+                "2026-09-03T11:42:00",
+            )
+        ],
+    )
+    assert signal is not None
+    states = _states(signal)
+    assert states[3] == STATE_FAIL
+    stopped = signal.stopped_at
+    assert stopped is not None and stopped.number == 3
+    assert stopped.code and "ENTRY_WINDOW_CLOSED" in stopped.code
+
+
+def test_a_path_restricted_gate_is_not_failed_on_an_unknown_path() -> None:
+    """An ERROR the path already explains may not become a refusal.
+
+    The deployed build records ``check:vwap_aligned`` as ERROR on every WORKING
+    admission because that path does not consult futures VWAP at all. Where the
+    entry type survives, checkpoint 9 reads n/a and the question never arises;
+    where it survives nowhere -- neither on the attempt nor in the decision
+    artifact -- a genuine futures-VWAP refusal and a gate that simply sat the
+    path out are indistinguishable, so inventing a refusal would libel a
+    candidate the policy admitted.
+    """
+    signal = _admitted_case(
+        "WORKING",
+        AdmissionCode.WORKING_REFERENCE_CONFIRMED_FLAT.value,
+        attempt_entry_type="",
+        decision_entry_type="",
+        gates=[
+            _gate_row(
+                "check:vwap_aligned",
+                "ERROR",
+                {"reached": True, "futures_vwap": None},
+                "2026-09-03T11:42:00",
+            )
+        ],
+    )
+    assert signal is not None
+    assert signal.entry_type is None, "the test needs the path to be unknowable"
+    states = _states(signal)
+    assert states[9] == STATE_OK
+    assert signal.stopped_at is None
+
+
+def test_the_committee_scoring_log_is_not_a_refusal() -> None:
+    """DECISION_RECORDED is written per ranked contract, not as a verdict.
+
+    Production writes one such row per candidate the committee scored, on
+    signals that went on to open a position as readily as on ones it passed
+    over. Reading it as a block put a FAIL on checkpoint 18 of a trade whose own
+    checkpoint 21 said the position was open.
+    """
+    signal = _admitted_case(
+        "INITIAL",
+        AdmissionCode.INITIAL_BEARISH_ALIGNMENT.value,
+        events=[
+            {"state": "OPPORTUNITY_EVALUATED", "detail": "OK", "timestamp": "2026-09-03T11:42:05"},
+            {
+                "state": "DECISION_RECORDED",
+                "detail": "candidate=NIFTY 23950 PE 08 SEP 26; rank=1;",
+                "timestamp": "2026-09-03T11:42:06",
+            },
+            {"state": "QUEUED", "detail": "committee", "timestamp": "2026-09-03T11:42:07"},
+            {"state": "PORTFOLIO_APPROVED", "detail": "", "timestamp": "2026-09-03T11:42:08"},
+            {"state": "EXECUTING", "detail": "", "timestamp": "2026-09-03T11:42:09"},
+            {"state": "OPEN", "detail": "", "timestamp": "2026-09-03T11:42:11"},
+        ],
+    )
+    assert signal is not None
+    states = _states(signal)
+    assert states[18] == STATE_OK
+    assert states[21] == STATE_OK
+    assert signal.stopped_at is None
+
+
+def test_exit_telemetry_cannot_push_the_entry_path_out_of_the_window() -> None:
+    """A trade that stayed open must still show how it got open.
+
+    An open position writes an ``EXIT_MONITOR`` row per candle, so a signal held
+    any length of time has hundreds of them. Read newest-first with a per-signal
+    cap, the states that opened the trade fall outside the window and the entry
+    ladder reports NOT_REACHED on rungs the trade plainly cleared -- worst on the
+    candidates that succeeded, which are the ones worth reading.
+    """
+    opening = [
+        {"state": "CANDIDATE_SELECTION", "detail": "", "timestamp": "2026-09-03T11:42:01"},
+        {"state": "OPPORTUNITY_EVALUATED", "detail": "OK", "timestamp": "2026-09-03T11:42:05"},
+        {"state": "QUEUED", "detail": "committee", "timestamp": "2026-09-03T11:42:07"},
+        {"state": "PORTFOLIO_APPROVED", "detail": "", "timestamp": "2026-09-03T11:42:08"},
+        {"state": "EXECUTING", "detail": "", "timestamp": "2026-09-03T11:42:09"},
+        {"state": "OPEN", "detail": "", "timestamp": "2026-09-03T11:42:11"},
+    ]
+    monitoring = [
+        {
+            "state": "EXIT_MONITOR",
+            "detail": "holding",
+            "timestamp": "2026-09-03T%02d:%02d:00" % (12 + minute // 60, minute % 60),
+        }
+        for minute in range(120)
+    ]
+    signal = _admitted_case(
+        "INITIAL",
+        AdmissionCode.INITIAL_BEARISH_ALIGNMENT.value,
+        events=opening + monitoring,
+    )
+    assert signal is not None
+    states = _states(signal)
+    assert states[21] == STATE_OK
+    assert all(states[n] == STATE_OK for n in range(13, 22))
+    assert signal.stopped_at is None
+    assert signal.reached_number == 21
+
+
+def test_a_late_refusal_is_not_lost_behind_thousands_of_earlier_rows() -> None:
+    """The committee's refusal is written last, and must still be read.
+
+    A signal the committee keeps re-ranking logs a DECISION_RECORDED row per
+    contract per cycle all day, and is only marked SKIPPED_OPPORTUNITY in the
+    end-of-session sweep. One real signal ran to 234 rows across eighteen states
+    this way. Any cap counted per signal loses the tail, and the tail is the one
+    row that answers the screen's question.
+    """
+    noise = [
+        {
+            "state": "DECISION_RECORDED",
+            "detail": "candidate=NIFTY 23950 PE 08 SEP 26; rank=1;",
+            "timestamp": "2026-09-03T%02d:%02d:%02d" % (
+                13 + row // 3600, (row // 60) % 60, row % 60
+            ),
+        }
+        for row in range(2000)
+    ]
+    signal = _admitted_case(
+        "INITIAL",
+        AdmissionCode.INITIAL_BEARISH_ALIGNMENT.value,
+        events=[
+            {"state": "OPPORTUNITY_EVALUATED", "detail": "OK", "timestamp": "2026-09-03T11:42:05"},
+            *noise,
+            {
+                "state": "SKIPPED_OPPORTUNITY",
+                "detail": "No candidate cleared the guarded opportunity",
+                "timestamp": "2026-09-03T22:43:15",
+            },
+        ],
+    )
+    assert signal is not None
+    states = _states(signal)
+    assert states[14] == STATE_OK
+    assert states[18] == STATE_FAIL
+    stopped = signal.stopped_at
+    assert stopped is not None and stopped.number == 18
+    assert stopped.code == "SKIPPED_OPPORTUNITY"
+    read = [str(event["state"]) for event in signal.state_events]
+    assert read.count("DECISION_RECORDED") <= 10, "the noise must stay bounded"
+
+
+def test_context_states_are_read_but_decide_nothing() -> None:
+    """The narrowed read must not smuggle a verdict in with the context.
+
+    The states read purely so a reader can see what the committee ranked have to
+    stay inert. If one of them were also a pass state or a blocking code, the
+    read would look like context and behave like a gate -- which is how
+    DECISION_RECORDED came to put a FAIL on checkpoint 18 of a trade that opened.
+    """
+    wanted = set(order_path_event_states())
+    for state in CONTEXT_EVENT_STATES:
+        assert state in wanted, state
+    for checkpoint in order_path_checkpoints():
+        answering = set(checkpoint.pass_states) | set(checkpoint.blocking_codes)
+        overlap = answering & set(CONTEXT_EVENT_STATES)
+        assert not overlap, f"checkpoint {checkpoint.number} keys off {overlap}"
+
+
 def test_the_join_survives_a_missing_half() -> None:
     """Neither half of the join may fabricate the other."""
     orphan_attempt = {
@@ -518,14 +797,20 @@ def test_evidence_run_ids_scope_to_one_date_against_a_real_database(tmp_path) ->
     assert stopped.detail["index_close"] == 23960.0
 
 
-def _insert_admitted_attempt(database: RedBarDatabase, *, run_id: str) -> str:
+def _insert_admitted_attempt(
+    database: RedBarDatabase,
+    *,
+    run_id: str,
+    signal_id: str = "RBV2-LADDERJOIN0000000001",
+    confirmation: str = "2026-09-03T11:31:00+05:30",
+    direction: str = "BEARISH",
+) -> str:
     """One published V2 attempt, written the way the paper bridge writes it.
 
     A direct insert rather than a call into the bridge: the bridge's own
     freshness window is clock-dependent and separately tested, and what this
     test is about is the join, not the publish.
     """
-    signal_id = "RBV2-LADDERJOIN0000000001"
     with sqlite3.connect(database.path) as conn:
         conn.execute(
             """
@@ -547,10 +832,10 @@ def _insert_admitted_attempt(database: RedBarDatabase, *, run_id: str) -> str:
                 "2026-09-03",
                 "RED_BAR_V2_MIDPOINT",
                 24000.0,
-                "BEARISH",
+                direction,
                 "ACTIVE",
                 "2026-09-03T11:30:00+05:30",
-                "2026-09-03T11:31:00+05:30",
+                confirmation,
                 23960.0,
                 "INITIAL",
                 "RED_BAR",
@@ -561,7 +846,7 @@ def _insert_admitted_attempt(database: RedBarDatabase, *, run_id: str) -> str:
                 35.0,
                 "FIVE_MINUTE_CROSSING_HIGH",
                 1,
-                "2026-09-03T11:31:00+05:30",
+                confirmation,
             ),
         )
         conn.commit()
@@ -666,8 +951,164 @@ def test_the_three_table_join_holds_against_real_storage(tmp_path) -> None:
     assert [number for number, state in states.items() if state != STATE_OK] == [8]
     assert signal.stopped_at is None
     assert signal.reached_number == 21
-    assert len(signal.state_events) == 7
+    # Narrowed to the states the ladder reads, in the order they happened.
+    assert [str(event["state"]) for event in signal.state_events] == [
+        "OPPORTUNITY_EVALUATED",
+        "CANDIDATE_SELECTION",
+        "QUEUED",
+        "DECISION_RECORDED",
+        "PORTFOLIO_APPROVED",
+        "EXECUTING",
+        "OPEN",
+    ]
     assert len(signal.evidence_rows) == 10
+
+
+def _write_cycle(
+    database: RedBarDatabase,
+    *,
+    run_id: str,
+    candle: str,
+    direction: str,
+    started_at: str,
+    entry_type: str = "INITIAL",
+) -> None:
+    """One strategy cycle, recorded the way the deployed monitor records it.
+
+    The cycle stamps the completed candle it judged and an admission decision
+    with no reference timestamp, because that is what production writes.
+    """
+    database.write_step_evidence(
+        process_name="red_bar_v2_strategy",
+        run_id=run_id,
+        step_name="latest_completed_1m_candle",
+        parent_step="strategy_evaluate",
+        started_at=started_at,
+        status="OK",
+        artifacts={"candle_timestamp": candle, "candle_close": 23960.0},
+    )
+    for step in (
+        "check:reference_ready",
+        "check:context_fresh",
+        "check:entry_window_open",
+        "check:duplicate_signal",
+        "check:reversal_already_consumed",
+        "check:active_trade",
+        "check:previous_trade_closed",
+        "check:vwap_aligned",
+        "check:midpoint_aligned",
+    ):
+        database.write_step_evidence(
+            process_name="red_bar_v2_strategy",
+            run_id=run_id,
+            step_name=step,
+            parent_step="strategy_evaluate",
+            started_at=started_at,
+            status="OK",
+            artifacts={"reached": True, "candidate_allowed": True},
+        )
+    database.write_step_evidence(
+        process_name="red_bar_v2_strategy",
+        run_id=run_id,
+        step_name="admission_decision",
+        parent_step="strategy_evaluate",
+        started_at=started_at,
+        status="OK",
+        artifacts={
+            "admission_code": (
+                AdmissionCode.INITIAL_BEARISH_ALIGNMENT.value
+                if direction == "BEARISH"
+                else AdmissionCode.INITIAL_BULLISH_ALIGNMENT.value
+            ),
+            "candidate_allowed": True,
+            "entry_type": entry_type,
+            "direction": direction,
+            "option_side": "PE" if direction == "BEARISH" else "CE",
+        },
+    )
+
+
+def test_an_attempt_finds_its_cycle_when_the_two_stores_disagree_on_run_id(
+    tmp_path,
+) -> None:
+    """The join production actually needs, and the one a shared run_id hides.
+
+    Every ``signal_attempts`` row is minted under an ``RBV2-*`` run id by the
+    paper bridge; every ``red_bar_v2_strategy`` evidence row is written under the
+    monitor loop's own ``paper-monitor-*`` id. The two namespaces never intersect,
+    so keying gate rows off the attempt's run id alone leaves the admission half
+    of every published signal reading "not reached" -- which is what the deployed
+    database showed. The candle the cycle judged is the field both stores carry.
+    """
+    database = RedBarDatabase(tmp_path / "ladder-namespaces.db")
+    database.initialize()
+    signal_id = _insert_admitted_attempt(
+        database, run_id="RBV2-PAPER-RUNTIME-9c1f2a", signal_id="RBV2-NAMESPACE00000000001"
+    )
+    # An earlier cycle on a different candle, and one on the right candle that
+    # admitted the other side of the book. Neither may be attached.
+    _write_cycle(
+        database,
+        run_id="paper-monitor-2026-09-03T05:55:02-aaaaaa",
+        candle="2026-09-03T11:25:00+05:30",
+        direction="BEARISH",
+        started_at="2026-09-03T05:55:03",
+    )
+    _write_cycle(
+        database,
+        run_id="paper-monitor-2026-09-03T06:01:02-bbbbbb",
+        candle="2026-09-03T11:31:00+05:30",
+        direction="BULLISH",
+        started_at="2026-09-03T06:01:03",
+    )
+    _write_cycle(
+        database,
+        run_id="paper-monitor-2026-09-03T06:01:40-cccccc",
+        candle="2026-09-03T11:31:00+05:30",
+        direction="BEARISH",
+        started_at="2026-09-03T06:01:41",
+    )
+    for offset, state in enumerate(("OPPORTUNITY_EVALUATED", "CANDIDATE_SELECTION")):
+        database.insert_execution_state_event(
+            {
+                "event_id": f"{signal_id}-{offset}",
+                "signal_id": signal_id,
+                "order_id": None,
+                "state": state,
+                "detail": "NO_HARD_PERFORMANCE_BLOCKERS",
+                "candidate_score": 0.5,
+                "timestamp": f"2026-09-03T11:3{offset + 2}:00+05:30",
+            }
+        )
+
+    view = build_entry_ladder_view(
+        database, trading_date="2026-09-03", instrument_key="NSE_INDEX|Nifty 50"
+    )
+    published = [item for item in view.signals if item.signal_id == signal_id]
+    assert len(published) == 1
+    signal = published[0]
+    # The attempt keeps its own run id; the cycle it was matched to is named
+    # separately, so the reader can go and look at that cycle's rows.
+    assert signal.run_id == "RBV2-PAPER-RUNTIME-9c1f2a"
+    assert signal.evidence_run_id == "paper-monitor-2026-09-03T06:01:40-cccccc"
+
+    states = _states(signal)
+    # The admission half is answered from the matched cycle rather than blank.
+    assert [number for number in range(1, 8) if states[number] != STATE_OK] == []
+    assert states[10] == STATE_OK
+    assert signal.stopped_at is None
+    assert signal.reached_number >= 17
+
+    # The cycle that was claimed does not also appear as an unpublished refusal,
+    # and the two cycles that did not match still stand on their own.
+    labelled = {item.evidence_run_id for item in view.signals}
+    assert "paper-monitor-2026-09-03T05:55:02-aaaaaa" in labelled
+    assert "paper-monitor-2026-09-03T06:01:02-bbbbbb" in labelled
+    assert sum(
+        1
+        for item in view.signals
+        if item.evidence_run_id == "paper-monitor-2026-09-03T06:01:40-cccccc"
+    ) == 1
 
 
 class _Ctx:

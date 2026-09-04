@@ -32,11 +32,24 @@ from red_bar_lab.services.red_bar_v2_entry_ladder_catalog import (
     admission_checkpoints,
     checkpoint_for_code,
     order_path_checkpoints,
+    order_path_event_states,
 )
 
 
 #: The process name ``record_strategy_subcheck`` writes every gate row under.
 STRATEGY_PROCESS_NAME = "red_bar_v2_strategy"
+
+#: The evidence step that stamps which completed 1-minute candle a cycle judged.
+#: It is the only field common to both stores, so it is how an attempt finds the
+#: cycle that admitted it -- see ``_evidence_for_attempt``.
+CANDLE_STEP_NAME = "latest_completed_1m_candle"
+
+#: How many rows of each lifecycle state to read per signal. Every rung answers
+#: off the first occurrence, so this only has to be enough for a reader to see
+#: that a state repeated -- the committee re-ranks contracts every cycle, and a
+#: signal that lives all day can log a hundred of some states and one of the
+#: state that refused it.
+ORDER_PATH_EVENTS_PER_STATE = 6
 
 STATE_OK = "ok"
 STATE_FAIL = "FAIL"
@@ -111,6 +124,10 @@ class LadderSignal:
     evidence_only: tuple[EvidenceNote, ...]
     evidence_rows: tuple[Mapping[str, Any], ...] = ()
     state_events: tuple[Mapping[str, Any], ...] = ()
+    #: The strategy cycle the gate rows were read from. Differs from ``run_id``
+    #: whenever the attempt was correlated by candle rather than by run id, which
+    #: is every published signal in production -- see ``_evidence_for_attempt``.
+    evidence_run_id: str | None = None
 
     @property
     def stopped_at(self) -> LadderRow | None:
@@ -122,13 +139,26 @@ class LadderSignal:
 
     @property
     def reached_number(self) -> int:
-        """The highest checkpoint number this candidate got an answer for."""
+        """How far down the ladder this candidate got.
+
+        A refusal ends the walk, so a stopper caps this even when a later rung
+        holds an answer. The order path is a trail rather than a chain and its
+        rungs are answered independently, so a candidate refused for staleness
+        at 15 can still have a committee row at 18; reporting 18 there would
+        contradict ``stopped_at`` in the same breath. The later answer is not
+        lost -- it is on its own row.
+        """
         answered = [
             row.number
             for row in self.rows
             if row.state in (STATE_OK, STATE_FAIL)
         ]
-        return max(answered) if answered else 0
+        if not answered:
+            return 0
+        stopped = self.stopped_at
+        if stopped is not None:
+            return stopped.number
+        return max(answered)
 
 
 @dataclass(frozen=True)
@@ -305,6 +335,24 @@ def _admission_rows(
                 code = str(admission_code or "").strip() or None
             else:
                 state = STATE_NOT_REACHED
+            if state == STATE_OK and own_row is not None:
+                # The chain says this rung passed and the rung's own row says it
+                # failed. Believing the derivation in silence would hide a
+                # recorder bug, so the recorded refusal wins and names itself.
+                #
+                # Only where the path cannot explain the ERROR. A path-restricted
+                # rung records ERROR on the paths it sits out -- the deployed
+                # build writes exactly that for ``check:vwap_aligned`` on every
+                # WORKING admission -- and an attempt whose ``entry_type`` is
+                # blank cannot be told apart from one that genuinely failed
+                # there, so it keeps the chain's answer rather than inventing a
+                # refusal.
+                explained_by_path = bool(checkpoint.applies_to) and not entry_type
+                if not explained_by_path and (
+                    str(own_row.get("status") or "").upper() == "ERROR"
+                ):
+                    state = STATE_FAIL
+                    code = ",".join(checkpoint.blocking_codes) or None
         elif own_row is not None:
             # No admission decision recorded -- rows written before the ladder
             # existed. Their own status is the only answer available.
@@ -538,6 +586,105 @@ def _reference_matches(
     return reference == cross or reference[:16] == cross[:16]
 
 
+def _minute(value: Any) -> str:
+    """An ISO timestamp trimmed to the minute, or empty when there is none."""
+    text = str(value or "")
+    return text[:16] if len(text) >= 16 else ""
+
+
+def _candle_minute(evidence_by_step: Mapping[str, Mapping[str, Any]]) -> str:
+    """The completed candle minute a run judged, from its candle row."""
+    return _minute(_artifacts(evidence_by_step.get(CANDLE_STEP_NAME)).get(
+        "candle_timestamp"
+    ))
+
+
+def _run_agrees_with_attempt(
+    evidence_by_step: Mapping[str, Mapping[str, Any]], attempt: Mapping[str, Any]
+) -> bool:
+    """Whether a run's admission describes the same candidate as this attempt.
+
+    Only fields both stores record are compared, and a field missing on either
+    side is not evidence of disagreement -- the deployed recorder writes an
+    admission artifact with no reference timestamp at all. Direction and entry
+    type are enough to keep a cycle that admitted the other side of the book
+    from being attached to this attempt.
+    """
+    decision = _detail_source(evidence_by_step.get("admission_decision"))
+    for evidence_key, attempt_key in (
+        ("direction", "direction"),
+        ("entry_type", "entry_type"),
+    ):
+        recorded = str(decision.get(evidence_key) or "").upper()
+        claimed = str(attempt.get(attempt_key) or "").upper()
+        if recorded and claimed and recorded != claimed:
+            return False
+    return _reference_matches(evidence_by_step, attempt)
+
+
+def _evidence_for_attempt(
+    database: Any,
+    *,
+    attempt: Mapping[str, Any],
+    trading_date: str,
+    evidence: Mapping[str, Mapping[str, Mapping[str, Any]]],
+    raw_rows: Mapping[str, tuple[Mapping[str, Any], ...]],
+    attempts_per_run: Mapping[str, int],
+) -> tuple[str, dict[str, Mapping[str, Any]], tuple[Mapping[str, Any], ...]]:
+    """The strategy cycle whose gate rows belong to one published attempt.
+
+    Two keys, tried in that order. The run_id the attempt names is preferred and
+    is what a single-process writer or a test fixture gives. It is not what
+    production gives: ``signal_attempts`` rows are minted under ``RBV2-*`` run
+    ids by the paper bridge while every ``red_bar_v2_strategy`` evidence row is
+    written under the monitor loop's own ``paper-monitor-*`` id, so the two
+    namespaces never intersect and that lookup misses every time. The fallback is
+    the completed candle: the cycle that admitted this entry is the cycle that
+    judged the candle the attempt was confirmed on, which both stores record.
+
+    Returns the run id actually used, its steps, and its raw rows -- empty when
+    neither key finds a cycle, so the caller renders "not reached" rather than a
+    guess.
+    """
+    named_run = str(attempt.get("run_id") or "")
+    by_step = dict(evidence.get(named_run, {}))
+    if by_step and attempts_per_run.get(named_run, 0) > 1:
+        if not _reference_matches(by_step, attempt):
+            by_step = {}
+    if by_step:
+        return named_run, by_step, raw_rows.get(named_run, ())
+
+    minute = _minute(attempt.get("confirmation_timestamp"))
+    if not minute:
+        return named_run, {}, ()
+
+    # Runs already read for the strip are checked first: on a quiet date the
+    # window covers the whole session and this costs no query at all.
+    for run_id, steps in evidence.items():
+        if _candle_minute(steps) == minute and "admission_decision" in steps:
+            if _run_agrees_with_attempt(steps, attempt):
+                return run_id, dict(steps), raw_rows.get(run_id, ())
+
+    candidates = database.read_evidence_run_ids(
+        process_name=STRATEGY_PROCESS_NAME,
+        step_name=CANDLE_STEP_NAME,
+        date_prefix=trading_date,
+        artifact_contains=minute,
+        limit=8,
+    )
+    for row in candidates:
+        run_id = str(row.get("run_id") or "")
+        if not run_id or run_id in evidence:
+            continue
+        rows = tuple(database.read_run_evidence(run_id=run_id))
+        steps = _evidence_by_step(rows)
+        if "admission_decision" not in steps:
+            continue
+        if _run_agrees_with_attempt(steps, attempt):
+            return run_id, steps, rows
+    return named_run, {}, ()
+
+
 def _cycle_summary(
     *,
     trading_date: str,
@@ -653,7 +800,18 @@ def build_entry_ladder_view(
         if attempt.get("signal_id")
     ]
     events_by_signal = (
-        database.read_execution_state_events_for_signals(attempt_ids)
+        # Narrowed to the states the ladder reads, capped per state, oldest
+        # first. A window off either end of a signal's stream misses the answer:
+        # an open position buries the newest rows in exit telemetry, and a
+        # committee refusal is written in the end-of-session sweep, past a day of
+        # ranking rows. Capping per state means no state that happened can be
+        # crowded out by another that happened more often.
+        database.read_execution_state_events_for_signals(
+            attempt_ids,
+            oldest_first=True,
+            states=order_path_event_states(),
+            per_state_limit=ORDER_PATH_EVENTS_PER_STATE,
+        )
         if attempt_ids
         else {}
     )
@@ -666,11 +824,14 @@ def build_entry_ladder_view(
         attempts_per_run[run_id] = attempts_per_run.get(run_id, 0) + 1
 
     for attempt in attempts:
-        run_id = str(attempt.get("run_id") or "")
-        by_step = evidence.get(run_id, {})
-        if by_step and attempts_per_run.get(run_id, 0) > 1:
-            if not _reference_matches(by_step, attempt):
-                by_step = {}
+        run_id, by_step, attempt_rows = _evidence_for_attempt(
+            database,
+            attempt=attempt,
+            trading_date=trading_date,
+            evidence=evidence,
+            raw_rows=raw_rows,
+            attempts_per_run=attempts_per_run,
+        )
         if by_step:
             claimed_runs.add(run_id)
         signals.append(
@@ -678,7 +839,8 @@ def build_entry_ladder_view(
                 attempt,
                 by_step=by_step,
                 events=events_by_signal.get(str(attempt.get("signal_id") or ""), ()),
-                raw_rows=raw_rows.get(run_id, ()) if by_step else (),
+                raw_rows=attempt_rows,
+                evidence_run_id=run_id if by_step else None,
             )
         )
 
@@ -717,14 +879,17 @@ def _resolved_allowed(
 
     Rows written before ``candidate_allowed`` was stamped still name their
     terminal code, and the admitting codes are enumerated -- so the answer is
-    recoverable rather than unknown.
+    recoverable rather than unknown. Older rows than that carry neither, and
+    record the same boolean under ``outcome`` as a string; the deployed build
+    writes exactly that, so without this the risk-plan rung reads "not reached"
+    on a candidate the recorder plainly admitted.
     """
     allowed = _as_bool(decision.get("candidate_allowed"))
     if allowed is not None:
         return allowed
     if admission_code:
         return admission_code in ADMITTING_CODES
-    return None
+    return _as_bool(decision.get("outcome"))
 
 
 def _signal_from_attempt(
@@ -733,6 +898,7 @@ def _signal_from_attempt(
     by_step: Mapping[str, Mapping[str, Any]],
     events: Sequence[Mapping[str, Any]],
     raw_rows: Sequence[Mapping[str, Any]],
+    evidence_run_id: str | None = None,
 ) -> LadderSignal:
     decision = _detail_source(by_step.get("admission_decision"))
     ordered = tuple(sorted(events, key=lambda item: str(item.get("timestamp") or "")))
@@ -794,6 +960,7 @@ def _signal_from_attempt(
         evidence_only=_evidence_notes(evidence_by_step=by_step, events=ordered),
         evidence_rows=tuple(raw_rows),
         state_events=ordered,
+        evidence_run_id=evidence_run_id or (run_id if by_step else None),
     )
 
 
@@ -853,5 +1020,6 @@ def _signal_from_evidence(
         evidence_only=_evidence_notes(evidence_by_step=by_step, events=()),
         evidence_rows=tuple(raw_rows),
         state_events=(),
+        evidence_run_id=run_id,
     )
 

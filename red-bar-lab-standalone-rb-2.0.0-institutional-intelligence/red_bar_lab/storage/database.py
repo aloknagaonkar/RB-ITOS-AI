@@ -2968,10 +2968,17 @@ class RedBarDatabase:
         signal_ids: Iterable[str],
         *,
         per_signal_limit: int = 50,
+        oldest_first: bool = False,
+        states: Iterable[str] | None = None,
+        per_state_limit: int | None = None,
     ) -> dict[str, list[dict[str, object]]]:
-        """Batch-load newest lifecycle events for multiple signals."""
+        """Batch-load lifecycle events for multiple signals."""
         return self.evaluation.read_execution_state_events_for_signals(
-            signal_ids, per_signal_limit=per_signal_limit
+            signal_ids,
+            per_signal_limit=per_signal_limit,
+            oldest_first=oldest_first,
+            states=states,
+            per_state_limit=per_state_limit,
         )
 
     def upsert_execution_queue_item(self, row: dict[str, object]) -> None:
@@ -3156,12 +3163,14 @@ class RedBarDatabase:
         process_name: str,
         step_name: str,
         date_prefix: str | None = None,
+        artifact_contains: str | None = None,
         limit: int = 200,
     ) -> list[dict[str, object]]:
         return self.evaluation.read_evidence_run_ids(
             process_name=process_name,
             step_name=step_name,
             date_prefix=date_prefix,
+            artifact_contains=artifact_contains,
             limit=limit,
         )
 
