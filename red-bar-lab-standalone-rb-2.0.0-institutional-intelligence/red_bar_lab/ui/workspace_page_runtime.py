@@ -20,6 +20,11 @@ PAGE_MODULE_PATHS = {
     "Red Bar V2 Comparison": "red_bar_lab.ui.pages.red_bar_v2_comparison",
     "Legacy V2 Lifecycle": "red_bar_lab.ui.pages.legacy_v2_lifecycle",
     "Canonical V2 Lifecycle": "red_bar_lab.ui.pages.canonical_v2_lifecycle",
+    # The two Red Bar V2 journals. Observational only: they read back recorded
+    # evidence -- per cycle for the monitor, per candidate for the ladder -- and
+    # decide nothing.
+    "V2 Evaluation Monitor": "red_bar_lab.ui.pages.v2_evaluation_monitor",
+    "V2 Entry Ladder": "red_bar_lab.ui.pages.v2_entry_ladder",
     "Shadow Directional": "red_bar_lab.ui.pages.shadow_directional_diagnostics",
     "Historical Intelligence": "red_bar_lab.ui.pages.historical_intelligence",
     "Signal Explorer": "red_bar_lab.ui.pages.signal_explorer",

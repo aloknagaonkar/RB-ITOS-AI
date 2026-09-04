@@ -56,11 +56,10 @@ _PAGE_MODULE_PATHS.setdefault(
     "Trade Evidence",
     "red_bar_lab.ui.pages.market_readiness",
 )
-# Per-cycle Red Bar V2 evaluation journal (observational only).
-_PAGE_MODULE_PATHS.setdefault(
-    "V2 Evaluation Monitor",
-    "red_bar_lab.ui.pages.v2_evaluation_monitor",
-)
+# The two observational Red Bar V2 journals -- "V2 Evaluation Monitor" per cycle
+# and "V2 Entry Ladder" per candidate -- are registered in
+# workspace_page_runtime beside the other lifecycle pages, because this module
+# carries a hard line budget.
 
 # Compatibility contracts retained for architecture tests and audit searches:
 # operations_center,

@@ -3150,6 +3150,21 @@ class RedBarDatabase:
     def read_run_evidence(self, *, run_id: str) -> list[dict[str, object]]:
         return self.evaluation.read_run_evidence(run_id=run_id)
 
+    def read_evidence_run_ids(
+        self,
+        *,
+        process_name: str,
+        step_name: str,
+        date_prefix: str | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, object]]:
+        return self.evaluation.read_evidence_run_ids(
+            process_name=process_name,
+            step_name=step_name,
+            date_prefix=date_prefix,
+            limit=limit,
+        )
+
     def read_latest_error_per_process(self) -> list[dict[str, object]]:
         return self.evaluation.read_latest_error_per_process()
 

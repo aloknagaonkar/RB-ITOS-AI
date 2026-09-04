@@ -11,6 +11,7 @@ from typing import Any, Mapping
 
 import pandas as pd
 
+from red_bar_lab.execution.red_bar_v2_admission_policy import DEFAULT_ENTRY_CUTOFF
 from red_bar_lab.operations.red_bar_v2_ui_snapshot import (
     persist_red_bar_v2_ui_snapshot,
     read_red_bar_v2_ui_snapshot,
@@ -20,6 +21,11 @@ from red_bar_lab.services.red_bar_v2_derived_exit_store import (
     read_red_bar_v2_derived_exits,
 )
 from red_bar_lab.services.red_bar_v2_derived_exits import resolve_next_derived_exit
+from red_bar_lab.services.red_bar_v2_entry_ladder_catalog import (
+    ENTRY_LADDER,
+    admission_checkpoints,
+    checkpoint_for_code,
+)
 from red_bar_lab.services.red_bar_v2_futures_replay_service import (
     run_monitored_red_bar_v2_futures_replay,
 )
@@ -89,6 +95,52 @@ def _latest_allowed_admission(events: Any) -> Any | None:
         if getattr(event, "candidate_allowed", None) is True:
             return event
     return None
+
+
+def _admission_ladder_rank(event: Any) -> int:
+    """How far down the entry ladder this candidate got before it stopped."""
+    if getattr(event, "candidate_allowed", None) is True:
+        return len(ENTRY_LADDER) + 1
+    checkpoint = checkpoint_for_code(str(getattr(event, "admission_code", "") or ""))
+    return checkpoint.number if checkpoint is not None else 0
+
+
+def _ranked_admission(events: Any) -> Any | None:
+    """The admission decision worth recording as this cycle's gate evidence.
+
+    Prefer the latest allowed admission -- that is the entry a position would be
+    taken on. When nothing was admitted, return the refusal that got *furthest
+    down the ladder*, because the question the ladder answers is how close the
+    cycle came. Recording the last refusal instead would report
+    REFERENCE_NOT_READY from a stale candidate and hide a sibling that cleared
+    nine gates and died on the midpoint. Ties break towards the later event.
+
+    This is deliberately separate from ``_latest_allowed_admission``: callers
+    that act on an admission -- the live-candidate restore, the risk plan, the
+    cycle row's ``latest_admission`` -- must still see only real entries. This
+    one feeds evidence rows, which exist to explain refusals too.
+    """
+    admissions = [
+        event
+        for event in (events or ())
+        if str(getattr(event, "event_type", "")) == "CANDIDATE_ADMISSION"
+    ]
+    if not admissions:
+        return None
+    allowed = [
+        event
+        for event in admissions
+        if getattr(event, "candidate_allowed", None) is True
+    ]
+    if allowed:
+        return allowed[-1]
+    best: Any | None = None
+    best_rank = -1
+    for event in admissions:
+        rank = _admission_ladder_rank(event)
+        if rank >= best_rank:
+            best, best_rank = event, rank
+    return best
 
 
 def _derived_exit_store_path(database: Any, settings: Any) -> Path | None:
@@ -684,20 +736,30 @@ def evaluate_current_session_red_bar_v2(
     )
     # Surface the most recent admission decision, if any.
     latest_admission = _latest_allowed_admission(candidate_events)
-    if latest_admission is not None:
+    # Gate evidence is written for the ranked admission, which is the allowed one
+    # when there is one and the furthest-reaching refusal otherwise. Binding it to
+    # the allowed admission -- as this did -- meant a cycle that admitted nothing
+    # wrote no gate rows at all, so the one question worth asking of a quiet
+    # cycle ("which check stopped it?") had no recorded answer anywhere.
+    evidence_admission = _ranked_admission(candidate_events)
+    if evidence_admission is not None:
         # Pull the per-boolean conditions and decision metadata out
         # of the underlying ``RedBarV2DirectionDecision`` so we can
         # both surface them in the admission_decision artifact and
         # write one evidence row per boolean check.
-        details = getattr(latest_admission, "details", None)
+        details = getattr(evidence_admission, "details", None)
         if not isinstance(details, Mapping):
             details = {}
         conditions = details.get("conditions")
         if not isinstance(conditions, Mapping):
             conditions = {}
-        event_type = str(getattr(latest_admission, "event_type", "—"))
-        direction = str(getattr(latest_admission, "direction", "—"))
-        option_side = getattr(latest_admission, "option_side", None)
+        candidate_allowed = (
+            getattr(evidence_admission, "candidate_allowed", None) is True
+        )
+        admission_code = str(getattr(evidence_admission, "admission_code", "") or "")
+        event_type = str(getattr(evidence_admission, "event_type", "—"))
+        direction = str(getattr(evidence_admission, "direction", "—"))
+        option_side = getattr(evidence_admission, "option_side", None)
         entry_type = (
             details.get("entry_type")
             if isinstance(details.get("entry_type"), str)
@@ -718,6 +780,7 @@ def evaluate_current_session_red_bar_v2(
             database,
             run_id=run_id,
             step_name="admission_decision",
+            status="OK" if candidate_allowed else "ERROR",
             artifacts={
                 "event_type": event_type,
                 "direction": direction,
@@ -725,10 +788,21 @@ def evaluate_current_session_red_bar_v2(
                 "entry_type": entry_type,
                 "trend_strength": trend_strength,
                 "outcome": str(
-                    getattr(latest_admission, "candidate_allowed", None)
+                    getattr(evidence_admission, "candidate_allowed", None)
                 ),
-                "candidate_score": getattr(latest_admission, "score", None),
+                "candidate_allowed": candidate_allowed,
+                "admission_code": admission_code,
+                "candidate_score": getattr(evidence_admission, "score", None),
                 "reason": str(reason_text),
+                # The whole condition set, not a projection of it. Six of these
+                # became check: rows and the rest were dropped, which left the
+                # 15:00 cutoff, the duplicate test and the two trade-state tests
+                # with no recorded answer on any cycle.
+                "conditions": dict(conditions),
+                "reference_timestamp": details.get("reference_timestamp"),
+                "context_timestamp": details.get("context_timestamp"),
+                "decision_id": details.get("decision_id"),
+                "admission_reason": details.get("admission_reason"),
             },
         )
         # Write one row per gate. The boolean gates are now:
@@ -752,11 +826,72 @@ def evaluate_current_session_red_bar_v2(
                 {
                     "passed": conditions.get("reference_ready", False),
                     "state": conditions.get("trade_state"),
+                    "reference_timestamp": details.get("reference_timestamp"),
+                    "governing_reference": details.get("governing_reference"),
                 },
             ),
             "context_fresh": (
                 bool(conditions.get("context_fresh", False)),
-                {"passed": conditions.get("context_fresh", False)},
+                {
+                    "passed": conditions.get("context_fresh", False),
+                    "context_timestamp": details.get("context_timestamp"),
+                },
+            ),
+            "entry_window_open": (
+                bool(conditions.get("entry_window_open", False)),
+                {
+                    "passed": conditions.get("entry_window_open", False),
+                    "context_timestamp": details.get("context_timestamp"),
+                    "entry_cutoff": DEFAULT_ENTRY_CUTOFF.isoformat(
+                        timespec="minutes"
+                    ),
+                },
+            ),
+            "duplicate_signal": (
+                not bool(conditions.get("duplicate_signal", False)),
+                {
+                    "passed": not bool(conditions.get("duplicate_signal", False)),
+                    "duplicate_signal": conditions.get("duplicate_signal"),
+                    "decision_id": details.get("decision_id"),
+                },
+            ),
+            "reversal_already_consumed": (
+                not bool(conditions.get("reversal_already_consumed", False)),
+                {
+                    "passed": not bool(
+                        conditions.get("reversal_already_consumed", False)
+                    ),
+                    "reversal_already_consumed": conditions.get(
+                        "reversal_already_consumed"
+                    ),
+                    "reversal_event_id": details.get("reversal_event_id"),
+                },
+            ),
+            "active_trade": (
+                not int(conditions.get("active_trade_count") or 0),
+                {
+                    "passed": not int(conditions.get("active_trade_count") or 0),
+                    "active_trade_count": conditions.get("active_trade_count"),
+                    "trade_state": conditions.get("trade_state"),
+                },
+            ),
+            "previous_trade_closed": (
+                bool(conditions.get("previous_trade_closed", False)),
+                {
+                    "passed": conditions.get("previous_trade_closed", False),
+                    "pending_trade_count": conditions.get("pending_trade_count"),
+                    "previous_trade_status": details.get("previous_trade_status"),
+                },
+            ),
+            "working_reference_confirmed": (
+                trend_strength == "CONFIRMED",
+                {
+                    "passed": trend_strength == "CONFIRMED",
+                    "entry_type": entry_type,
+                    "trend_strength": trend_strength,
+                    "working_body_ratio": details.get("working_body_ratio"),
+                    "governing_reference": details.get("governing_reference"),
+                },
             ),
             "redbar_vwap_aligned": (
                 bool(conditions.get("redbar_vwap_aligned", False)),
@@ -764,11 +899,20 @@ def evaluate_current_session_red_bar_v2(
             ),
             "vwap_aligned": (
                 bool(conditions.get("vwap_aligned", False)),
-                {"passed": conditions.get("vwap_aligned", False)},
+                {
+                    "passed": conditions.get("vwap_aligned", False),
+                    "redbar_vwap_aligned": conditions.get("redbar_vwap_aligned"),
+                },
             ),
             "midpoint_aligned": (
                 bool(conditions.get("midpoint_aligned", False)),
-                {"passed": conditions.get("midpoint_aligned", False)},
+                {
+                    "passed": conditions.get("midpoint_aligned", False),
+                    "midpoint_distance_points": details.get(
+                        "midpoint_distance_points"
+                    ),
+                    "zone_position": details.get("zone_position"),
+                },
             ),
             "rsi_informational": (
                 True,  # informational; always "passed" in audit terms
@@ -778,13 +922,35 @@ def evaluate_current_session_red_bar_v2(
                 },
             ),
         }
+        # How far the ladder actually got. A boolean recorded for a gate the
+        # candidate never reached is stale, not a verdict: a cycle stopped at
+        # CONTEXT_STALE still carries whatever `midpoint_aligned` happened to
+        # hold, and reading that as an independent midpoint failure sends the
+        # reader chasing a level that was never consulted. Stamping each row with
+        # `reached` keeps the raw evidence honest about which booleans were used.
+        stopped_at = checkpoint_for_code(admission_code)
+        stop_number = (
+            stopped_at.number if stopped_at is not None else len(ENTRY_LADDER) + 1
+        )
+        rung_numbers = {
+            checkpoint.evidence_step: checkpoint.number
+            for checkpoint in admission_checkpoints()
+            if checkpoint.evidence_step
+        }
         for check_name, (passed, artifact) in gate_map.items():
+            step_name = f"check:{check_name}"
+            rung = rung_numbers.get(step_name)
             record_strategy_subcheck(
                 database,
                 run_id=run_id,
-                step_name=f"check:{check_name}",
+                step_name=step_name,
                 status="OK" if passed else "ERROR",
-                artifacts=artifact,
+                artifacts={
+                    **artifact,
+                    "checkpoint": rung,
+                    "reached": None if rung is None else rung <= stop_number,
+                    "candidate_allowed": candidate_allowed,
+                },
             )
         # Stage 3 geometry (informational): where the decision was taken. These
         # gate nothing on their own, but without them the audit trail cannot say

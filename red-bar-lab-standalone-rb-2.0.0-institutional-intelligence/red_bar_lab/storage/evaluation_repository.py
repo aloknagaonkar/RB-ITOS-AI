@@ -1204,6 +1204,48 @@ class EvaluationRepository:
             out.append(d)
         return out
 
+    def read_evidence_run_ids(
+        self,
+        *,
+        process_name: str,
+        step_name: str,
+        date_prefix: str | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, object]]:
+        """Return the newest run_ids that recorded a given step, one row each.
+
+        ``date_prefix`` matches the leading characters of ``started_at``, which is
+        an ISO timestamp -- so a ``YYYY-MM-DD`` prefix scopes the read to one day.
+        Needed because the ladder page must find the cycles for a chosen date, and
+        every other evidence reader here is keyed by run_id or is global.
+
+        Note that ``record_strategy_subcheck`` stamps ``started_at`` in UTC. For a
+        session that trades 09:15-15:30 IST the UTC date is the same date, so a
+        trading-date prefix is exact; a row written before 05:30 IST would file
+        under the previous day, which no strategy cycle does.
+        """
+        self._db.initialize()
+        clauses = ["process_name=?", "step_name=?"]
+        params: list[object] = [process_name, step_name]
+        if date_prefix:
+            clauses.append("started_at LIKE ?")
+            params.append(f"{date_prefix}%")
+        params.append(max(1, int(limit)))
+        with self._db._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                f"""
+                SELECT run_id, MAX(started_at) AS started_at, COUNT(*) AS rows_seen
+                FROM process_evidence
+                WHERE {" AND ".join(clauses)}
+                GROUP BY run_id
+                ORDER BY started_at DESC
+                LIMIT ?
+                """,
+                tuple(params),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def read_latest_error_per_process(self) -> list[dict[str, object]]:
         """Return the most recent ERROR row per process, with the
         duration since that error started (computed from
