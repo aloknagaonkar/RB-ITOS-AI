@@ -26,6 +26,10 @@ class HistoricalSessionGateway(Protocol):
         self, underlying: str, expiry: date
     ) -> list[HistoricalOptionContract]: ...
 
+    def historical_option_candles(
+        self, instrument_key: str, session_date: date
+    ) -> list[HistoricalCandle]: ...
+
 
 class ReportModel(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")

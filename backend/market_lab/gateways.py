@@ -235,7 +235,7 @@ class UpstoxGateway:
         self, underlying: str, expiry: date
     ) -> list[HistoricalOptionContract]:
         body = self._get(
-            "/v2/option/contract",
+            "/v2/expired-instruments/option/contract",
             {"instrument_key": underlying, "expiry_date": expiry.isoformat()},
         )
         try:
@@ -259,6 +259,24 @@ class UpstoxGateway:
             raise GatewayError(
                 "Upstox historical candle data failed schema validation."
             ) from None
+
+    def historical_option_candles(
+        self, instrument_key: str, session_date: date
+    ) -> list[HistoricalCandle]:
+        encoded_key = quote(instrument_key, safe="")
+        requested_date = session_date.isoformat()
+        body = self._get(
+            f"/v2/expired-instruments/historical-candle/{encoded_key}/1minute/"
+            f"{requested_date}/{requested_date}",
+            {},
+        )
+        try:
+            return normalize_upstox_historical_candles(instrument_key, session_date, body)
+        except (ValueError, KeyError, TypeError):
+            raise GatewayError(
+                "Upstox expired historical option candle data failed schema validation."
+            ) from None
+
     def close(self):
         self.client.close()
 

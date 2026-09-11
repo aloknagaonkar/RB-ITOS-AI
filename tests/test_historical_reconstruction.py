@@ -357,9 +357,34 @@ def test_upstox_contract_discovery_is_one_explicit_expiry_request():
         )
 
     assert len(contracts) == 1 and len(seen) == 1
-    assert seen[0].url.path == "/v2/option/contract"
+    assert seen[0].url.path == "/v2/expired-instruments/option/contract"
     assert seen[0].url.params["instrument_key"] == UNDERLYING
     assert seen[0].url.params["expiry_date"] == SESSION.isoformat()
+
+
+def test_upstox_expired_option_candles_use_expired_endpoint():
+    seen = []
+    response = {
+        "status": "success",
+        "data": {"candles": [[
+            f"{SESSION.isoformat()}T09:15:00+05:30", 100, 105, 95, 102, 1000, 25000
+        ]]},
+    }
+
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(200, json=response)
+
+    with httpx.Client(
+        base_url="https://api.upstox.com", transport=httpx.MockTransport(handler)
+    ) as client:
+        values = UpstoxGateway("test-token", client).historical_option_candles(
+            "NSE_FO|42601|08-09-2026", SESSION
+        )
+
+    assert len(values) == 1
+    assert "/v2/expired-instruments/historical-candle/" in seen[0].url.path
+    assert f"/1minute/{SESSION.isoformat()}/{SESSION.isoformat()}" in seen[0].url.path
 
 
 class StubHistoricalLoader:
@@ -367,7 +392,7 @@ class StubHistoricalLoader:
         self.values = values
         self.calls = []
 
-    def historical_candles(self, instrument_key, session_date):
+    def historical_option_candles(self, instrument_key, session_date):
         self.calls.append((instrument_key, session_date))
         return self.values.get(instrument_key, [])
 

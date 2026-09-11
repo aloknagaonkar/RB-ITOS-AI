@@ -42,8 +42,8 @@ def resolve_historical_atm(
         for candle in sorted(candles, key=lambda value: value.timestamp)
     ]
 
-class HistoricalCandleLoader(Protocol):
-    def historical_candles(
+class HistoricalOptionCandleLoader(Protocol):
+    def historical_option_candles(
         self, instrument_key: str, session_date: date
     ) -> list[HistoricalCandle]: ...
 
@@ -87,7 +87,7 @@ def resolve_historical_option_contracts(
 
 
 def load_historical_option_candles(
-    loader: HistoricalCandleLoader,
+    loader: HistoricalOptionCandleLoader,
     contracts: Iterable[HistoricalOptionContract],
     session_date: date,
 ) -> list[HistoricalOptionCandleSeries]:
@@ -104,7 +104,7 @@ def load_historical_option_candles(
         HistoricalOptionCandleSeries(
             contract=contract,
             session_date=session_date,
-            candles=loader.historical_candles(contract.instrument_key, session_date),
+            candles=loader.historical_option_candles(contract.instrument_key, session_date),
         )
         for contract in ordered
     ]

@@ -46,9 +46,13 @@ class HistoricalGatewayStub:
         self.candle_calls = []
 
     def historical_candles(self, instrument_key, session_date):
-        self.candle_calls.append((instrument_key, session_date))
-        if instrument_key == UNDERLYING:
-            return self.underlying_candles
+        self.candle_calls.append(("underlying", instrument_key, session_date))
+        if instrument_key != UNDERLYING:
+            return []
+        return self.underlying_candles
+
+    def historical_option_candles(self, instrument_key, session_date):
+        self.candle_calls.append(("option", instrument_key, session_date))
         return self.option_candles.get(instrument_key, [])
 
     def historical_option_contracts(self, underlying, expiry):
@@ -100,9 +104,9 @@ def test_historical_session_runner_executes_once_per_selected_contract():
     assert report.atm_change_count == 1
     assert report.selected_contract_count == 4
     assert gateway.catalog_calls == [(UNDERLYING, EXPIRY)]
-    assert gateway.candle_calls[0] == (UNDERLYING, SESSION)
+    assert gateway.candle_calls[0] == ("underlying", UNDERLYING, SESSION)
     assert gateway.candle_calls[1:] == [
-        (value.instrument_key, SESSION)
+        ("option", value.instrument_key, SESSION)
         for value in contracts
     ]
     assert len(set(gateway.candle_calls[1:])) == 4
@@ -175,7 +179,7 @@ def test_historical_session_report_preserves_partial_and_empty_data():
     assert report.first_valid_moving_pcr is None
     assert len(gateway.candle_calls[1:]) == 3
     assert missing_contract.instrument_key not in {
-        instrument_key for instrument_key, _ in gateway.candle_calls
+        instrument_key for _, instrument_key, _ in gateway.candle_calls
     }
 
 
@@ -191,7 +195,7 @@ def test_empty_underlying_session_exits_cleanly_without_other_provider_calls():
     assert report.underlying_candle_count == 0
     assert report.reconstructed_snapshot_count == 0
     assert report.selected_contract_count == 0
-    assert gateway.candle_calls == [(UNDERLYING, SESSION)]
+    assert gateway.candle_calls == [("underlying", UNDERLYING, SESSION)]
     assert gateway.catalog_calls == []
 
 
@@ -208,4 +212,4 @@ def test_duplicate_underlying_timestamps_are_reported_without_reconstruction():
     assert report.issues == ["duplicate_underlying_timestamps"]
     assert report.reconstructed_snapshot_count == 0
     assert gateway.catalog_calls == []
-    assert gateway.candle_calls == [(UNDERLYING, SESSION)]
+    assert gateway.candle_calls == [("underlying", UNDERLYING, SESSION)]
