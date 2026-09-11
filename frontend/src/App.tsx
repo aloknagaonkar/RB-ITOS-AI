@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { Config, Detail, Point, Result, State } from './types'
 import { fetchLatestPanelTrends, type PCRTrendResult } from './pcrTrends'
 import { fetchStrikePositioning, type PositioningClassification, type PositioningHorizon, type StrikePositioningResult } from './strikePositioning'
+import HistoricalResearch from './historicalResearch'
 
 const number = (v: number|null|undefined, digits = 0) => v == null ? '—' : v.toLocaleString('en-IN', {maximumFractionDigits: digits})
 const time = (v: string) => new Date(v).toLocaleTimeString('en-IN', {timeZone: 'Asia/Kolkata', hour12: false})
@@ -174,17 +175,17 @@ export default function App() {
   const isDemo = state.config.provider === 'demo'
   return <div className="shell">
     <aside><div className="brand"><span className="brand-icon">M</span><div>MARKET LAB<small>STRATEGY RESEARCH</small></div></div>
-      <div className="nav-label">WORKSPACE</div><nav>{['PCR workspace','Data health','Configuration'].map(label =>
-        <button key={label} className={tab===label ? 'active':''} onClick={()=>setTab(label)}><span>{label==='PCR workspace'?'◈':label==='Data health'?'◉':'⚙'}</span>{label}</button>)}</nav>
+      <div className="nav-label">WORKSPACE</div><nav>{['PCR workspace','Historical research','Data health','Configuration'].map(label =>
+        <button key={label} className={tab===label ? 'active':''} onClick={()=>setTab(label)}><span>{label==='PCR workspace'?'◈':label==='Historical research'?'◫':label==='Data health'?'◉':'⚙'}</span>{label}</button>)}</nav>
       <div className="sidebar-bottom"><span className="dot"/><b>Research foundation</b><p>Record. Inspect. Reproduce.</p><small>Order execution is not enabled.</small></div>
     </aside>
     <main>
       <header><div className="breadcrumb">Research / <b>{tab}</b></div><span className={'pill ' + (isDemo?'amber':'teal')}>{isDemo?'SYNTHETIC DEMO':'UPSTOX DATA'}</span></header>
-      <div className="page-heading"><div><div className="eyebrow">OPTIONS INTELLIGENCE</div><h1>{tab}</h1><p>{tab==='PCR workspace'?'One option chain. Two ATM perspectives. Every calculation traceable.':tab==='Data health'?'Connection health and data quality, with their limits visible.':'Versioned parameters for repeatable research.'}</p></div>
-        <button disabled={busy} className={state.enabled?'secondary':'primary'} onClick={()=>void action(async()=>{
+      <div className="page-heading"><div><div className="eyebrow">OPTIONS INTELLIGENCE</div><h1>{tab}</h1><p>{tab==='PCR workspace'?'One option chain. Two ATM perspectives. Every calculation traceable.':tab==='Historical research'?'Reconstruct Fixed, Moving, and Full PCR from expired option candles.':tab==='Data health'?'Connection health and data quality, with their limits visible.':'Versioned parameters for repeatable research.'}</p></div>
+        {tab!=='Historical research' && <button disabled={busy} className={state.enabled?'secondary':'primary'} onClick={()=>void action(async()=>{
           await api('/collection',{enabled:!state.enabled})
           setNotice(state.enabled?'Pause requested. An in-flight observation may still finish.':'Collection requested. The separate worker must be running.')
-        })}>{state.enabled?'Pause collection':'Start collection'}</button></div>
+        })}>{state.enabled?'Pause collection':'Start collection'}</button>}</div>
       {error && <div role="alert" className="banner error">{error} Displayed observations may be outdated.</div>}
       {notice && <div role="status" className="banner">{notice}</div>}
       {isDemo && <div className="demo-strip"><span>DEMO ENVIRONMENT</span>Generated prices and OI · simulated session clock · no market connection</div>}
@@ -230,6 +231,7 @@ export default function App() {
           </> : <div className="empty">No observation selected.</div>}
         </section>
       </>}
+      {tab==='Historical research' && <HistoricalResearch defaultUnderlying={state.config.underlying} defaultExpiry={state.config.expiry} defaultWings={state.config.wings}/>}
       {tab==='Data health' && <>
         <div className="health-grid">
           <Health label="Collector" value={state.worker.alive?words(state.worker.state):'Worker offline'} note="Heartbeat measures worker availability, not market freshness."/>
