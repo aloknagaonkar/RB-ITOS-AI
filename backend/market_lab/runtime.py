@@ -32,7 +32,7 @@ def main() -> None:
 
     import uvicorn
 
-    uvicorn.run("market_lab.api:app", host="127.0.0.1", port=8123, log_level="info")
+    uvicorn.run("market_lab.api:app", host="0.0.0.0", port=8123, log_level="info")
 
 
 if __name__ == "__main__":
