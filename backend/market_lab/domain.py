@@ -77,6 +77,33 @@ class PCRConfig(Model):
         return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
+class HistoricalCandle(Model):
+    provider: Literal["upstox"]
+    instrument_key: str = Field(min_length=1)
+    session_date: date
+    interval_seconds: int = Field(default=60, gt=0)
+    timestamp: AwareDatetime
+    open: float = Field(gt=0)
+    high: float = Field(gt=0)
+    low: float = Field(gt=0)
+    close: float = Field(gt=0)
+    volume: int | None = Field(default=None, ge=0)
+    open_interest: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def valid_candle(self):
+        if self.timestamp.astimezone(IST).date() != self.session_date:
+            raise ValueError("Historical candle timestamp is outside the requested IST session")
+        if self.low > min(self.open, self.close) or self.high < max(self.open, self.close):
+            raise ValueError("Historical candle OHLC range is inconsistent")
+        return self
+
+
+class HistoricalATM(Model):
+    timestamp: AwareDatetime
+    spot: float = Field(gt=0)
+    atm: float = Field(gt=0)
+
 class Contract(Model):
     key: str
     strike: float = Field(gt=0)
