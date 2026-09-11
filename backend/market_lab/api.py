@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -33,7 +33,7 @@ from .storage import (
 )
 
 
-def create_app(engine=None):
+def create_app(engine=None, historical_gateway_factory=None):
     @asynccontextmanager
     async def lifespan(app):
         app.state.engine = engine if engine is not None else make_engine()
@@ -136,6 +136,47 @@ def create_app(engine=None):
                 {"id": row.id, "created_at": row.created_at, "config": row.payload}
                 for row in session.scalars(select(Configuration).order_by(Configuration.id.desc()))
             ]
+
+
+    @app.get("/api/research/historical/pcr")
+    def historical_pcr_research(
+        underlying: str,
+        session_date: date,
+        expiry: date,
+        wings: int = 5,
+    ):
+        if wings < 0 or wings > 50:
+            raise HTTPException(422, "wings must be between 0 and 50")
+
+        gateway = None
+        try:
+            if historical_gateway_factory is not None:
+                gateway = historical_gateway_factory()
+            else:
+                import os
+                from dotenv import load_dotenv
+
+                from .gateways import UpstoxGateway
+
+                load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+                gateway = UpstoxGateway(os.getenv("UPSTOX_ACCESS_TOKEN", ""))
+
+            from .historical_research import build_historical_research_session
+
+            return build_historical_research_session(
+                gateway, underlying, session_date, expiry, wings
+            )
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from None
+        except Exception as error:
+            from .gateways import GatewayError
+
+            if isinstance(error, GatewayError):
+                raise HTTPException(503, str(error)) from None
+            raise
+        finally:
+            if gateway is not None and historical_gateway_factory is None:
+                gateway.close()
 
     @app.get("/api/recorded-session-inventory", response_model=RecordedSessionInventoryReport)
     def recorded_sessions(config_id: int | None = None):
