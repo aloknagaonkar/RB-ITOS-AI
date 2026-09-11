@@ -104,6 +104,34 @@ class HistoricalATM(Model):
     spot: float = Field(gt=0)
     atm: float = Field(gt=0)
 
+class HistoricalOptionContract(Model):
+    instrument_key: str = Field(min_length=1)
+    underlying: str = Field(min_length=1)
+    expiry: date
+    strike: float = Field(gt=0)
+    side: Literal["CE", "PE"]
+    lot_size: int | None = Field(default=None, gt=0)
+    is_weekly: bool | None = None
+
+
+class HistoricalOptionCandleSeries(Model):
+    contract: HistoricalOptionContract
+    session_date: date
+    candles: list[HistoricalCandle] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def valid_series(self):
+        timestamps = [candle.timestamp for candle in self.candles]
+        if timestamps != sorted(timestamps) or len(timestamps) != len(set(timestamps)):
+            raise ValueError("Historical option candles must have unique chronological timestamps")
+        if any(
+            candle.instrument_key != self.contract.instrument_key
+            or candle.session_date != self.session_date
+            for candle in self.candles
+        ):
+            raise ValueError("Historical option candle identity mismatch")
+        return self
+
 class Contract(Model):
     key: str
     strike: float = Field(gt=0)

@@ -7,7 +7,7 @@ from urllib.parse import quote
 
 import httpx
 
-from .domain import Contract, HistoricalCandle, PCRConfig, Quote, Snapshot
+from .domain import Contract, HistoricalCandle, HistoricalOptionContract, PCRConfig, Quote, Snapshot
 
 UTC = timezone.utc
 
@@ -93,6 +93,49 @@ def normalize_upstox(config, catalog_body, chain_body, spot_body, started, recei
         raw={"catalog": catalog_body, "chain": chain_body, "spot": spot_body},
     )
 
+
+def normalize_upstox_historical_option_contracts(
+    underlying: str, expiry: date, body: dict
+) -> list[HistoricalOptionContract]:
+    """Normalize one Upstox option catalog without selecting a strike basket."""
+    if not isinstance(body, dict) or not isinstance(body.get("data"), list):
+        raise ValueError("Historical option contract response is invalid")
+    contracts = []
+    identities = set()
+    for value in body["data"]:
+        if not isinstance(value, dict):
+            raise ValueError("Historical option contract is invalid")
+        if value.get("underlying_key") != underlying or value.get("expiry") != expiry.isoformat():
+            continue
+        side = value.get("instrument_type")
+        if side not in ("CE", "PE"):
+            continue
+        lot_size = value.get("lot_size")
+        if lot_size is not None and (
+            type(lot_size) not in (int, float)
+            or not math.isfinite(lot_size)
+            or lot_size <= 0
+            or int(lot_size) != lot_size
+        ):
+            raise ValueError("Historical option contract lot size is invalid")
+        weekly = value.get("weekly")
+        if weekly is not None and type(weekly) is not bool:
+            raise ValueError("Historical option contract weekly metadata is invalid")
+        contract = HistoricalOptionContract(
+            instrument_key=value["instrument_key"],
+            underlying=underlying,
+            expiry=expiry,
+            strike=value["strike_price"],
+            side=side,
+            lot_size=int(lot_size) if lot_size is not None else None,
+            is_weekly=weekly,
+        )
+        identity = (contract.strike, contract.side)
+        if identity in identities:
+            raise ValueError("Duplicate historical option contract")
+        identities.add(identity)
+        contracts.append(contract)
+    return sorted(contracts, key=lambda contract: (contract.strike, 0 if contract.side == "CE" else 1))
 
 def normalize_upstox_historical_candles(
     instrument_key: str, session_date: date, body: dict
@@ -188,6 +231,19 @@ class UpstoxGateway:
                 "Upstox data failed contract/schema validation; observation rejected."
             ) from None
 
+    def historical_option_contracts(
+        self, underlying: str, expiry: date
+    ) -> list[HistoricalOptionContract]:
+        body = self._get(
+            "/v2/option/contract",
+            {"instrument_key": underlying, "expiry_date": expiry.isoformat()},
+        )
+        try:
+            return normalize_upstox_historical_option_contracts(underlying, expiry, body)
+        except (ValueError, KeyError, TypeError):
+            raise GatewayError(
+                "Upstox historical option contract data failed schema validation."
+            ) from None
     def historical_candles(
         self, instrument_key: str, session_date: date
     ) -> list[HistoricalCandle]:
