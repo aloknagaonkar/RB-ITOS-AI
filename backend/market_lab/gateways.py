@@ -37,6 +37,11 @@ def normalize_upstox(config, catalog_body, chain_body, spot_body, started, recei
             return None
         return int(value)
 
+    def valid_price(value):
+        if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+            return None
+        return float(value)
+
     contracts = []
     for row in catalog_body["data"]:
         if row["expiry"] != config.expiry.isoformat() or row["underlying_key"] != config.underlying:
@@ -61,7 +66,15 @@ def normalize_upstox(config, catalog_body, chain_body, spot_body, started, recei
             oi = valid_oi(market_data.get("oi"))
             prev_oi = valid_oi(market_data.get("prev_oi"))
             # Preserve absent/invalid OI as unavailable. Do not coerce booleans, negatives or fractions.
-            quotes.append(Quote(key=key, oi=oi, prev_oi=prev_oi))
+            quotes.append(Quote(
+                key=key,
+                oi=oi,
+                prev_oi=prev_oi,
+                ltp=valid_price(market_data.get("ltp")),
+                bid=valid_price(market_data.get("bid_price")),
+                ask=valid_price(market_data.get("ask_price")),
+                volume=valid_oi(market_data.get("volume")),
+            ))
     spots = [q for q in spot_body["data"].values() if q.get("instrument_token") == config.underlying]
     if len(spots) != 1:
         raise ValueError("Underlying quote missing or ambiguous")

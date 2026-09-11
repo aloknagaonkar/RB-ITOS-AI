@@ -61,7 +61,7 @@ def test_zero_calls_unavailable_zero_puts_valid(config, snapshot):
         )
 
 
-@pytest.mark.parametrize("offset,issue", [(-31, "spot_quote_stale"), (3, "spot_timestamp_in_future")])
+@pytest.mark.parametrize("offset,issue", [(-31, "spot_quote_stale"), (6, "spot_timestamp_in_future")])
 def test_bad_quote_time_blocks_anchor(config, snapshot, offset, issue):
     out = evaluate(snapshot.model_copy(update={"spot_feed_at": AT + timedelta(seconds=offset)}), config)
     assert out.anchor is None and issue in result(out, "moving").issues
@@ -73,6 +73,12 @@ def test_unknown_timestamp_slow_collection(config, snapshot):
     )
     assert out.anchor is None
     assert {"spot_timestamp_unknown", "collection_too_slow"} <= set(result(out, "moving").issues)
+
+
+def test_small_provider_clock_lead_is_visible_but_accepted(config, snapshot):
+    out = evaluate(snapshot.model_copy(update={"spot_feed_at": AT + timedelta(seconds=3)}), config)
+    assert result(out, "moving").pcr is not None
+    assert "provider_clock_ahead_within_tolerance" in out.warnings
 
 
 def test_missed_anchor_not_replaced(config):

@@ -11,16 +11,24 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .domain import PCRConfig
+from .domain import ForwardLookupConfig, PCRChangeBucketConfig, PCRConfig, PatternEvidenceReport, RecordedSessionInventoryReport, SessionAnalysisObservation
+from .multi_session_evidence import build_compatible_pattern_evidence, collect_compatible_session_analysis
+from .recorded_session_inventory import recorded_session_inventory
+from .pattern_statistics import calculate_pattern_statistics
+from .pattern_evidence import build_pattern_evidence
 from .storage import (
     Configuration,
     Control,
     Health,
     Observation,
     active_config,
+    backfill_pcr_history,
     initialize,
     make_engine,
     replay,
+    session_analysis_results,
+    strike_positioning_results,
+    trend_results,
     utc_now,
 )
 
@@ -129,6 +137,14 @@ def create_app(engine=None):
                 for row in session.scalars(select(Configuration).order_by(Configuration.id.desc()))
             ]
 
+    @app.get("/api/recorded-session-inventory", response_model=RecordedSessionInventoryReport)
+    def recorded_sessions(config_id: int | None = None):
+        with Session(app.state.engine) as session:
+            try:
+                return recorded_session_inventory(session, config_id)
+            except ValueError:
+                raise HTTPException(404, "Configuration not found") from None
+
     @app.post("/api/configurations", status_code=201)
     def configure(config: PCRConfig):
         with Session(app.state.engine) as session, session.begin():
@@ -153,6 +169,14 @@ def create_app(engine=None):
             session.get(Control, 1).enabled = body.enabled
         return {"enabled": body.enabled}
 
+    @app.post("/api/maintenance/backfill-pcr-history")
+    def backfill_history(config_id: int):
+        with Session(app.state.engine) as session, session.begin():
+            try:
+                return backfill_pcr_history(session, config_id)
+            except ValueError:
+                raise HTTPException(404, "Configuration not found") from None
+
     @app.get("/api/observations/{observation_id}")
     def observation(observation_id: int):
         with Session(app.state.engine) as session:
@@ -173,6 +197,91 @@ def create_app(engine=None):
             return replay(app.state.engine, config_id)
         except ValueError:
             raise HTTPException(404, "Configuration not found") from None
+
+    @app.get("/api/pcr-trends")
+    def pcr_trends(
+        config_id: int,
+        mode: str | None = None,
+        strike: float | None = None,
+        limit: int = 240,
+    ) -> list[dict]:
+        if limit < 1 or limit > 1_000:
+            raise HTTPException(422, "limit must be between 1 and 1000")
+        with Session(app.state.engine) as session:
+            if session.get(Configuration, config_id) is None:
+                raise HTTPException(status_code=404, detail="Configuration not found")
+            return trend_results(session, config_id, mode=mode, strike=strike, limit=limit)
+
+    @app.get("/api/session-analysis")
+    def session_analysis(config_id: int, forward_tolerance_seconds: int = 30) -> list[dict]:
+        try:
+            forward_config = ForwardLookupConfig(timestamp_tolerance_seconds=forward_tolerance_seconds)
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from None
+        with Session(app.state.engine) as session:
+            try:
+                return session_analysis_results(session, config_id, forward_config)
+            except ValueError:
+                raise HTTPException(404, "Configuration not found") from None
+
+    @app.get("/api/strike-positioning")
+    def strike_positioning(
+        config_id: int,
+        horizon_seconds: int | None = None,
+        observation_id: int | None = None,
+        center_strike: float | None = None,
+        wings: int | None = None,
+    ) -> list[dict]:
+        with Session(app.state.engine) as session:
+            try:
+                return strike_positioning_results(
+                    session, config_id, horizon_seconds, observation_id, center_strike, wings
+                )
+            except LookupError:
+                raise HTTPException(404, "Observation not found") from None
+            except ValueError as error:
+                if str(error) == "Configuration not found":
+                    raise HTTPException(404, str(error)) from None
+                raise HTTPException(422, str(error)) from None
+
+    @app.get("/api/pcr-pattern-statistics")
+    def pcr_pattern_statistics(config_id: int):
+        with Session(app.state.engine) as session:
+            try:
+                analysis = session_analysis_results(session, config_id)
+            except ValueError:
+                raise HTTPException(404, "Configuration not found") from None
+        return [report.model_dump(mode="json") for report in calculate_pattern_statistics(
+            (SessionAnalysisObservation.model_validate(item) for item in analysis), PCRChangeBucketConfig()
+        )]
+
+    @app.get("/api/pcr-pattern-evidence")
+    def pcr_pattern_evidence(config_id: int):
+        with Session(app.state.engine) as session:
+            try: analysis = session_analysis_results(session, config_id)
+            except ValueError: raise HTTPException(404, "Configuration not found") from None
+        reports = calculate_pattern_statistics((SessionAnalysisObservation.model_validate(item) for item in analysis), PCRChangeBucketConfig())
+        return [build_pattern_evidence(report).model_dump(mode="json") for report in reports]
+
+    @app.get("/api/pcr-pattern-evidence/history", response_model=PatternEvidenceReport)
+    def pcr_pattern_evidence_history(config_id: int):
+        with Session(app.state.engine) as session:
+            try:
+                history = collect_compatible_session_analysis(session, config_id)
+                return build_compatible_pattern_evidence(history)
+            except ValueError:
+                raise HTTPException(404, "Configuration not found") from None
+
+    @app.get("/api/pcr-trends/latest")
+    def latest_pcr_trends(
+        config_id: int, mode: str | None = None, panels_only: bool = False
+    ) -> list[dict]:
+        with Session(app.state.engine) as session:
+            if session.get(Configuration, config_id) is None:
+                raise HTTPException(404, "Configuration not found")
+            return trend_results(
+                session, config_id, mode=mode, latest_only=True, limit=500, panels_only=panels_only
+            )
 
     # Development uses Vite proxy; built UI can be served by the same local backend.
     dist = Path("frontend/dist")

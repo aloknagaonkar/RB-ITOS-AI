@@ -36,6 +36,17 @@ In a second terminal, from this project directory:
 .\.venv\Scripts\python.exe -m market_lab.worker
 ```
 
+For normal local operation, control both services from the project directory:
+
+```powershell
+.\start.cmd
+.\status.cmd
+.\restart.cmd
+.\stop.cmd
+```
+
+These commands maintain validated PID files under `data/runtime` and logs under `data/logs`. Starting the platform does not enable data collection; that remains controlled from the dashboard.
+
 Click **Start collection** in the dashboard. Closing the browser does not stop the worker. Click **Pause collection** to stop further attempts; an in-flight observation can still finish. Stop the worker with Ctrl+C. Only one worker/seed process may hold the local collector lock. The API may run separately.
 
 Demo data is visibly labelled synthetic. Each worker tick advances one simulated market minute every five wall-clock seconds. Seeding starts at the configured morning anchor and uses the same recording/calculation pipeline. It does not represent the current market. Re-running the seed command appends observations; it does not reset data.

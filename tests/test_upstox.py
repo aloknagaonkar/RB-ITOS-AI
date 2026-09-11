@@ -22,8 +22,14 @@ def payload():
         "data": [
             dict(
                 common,
-                call_options={"instrument_key": "NSE_FO|1", "market_data": {"oi": 100, "prev_oi": 80}},
-                put_options={"instrument_key": "NSE_FO|2", "market_data": {"oi": 150, "prev_oi": 120}},
+                call_options={"instrument_key": "NSE_FO|1", "market_data": {
+                    "oi": 100, "prev_oi": 80, "ltp": 125.5, "bid_price": 125,
+                    "ask_price": 126, "volume": 1000,
+                }},
+                put_options={"instrument_key": "NSE_FO|2", "market_data": {
+                    "oi": 150, "prev_oi": 120, "ltp": 110, "bid_price": 109.5,
+                    "ask_price": 110.5, "volume": 900,
+                }},
             )
         ],
     }
@@ -45,7 +51,21 @@ def test_normalize():
     s = normalize_upstox(c, catalog, chain, spot, NOW, NOW)
     assert [q.oi for q in s.quotes] == [100, 150]
     assert [q.prev_oi for q in s.quotes] == [80, 120]
+    assert [q.ltp for q in s.quotes] == [125.5, 110]
+    assert [q.bid for q in s.quotes] == [125, 109.5]
+    assert [q.ask for q in s.quotes] == [126, 110.5]
+    assert [q.volume for q in s.quotes] == [1000, 900]
+    assert all(q.quote_timestamp is None for q in s.quotes)
     assert s.oi_source_at is None and s.spot_feed_at == NOW and s.raw["catalog"] == catalog
+
+
+@pytest.mark.parametrize("field,bad", [("ltp", -1), ("bid_price", "125"), ("ask_price", True), ("volume", 1.2)])
+def test_invalid_market_data_stays_unavailable(field, bad):
+    c, catalog, chain, spot = payload()
+    chain["data"][0]["call_options"]["market_data"][field] = bad
+    quote = normalize_upstox(c, catalog, chain, spot, NOW, NOW).quotes[0]
+    normalized = {"ltp": quote.ltp, "bid_price": quote.bid, "ask_price": quote.ask, "volume": quote.volume}
+    assert normalized[field] is None
 
 
 @pytest.mark.parametrize("bad", [None, -1, 1.2, True, "100"])

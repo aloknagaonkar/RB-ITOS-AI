@@ -56,6 +56,15 @@ def run():
                     config_id, config, enabled = active_config(session)
                 if config_id != last_config:
                     failures, next_due, last_config = 0, 0.0, config_id
+                    update_health(
+                        engine,
+                        state="configuration_changed",
+                        config_id=config_id,
+                        failures=0,
+                        last_error=None,
+                        last_success_at=None,
+                        last_observation_id=None,
+                    )
                 if not enabled:
                     update_health(engine, state="paused", config_id=config_id, failures=failures)
                     time.sleep(1)
