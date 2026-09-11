@@ -213,3 +213,45 @@ def test_duplicate_underlying_timestamps_are_reported_without_reconstruction():
     assert report.reconstructed_snapshot_count == 0
     assert gateway.catalog_calls == []
     assert gateway.candle_calls == [("underlying", UNDERLYING, SESSION)]
+
+def test_historical_validation_reports_fixed_0920_anchor_and_fixed_pcr():
+    underlying = [
+        candle(UNDERLYING, minute, close)
+        for minute, close in ((19, 23249), (20, 23276), (21, 23330))
+    ]
+    contracts = [
+        contract(strike, side)
+        for strike in (23250, 23300, 23350)
+        for side in ("CE", "PE")
+    ]
+    option_candles = {
+        value.instrument_key: [
+            candle(
+                value.instrument_key,
+                minute,
+                close=100 if value.side == "CE" else 120,
+                oi=1000 if value.side == "CE" else 1500,
+            )
+            for minute in (19, 20, 21)
+        ]
+        for value in contracts
+    }
+
+    report = validate_historical_session(
+        HistoricalGatewayStub(underlying, contracts, option_candles),
+        UNDERLYING,
+        SESSION,
+        EXPIRY,
+        wings=0,
+    )
+
+    assert report.fixed_anchor_time == "09:20:00"
+    assert report.fixed_anchor_status == "CAPTURED"
+    assert report.fixed_anchor_spot == 23276
+    assert report.fixed_anchor_atm == 23300
+    assert report.fixed_pcr_available_count == 2
+    assert report.fixed_pcr_unavailable_count == 1
+    assert report.first_valid_fixed_pcr.timestamp == underlying[1].timestamp
+    assert report.first_valid_fixed_pcr.pcr == 1.5
+    assert report.last_valid_fixed_pcr.timestamp == underlying[2].timestamp
+    assert report.last_valid_fixed_pcr.pcr == 1.5

@@ -1,6 +1,6 @@
 """Provider-independent historical feature primitives."""
 
-from datetime import date, datetime
+from datetime import date, datetime, time
 from decimal import Decimal, ROUND_FLOOR
 from typing import Iterable, Protocol
 
@@ -15,6 +15,7 @@ from .domain import (
     HistoricalPCRStrikeResult,
     HistoricalReconstructedSnapshot,
     HistoricalStrikeObservation,
+    IST,
     calculate_oi_change,
     calculate_pcr_value,
 )
@@ -132,8 +133,9 @@ def reconstruct_historical_snapshots(
     session_date: date,
     wings: int = 5,
     strike_interval: int = 50,
+    fixed_anchor_time: time = time(9, 20),
 ) -> list[HistoricalReconstructedSnapshot]:
-    """Reconstruct exact-timestamp historical baskets without filling missing data."""
+    """Reconstruct exact-timestamp moving and fixed baskets without filling missing data."""
     if type(wings) is not int or wings < 0:
         raise ValueError("wings must be a non-negative integer")
     if strike_interval <= 0:
@@ -192,17 +194,45 @@ def reconstruct_historical_snapshots(
             status=status,
         )
 
-    snapshots = []
-    interval = Decimal(str(strike_interval))
-    for candle in timeline:
-        atm = _nearest_strike(candle.close, strike_interval)
-        center = Decimal(str(atm))
+    def strike_rows(timestamp, center_atm):
+        interval = Decimal(str(strike_interval))
+        center = Decimal(str(center_atm))
         required_strikes = [
             float(center + interval * offset)
             for offset in range(-wings, wings + 1)
         ]
         if min(required_strikes) <= 0:
             raise ValueError("requested strike range must be positive")
+        return [
+            HistoricalStrikeObservation(
+                strike=strike,
+                ce=side_observation(timestamp, strike, "CE"),
+                pe=side_observation(timestamp, strike, "PE"),
+            )
+            for strike in required_strikes
+        ]
+
+    anchor_candle = next(
+        (
+            candle for candle in timeline
+            if candle.timestamp.astimezone(IST).time().replace(tzinfo=None) == fixed_anchor_time
+        ),
+        None,
+    )
+    fixed_anchor_timestamp = anchor_candle.timestamp if anchor_candle is not None else None
+    fixed_atm = (
+        _nearest_strike(anchor_candle.close, strike_interval)
+        if anchor_candle is not None
+        else None
+    )
+
+    snapshots = []
+    for candle in timeline:
+        moving_atm = _nearest_strike(candle.close, strike_interval)
+        fixed_active = (
+            fixed_anchor_timestamp is not None
+            and candle.timestamp >= fixed_anchor_timestamp
+        )
         snapshots.append(HistoricalReconstructedSnapshot(
             source_provider=candle.provider,
             underlying=underlying,
@@ -210,17 +240,17 @@ def reconstruct_historical_snapshots(
             session_date=session_date,
             timestamp=candle.timestamp,
             spot=candle.close,
-            moving_atm=atm,
+            moving_atm=moving_atm,
+            fixed_anchor_timestamp=fixed_anchor_timestamp if fixed_active else None,
+            fixed_atm=fixed_atm if fixed_active else None,
             wings=wings,
             strike_interval=strike_interval,
-            strikes=[
-                HistoricalStrikeObservation(
-                    strike=strike,
-                    ce=side_observation(candle.timestamp, strike, "CE"),
-                    pe=side_observation(candle.timestamp, strike, "PE"),
-                )
-                for strike in required_strikes
-            ],
+            strikes=strike_rows(candle.timestamp, moving_atm),
+            fixed_strikes=(
+                strike_rows(candle.timestamp, fixed_atm)
+                if fixed_active and fixed_atm is not None
+                else []
+            ),
         ))
     return snapshots
 
@@ -236,20 +266,9 @@ def reconstruct_historical_pcr(
     if len(timestamps) != len(set(timestamps)):
         raise ValueError("Historical PCR snapshot timestamps are duplicated")
 
-    observations = []
-    previous_snapshot = None
-    for snapshot in timeline:
-        previous_rows = {}
-        previous_is_consecutive = (
-            previous_snapshot is not None
-            and (snapshot.timestamp - previous_snapshot.timestamp).total_seconds()
-            == timeline_interval_seconds
-        )
-        if previous_is_consecutive:
-            previous_rows = {row.strike: row for row in previous_snapshot.strikes}
-
-        strike_results = []
-        for row in snapshot.strikes:
+    def build_results(rows, previous_rows):
+        results = []
+        for row in rows:
             previous_row = previous_rows.get(row.strike)
 
             def previous_oi(side_name):
@@ -278,7 +297,7 @@ def reconstruct_historical_pcr(
             if call_oi == 0:
                 issues.append("zero_call_oi")
             pcr = calculate_pcr_value(put_oi, call_oi)
-            strike_results.append(HistoricalPCRStrikeResult(
+            results.append(HistoricalPCRStrikeResult(
                 strike=row.strike,
                 call_oi=call_oi,
                 put_oi=put_oi,
@@ -292,57 +311,98 @@ def reconstruct_historical_pcr(
                 status="AVAILABLE" if pcr is not None else "UNAVAILABLE",
                 issues=issues,
             ))
+        return results
 
-        def panel(mode):
-            current_complete = all(
-                result.call_oi is not None and result.put_oi is not None
-                for result in strike_results
-            )
-            previous_complete = all(
-                result.previous_call_oi is not None
-                and result.previous_put_oi is not None
-                for result in strike_results
-            )
-            call_oi = sum(result.call_oi for result in strike_results) if current_complete else None
-            put_oi = sum(result.put_oi for result in strike_results) if current_complete else None
-            previous_call_oi = (
-                sum(result.previous_call_oi for result in strike_results)
-                if previous_complete else None
-            )
-            previous_put_oi = (
-                sum(result.previous_put_oi for result in strike_results)
-                if previous_complete else None
-            )
-            call_change, call_change_pct = calculate_oi_change(call_oi, previous_call_oi)
-            put_change, put_change_pct = calculate_oi_change(put_oi, previous_put_oi)
-            issues = []
-            if not current_complete:
-                issues.append("missing_or_invalid_oi")
-            if call_oi == 0:
-                issues.append("zero_call_oi")
-            pcr = calculate_pcr_value(put_oi, call_oi)
+    def build_panel(mode, results, atm=None, unavailable_issue=None):
+        if unavailable_issue is not None:
             return HistoricalPCRPanelResult(
                 mode=mode,
-                atm=snapshot.moving_atm if mode == "moving" else None,
-                strikes=[result.strike for result in strike_results],
-                expected_contracts=len(strike_results) * 2,
-                received_oi_contracts=sum(
-                    value is not None
-                    for result in strike_results
-                    for value in (result.call_oi, result.put_oi)
-                ),
-                call_oi=call_oi,
-                put_oi=put_oi,
-                previous_call_oi=previous_call_oi,
-                previous_put_oi=previous_put_oi,
-                call_oi_change=call_change,
-                put_oi_change=put_change,
-                call_oi_change_pct=call_change_pct,
-                put_oi_change_pct=put_change_pct,
-                pcr=pcr,
-                status="AVAILABLE" if pcr is not None else "UNAVAILABLE",
-                issues=issues,
+                atm=atm,
+                status="UNAVAILABLE",
+                issues=[unavailable_issue],
             )
+        current_complete = bool(results) and all(
+            result.call_oi is not None and result.put_oi is not None
+            for result in results
+        )
+        previous_complete = bool(results) and all(
+            result.previous_call_oi is not None
+            and result.previous_put_oi is not None
+            for result in results
+        )
+        call_oi = sum(result.call_oi for result in results) if current_complete else None
+        put_oi = sum(result.put_oi for result in results) if current_complete else None
+        previous_call_oi = (
+            sum(result.previous_call_oi for result in results)
+            if previous_complete else None
+        )
+        previous_put_oi = (
+            sum(result.previous_put_oi for result in results)
+            if previous_complete else None
+        )
+        call_change, call_change_pct = calculate_oi_change(call_oi, previous_call_oi)
+        put_change, put_change_pct = calculate_oi_change(put_oi, previous_put_oi)
+        issues = []
+        if not current_complete:
+            issues.append("missing_or_invalid_oi")
+        if call_oi == 0:
+            issues.append("zero_call_oi")
+        pcr = calculate_pcr_value(put_oi, call_oi)
+        return HistoricalPCRPanelResult(
+            mode=mode,
+            atm=atm,
+            strikes=[result.strike for result in results],
+            expected_contracts=len(results) * 2,
+            received_oi_contracts=sum(
+                value is not None
+                for result in results
+                for value in (result.call_oi, result.put_oi)
+            ),
+            call_oi=call_oi,
+            put_oi=put_oi,
+            previous_call_oi=previous_call_oi,
+            previous_put_oi=previous_put_oi,
+            call_oi_change=call_change,
+            put_oi_change=put_change,
+            call_oi_change_pct=call_change_pct,
+            put_oi_change_pct=put_change_pct,
+            pcr=pcr,
+            status="AVAILABLE" if pcr is not None else "UNAVAILABLE",
+            issues=issues,
+        )
+
+    observations = []
+    previous_snapshot = None
+    for snapshot in timeline:
+        previous_is_consecutive = (
+            previous_snapshot is not None
+            and (snapshot.timestamp - previous_snapshot.timestamp).total_seconds()
+            == timeline_interval_seconds
+        )
+        previous_moving_rows = (
+            {row.strike: row for row in previous_snapshot.strikes}
+            if previous_is_consecutive else {}
+        )
+        previous_fixed_rows = (
+            {row.strike: row for row in previous_snapshot.fixed_strikes}
+            if previous_is_consecutive
+            and previous_snapshot.fixed_atm is not None
+            and snapshot.fixed_atm == previous_snapshot.fixed_atm
+            else {}
+        )
+
+        strike_results = build_results(snapshot.strikes, previous_moving_rows)
+        fixed_results = build_results(snapshot.fixed_strikes, previous_fixed_rows)
+
+        if snapshot.fixed_atm is None:
+            fixed_issue = (
+                "fixed_anchor_not_reached"
+                if snapshot.fixed_anchor_timestamp is None
+                else "fixed_basket_unavailable"
+            )
+            fixed_panel = build_panel("fixed", [], unavailable_issue=fixed_issue)
+        else:
+            fixed_panel = build_panel("fixed", fixed_results, atm=snapshot.fixed_atm)
 
         observations.append(HistoricalPCRObservation(
             timestamp=snapshot.timestamp,
@@ -352,13 +412,9 @@ def reconstruct_historical_pcr(
             spot=snapshot.spot,
             moving_atm=snapshot.moving_atm,
             strike_results=strike_results,
-            moving_panel=panel("moving"),
-            full_reconstructed_panel=panel("full_reconstructed"),
-            fixed_panel=HistoricalPCRPanelResult(
-                mode="fixed",
-                status="UNAVAILABLE",
-                issues=["fixed_basket_not_reconstructed"],
-            ),
+            moving_panel=build_panel("moving", strike_results, atm=snapshot.moving_atm),
+            full_reconstructed_panel=build_panel("full_reconstructed", strike_results),
+            fixed_panel=fixed_panel,
         ))
         previous_snapshot = snapshot
     return observations

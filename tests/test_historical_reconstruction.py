@@ -868,7 +868,7 @@ def test_fixed_historical_panel_is_explicitly_unavailable():
     assert fixed.status == "UNAVAILABLE"
     assert fixed.pcr is None
     assert fixed.call_oi is None and fixed.put_oi is None
-    assert fixed.issues == ["fixed_basket_not_reconstructed"]
+    assert fixed.issues == ["fixed_anchor_not_reached"]
 
 
 def test_historical_pcr_provenance_order_and_repeatability():
@@ -928,3 +928,43 @@ def test_shared_pcr_core_matches_equivalent_live_oi_math():
 
     assert live_result.pcr == calculate_pcr_value(150, 100)
     assert historical.moving_panel.pcr == live_result.pcr
+
+def test_fixed_historical_basket_captures_at_0920_and_remains_constant():
+    t19 = "2026-09-11T09:19:00+05:30"
+    t20 = "2026-09-11T09:20:00+05:30"
+    t21 = "2026-09-11T09:21:00+05:30"
+    timeline = [
+        candle(timestamp=t19, close=23249),
+        candle(timestamp=t20, close=23276),
+        candle(timestamp=t21, close=23330),
+    ]
+    contracts = [
+        option_contract(strike, side)
+        for strike in (23250, 23300, 23350)
+        for side in ("CE", "PE")
+    ]
+    snapshots = reconstruct(
+        timeline=timeline,
+        contracts=contracts,
+        series=option_series(contracts, timestamps=(t19, t20, t21)),
+        wings=0,
+    )
+
+    assert snapshots[0].fixed_atm is None
+    assert snapshots[0].fixed_strikes == []
+    assert snapshots[1].fixed_atm == 23300
+    assert snapshots[1].fixed_anchor_timestamp == datetime.fromisoformat(t20)
+    assert [row.strike for row in snapshots[1].fixed_strikes] == [23300]
+    assert snapshots[2].moving_atm == 23350
+    assert snapshots[2].fixed_atm == 23300
+    assert [row.strike for row in snapshots[2].fixed_strikes] == [23300]
+
+    pcr = reconstruct_historical_pcr(snapshots)
+    assert pcr[0].fixed_panel.status == "UNAVAILABLE"
+    assert pcr[0].fixed_panel.issues == ["fixed_anchor_not_reached"]
+    assert pcr[1].fixed_panel.status == "AVAILABLE"
+    assert pcr[1].fixed_panel.atm == 23300
+    assert pcr[1].fixed_panel.pcr == 1.0
+    assert pcr[2].fixed_panel.status == "AVAILABLE"
+    assert pcr[2].fixed_panel.atm == 23300
+    assert pcr[2].fixed_panel.strikes == [23300]

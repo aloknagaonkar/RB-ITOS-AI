@@ -187,9 +187,12 @@ class HistoricalReconstructedSnapshot(Model):
     timestamp: AwareDatetime
     spot: float = Field(gt=0)
     moving_atm: float = Field(gt=0)
+    fixed_anchor_timestamp: AwareDatetime | None = None
+    fixed_atm: float | None = Field(default=None, gt=0)
     wings: int = Field(ge=0)
     strike_interval: int = Field(gt=0)
     strikes: list[HistoricalStrikeObservation]
+    fixed_strikes: list[HistoricalStrikeObservation] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def valid_snapshot(self):
@@ -200,6 +203,19 @@ class HistoricalReconstructedSnapshot(Model):
             raise ValueError("Historical snapshot strikes must be unique and ordered")
         if len(values) != 2 * self.wings + 1 or self.moving_atm not in values:
             raise ValueError("Historical snapshot strike basket is incomplete")
+        fixed_values = [row.strike for row in self.fixed_strikes]
+        if fixed_values != sorted(fixed_values) or len(fixed_values) != len(set(fixed_values)):
+            raise ValueError("Historical fixed snapshot strikes must be unique and ordered")
+        if self.fixed_atm is None:
+            if self.fixed_anchor_timestamp is not None or fixed_values:
+                raise ValueError("Historical fixed basket metadata is inconsistent")
+        else:
+            if self.fixed_anchor_timestamp is None:
+                raise ValueError("Historical fixed ATM requires an anchor timestamp")
+            if len(fixed_values) != 2 * self.wings + 1 or self.fixed_atm not in fixed_values:
+                raise ValueError("Historical fixed snapshot strike basket is incomplete")
+            if self.timestamp < self.fixed_anchor_timestamp:
+                raise ValueError("Historical fixed basket cannot exist before its anchor")
         return self
 
 class HistoricalPCRStrikeResult(Model):
