@@ -4,7 +4,12 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
-from market_lab.domain import HistoricalCandle, HistoricalOptionContract, IST
+from market_lab.domain import (
+    HistoricalCandle,
+    HistoricalOptionCandleSeries,
+    HistoricalOptionContract,
+    IST,
+)
 from market_lab.gateways import (
     GatewayError,
     UpstoxGateway,
@@ -14,6 +19,7 @@ from market_lab.gateways import (
 from market_lab.historical import (
     index_historical_option_candles,
     load_historical_option_candles,
+    reconstruct_historical_snapshots,
     resolve_historical_atm,
     resolve_historical_option_contracts,
 )
@@ -425,3 +431,241 @@ def test_option_candle_loader_rejects_duplicate_contracts_before_fetching():
         load_historical_option_candles(loader, [contract, contract], SESSION)
 
     assert loader.calls == []
+
+def option_series(contracts, timestamps=(FIRST,), missing_candles=(), missing_oi=()):
+    missing_candles = set(missing_candles)
+    missing_oi = set(missing_oi)
+    values = []
+    for contract in contracts:
+        candles = []
+        if contract.instrument_key not in missing_candles:
+            for timestamp in timestamps:
+                candles.append(candle(timestamp=timestamp, close=100).model_copy(update={
+                    "instrument_key": contract.instrument_key,
+                    "volume": 500,
+                    "open_interest": None if contract.instrument_key in missing_oi else 1000,
+                }))
+        values.append(HistoricalOptionCandleSeries(
+            contract=contract,
+            session_date=SESSION,
+            candles=candles,
+        ))
+    return values
+
+
+def reconstruct(
+    timeline=None, contracts=None, series=None, wings=5, session_date=SESSION
+):
+    timeline = timeline or [candle(close=23250)]
+    contracts = contracts if contracts is not None else requested_option_contracts(wings=wings)
+    series = series if series is not None else option_series(contracts)
+    return reconstruct_historical_snapshots(
+        timeline,
+        contracts,
+        series,
+        underlying=UNDERLYING,
+        expiry=SESSION,
+        session_date=session_date,
+        wings=wings,
+        strike_interval=50,
+    )
+
+
+def test_complete_canonical_historical_snapshot_reconstruction():
+    snapshots = reconstruct()
+
+    assert len(snapshots) == 1
+    value = snapshots[0]
+    assert value.timestamp == datetime.fromisoformat(FIRST)
+    assert value.spot == 23250
+    assert value.moving_atm == 23250
+    assert len(value.strikes) == 11
+    assert [row.strike for row in value.strikes] == list(range(23000, 23501, 50))
+    assert all(row.ce.status == row.pe.status == "AVAILABLE" for row in value.strikes)
+    assert all(row.ce.close == row.pe.close == 100 for row in value.strikes)
+    assert all(row.ce.open_interest == row.pe.open_interest == 1000 for row in value.strikes)
+
+
+def test_reconstruction_tracks_moving_atm_on_underlying_timeline():
+    timeline = [
+        candle(timestamp=SECOND, close=23276),
+        candle(timestamp=FIRST, close=23249),
+    ]
+    contracts_by_key = {
+        contract.instrument_key: contract
+        for contract in requested_option_contracts(atm=23250)
+        + requested_option_contracts(atm=23300)
+    }
+    contracts = list(contracts_by_key.values())
+    snapshots = reconstruct(
+        timeline=timeline,
+        contracts=contracts,
+        series=option_series(contracts, timestamps=(FIRST, SECOND)),
+    )
+
+    assert [value.timestamp.isoformat() for value in snapshots] == [FIRST, SECOND]
+    assert [value.moving_atm for value in snapshots] == [23250, 23300]
+    assert snapshots[0].strikes[0].strike == 23000
+    assert snapshots[1].strikes[-1].strike == 23550
+
+
+@pytest.mark.parametrize("missing_side", ["CE", "PE"])
+def test_missing_contract_side_does_not_hide_available_other_side(missing_side):
+    contracts = [
+        contract for contract in requested_option_contracts(wings=0)
+        if contract.side != missing_side
+    ]
+
+    row = reconstruct(
+        contracts=contracts,
+        series=option_series(contracts),
+        wings=0,
+    )[0].strikes[0]
+
+    missing = row.ce if missing_side == "CE" else row.pe
+    available = row.pe if missing_side == "CE" else row.ce
+    assert missing.status == "CONTRACT_UNAVAILABLE"
+    assert missing.instrument_key is None
+    assert missing.close is None
+    assert missing.open_interest is None
+    assert available.status == "AVAILABLE"
+
+
+@pytest.mark.parametrize("missing_side", ["CE", "PE"])
+def test_missing_exact_candle_side_does_not_hide_available_other_side(missing_side):
+    contracts = requested_option_contracts(wings=0)
+    missing_key = next(value.instrument_key for value in contracts if value.side == missing_side)
+
+    row = reconstruct(
+        contracts=contracts,
+        series=option_series(contracts, missing_candles={missing_key}),
+        wings=0,
+    )[0].strikes[0]
+
+    missing = row.ce if missing_side == "CE" else row.pe
+    available = row.pe if missing_side == "CE" else row.ce
+    assert missing.status == "CANDLE_UNAVAILABLE"
+    assert missing.instrument_key == missing_key
+    assert missing.close is None
+    assert missing.open_interest is None
+    assert available.status == "AVAILABLE"
+
+
+def test_candle_price_survives_when_intraday_oi_is_missing():
+    contracts = requested_option_contracts(wings=0)
+    ce_key = next(value.instrument_key for value in contracts if value.side == "CE")
+
+    row = reconstruct(
+        contracts=contracts,
+        series=option_series(contracts, missing_oi={ce_key}),
+        wings=0,
+    )[0].strikes[0]
+
+    assert row.ce.status == "OI_UNAVAILABLE"
+    assert row.ce.close == 100
+    assert row.ce.open_interest is None
+    assert row.pe.status == "AVAILABLE"
+
+
+def test_empty_option_series_remains_candle_unavailable_without_zero_substitution():
+    contracts = requested_option_contracts(wings=0)
+
+    row = reconstruct(
+        contracts=contracts,
+        series=option_series(contracts, missing_candles={
+            contract.instrument_key for contract in contracts
+        }),
+        wings=0,
+    )[0].strikes[0]
+
+    assert row.ce.status == row.pe.status == "CANDLE_UNAVAILABLE"
+    assert row.ce.close is None and row.pe.close is None
+    assert row.ce.open_interest is None and row.pe.open_interest is None
+
+
+def test_reconstruction_uses_exact_timestamp_without_interpolation_or_fill():
+    timeline = [
+        candle(timestamp=FIRST, close=23250),
+        candle(timestamp=SECOND, close=23250),
+    ]
+    contracts = requested_option_contracts(wings=0)
+
+    snapshots = reconstruct(
+        timeline=timeline,
+        contracts=contracts,
+        series=option_series(contracts, timestamps=(FIRST,)),
+        wings=0,
+    )
+
+    assert all(side.status == "AVAILABLE" for side in (
+        snapshots[0].strikes[0].ce, snapshots[0].strikes[0].pe
+    ))
+    assert all(side.status == "CANDLE_UNAVAILABLE" for side in (
+        snapshots[1].strikes[0].ce, snapshots[1].strikes[0].pe
+    ))
+    assert snapshots[1].strikes[0].ce.close is None
+    assert snapshots[1].strikes[0].pe.open_interest is None
+
+
+def test_reconstruction_order_and_provenance_are_deterministic():
+    timeline = [
+        candle(timestamp=SECOND, close=23250),
+        candle(timestamp=FIRST, close=23250),
+    ]
+    contracts = list(reversed(requested_option_contracts(wings=1)))
+
+    snapshots = reconstruct(
+        timeline=timeline,
+        contracts=contracts,
+        series=list(reversed(option_series(contracts, timestamps=(FIRST, SECOND)))),
+        wings=1,
+    )
+
+    assert [value.timestamp.isoformat() for value in snapshots] == [FIRST, SECOND]
+    assert all(value.provenance == "HISTORICAL_CANDLE_RECONSTRUCTION" for value in snapshots)
+    assert all(
+        row.provenance == "HISTORICAL_CANDLE_RECONSTRUCTION"
+        for value in snapshots for row in value.strikes
+    )
+    assert [row.strike for row in snapshots[0].strikes] == [23200, 23250, 23300]
+
+
+def test_reconstruction_does_not_mutate_inputs_and_repeats_equivalently():
+    timeline = [candle(close=23250)]
+    contracts = requested_option_contracts(wings=1)
+    series = option_series(contracts)
+    before = (
+        [value.model_dump(mode="json") for value in timeline],
+        [value.model_dump(mode="json") for value in contracts],
+        [value.model_dump(mode="json") for value in series],
+    )
+
+    first = reconstruct(timeline=timeline, contracts=contracts, series=series, wings=1)
+    second = reconstruct(timeline=timeline, contracts=contracts, series=series, wings=1)
+
+    assert first == second
+    assert [value.model_dump(mode="json") for value in first] == [
+        value.model_dump(mode="json") for value in second
+    ]
+    assert before == (
+        [value.model_dump(mode="json") for value in timeline],
+        [value.model_dump(mode="json") for value in contracts],
+        [value.model_dump(mode="json") for value in series],
+    )
+
+
+def test_wrong_session_underlying_timeline_is_rejected():
+    wrong_session = date(2026, 9, 10)
+    wrong = HistoricalCandle(
+        provider="upstox",
+        instrument_key=UNDERLYING,
+        session_date=wrong_session,
+        timestamp=datetime(2026, 9, 10, 9, 15, tzinfo=IST),
+        open=23250,
+        high=23255,
+        low=23245,
+        close=23250,
+    )
+
+    with pytest.raises(ValueError, match="session mismatch"):
+        reconstruct(timeline=[wrong], wings=0)

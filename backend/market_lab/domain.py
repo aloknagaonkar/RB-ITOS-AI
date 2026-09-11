@@ -132,6 +132,76 @@ class HistoricalOptionCandleSeries(Model):
             raise ValueError("Historical option candle identity mismatch")
         return self
 
+class HistoricalOptionSideObservation(Model):
+    side: Literal["CE", "PE"]
+    instrument_key: str | None = None
+    close: float | None = Field(default=None, gt=0)
+    open_interest: int | None = Field(default=None, ge=0)
+    volume: int | None = Field(default=None, ge=0)
+    status: Literal[
+        "AVAILABLE",
+        "CONTRACT_UNAVAILABLE",
+        "CANDLE_UNAVAILABLE",
+        "OI_UNAVAILABLE",
+    ]
+
+    @model_validator(mode="after")
+    def valid_availability(self):
+        if self.status == "CONTRACT_UNAVAILABLE":
+            if any(value is not None for value in (
+                self.instrument_key, self.close, self.open_interest, self.volume
+            )):
+                raise ValueError("Unavailable historical contract cannot carry candle data")
+        elif self.status == "CANDLE_UNAVAILABLE":
+            if self.instrument_key is None or any(value is not None for value in (
+                self.close, self.open_interest, self.volume
+            )):
+                raise ValueError("Unavailable historical candle has inconsistent data")
+        elif self.status == "OI_UNAVAILABLE":
+            if self.instrument_key is None or self.close is None or self.open_interest is not None:
+                raise ValueError("Historical option OI availability is inconsistent")
+        elif self.instrument_key is None or self.close is None or self.open_interest is None:
+            raise ValueError("Available historical option side is incomplete")
+        return self
+
+
+class HistoricalStrikeObservation(Model):
+    provenance: Literal["HISTORICAL_CANDLE_RECONSTRUCTION"] = "HISTORICAL_CANDLE_RECONSTRUCTION"
+    strike: float = Field(gt=0)
+    ce: HistoricalOptionSideObservation
+    pe: HistoricalOptionSideObservation
+
+    @model_validator(mode="after")
+    def valid_sides(self):
+        if self.ce.side != "CE" or self.pe.side != "PE":
+            raise ValueError("Historical strike side identity is invalid")
+        return self
+
+
+class HistoricalReconstructedSnapshot(Model):
+    provenance: Literal["HISTORICAL_CANDLE_RECONSTRUCTION"] = "HISTORICAL_CANDLE_RECONSTRUCTION"
+    source_provider: str = Field(min_length=1)
+    underlying: str = Field(min_length=1)
+    expiry: date
+    session_date: date
+    timestamp: AwareDatetime
+    spot: float = Field(gt=0)
+    moving_atm: float = Field(gt=0)
+    wings: int = Field(ge=0)
+    strike_interval: int = Field(gt=0)
+    strikes: list[HistoricalStrikeObservation]
+
+    @model_validator(mode="after")
+    def valid_snapshot(self):
+        if self.timestamp.astimezone(IST).date() != self.session_date:
+            raise ValueError("Historical snapshot timestamp is outside the requested IST session")
+        values = [row.strike for row in self.strikes]
+        if values != sorted(values) or len(values) != len(set(values)):
+            raise ValueError("Historical snapshot strikes must be unique and ordered")
+        if len(values) != 2 * self.wings + 1 or self.moving_atm not in values:
+            raise ValueError("Historical snapshot strike basket is incomplete")
+        return self
+
 class Contract(Model):
     key: str
     strike: float = Field(gt=0)
