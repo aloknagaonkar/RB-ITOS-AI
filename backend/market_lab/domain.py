@@ -202,6 +202,55 @@ class HistoricalReconstructedSnapshot(Model):
             raise ValueError("Historical snapshot strike basket is incomplete")
         return self
 
+class HistoricalPCRStrikeResult(Model):
+    provenance: Literal["HISTORICAL_CANDLE_RECONSTRUCTION"] = "HISTORICAL_CANDLE_RECONSTRUCTION"
+    strike: float = Field(gt=0)
+    call_oi: int | None = Field(default=None, ge=0)
+    put_oi: int | None = Field(default=None, ge=0)
+    previous_call_oi: int | None = Field(default=None, ge=0)
+    previous_put_oi: int | None = Field(default=None, ge=0)
+    call_oi_change: int | None = None
+    put_oi_change: int | None = None
+    call_oi_change_pct: float | None = None
+    put_oi_change_pct: float | None = None
+    pcr: float | None = Field(default=None, ge=0)
+    status: Literal["AVAILABLE", "UNAVAILABLE"]
+    issues: list[str] = Field(default_factory=list)
+
+
+class HistoricalPCRPanelResult(Model):
+    provenance: Literal["HISTORICAL_CANDLE_RECONSTRUCTION"] = "HISTORICAL_CANDLE_RECONSTRUCTION"
+    mode: Literal["fixed", "moving", "full_reconstructed"]
+    atm: float | None = Field(default=None, gt=0)
+    strikes: list[float] = Field(default_factory=list)
+    expected_contracts: int | None = Field(default=None, ge=0)
+    received_oi_contracts: int | None = Field(default=None, ge=0)
+    call_oi: int | None = Field(default=None, ge=0)
+    put_oi: int | None = Field(default=None, ge=0)
+    previous_call_oi: int | None = Field(default=None, ge=0)
+    previous_put_oi: int | None = Field(default=None, ge=0)
+    call_oi_change: int | None = None
+    put_oi_change: int | None = None
+    call_oi_change_pct: float | None = None
+    put_oi_change_pct: float | None = None
+    pcr: float | None = Field(default=None, ge=0)
+    status: Literal["AVAILABLE", "UNAVAILABLE"]
+    issues: list[str] = Field(default_factory=list)
+
+
+class HistoricalPCRObservation(Model):
+    provenance: Literal["HISTORICAL_CANDLE_RECONSTRUCTION"] = "HISTORICAL_CANDLE_RECONSTRUCTION"
+    timestamp: AwareDatetime
+    session_date: date
+    underlying: str = Field(min_length=1)
+    expiry: date
+    spot: float = Field(gt=0)
+    moving_atm: float = Field(gt=0)
+    strike_results: list[HistoricalPCRStrikeResult]
+    moving_panel: HistoricalPCRPanelResult
+    full_reconstructed_panel: HistoricalPCRPanelResult
+    fixed_panel: HistoricalPCRPanelResult
+
 class Contract(Model):
     key: str
     strike: float = Field(gt=0)
@@ -591,6 +640,23 @@ class RecordedSessionInventoryReport(Model):
     rows: list[RecordedSessionInventoryRow]
 
 
+def calculate_pcr_value(put_oi: int | None, call_oi: int | None) -> float | None:
+    """Provider-independent platform PCR definition."""
+    if put_oi is None or call_oi in (None, 0):
+        return None
+    return put_oi / call_oi
+
+
+def calculate_oi_change(
+    current_oi: int | None, previous_oi: int | None
+) -> tuple[int | None, float | None]:
+    """Return deterministic absolute and percentage OI change."""
+    if current_oi is None or previous_oi is None:
+        return None, None
+    change = current_oi - previous_oi
+    percentage = change / previous_oi * 100 if previous_oi != 0 else None
+    return change, percentage
+
 def in_session(at: datetime) -> bool:
     local = at.astimezone(IST)
     return local.weekday() < 5 and time(9, 15) <= local.time() < time(15, 30)
@@ -683,13 +749,13 @@ def evaluate(snapshot: Snapshot, config: PCRConfig, anchor: Anchor | None = None
             errors.append("zero_call_oi")
         previous_complete = previous_count == len(contracts)
         changes = {
-            side: totals[side] - previous[side] if previous_complete else None for side in ("CE", "PE")
+            side: calculate_oi_change(totals[side], previous[side])[0] if previous_complete else None for side in ("CE", "PE")
         }
 
         def change_pct(side):
             if not previous_complete or previous[side] == 0:
                 return None
-            return changes[side] / previous[side] * 100
+            return calculate_oi_change(totals[side], previous[side])[1]
 
         errors = list(dict.fromkeys(errors))
         return PCRResult(
@@ -707,7 +773,7 @@ def evaluate(snapshot: Snapshot, config: PCRConfig, anchor: Anchor | None = None
             call_change_oi=changes["CE"],
             put_change_pct=change_pct("PE"),
             call_change_pct=change_pct("CE"),
-            pcr=totals["PE"] / totals["CE"] if not errors else None,
+            pcr=calculate_pcr_value(totals["PE"], totals["CE"]) if not errors else None,
             issues=errors,
         )
 

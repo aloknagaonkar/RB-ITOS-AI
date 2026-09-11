@@ -9,7 +9,12 @@ from market_lab.domain import (
     HistoricalOptionCandleSeries,
     HistoricalOptionContract,
     IST,
+    PCRConfig,
+    Quote,
+    calculate_pcr_value,
+    evaluate,
 )
+from market_lab.gateways import DemoGateway
 from market_lab.gateways import (
     GatewayError,
     UpstoxGateway,
@@ -19,6 +24,7 @@ from market_lab.gateways import (
 from market_lab.historical import (
     index_historical_option_candles,
     load_historical_option_candles,
+    reconstruct_historical_pcr,
     reconstruct_historical_snapshots,
     resolve_historical_atm,
     resolve_historical_option_contracts,
@@ -669,3 +675,231 @@ def test_wrong_session_underlying_timeline_is_rejected():
 
     with pytest.raises(ValueError, match="session mismatch"):
         reconstruct(timeline=[wrong], wings=0)
+
+def snapshot_with_oi(timestamp=FIRST, spot=23250, wings=0, call_oi=100, put_oi=150):
+    contracts = requested_option_contracts(atm=spot, wings=wings)
+    reconstructed = reconstruct(
+        timeline=[candle(timestamp=timestamp, close=spot)],
+        contracts=contracts,
+        series=option_series(contracts, timestamps=(timestamp,)),
+        wings=wings,
+    )[0]
+    rows = []
+    for row in reconstructed.strikes:
+        rows.append(row.model_copy(update={
+            "ce": row.ce.model_copy(update={"open_interest": call_oi}),
+            "pe": row.pe.model_copy(update={"open_interest": put_oi}),
+        }))
+    return reconstructed.model_copy(update={"strikes": rows})
+
+
+def test_historical_strike_and_panel_pcr_use_valid_oi():
+    observation = reconstruct_historical_pcr([
+        snapshot_with_oi(wings=1, call_oi=100, put_oi=150)
+    ])[0]
+
+    assert [result.pcr for result in observation.strike_results] == [1.5, 1.5, 1.5]
+    assert observation.moving_panel.call_oi == 300
+    assert observation.moving_panel.put_oi == 450
+    assert observation.moving_panel.pcr == 1.5
+    assert observation.moving_panel.status == "AVAILABLE"
+
+
+def test_first_historical_observation_has_no_previous_oi_or_change():
+    observation = reconstruct_historical_pcr([
+        snapshot_with_oi(call_oi=100, put_oi=150)
+    ])[0]
+    strike = observation.strike_results[0]
+
+    assert strike.call_oi == 100 and strike.put_oi == 150
+    assert strike.previous_call_oi is None and strike.previous_put_oi is None
+    assert strike.call_oi_change is None and strike.put_oi_change is None
+    assert strike.call_oi_change_pct is None and strike.put_oi_change_pct is None
+
+
+def test_consecutive_historical_oi_change_and_percentage():
+    first = snapshot_with_oi(timestamp=FIRST, call_oi=100, put_oi=150)
+    second = snapshot_with_oi(timestamp=SECOND, call_oi=120, put_oi=180)
+
+    observation = reconstruct_historical_pcr([second, first])[1]
+    strike = observation.strike_results[0]
+
+    assert strike.previous_call_oi == 100 and strike.previous_put_oi == 150
+    assert strike.call_oi_change == 20 and strike.put_oi_change == 30
+    assert strike.call_oi_change_pct == pytest.approx(20)
+    assert strike.put_oi_change_pct == pytest.approx(20)
+    assert observation.moving_panel.call_oi_change == 20
+    assert observation.moving_panel.put_oi_change_pct == pytest.approx(20)
+
+
+@pytest.mark.parametrize("missing_side", ["ce", "pe"])
+def test_missing_current_historical_oi_remains_unavailable(missing_side):
+    value = snapshot_with_oi()
+    row = value.strikes[0]
+    missing = getattr(row, missing_side).model_copy(update={
+        "open_interest": None,
+        "status": "OI_UNAVAILABLE",
+    })
+    value = value.model_copy(update={
+        "strikes": [row.model_copy(update={missing_side: missing})]
+    })
+
+    observation = reconstruct_historical_pcr([value])[0]
+    strike = observation.strike_results[0]
+
+    assert getattr(strike, "call_oi" if missing_side == "ce" else "put_oi") is None
+    assert strike.pcr is None
+    assert strike.status == "UNAVAILABLE"
+    assert observation.moving_panel.pcr is None
+    assert observation.moving_panel.call_oi is None
+    assert observation.moving_panel.put_oi is None
+
+
+def test_missing_previous_side_oi_keeps_changes_unavailable():
+    first = snapshot_with_oi(timestamp=FIRST)
+    row = first.strikes[0]
+    first = first.model_copy(update={"strikes": [row.model_copy(update={
+        "ce": row.ce.model_copy(update={"open_interest": None, "status": "OI_UNAVAILABLE"})
+    })]})
+    second = snapshot_with_oi(timestamp=SECOND, call_oi=120, put_oi=180)
+
+    strike = reconstruct_historical_pcr([first, second])[1].strike_results[0]
+
+    assert strike.previous_call_oi is None
+    assert strike.call_oi_change is None
+    assert strike.call_oi_change_pct is None
+    assert strike.previous_put_oi == 150
+    assert strike.put_oi_change == 30
+
+
+@pytest.mark.parametrize(
+    "side_status",
+    ["CONTRACT_UNAVAILABLE", "CANDLE_UNAVAILABLE"],
+)
+def test_missing_contract_or_candle_never_substitutes_zero(side_status):
+    value = snapshot_with_oi()
+    row = value.strikes[0]
+    unavailable = row.ce.model_copy(update={
+        "instrument_key": None if side_status == "CONTRACT_UNAVAILABLE" else row.ce.instrument_key,
+        "close": None,
+        "open_interest": None,
+        "volume": None,
+        "status": side_status,
+    })
+    value = value.model_copy(update={
+        "strikes": [row.model_copy(update={"ce": unavailable})]
+    })
+
+    result = reconstruct_historical_pcr([value])[0].strike_results[0]
+
+    assert result.call_oi is None
+    assert result.put_oi == 150
+    assert result.pcr is None
+    assert any(side_status.lower() in issue for issue in result.issues)
+
+
+def test_zero_call_oi_denominator_is_unavailable_not_divided():
+    observation = reconstruct_historical_pcr([
+        snapshot_with_oi(call_oi=0, put_oi=150)
+    ])[0]
+
+    assert observation.strike_results[0].call_oi == 0
+    assert observation.strike_results[0].pcr is None
+    assert "zero_call_oi" in observation.strike_results[0].issues
+    assert observation.moving_panel.pcr is None
+
+
+def test_timeline_gap_does_not_forward_fill_previous_oi():
+    first = snapshot_with_oi(timestamp=FIRST, call_oi=100, put_oi=150)
+    third_time = "2026-09-11T09:17:00+05:30"
+    third = snapshot_with_oi(timestamp=third_time, call_oi=120, put_oi=180)
+
+    strike = reconstruct_historical_pcr([first, third])[1].strike_results[0]
+
+    assert strike.previous_call_oi is None
+    assert strike.previous_put_oi is None
+    assert strike.call_oi_change is None
+    assert strike.put_oi_change_pct is None
+
+
+def test_moving_atm_changes_panel_membership_and_full_is_reconstructed_scope():
+    first = snapshot_with_oi(timestamp=FIRST, spot=23250, wings=1)
+    second = snapshot_with_oi(timestamp=SECOND, spot=23300, wings=1)
+
+    observations = reconstruct_historical_pcr([second, first])
+
+    assert observations[0].moving_atm == 23250
+    assert observations[0].moving_panel.strikes == [23200, 23250, 23300]
+    assert observations[1].moving_atm == 23300
+    assert observations[1].moving_panel.strikes == [23250, 23300, 23350]
+    assert observations[1].full_reconstructed_panel.mode == "full_reconstructed"
+    assert observations[1].full_reconstructed_panel.strikes == observations[1].moving_panel.strikes
+
+
+def test_fixed_historical_panel_is_explicitly_unavailable():
+    fixed = reconstruct_historical_pcr([snapshot_with_oi()])[0].fixed_panel
+
+    assert fixed.mode == "fixed"
+    assert fixed.status == "UNAVAILABLE"
+    assert fixed.pcr is None
+    assert fixed.call_oi is None and fixed.put_oi is None
+    assert fixed.issues == ["fixed_basket_not_reconstructed"]
+
+
+def test_historical_pcr_provenance_order_and_repeatability():
+    first = snapshot_with_oi(timestamp=FIRST)
+    second = snapshot_with_oi(timestamp=SECOND, call_oi=110, put_oi=160)
+
+    one = reconstruct_historical_pcr([second, first])
+    two = reconstruct_historical_pcr([second, first])
+
+    assert one == two
+    assert [value.timestamp.isoformat() for value in one] == [FIRST, SECOND]
+    assert all(value.provenance == "HISTORICAL_CANDLE_RECONSTRUCTION" for value in one)
+    assert all(
+        result.provenance == "HISTORICAL_CANDLE_RECONSTRUCTION"
+        for value in one for result in value.strike_results
+    )
+    assert all(value.moving_panel.provenance == "HISTORICAL_CANDLE_RECONSTRUCTION" for value in one)
+
+
+def test_equivalent_aware_timestamps_match_exact_previous_contract():
+    first = snapshot_with_oi(timestamp=FIRST, call_oi=100, put_oi=150)
+    second_utc = datetime.fromisoformat(SECOND).astimezone(timezone.utc).isoformat()
+    second = snapshot_with_oi(timestamp=second_utc, call_oi=120, put_oi=180)
+
+    strike = reconstruct_historical_pcr([first, second])[1].strike_results[0]
+
+    assert strike.previous_call_oi == 100
+    assert strike.call_oi_change == 20
+
+
+def test_historical_pcr_requires_no_loader_or_network_call():
+    value = snapshot_with_oi()
+
+    result = reconstruct_historical_pcr([value])
+
+    assert len(result) == 1
+    assert result[0].moving_panel.pcr == 1.5
+
+
+def test_shared_pcr_core_matches_equivalent_live_oi_math():
+    config = PCRConfig(expiry=date(2026, 9, 15), wings=0)
+    live = DemoGateway().collect_at(
+        config, datetime(2026, 9, 9, 9, 20, tzinfo=IST), 0
+    )
+    atm = min({contract.strike for contract in live.catalog}, key=lambda strike: abs(strike-live.spot))
+    quotes = [
+        Quote(key=contract.key, oi=100 if contract.side == "CE" else 150)
+        for contract in live.catalog if contract.strike == atm
+    ]
+    live_result = next(
+        result for result in evaluate(live.model_copy(update={"quotes": quotes}), config).results
+        if result.mode == "moving"
+    )
+    historical = reconstruct_historical_pcr([
+        snapshot_with_oi(call_oi=100, put_oi=150)
+    ])[0]
+
+    assert live_result.pcr == calculate_pcr_value(150, 100)
+    assert historical.moving_panel.pcr == live_result.pcr

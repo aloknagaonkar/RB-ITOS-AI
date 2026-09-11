@@ -10,8 +10,13 @@ from .domain import (
     HistoricalOptionCandleSeries,
     HistoricalOptionContract,
     HistoricalOptionSideObservation,
+    HistoricalPCRObservation,
+    HistoricalPCRPanelResult,
+    HistoricalPCRStrikeResult,
     HistoricalReconstructedSnapshot,
     HistoricalStrikeObservation,
+    calculate_oi_change,
+    calculate_pcr_value,
 )
 
 
@@ -218,3 +223,142 @@ def reconstruct_historical_snapshots(
             ],
         ))
     return snapshots
+
+def reconstruct_historical_pcr(
+    snapshots: Iterable[HistoricalReconstructedSnapshot],
+    timeline_interval_seconds: int = 60,
+) -> list[HistoricalPCRObservation]:
+    """Calculate historical PCR from exact reconstructed observations only."""
+    if timeline_interval_seconds <= 0:
+        raise ValueError("timeline_interval_seconds must be positive")
+    timeline = sorted(snapshots, key=lambda snapshot: snapshot.timestamp)
+    timestamps = [snapshot.timestamp for snapshot in timeline]
+    if len(timestamps) != len(set(timestamps)):
+        raise ValueError("Historical PCR snapshot timestamps are duplicated")
+
+    observations = []
+    previous_snapshot = None
+    for snapshot in timeline:
+        previous_rows = {}
+        previous_is_consecutive = (
+            previous_snapshot is not None
+            and (snapshot.timestamp - previous_snapshot.timestamp).total_seconds()
+            == timeline_interval_seconds
+        )
+        if previous_is_consecutive:
+            previous_rows = {row.strike: row for row in previous_snapshot.strikes}
+
+        strike_results = []
+        for row in snapshot.strikes:
+            previous_row = previous_rows.get(row.strike)
+
+            def previous_oi(side_name):
+                if previous_row is None:
+                    return None
+                current_side = getattr(row, side_name)
+                prior_side = getattr(previous_row, side_name)
+                if (
+                    current_side.instrument_key is None
+                    or current_side.instrument_key != prior_side.instrument_key
+                ):
+                    return None
+                return prior_side.open_interest
+
+            call_oi = row.ce.open_interest
+            put_oi = row.pe.open_interest
+            previous_call_oi = previous_oi("ce")
+            previous_put_oi = previous_oi("pe")
+            call_change, call_change_pct = calculate_oi_change(call_oi, previous_call_oi)
+            put_change, put_change_pct = calculate_oi_change(put_oi, previous_put_oi)
+            issues = []
+            if row.ce.status != "AVAILABLE":
+                issues.append(f"call_{row.ce.status.lower()}")
+            if row.pe.status != "AVAILABLE":
+                issues.append(f"put_{row.pe.status.lower()}")
+            if call_oi == 0:
+                issues.append("zero_call_oi")
+            pcr = calculate_pcr_value(put_oi, call_oi)
+            strike_results.append(HistoricalPCRStrikeResult(
+                strike=row.strike,
+                call_oi=call_oi,
+                put_oi=put_oi,
+                previous_call_oi=previous_call_oi,
+                previous_put_oi=previous_put_oi,
+                call_oi_change=call_change,
+                put_oi_change=put_change,
+                call_oi_change_pct=call_change_pct,
+                put_oi_change_pct=put_change_pct,
+                pcr=pcr,
+                status="AVAILABLE" if pcr is not None else "UNAVAILABLE",
+                issues=issues,
+            ))
+
+        def panel(mode):
+            current_complete = all(
+                result.call_oi is not None and result.put_oi is not None
+                for result in strike_results
+            )
+            previous_complete = all(
+                result.previous_call_oi is not None
+                and result.previous_put_oi is not None
+                for result in strike_results
+            )
+            call_oi = sum(result.call_oi for result in strike_results) if current_complete else None
+            put_oi = sum(result.put_oi for result in strike_results) if current_complete else None
+            previous_call_oi = (
+                sum(result.previous_call_oi for result in strike_results)
+                if previous_complete else None
+            )
+            previous_put_oi = (
+                sum(result.previous_put_oi for result in strike_results)
+                if previous_complete else None
+            )
+            call_change, call_change_pct = calculate_oi_change(call_oi, previous_call_oi)
+            put_change, put_change_pct = calculate_oi_change(put_oi, previous_put_oi)
+            issues = []
+            if not current_complete:
+                issues.append("missing_or_invalid_oi")
+            if call_oi == 0:
+                issues.append("zero_call_oi")
+            pcr = calculate_pcr_value(put_oi, call_oi)
+            return HistoricalPCRPanelResult(
+                mode=mode,
+                atm=snapshot.moving_atm if mode == "moving" else None,
+                strikes=[result.strike for result in strike_results],
+                expected_contracts=len(strike_results) * 2,
+                received_oi_contracts=sum(
+                    value is not None
+                    for result in strike_results
+                    for value in (result.call_oi, result.put_oi)
+                ),
+                call_oi=call_oi,
+                put_oi=put_oi,
+                previous_call_oi=previous_call_oi,
+                previous_put_oi=previous_put_oi,
+                call_oi_change=call_change,
+                put_oi_change=put_change,
+                call_oi_change_pct=call_change_pct,
+                put_oi_change_pct=put_change_pct,
+                pcr=pcr,
+                status="AVAILABLE" if pcr is not None else "UNAVAILABLE",
+                issues=issues,
+            )
+
+        observations.append(HistoricalPCRObservation(
+            timestamp=snapshot.timestamp,
+            session_date=snapshot.session_date,
+            underlying=snapshot.underlying,
+            expiry=snapshot.expiry,
+            spot=snapshot.spot,
+            moving_atm=snapshot.moving_atm,
+            strike_results=strike_results,
+            moving_panel=panel("moving"),
+            full_reconstructed_panel=panel("full_reconstructed"),
+            fixed_panel=HistoricalPCRPanelResult(
+                mode="fixed",
+                status="UNAVAILABLE",
+                issues=["fixed_basket_not_reconstructed"],
+            ),
+        ))
+        previous_snapshot = snapshot
+    return observations
