@@ -57,9 +57,10 @@ function HistoricalChart({observations,selected,onSelect}:{observations:Historic
 }
 
 function PanelCard({title,panel,color}:{title:string;panel:HistoricalPanel;color:string}){
+  const isFull=panel.mode==='full_reconstructed'
   return <article className="metric" style={{borderTopColor:color}}><div className="metric-title"><span>{title}</span><span className="mini-dot" style={{background:color}}/></div>
     <div className="metric-value"><span className="metric-current-label">PCR</span>{panel.pcr==null?'—':panel.pcr.toFixed(3)}</div>
-    <div className="trend-metrics"><span>ATM <b>{fmt(panel.atm,0)}</b></span><span>Call OI <b>{fmt(panel.call_oi,0)}</b></span><span>Put OI <b>{fmt(panel.put_oi,0)}</b></span><span>Status <b>{panel.status}</b></span></div>
+    <div className="trend-metrics"><span>{isFull?'Coverage':'ATM'} <b>{isFull?'Reconstructed chain':fmt(panel.atm,0)}</b></span><span>Call OI <b>{fmt(panel.call_oi,0)}</b></span><span>Put OI <b>{fmt(panel.put_oi,0)}</b></span><span>Call ΔOI% <b>{panel.call_oi_change_pct==null?'—':`${signed(panel.call_oi_change_pct,2)}%`}</b></span><span>Put ΔOI% <b>{panel.put_oi_change_pct==null?'—':`${signed(panel.put_oi_change_pct,2)}%`}</b></span><span>Status <b>{panel.status}</b></span></div>
     <div className="metric-sub"><span>{panel.received_oi_contracts??0}/{panel.expected_contracts??0} contracts</span><span>{panel.strikes.length} strikes</span></div>
   </article>
 }
@@ -76,6 +77,10 @@ export default function HistoricalResearch({defaultUnderlying,defaultExpiry,defa
   const load=async()=>{setBusy(true);setError('');try{const value=await fetchHistorical(underlying,sessionDate,expiry,wings);setSession(value);setSelected(Math.min(5,Math.max(0,value.observations.length-1)))}catch(e){setError((e as Error).message)}finally{setBusy(false)}}
   const observation=session?.observations[selected]??null
   const anchor=useMemo(()=>session?.observations.find(o=>o.fixed_panel.status==='AVAILABLE')??null,[session])
+  const move=(delta:number)=>setSelected(i=>Math.max(0,Math.min((session?.observations.length??1)-1,i+delta)))
+  const atmComparison=observation?.fixed_panel.atm!=null&&observation?.moving_panel.atm!=null
+    ? observation.fixed_panel.atm===observation.moving_panel.atm?'SAME ATM':`ATM DIVERGED · ${signed(observation.moving_panel.atm-observation.fixed_panel.atm,0)} pts`
+    : 'ATM COMPARISON UNAVAILABLE'
   return <>
     <section className="panel historical-controls"><div className="panel-heading"><div><h2>Historical session</h2><p>Reconstruct one deterministic PCR session from Upstox expired option candles.</p></div><span className="pill teal">RESEARCH ONLY</span></div>
       <div className="historical-form"><label>Underlying<input value={underlying} onChange={e=>setUnderlying(e.target.value)}/></label><label>Session date<input type="date" value={sessionDate} onChange={e=>setSessionDate(e.target.value)}/></label><label>Expiry<input type="date" value={expiry} onChange={e=>setExpiry(e.target.value)}/></label><label>Wings<input type="number" min="0" max="20" value={wings} onChange={e=>setWings(Number(e.target.value))}/></label><button className="primary" disabled={busy||!underlying||!sessionDate||!expiry} onClick={()=>void load()}>{busy?'Loading…':'Load session'}</button></div>
@@ -84,13 +89,13 @@ export default function HistoricalResearch({defaultUnderlying,defaultExpiry,defa
     {!session?<div className="empty historical-empty">Choose a session and expiry, then load historical research data.</div>:<>
       <div className="historical-summary"><span>Status <b>{session.status}</b></span><span>Observations <b>{session.observations.length}</b></span><span>Anchor <b>{anchor?t(anchor.timestamp):'Unavailable'}</b></span><span>Fixed ATM <b>{fmt(anchor?.fixed_panel.atm,0)}</b></span><span>Provenance <b>{session.provenance}</b></span></div>
       {observation&&<div className="metrics"><PanelCard title="Fixed morning ATM" panel={observation.fixed_panel} color={palette.fixed}/><PanelCard title="Moving ATM" panel={observation.moving_panel} color={palette.moving}/><PanelCard title="Full reconstructed" panel={observation.full_reconstructed_panel} color={palette.full}/></div>}
-      <section className="panel"><div className="panel-heading"><div><h2>Historical PCR timeline</h2><p>{session.session_date} · {session.observations.length} one-minute observations</p></div><select aria-label="Historical timestamp" value={selected} onChange={e=>setSelected(Number(e.target.value))}>{session.observations.map((o,i)=><option key={o.timestamp} value={i}>{t(o.timestamp)} · Spot {fmt(o.spot)}</option>)}</select></div>
+      <section className="panel"><div className="panel-heading"><div><h2>Historical PCR timeline</h2><p>{session.session_date} · {session.observations.length} one-minute observations</p></div><div className="historical-nav"><button onClick={()=>move(-5)} disabled={selected===0}>−5m</button><button onClick={()=>move(-1)} disabled={selected===0}>−1m</button><select aria-label="Historical timestamp" value={selected} onChange={e=>setSelected(Number(e.target.value))}>{session.observations.map((o,i)=><option key={o.timestamp} value={i}>{t(o.timestamp)} · Spot {fmt(o.spot)}</option>)}</select><button onClick={()=>move(1)} disabled={selected>=session.observations.length-1}>+1m</button><button onClick={()=>move(5)} disabled={selected>=session.observations.length-1}>+5m</button></div></div>
         <div className="legend"><span><i style={{background:palette.fixed}}/>Fixed</span><span><i style={{background:palette.moving}}/>Moving</span><span><i style={{background:palette.full}}/>Full reconstructed</span><small>Click the chart to inspect a minute</small></div><HistoricalChart observations={session.observations} selected={selected} onSelect={setSelected}/>
       </section>
-      {observation&&<section className="panel"><div className="panel-heading"><div><h2>Timestamp inspector</h2><p>{t(observation.timestamp)} IST · Spot {fmt(observation.spot)} · Moving ATM {fmt(observation.moving_atm,0)}</p></div><span className="pill">{observation.provenance}</span></div>
+      {observation&&<><div className="historical-comparison"><span className={atmComparison==='SAME ATM'?'same':'diverged'}>{atmComparison}</span><span>Fixed ATM <b>{fmt(observation.fixed_panel.atm,0)}</b></span><span>Moving ATM <b>{fmt(observation.moving_panel.atm,0)}</b></span><span>PCR spread (Moving − Fixed) <b>{observation.fixed_panel.pcr==null||observation.moving_panel.pcr==null?'—':signed(observation.moving_panel.pcr-observation.fixed_panel.pcr,3)}</b></span></div><section className="panel"><div className="panel-heading"><div><h2>Timestamp inspector</h2><p>{t(observation.timestamp)} IST · Spot {fmt(observation.spot)} · Moving ATM {fmt(observation.moving_atm,0)}</p></div><span className="pill">{observation.provenance}</span></div>
         <div className="historical-table-scroll"><table><thead><tr><th>Strike</th><th>Call OI</th><th>Call ΔOI</th><th>Call ΔOI%</th><th>Put OI</th><th>Put ΔOI</th><th>Put ΔOI%</th><th>Strike PCR</th><th>Status</th></tr></thead><tbody>{observation.strike_results.map(row=><tr key={row.strike}><td>{fmt(row.strike,0)}</td><td>{fmt(row.call_oi,0)}</td><td>{signed(row.call_oi_change,0)}</td><td>{row.call_oi_change_pct==null?'—':`${signed(row.call_oi_change_pct,2)}%`}</td><td>{fmt(row.put_oi,0)}</td><td>{signed(row.put_oi_change,0)}</td><td>{row.put_oi_change_pct==null?'—':`${signed(row.put_oi_change_pct,2)}%`}</td><td>{row.pcr?.toFixed(3)??'—'}</td><td>{row.status}</td></tr>)}</tbody></table></div>
         <div className="panel-foot">Historical values are reconstructed from one-minute expired option candles. Missing provider values remain unavailable; they are never replaced with zero.</div>
-      </section>}
+      </section></>}
     </>}
   </>
 }
