@@ -559,6 +559,51 @@ def _historical_pcr_bidirectional_compare(arguments) -> None:
     except (OSError, ValueError) as error:
         print(json.dumps({"status": "UNAVAILABLE", "issues": [str(error)]}, indent=2))
 
+
+def _historical_pcr_bidirectional_discriminate(arguments) -> None:
+    from .pcr_bidirectional_discriminator import analyze_bidirectional_discriminator, write_bidirectional_discriminator_json
+
+    try:
+        blocks = [(name, evidence) for name, evidence in arguments.block]
+        report = analyze_bidirectional_discriminator(blocks)
+        if arguments.output:
+            write_bidirectional_discriminator_json(report, arguments.output)
+        print(json.dumps({
+            "status": report.status,
+            "block_count": report.block_count,
+            "total_evidence_rows": report.total_evidence_rows,
+            "total_session_count": report.total_session_count,
+            "bearish": {
+                "stage_2_events": report.bearish.total_stage_2_events,
+                "true_reversals": report.bearish.total_true_reversals,
+                "false_warnings": report.bearish.total_false_warnings,
+                "top_features": [
+                    {
+                        "feature": item.feature,
+                        "standardized_median_difference": item.standardized_median_difference,
+                        "block_direction_consistency_count": item.block_direction_consistency_count,
+                        "block_available_count": item.block_available_count,
+                    } for item in report.bearish.features[:6]
+                ],
+            },
+            "bullish": {
+                "stage_2_events": report.bullish.total_stage_2_events,
+                "true_reversals": report.bullish.total_true_reversals,
+                "false_warnings": report.bullish.total_false_warnings,
+                "top_features": [
+                    {
+                        "feature": item.feature,
+                        "standardized_median_difference": item.standardized_median_difference,
+                        "block_direction_consistency_count": item.block_direction_consistency_count,
+                        "block_available_count": item.block_available_count,
+                    } for item in report.bullish.features[:6]
+                ],
+            },
+            "output": arguments.output,
+        }, indent=2))
+    except (OSError, ValueError) as error:
+        print(json.dumps({"status": "UNAVAILABLE", "issues": [str(error)]}, indent=2))
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="python -m market_lab.runtime")
     subparsers = parser.add_subparsers(dest="service", required=True)
@@ -637,6 +682,13 @@ def main() -> None:
         help="Repeat for each frozen block: NAME evidence.csv",
     )
     bidirectional.add_argument("--output")
+    bidirectional_discriminator = subparsers.add_parser("historical-pcr-bidirectional-discriminate")
+    bidirectional_discriminator.add_argument(
+        "--block", action="append", nargs=2, required=True,
+        metavar=("NAME", "EVIDENCE_CSV"),
+        help="Repeat for each frozen block. First block must be TRAIN: NAME evidence.csv",
+    )
+    bidirectional_discriminator.add_argument("--output")
     arguments = parser.parse_args()
 
     if arguments.service == "historical-validate":
@@ -683,6 +735,9 @@ def main() -> None:
         return
     if arguments.service == "historical-pcr-bidirectional-compare":
         _historical_pcr_bidirectional_compare(arguments)
+        return
+    if arguments.service == "historical-pcr-bidirectional-discriminate":
+        _historical_pcr_bidirectional_discriminate(arguments)
         return
 
     write_pid(arguments.service)
