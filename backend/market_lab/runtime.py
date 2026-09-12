@@ -454,6 +454,37 @@ def _historical_pcr_reversal_analyze(arguments) -> None:
             "issues": [str(error)],
         }, indent=2))
 
+
+def _historical_pcr_reversal_compare(arguments) -> None:
+    from .pcr_reversal_compare import compare_reversal_report_files, write_pcr_reversal_100_json
+
+    try:
+        report = compare_reversal_report_files(
+            arguments.training, arguments.oos_a, arguments.oos_b, arguments.oos_c, arguments.oos_d
+        )
+        if arguments.output:
+            write_pcr_reversal_100_json(report, arguments.output)
+        print(json.dumps({
+            "status": report.status,
+            "stage": report.stage,
+            "block_count": report.block_count,
+            "total_row_count": report.total_row_count,
+            "total_session_count": report.total_session_count,
+            "bearish_direction_block_count": report.bearish_direction_block_count,
+            "lead_support_block_count": report.lead_support_block_count,
+            "combined_event_count": report.combined.event_count,
+            "combined_pcr_led_price_pct": report.combined.pcr_led_price_pct,
+            "combined_mean_lead_minutes": report.combined.mean_lead_minutes,
+            "combined_bearish_pct_15m": report.combined.bearish_pct_15m,
+            "robustness_status": report.robustness_status,
+            "output": arguments.output,
+        }, indent=2))
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        print(json.dumps({
+            "status": "UNAVAILABLE",
+            "issues": [str(error)],
+        }, indent=2))
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="python -m market_lab.runtime")
     subparsers = parser.add_subparsers(dest="service", required=True)
@@ -511,6 +542,13 @@ def main() -> None:
     pcr_reversal = subparsers.add_parser("historical-pcr-reversal-analyze")
     pcr_reversal.add_argument("--input", required=True)
     pcr_reversal.add_argument("--output")
+    pcr_reversal_compare = subparsers.add_parser("historical-pcr-reversal-compare")
+    pcr_reversal_compare.add_argument("--training", required=True)
+    pcr_reversal_compare.add_argument("--oos-a", required=True)
+    pcr_reversal_compare.add_argument("--oos-b", required=True)
+    pcr_reversal_compare.add_argument("--oos-c", required=True)
+    pcr_reversal_compare.add_argument("--oos-d", required=True)
+    pcr_reversal_compare.add_argument("--output")
     arguments = parser.parse_args()
 
     if arguments.service == "historical-validate":
@@ -548,6 +586,9 @@ def main() -> None:
         return
     if arguments.service == "historical-pcr-reversal-analyze":
         _historical_pcr_reversal_analyze(arguments)
+        return
+    if arguments.service == "historical-pcr-reversal-compare":
+        _historical_pcr_reversal_compare(arguments)
         return
 
     write_pid(arguments.service)
