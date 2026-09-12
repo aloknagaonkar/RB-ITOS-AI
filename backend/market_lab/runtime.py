@@ -27,6 +27,10 @@ from .historical_oos import (
     write_h3_oos_json,
     write_h3_spec_json,
 )
+from .historical_oos_combined import (
+    validate_h3_combined_oos_csv,
+    write_h3_combined_oos_json,
+)
 
 def _date(value: str) -> date:
     try:
@@ -344,6 +348,28 @@ def _historical_validate_h3_oos(arguments) -> None:
         "output": arguments.output,
     }, indent=2))
 
+def _historical_validate_h3_combined_oos(arguments) -> None:
+    spec = load_h3_spec_json(arguments.spec)
+    report = validate_h3_combined_oos_csv(arguments.block_a, arguments.block_b, spec)
+    if arguments.output:
+        write_h3_combined_oos_json(report, arguments.output)
+    primary = report.combined.holds.get("15m")
+    print(json.dumps({
+        "status": report.status,
+        "spec": arguments.spec,
+        "frozen_threshold": report.frozen_threshold,
+        "block_a_sessions": report.block_a.session_count,
+        "block_b_sessions": report.block_b.session_count,
+        "combined_sessions": report.combined.session_count,
+        "combined_event_count": report.combined.event_count,
+        "combined_event_session_count": report.combined.event_session_count,
+        "combined_win_rate_15m": primary.win_rate_pct if primary else None,
+        "combined_mean_15m": primary.mean_directional_points if primary else None,
+        "combined_median_15m": primary.median_directional_points if primary else None,
+        "robustness_status": report.robustness_status,
+        "output": arguments.output,
+    }, indent=2))
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="python -m market_lab.runtime")
@@ -386,6 +412,11 @@ def main() -> None:
     oos_h3.add_argument("--input", required=True)
     oos_h3.add_argument("--spec", required=True)
     oos_h3.add_argument("--output", required=True)
+    combined_oos_h3 = subparsers.add_parser("historical-validate-h3-combined-oos")
+    combined_oos_h3.add_argument("--block-a", required=True)
+    combined_oos_h3.add_argument("--block-b", required=True)
+    combined_oos_h3.add_argument("--spec", required=True)
+    combined_oos_h3.add_argument("--output", required=True)
     arguments = parser.parse_args()
 
     if arguments.service == "historical-validate":
@@ -411,6 +442,9 @@ def main() -> None:
         return
     if arguments.service == "historical-validate-h3-oos":
         _historical_validate_h3_oos(arguments)
+        return
+    if arguments.service == "historical-validate-h3-combined-oos":
+        _historical_validate_h3_combined_oos(arguments)
         return
 
     write_pid(arguments.service)
