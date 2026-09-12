@@ -371,6 +371,30 @@ def _historical_validate_h3_combined_oos(arguments) -> None:
     }, indent=2))
 
 
+
+def _historical_pcr_deep_analyze(arguments) -> None:
+    from .pcr_deep_analysis import analyze_pcr_deep_csv, write_pcr_deep_analysis_json
+
+    try:
+        report = analyze_pcr_deep_csv(arguments.input)
+        if arguments.output:
+            write_pcr_deep_analysis_json(report, arguments.output)
+        print(json.dumps({
+            "status": report.status,
+            "source": report.source,
+            "row_count": report.row_count,
+            "session_count": report.session_count,
+            "panel_count": len(report.panels),
+            "cross_panel_condition_count": len(report.cross_panel.conditions),
+            "output": arguments.output,
+        }, indent=2))
+    except (OSError, ValueError) as error:
+        print(json.dumps({
+            "status": "UNAVAILABLE",
+            "source": arguments.input,
+            "issues": [str(error)],
+        }, indent=2))
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="python -m market_lab.runtime")
     subparsers = parser.add_subparsers(dest="service", required=True)
@@ -417,6 +441,9 @@ def main() -> None:
     combined_oos_h3.add_argument("--block-b", required=True)
     combined_oos_h3.add_argument("--spec", required=True)
     combined_oos_h3.add_argument("--output", required=True)
+    pcr_deep = subparsers.add_parser("historical-pcr-deep-analyze")
+    pcr_deep.add_argument("--input", required=True)
+    pcr_deep.add_argument("--output")
     arguments = parser.parse_args()
 
     if arguments.service == "historical-validate":
@@ -445,6 +472,9 @@ def main() -> None:
         return
     if arguments.service == "historical-validate-h3-combined-oos":
         _historical_validate_h3_combined_oos(arguments)
+        return
+    if arguments.service == "historical-pcr-deep-analyze":
+        _historical_pcr_deep_analyze(arguments)
         return
 
     write_pid(arguments.service)
