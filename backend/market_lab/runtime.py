@@ -113,6 +113,77 @@ def _historical_batch(arguments) -> None:
         if gateway is not None:
             gateway.close()
 
+
+
+def _historical_evidence(arguments) -> None:
+    from dotenv import load_dotenv
+
+    from .gateways import GatewayError, UpstoxGateway
+    from .historical_batch import load_historical_batch_manifest
+    from .historical_evidence import (
+        HistoricalEvidenceSessionSummary,
+        build_historical_evidence_dataset,
+        write_historical_evidence_csv,
+        write_historical_evidence_json,
+    )
+    from .historical_research import build_historical_research_session
+
+    load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+    manifest = load_historical_batch_manifest(arguments.manifest)
+    gateway = None
+    sessions = []
+    unavailable = []
+    try:
+        gateway = UpstoxGateway(os.getenv("UPSTOX_ACCESS_TOKEN", ""))
+        for spec in sorted(manifest.sessions, key=lambda item: item.session_date):
+            try:
+                session = build_historical_research_session(
+                    gateway,
+                    arguments.underlying,
+                    spec.session_date,
+                    spec.expiry,
+                    arguments.wings,
+                )
+                if session.status == "AVAILABLE":
+                    sessions.append(session)
+                else:
+                    unavailable.append(HistoricalEvidenceSessionSummary(
+                        session_date=spec.session_date,
+                        expiry=spec.expiry,
+                        status="UNAVAILABLE",
+                        issues=session.issues,
+                    ))
+            except (GatewayError, ValueError) as error:
+                unavailable.append(HistoricalEvidenceSessionSummary(
+                    session_date=spec.session_date,
+                    expiry=spec.expiry,
+                    status="UNAVAILABLE",
+                    issues=[str(error)],
+                ))
+
+        dataset = build_historical_evidence_dataset(
+            arguments.underlying, sessions, unavailable
+        )
+        if arguments.output:
+            write_historical_evidence_json(dataset, arguments.output)
+        if arguments.csv_output:
+            write_historical_evidence_csv(dataset, arguments.csv_output)
+        summary = {
+            "status": dataset.status,
+            "underlying": dataset.underlying,
+            "requested_session_count": dataset.requested_session_count,
+            "available_session_count": dataset.available_session_count,
+            "unavailable_session_count": dataset.unavailable_session_count,
+            "row_count": dataset.row_count,
+            "provenance": dataset.provenance,
+            "output": arguments.output,
+            "csv_output": arguments.csv_output,
+        }
+        print(json.dumps(summary, indent=2))
+    finally:
+        if gateway is not None:
+            gateway.close()
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="python -m market_lab.runtime")
     subparsers = parser.add_subparsers(dest="service", required=True)
@@ -128,6 +199,12 @@ def main() -> None:
     batch.add_argument("--manifest", required=True)
     batch.add_argument("--wings", required=True, type=int)
     batch.add_argument("--output")
+    evidence = subparsers.add_parser("historical-evidence")
+    evidence.add_argument("--underlying", required=True)
+    evidence.add_argument("--manifest", required=True)
+    evidence.add_argument("--wings", required=True, type=int)
+    evidence.add_argument("--output")
+    evidence.add_argument("--csv-output")
     arguments = parser.parse_args()
 
     if arguments.service == "historical-validate":
@@ -135,6 +212,9 @@ def main() -> None:
         return
     if arguments.service == "historical-batch":
         _historical_batch(arguments)
+        return
+    if arguments.service == "historical-evidence":
+        _historical_evidence(arguments)
         return
 
     write_pid(arguments.service)
