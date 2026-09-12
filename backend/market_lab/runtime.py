@@ -395,6 +395,36 @@ def _historical_pcr_deep_analyze(arguments) -> None:
             "issues": [str(error)],
         }, indent=2))
 
+
+
+def _historical_pcr_deep_compare(arguments) -> None:
+    from .pcr_deep_compare import compare_pcr_deep_json, write_pcr_deep_comparison_json
+
+    try:
+        report = compare_pcr_deep_json(arguments.training, arguments.oos_a, arguments.oos_b)
+        if arguments.output:
+            write_pcr_deep_comparison_json(report, arguments.output)
+        print(json.dumps({
+            "status": report.status,
+            "total_row_count": report.total_row_count,
+            "total_session_count": report.total_session_count,
+            "candidates": [
+                {
+                    "condition": item.condition,
+                    "expected_direction": item.expected_direction,
+                    "validation_status": item.validation_status,
+                    "consistent_direction_count": item.consistent_direction_count,
+                }
+                for item in report.candidates
+            ],
+            "output": arguments.output,
+        }, indent=2))
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        print(json.dumps({
+            "status": "UNAVAILABLE",
+            "issues": [str(error)],
+        }, indent=2))
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="python -m market_lab.runtime")
     subparsers = parser.add_subparsers(dest="service", required=True)
@@ -444,6 +474,11 @@ def main() -> None:
     pcr_deep = subparsers.add_parser("historical-pcr-deep-analyze")
     pcr_deep.add_argument("--input", required=True)
     pcr_deep.add_argument("--output")
+    pcr_compare = subparsers.add_parser("historical-pcr-deep-compare")
+    pcr_compare.add_argument("--training", required=True)
+    pcr_compare.add_argument("--oos-a", required=True)
+    pcr_compare.add_argument("--oos-b", required=True)
+    pcr_compare.add_argument("--output")
     arguments = parser.parse_args()
 
     if arguments.service == "historical-validate":
@@ -475,6 +510,9 @@ def main() -> None:
         return
     if arguments.service == "historical-pcr-deep-analyze":
         _historical_pcr_deep_analyze(arguments)
+        return
+    if arguments.service == "historical-pcr-deep-compare":
+        _historical_pcr_deep_compare(arguments)
         return
 
     write_pid(arguments.service)
