@@ -560,6 +560,38 @@ def _historical_pcr_bidirectional_compare(arguments) -> None:
         print(json.dumps({"status": "UNAVAILABLE", "issues": [str(error)]}, indent=2))
 
 
+def _historical_pcr_bidirectional_bucket_oos(arguments) -> None:
+    from .pcr_bidirectional_bucket_oos import validate_fresh_oos, write_fresh_oos_json
+
+    try:
+        report = validate_fresh_oos(arguments.spec, arguments.input)
+        if arguments.output:
+            write_fresh_oos_json(report, arguments.output)
+        print(json.dumps({
+            "status": report.status,
+            "source": report.source,
+            "row_count": report.row_count,
+            "session_count": report.session_count,
+            "bearish": {
+                "event_count": report.bearish.event_count,
+                "true_reversals": report.bearish.true_reversals,
+                "false_warnings": report.bearish.false_warnings,
+                "confirmed_feature_count": report.bearish.confirmed_feature_count,
+                "tested_feature_count": report.bearish.tested_feature_count,
+            },
+            "bullish": {
+                "event_count": report.bullish.event_count,
+                "true_reversals": report.bullish.true_reversals,
+                "false_warnings": report.bullish.false_warnings,
+                "confirmed_feature_count": report.bullish.confirmed_feature_count,
+                "tested_feature_count": report.bullish.tested_feature_count,
+            },
+            "output": arguments.output,
+        }, indent=2))
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        print(json.dumps({"status": "UNAVAILABLE", "issues": [str(error)]}, indent=2))
+
+
 def _historical_pcr_bidirectional_discriminate(arguments) -> None:
     from .pcr_bidirectional_discriminator import analyze_bidirectional_discriminator, write_bidirectional_discriminator_json
 
@@ -689,6 +721,10 @@ def main() -> None:
         help="Repeat for each frozen block. First block must be TRAIN: NAME evidence.csv",
     )
     bidirectional_discriminator.add_argument("--output")
+    bidirectional_bucket_oos = subparsers.add_parser("historical-pcr-bidirectional-bucket-oos")
+    bidirectional_bucket_oos.add_argument("--spec", required=True, help="Frozen 100-session discriminator JSON")
+    bidirectional_bucket_oos.add_argument("--input", required=True, help="Fresh OOS evidence CSV")
+    bidirectional_bucket_oos.add_argument("--output")
     arguments = parser.parse_args()
 
     if arguments.service == "historical-validate":
@@ -738,6 +774,9 @@ def main() -> None:
         return
     if arguments.service == "historical-pcr-bidirectional-discriminate":
         _historical_pcr_bidirectional_discriminate(arguments)
+        return
+    if arguments.service == "historical-pcr-bidirectional-bucket-oos":
+        _historical_pcr_bidirectional_bucket_oos(arguments)
         return
 
     write_pid(arguments.service)
