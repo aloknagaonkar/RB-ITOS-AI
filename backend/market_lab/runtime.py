@@ -120,6 +120,7 @@ def _historical_evidence(arguments) -> None:
 
     from .gateways import GatewayError, UpstoxGateway
     from .historical_batch import load_historical_batch_manifest
+    from .historical_cache import HistoricalSessionCache, HistoricalSessionCacheKey
     from .historical_evidence import (
         HistoricalEvidenceSessionSummary,
         build_historical_evidence_dataset,
@@ -130,13 +131,38 @@ def _historical_evidence(arguments) -> None:
 
     load_dotenv(Path(__file__).resolve().parents[2] / ".env")
     manifest = load_historical_batch_manifest(arguments.manifest)
+    cache = HistoricalSessionCache(arguments.cache_dir)
     gateway = None
     sessions = []
     unavailable = []
+    cache_hits = 0
+    cache_misses = 0
+    provider_fetches = 0
+    cache_writes = 0
     try:
-        gateway = UpstoxGateway(os.getenv("UPSTOX_ACCESS_TOKEN", ""))
         for spec in sorted(manifest.sessions, key=lambda item: item.session_date):
+            key = HistoricalSessionCacheKey(
+                underlying=arguments.underlying,
+                session_date=spec.session_date,
+                expiry=spec.expiry,
+                wings=arguments.wings,
+            )
+            session = None
+            if not arguments.refresh:
+                try:
+                    session = cache.load(key)
+                except (OSError, ValueError, json.JSONDecodeError):
+                    session = None
+            if session is not None:
+                cache_hits += 1
+                sessions.append(session)
+                continue
+
+            cache_misses += 1
             try:
+                if gateway is None:
+                    gateway = UpstoxGateway(os.getenv("UPSTOX_ACCESS_TOKEN", ""))
+                provider_fetches += 1
                 session = build_historical_research_session(
                     gateway,
                     arguments.underlying,
@@ -145,6 +171,8 @@ def _historical_evidence(arguments) -> None:
                     arguments.wings,
                 )
                 if session.status == "AVAILABLE":
+                    cache.store(key, session)
+                    cache_writes += 1
                     sessions.append(session)
                 else:
                     unavailable.append(HistoricalEvidenceSessionSummary(
@@ -153,7 +181,7 @@ def _historical_evidence(arguments) -> None:
                         status="UNAVAILABLE",
                         issues=session.issues,
                     ))
-            except (GatewayError, ValueError) as error:
+            except (GatewayError, ValueError, OSError) as error:
                 unavailable.append(HistoricalEvidenceSessionSummary(
                     session_date=spec.session_date,
                     expiry=spec.expiry,
@@ -175,6 +203,12 @@ def _historical_evidence(arguments) -> None:
             "available_session_count": dataset.available_session_count,
             "unavailable_session_count": dataset.unavailable_session_count,
             "row_count": dataset.row_count,
+            "cache_hits": cache_hits,
+            "cache_misses": cache_misses,
+            "provider_fetches": provider_fetches,
+            "cache_writes": cache_writes,
+            "cache_dir": arguments.cache_dir,
+            "refresh": bool(arguments.refresh),
             "provenance": dataset.provenance,
             "output": arguments.output,
             "csv_output": arguments.csv_output,
@@ -183,6 +217,7 @@ def _historical_evidence(arguments) -> None:
     finally:
         if gateway is not None:
             gateway.close()
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="python -m market_lab.runtime")
@@ -205,6 +240,8 @@ def main() -> None:
     evidence.add_argument("--wings", required=True, type=int)
     evidence.add_argument("--output")
     evidence.add_argument("--csv-output")
+    evidence.add_argument("--cache-dir", default="data/historical-cache")
+    evidence.add_argument("--refresh", action="store_true")
     arguments = parser.parse_args()
 
     if arguments.service == "historical-validate":
