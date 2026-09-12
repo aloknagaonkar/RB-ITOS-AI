@@ -60,6 +60,59 @@ def _historical_validate(arguments) -> None:
             gateway.close()
 
 
+
+def _historical_batch(arguments) -> None:
+    from dotenv import load_dotenv
+
+    from .gateways import GatewayError, UpstoxGateway
+    from .historical_batch import (
+        HistoricalBatchSessionResult,
+        build_historical_batch_report,
+        load_historical_batch_manifest,
+    )
+    from .historical_validation import validate_historical_session
+
+    load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+    manifest = load_historical_batch_manifest(arguments.manifest)
+    gateway = None
+    results = []
+    try:
+        gateway = UpstoxGateway(os.getenv("UPSTOX_ACCESS_TOKEN", ""))
+        for spec in sorted(manifest.sessions, key=lambda item: item.session_date):
+            try:
+                report = validate_historical_session(
+                    gateway,
+                    arguments.underlying,
+                    spec.session_date,
+                    spec.expiry,
+                    arguments.wings,
+                )
+                results.append(HistoricalBatchSessionResult(
+                    session_date=spec.session_date,
+                    expiry=spec.expiry,
+                    status=report.status,
+                    report=report,
+                    issues=report.issues,
+                ))
+            except (GatewayError, ValueError) as error:
+                results.append(HistoricalBatchSessionResult(
+                    session_date=spec.session_date,
+                    expiry=spec.expiry,
+                    status="UNAVAILABLE",
+                    issues=[str(error)],
+                ))
+
+        batch = build_historical_batch_report(arguments.underlying, arguments.wings, results)
+        rendered = json.dumps(batch.model_dump(mode="json"), indent=2)
+        if arguments.output:
+            output = Path(arguments.output)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(rendered + "\n", encoding="utf-8")
+        print(rendered)
+    finally:
+        if gateway is not None:
+            gateway.close()
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="python -m market_lab.runtime")
     subparsers = parser.add_subparsers(dest="service", required=True)
@@ -70,10 +123,18 @@ def main() -> None:
     historical.add_argument("--session-date", required=True, type=_date)
     historical.add_argument("--expiry", required=True, type=_date)
     historical.add_argument("--wings", required=True, type=int)
+    batch = subparsers.add_parser("historical-batch")
+    batch.add_argument("--underlying", required=True)
+    batch.add_argument("--manifest", required=True)
+    batch.add_argument("--wings", required=True, type=int)
+    batch.add_argument("--output")
     arguments = parser.parse_args()
 
     if arguments.service == "historical-validate":
         _historical_validate(arguments)
+        return
+    if arguments.service == "historical-batch":
+        _historical_batch(arguments)
         return
 
     write_pid(arguments.service)
