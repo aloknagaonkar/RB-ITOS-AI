@@ -485,6 +485,42 @@ def _historical_pcr_reversal_compare(arguments) -> None:
             "issues": [str(error)],
         }, indent=2))
 
+
+
+def _historical_pcr_stage2_discriminate(arguments) -> None:
+    from .pcr_stage2_discriminator import analyze_stage2_discriminator, write_stage2_discriminator_json
+
+    try:
+        blocks = [(name, evidence, reversal) for name, evidence, reversal in arguments.block]
+        report = analyze_stage2_discriminator(blocks)
+        if arguments.output:
+            write_stage2_discriminator_json(report, arguments.output)
+        print(json.dumps({
+            "status": report.status,
+            "stage": report.stage,
+            "block_count": report.block_count,
+            "total_evidence_rows": report.total_evidence_rows,
+            "total_stage_2_events": report.total_stage_2_events,
+            "total_joined_events": report.total_joined_events,
+            "total_success_events": report.total_success_events,
+            "total_false_warning_events": report.total_false_warning_events,
+            "top_features": [
+                {
+                    "feature": item.feature,
+                    "standardized_median_difference": item.standardized_median_difference,
+                    "block_direction_consistency_count": item.block_direction_consistency_count,
+                    "block_available_count": item.block_available_count,
+                }
+                for item in report.features[:8]
+            ],
+            "output": arguments.output,
+        }, indent=2))
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        print(json.dumps({
+            "status": "UNAVAILABLE",
+            "issues": [str(error)],
+        }, indent=2))
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="python -m market_lab.runtime")
     subparsers = parser.add_subparsers(dest="service", required=True)
@@ -549,6 +585,13 @@ def main() -> None:
     pcr_reversal_compare.add_argument("--oos-c", required=True)
     pcr_reversal_compare.add_argument("--oos-d", required=True)
     pcr_reversal_compare.add_argument("--output")
+    stage2_discriminator = subparsers.add_parser("historical-pcr-stage2-discriminate")
+    stage2_discriminator.add_argument(
+        "--block", action="append", nargs=3, required=True,
+        metavar=("NAME", "EVIDENCE_CSV", "REVERSAL_JSON"),
+        help="Repeat for each frozen block: NAME evidence.csv reversal.json",
+    )
+    stage2_discriminator.add_argument("--output")
     arguments = parser.parse_args()
 
     if arguments.service == "historical-validate":
@@ -589,6 +632,9 @@ def main() -> None:
         return
     if arguments.service == "historical-pcr-reversal-compare":
         _historical_pcr_reversal_compare(arguments)
+        return
+    if arguments.service == "historical-pcr-stage2-discriminate":
+        _historical_pcr_stage2_discriminate(arguments)
         return
 
     write_pid(arguments.service)
