@@ -20,6 +20,14 @@ def write_pid(service: str) -> None:
     (runtime_dir / f"{service}.json").write_text(json.dumps(process, indent=2), encoding="utf-8")
 
 
+from .historical_oos import (
+    freeze_h3_spec_csv,
+    load_h3_spec_json,
+    validate_h3_oos_csv,
+    write_h3_oos_json,
+    write_h3_spec_json,
+)
+
 def _date(value: str) -> date:
     try:
         return date.fromisoformat(value)
@@ -297,6 +305,46 @@ def _historical_backtest_hypotheses(arguments) -> None:
             "issues": [str(error)],
         }, indent=2))
 
+def _historical_freeze_h3(arguments) -> None:
+    spec = freeze_h3_spec_csv(arguments.input, arguments.cooldown_minutes)
+    if arguments.output:
+        write_h3_spec_json(spec, arguments.output)
+    print(json.dumps({
+        "status": "AVAILABLE",
+        "source": arguments.input,
+        "spec_version": spec.spec_version,
+        "hypothesis_id": spec.hypothesis_id,
+        "frozen_threshold": spec.frozen_threshold,
+        "training_row_count": spec.training_row_count,
+        "training_session_count": spec.training_session_count,
+        "cooldown_minutes": spec.cooldown_minutes,
+        "output": arguments.output,
+    }, indent=2))
+
+
+def _historical_validate_h3_oos(arguments) -> None:
+    spec = load_h3_spec_json(arguments.spec)
+    report = validate_h3_oos_csv(arguments.input, spec)
+    if arguments.output:
+        write_h3_oos_json(report, arguments.output)
+    primary = report.holds.get("15m")
+    print(json.dumps({
+        "status": report.status,
+        "source": arguments.input,
+        "spec": arguments.spec,
+        "frozen_threshold": report.frozen_threshold,
+        "row_count": report.row_count,
+        "session_count": report.session_count,
+        "event_count": report.event_count,
+        "event_session_count": report.event_session_count,
+        "win_rate_15m": primary.win_rate_pct if primary else None,
+        "mean_15m": primary.mean_directional_points if primary else None,
+        "median_15m": primary.median_directional_points if primary else None,
+        "acceptance_status": report.acceptance_status,
+        "output": arguments.output,
+    }, indent=2))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="python -m market_lab.runtime")
     subparsers = parser.add_subparsers(dest="service", required=True)
@@ -330,6 +378,14 @@ def main() -> None:
     backtest.add_argument("--input", required=True)
     backtest.add_argument("--output")
     backtest.add_argument("--cooldown-minutes", type=int, default=15)
+    freeze_h3 = subparsers.add_parser("historical-freeze-h3")
+    freeze_h3.add_argument("--input", required=True)
+    freeze_h3.add_argument("--output", required=True)
+    freeze_h3.add_argument("--cooldown-minutes", type=int, default=15)
+    oos_h3 = subparsers.add_parser("historical-validate-h3-oos")
+    oos_h3.add_argument("--input", required=True)
+    oos_h3.add_argument("--spec", required=True)
+    oos_h3.add_argument("--output", required=True)
     arguments = parser.parse_args()
 
     if arguments.service == "historical-validate":
@@ -349,6 +405,12 @@ def main() -> None:
         return
     if arguments.service == "historical-backtest-hypotheses":
         _historical_backtest_hypotheses(arguments)
+        return
+    if arguments.service == "historical-freeze-h3":
+        _historical_freeze_h3(arguments)
+        return
+    if arguments.service == "historical-validate-h3-oos":
+        _historical_validate_h3_oos(arguments)
         return
 
     write_pid(arguments.service)
