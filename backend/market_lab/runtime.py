@@ -219,6 +219,31 @@ def _historical_evidence(arguments) -> None:
             gateway.close()
 
 
+
+def _historical_analyze(arguments) -> None:
+    from .historical_analysis import analyze_historical_evidence_csv, write_historical_analysis_json
+
+    try:
+        report = analyze_historical_evidence_csv(arguments.input)
+        if arguments.output:
+            write_historical_analysis_json(report, arguments.output)
+        summary = {
+            "status": report.status,
+            "source": report.source,
+            "row_count": report.row_count,
+            "session_count": report.session_count,
+            "feature_count": len(report.feature_analyses),
+            "output": arguments.output,
+        }
+        print(json.dumps(summary, indent=2))
+    except (OSError, ValueError) as error:
+        print(json.dumps({
+            "status": "UNAVAILABLE",
+            "source": arguments.input,
+            "issues": [str(error)],
+        }, indent=2))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="python -m market_lab.runtime")
     subparsers = parser.add_subparsers(dest="service", required=True)
@@ -242,6 +267,9 @@ def main() -> None:
     evidence.add_argument("--csv-output")
     evidence.add_argument("--cache-dir", default="data/historical-cache")
     evidence.add_argument("--refresh", action="store_true")
+    analyze = subparsers.add_parser("historical-analyze")
+    analyze.add_argument("--input", required=True)
+    analyze.add_argument("--output")
     arguments = parser.parse_args()
 
     if arguments.service == "historical-validate":
@@ -252,6 +280,9 @@ def main() -> None:
         return
     if arguments.service == "historical-evidence":
         _historical_evidence(arguments)
+        return
+    if arguments.service == "historical-analyze":
+        _historical_analyze(arguments)
         return
 
     write_pid(arguments.service)
