@@ -244,6 +244,33 @@ def _historical_analyze(arguments) -> None:
         }, indent=2))
 
 
+
+def _historical_rank(arguments) -> None:
+    from .historical_ranking import rank_historical_evidence_csv, write_historical_ranking_json
+
+    try:
+        report = rank_historical_evidence_csv(arguments.input)
+        if arguments.output:
+            write_historical_ranking_json(report, arguments.output)
+        ranked_count = sum(item.rank is not None for item in report.ranked_conditions)
+        summary = {
+            "status": report.status,
+            "source": report.source,
+            "row_count": report.row_count,
+            "session_count": report.session_count,
+            "candidate_count": len(report.ranked_conditions),
+            "ranked_candidate_count": ranked_count,
+            "primary_forward": report.primary_forward,
+            "output": arguments.output,
+        }
+        print(json.dumps(summary, indent=2))
+    except (OSError, ValueError) as error:
+        print(json.dumps({
+            "status": "UNAVAILABLE",
+            "source": arguments.input,
+            "issues": [str(error)],
+        }, indent=2))
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="python -m market_lab.runtime")
     subparsers = parser.add_subparsers(dest="service", required=True)
@@ -270,6 +297,9 @@ def main() -> None:
     analyze = subparsers.add_parser("historical-analyze")
     analyze.add_argument("--input", required=True)
     analyze.add_argument("--output")
+    rank = subparsers.add_parser("historical-rank")
+    rank.add_argument("--input", required=True)
+    rank.add_argument("--output")
     arguments = parser.parse_args()
 
     if arguments.service == "historical-validate":
@@ -283,6 +313,9 @@ def main() -> None:
         return
     if arguments.service == "historical-analyze":
         _historical_analyze(arguments)
+        return
+    if arguments.service == "historical-rank":
+        _historical_rank(arguments)
         return
 
     write_pid(arguments.service)
