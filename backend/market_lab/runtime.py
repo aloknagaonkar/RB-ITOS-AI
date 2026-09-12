@@ -271,6 +271,32 @@ def _historical_rank(arguments) -> None:
             "issues": [str(error)],
         }, indent=2))
 
+
+def _historical_backtest_hypotheses(arguments) -> None:
+    from .historical_hypothesis_backtest import backtest_hypotheses_csv, write_hypothesis_backtest_json
+
+    try:
+        report = backtest_hypotheses_csv(arguments.input, arguments.cooldown_minutes)
+        if arguments.output:
+            write_hypothesis_backtest_json(report, arguments.output)
+        summary = {
+            "status": report.status,
+            "source": report.source,
+            "row_count": report.row_count,
+            "session_count": report.session_count,
+            "cooldown_minutes": report.cooldown_minutes,
+            "hypothesis_count": len(report.hypotheses),
+            "events": {item.hypothesis_id: item.event_count for item in report.hypotheses},
+            "output": arguments.output,
+        }
+        print(json.dumps(summary, indent=2))
+    except (OSError, ValueError) as error:
+        print(json.dumps({
+            "status": "UNAVAILABLE",
+            "source": arguments.input,
+            "issues": [str(error)],
+        }, indent=2))
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="python -m market_lab.runtime")
     subparsers = parser.add_subparsers(dest="service", required=True)
@@ -300,6 +326,10 @@ def main() -> None:
     rank = subparsers.add_parser("historical-rank")
     rank.add_argument("--input", required=True)
     rank.add_argument("--output")
+    backtest = subparsers.add_parser("historical-backtest-hypotheses")
+    backtest.add_argument("--input", required=True)
+    backtest.add_argument("--output")
+    backtest.add_argument("--cooldown-minutes", type=int, default=15)
     arguments = parser.parse_args()
 
     if arguments.service == "historical-validate":
@@ -316,6 +346,9 @@ def main() -> None:
         return
     if arguments.service == "historical-rank":
         _historical_rank(arguments)
+        return
+    if arguments.service == "historical-backtest-hypotheses":
+        _historical_backtest_hypotheses(arguments)
         return
 
     write_pid(arguments.service)
