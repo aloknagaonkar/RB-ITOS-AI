@@ -521,6 +521,44 @@ def _historical_pcr_stage2_discriminate(arguments) -> None:
             "issues": [str(error)],
         }, indent=2))
 
+
+
+def _historical_pcr_bidirectional_compare(arguments) -> None:
+    from .pcr_bidirectional_reversal import analyze_bidirectional_blocks, write_bidirectional_json
+
+    try:
+        blocks = [(name, evidence) for name, evidence in arguments.block]
+        report = analyze_bidirectional_blocks(blocks)
+        if arguments.output:
+            write_bidirectional_json(report, arguments.output)
+        print(json.dumps({
+            "status": report.status,
+            "block_count": report.block_count,
+            "total_row_count": report.total_row_count,
+            "total_session_count": report.total_session_count,
+            "bearish": {
+                "event_count": report.bearish.combined.event_count,
+                "pcr_led_price_pct": report.bearish.combined.pcr_led_price_pct,
+                "mean_lead_minutes": report.bearish.combined.mean_lead_minutes,
+                "directional_pct_15m": report.bearish.combined.directional_pct_15m,
+                "direction_support_block_count": report.bearish.combined.direction_support_block_count,
+                "lead_support_block_count": report.bearish.combined.lead_support_block_count,
+                "robustness_status": report.bearish.combined.robustness_status,
+            },
+            "bullish": {
+                "event_count": report.bullish.combined.event_count,
+                "pcr_led_price_pct": report.bullish.combined.pcr_led_price_pct,
+                "mean_lead_minutes": report.bullish.combined.mean_lead_minutes,
+                "directional_pct_15m": report.bullish.combined.directional_pct_15m,
+                "direction_support_block_count": report.bullish.combined.direction_support_block_count,
+                "lead_support_block_count": report.bullish.combined.lead_support_block_count,
+                "robustness_status": report.bullish.combined.robustness_status,
+            },
+            "output": arguments.output,
+        }, indent=2))
+    except (OSError, ValueError) as error:
+        print(json.dumps({"status": "UNAVAILABLE", "issues": [str(error)]}, indent=2))
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="python -m market_lab.runtime")
     subparsers = parser.add_subparsers(dest="service", required=True)
@@ -592,6 +630,13 @@ def main() -> None:
         help="Repeat for each frozen block: NAME evidence.csv reversal.json",
     )
     stage2_discriminator.add_argument("--output")
+    bidirectional = subparsers.add_parser("historical-pcr-bidirectional-compare")
+    bidirectional.add_argument(
+        "--block", action="append", nargs=2, required=True,
+        metavar=("NAME", "EVIDENCE_CSV"),
+        help="Repeat for each frozen block: NAME evidence.csv",
+    )
+    bidirectional.add_argument("--output")
     arguments = parser.parse_args()
 
     if arguments.service == "historical-validate":
@@ -635,6 +680,9 @@ def main() -> None:
         return
     if arguments.service == "historical-pcr-stage2-discriminate":
         _historical_pcr_stage2_discriminate(arguments)
+        return
+    if arguments.service == "historical-pcr-bidirectional-compare":
+        _historical_pcr_bidirectional_compare(arguments)
         return
 
     write_pid(arguments.service)
