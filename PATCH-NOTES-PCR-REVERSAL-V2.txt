@@ -1,0 +1,18 @@
+PCR Early Reversal Research v2
+
+Adds event-based analysis for the strongest 60-session Moving-PCR transition:
+  Stage 1: 5m falling, 15m rising, 30m rising
+  Stage 2: 5m falling, 15m falling, 30m rising
+  Stage 3: 5m falling, 15m falling, 30m falling
+
+Key safeguards:
+- first-entry events only; persistent minute rows are deduplicated
+- no BUY/SELL signal
+- no option P&L or execution assumptions
+- exact same-session timestamp lookups for prior rolling spot changes
+- PCR lead measured against rolling 5m spot momentum turning negative
+- descriptive fixed labels for true bearish reversal / short reversal / pullback / continuation / false warning
+- volume lead/lag intentionally deferred because current evidence CSV has no underlying volume
+
+Command:
+python -m market_lab.runtime historical-pcr-reversal-analyze --input <evidence.csv> --output <report.json>

@@ -1,0 +1,21 @@
+PCR Deep Validation v1
+
+Adds:
+- absolute PCR bands and cumulative thresholds (<0.50, <0.70, <1.00, >1.25, >1.50)
+- 5m/15m/30m all-rising/all-falling alignment per Fixed/Moving/Full panel
+- early-horizon flip candidates (5m first; 5m+15m before 30m)
+- PCR level + 5m turn combinations
+- cross-panel Fixed+Moving+Full alignment
+- exact +5/+10/+15/+30 NIFTY descriptive outcomes
+
+Does NOT:
+- emit BUY/SELL signals
+- tune thresholds on OOS data
+- claim early-flip candidates are confirmed reversals
+- measure volume lead/lag yet (current evidence CSV has no underlying volume)
+- classify true reversal vs pullback yet (planned lead/lag v2 evidence extension)
+
+CLI:
+python -m market_lab.runtime historical-pcr-deep-analyze \
+  --input data/historical-evidence/evidence-20.csv \
+  --output data/historical-evidence/pcr-deep-analysis-20.json

@@ -1,0 +1,24 @@
+Historical Positioning Core v1
+
+Purpose
+- Add provider-independent historical per-strike premium + OI positioning calculations.
+- Preserve the existing historical PCR cache and its schema.
+- Use exact same-instrument historical baselines only; no interpolation and no synthetic zero.
+- Support 5m/15m/30m horizons.
+- Reuse the same positioning semantics as live research:
+  premium up + OI up   -> LONG_BUILDUP
+  premium down + OI up -> SHORT_BUILDUP
+  premium down + OI down -> LONG_UNWINDING
+  premium up + OI down -> SHORT_COVERING
+
+Same-strike combined observations
+- CE LONG_BUILDUP + PE SHORT_BUILDUP -> STRONG_BULLISH
+- CE SHORT_BUILDUP + PE LONG_BUILDUP -> STRONG_BEARISH
+- conservative BULLISH/BEARISH/MIXED/NEUTRAL/UNAVAILABLE states for partial combinations.
+
+Important
+- This patch intentionally does NOT modify HistoricalResearchSession cache schema.
+- Existing 120-session PCR/evidence caches remain valid.
+- Next integration step is a separate sidecar builder that receives reconstructed HistoricalReconstructedSnapshot observations before PCR-only conversion and persists positioning rows per session.
+- The sidecar should initially capture Moving ATM +/-5 strikes at Stage-2 event timestamps and the required exact 5/15/30 minute baselines.
+- Threshold defaults are zero in this provider-independent core. Before production research integration, wire in the existing live StrikePositioningConfig thresholds rather than silently inventing new thresholds.

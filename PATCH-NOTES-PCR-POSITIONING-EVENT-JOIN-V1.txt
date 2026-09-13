@@ -1,0 +1,8 @@
+PCR Positioning Event Join v1
+
+- Research-only join of frozen bullish/bearish Stage-2 first-entry events to positioning sidecar.
+- Scans exact timestamps T0 through T0+5m.
+- Bearish confirmation = any Moving ATM +/-5 strike with combined_5m STRONG_BEARISH.
+- Bullish confirmation = any Moving ATM +/-5 strike with combined_5m STRONG_BULLISH.
+- Reports first confirmation offset and confirmation rate by existing reversal outcome label.
+- No interpolation, no nearest timestamp lookup, no trade signal and no option-P&L assumption.

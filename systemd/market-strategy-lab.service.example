@@ -1,0 +1,20 @@
+# Optional wrapper unit for the existing start/stop scripts.
+# Replace YOUR_LINUX_USER and YOUR_PROJECT_PATH before use.
+
+[Unit]
+Description=Market Strategy Lab
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=YOUR_LINUX_USER
+WorkingDirectory=YOUR_PROJECT_PATH
+ExecStart=YOUR_PROJECT_PATH/scripts/start.sh
+ExecStop=YOUR_PROJECT_PATH/scripts/stop.sh
+TimeoutStartSec=60
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

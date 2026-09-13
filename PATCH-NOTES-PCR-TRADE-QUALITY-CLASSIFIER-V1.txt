@@ -1,0 +1,25 @@
+PCR Trade Quality Classifier V1
+================================
+
+Adds:
+- backend/market_lab/pcr_trade_quality_classifier_v1.py
+- backend/market_lab/pcr_trade_quality_score_v1.py
+- tests/test_pcr_trade_quality_classifier_v1.py
+- tests/test_pcr_trade_quality_score_v1.py
+
+Research design:
+- Development-only training: TRAIN + OOS_A + OOS_B + OOS_C + OOS_D.
+- OOS_E/F/G/H are rejected as training inputs.
+- Separate transparent logistic models for BEARISH and BULLISH.
+- Features are restricted to values available at or before entry.
+- forward_change_* columns are explicitly prohibited from feature use.
+- Label is realized frozen +5/-10/15m policy after 0.50 percentage-point cost.
+- Direction-specific decision threshold is calibrated using leave-one-development-block-out predictions only.
+- Final model is frozen before untouched OOS-H.
+- Scoring never retrains or recalibrates on the block being scored.
+
+Important:
+This patch does not claim a profitable classifier. It creates the leakage-safe
+research/training/scoring pipeline. E/F/G may be scored retrospectively only as
+diagnostics. Untouched OOS-H is the first clean classifier validation after the
+model spec is frozen.

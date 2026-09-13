@@ -1,0 +1,40 @@
+Historical Positioning Sidecar v1
+=================================
+
+Purpose
+-------
+Build a separate historical per-strike premium+OI positioning dataset from reconstructed
+expired option candles. This deliberately does NOT modify HistoricalResearchSession or
+invalidate the existing PCR cache schema.
+
+Data model
+----------
+One wide row per session/timestamp/moving-basket strike (ATM +/- configured wings).
+Includes current CE/PE close, OI, volume plus exact same-instrument 5m/15m/30m:
+- premium change %
+- OI change %
+- side positioning state
+- combined CE/PE observation
+
+Important semantics
+-------------------
+- Exact timestamp only; no nearest-time matching and no interpolation.
+- Baseline is keyed by instrument_key + exact timestamp, even when that strike was not in
+  the previous moving basket. This avoids artificial UNAVAILABLE states when ATM moved.
+- Missing OI/close stays UNAVAILABLE and is never converted to zero.
+- Existing historical PCR/session caches are untouched.
+- Default thresholds are zero to preserve the current positioning rules. Threshold tuning
+  remains a later research task and is not learned here.
+
+Run directly
+------------
+python -m market_lab.historical_positioning_sidecar \
+  --underlying "NSE_INDEX|Nifty 50" \
+  --manifest data/historical-validation/manifest-oos-e-20.json \
+  --wings 5 \
+  --cache-dir data/historical-positioning-cache-oos-e \
+  --output data/historical-evidence/positioning-oos-e.json \
+  --csv-output data/historical-evidence/positioning-oos-e.csv
+
+Rerun the same command after PARTIAL provider responses. Successfully built sessions are
+read from the separate positioning cache on later runs.

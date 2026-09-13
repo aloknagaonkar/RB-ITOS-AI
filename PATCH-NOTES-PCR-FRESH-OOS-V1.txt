@@ -1,0 +1,8 @@
+PCR Fresh OOS Severity Validation v1
+
+- Adds OOS-E 20-session manifest, extending the research calendar to about six months / 120 sessions when combined with the existing 100.
+- Adds historical-pcr-bidirectional-bucket-oos.
+- Consumes the existing 100-session discriminator JSON as a frozen spec.
+- Does not recalculate quartile cut points from OOS-E.
+- Tests only severity features that were monotonic in the frozen 100-session study.
+- No CE/PE order or strategy signal is emitted.

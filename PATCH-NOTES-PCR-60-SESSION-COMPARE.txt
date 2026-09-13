@@ -1,0 +1,19 @@
+PCR 60-Session Comparison v1
+
+Adds:
+- backend/market_lab/pcr_deep_compare.py
+- runtime command historical-pcr-deep-compare
+- tests/test_pcr_deep_compare.py
+
+Purpose:
+Compare frozen PCR deep-analysis candidates across TRAIN, OOS-A and OOS-B without retuning thresholds.
+
+Frozen candidates compared:
+1. moving PCR < 0.70 AND 5m rising -> expected BULLISH
+2. moving PCR > 1.25 AND 5m falling -> expected BEARISH
+3. moving 5m+15m bearish while 30m rising -> expected BEARISH early-turn candidate
+
+Primary comparison horizon: +15m.
+CONSISTENT requires expected-sign mean and median in all three blocks with non-empty samples.
+MIXED requires expected direction in two of three blocks.
+No BUY/SELL signal is emitted.

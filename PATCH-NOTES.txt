@@ -1,0 +1,25 @@
+Historical hypothesis event backtest patch
+
+Copy only:
+- backend/market_lab/historical_hypothesis_backtest.py
+- backend/market_lab/runtime.py
+- tests/test_historical_hypothesis_backtest.py
+
+Command:
+python -m market_lab.runtime historical-backtest-hypotheses \
+  --input data/historical-evidence/evidence-20.csv \
+  --output data/historical-evidence/hypothesis-backtest-20.json \
+  --cooldown-minutes 15
+
+Scope:
+- H1 PCR_FALL_SPREAD_LOW
+- H2 MOVING_FALL_PUT_OI_PRESSURE
+- H3 PCR_SPREAD_LOW
+- H4 MOVING_PCR_STRONG_FALL
+- bearish/PE-direction underlying event study only
+- next exact 1-minute entry
+- 5/10/15/30 minute exact exits
+- cooldown event de-duplication
+- close-to-close MFE/MAE proxies
+- per-session, time-of-day, expiry-day segmentation
+- no option premium P&L, execution, or live signals

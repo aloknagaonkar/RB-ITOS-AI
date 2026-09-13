@@ -1,0 +1,13 @@
+PCR Bidirectional Reversal Research v1
+
+Adds independent bullish and bearish Stage-2 research over the same frozen evidence blocks.
+
+Bearish Stage 2 remains unchanged:
+  5m falling + 15m falling + 30m rising
+
+Bullish Stage 2 is a new research candidate and is NOT assumed valid by symmetry:
+  5m rising + 15m rising + 30m falling
+
+Both directions use first-entry event deduplication, opposite-prior-trend eligibility,
+5m spot-momentum lead timing, symmetric response labels, and per-block robustness.
+No CE/PE order signal is produced.

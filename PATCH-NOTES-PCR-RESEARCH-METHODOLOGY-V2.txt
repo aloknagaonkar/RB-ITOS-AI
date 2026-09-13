@@ -1,0 +1,42 @@
+PCR Research Methodology V2
+===========================
+
+Purpose
+-------
+Remove two methodological weaknesses from the exploratory PCR option research:
+1) current-holdout outcome labels selecting which confidence features are active;
+2) panel-any positioning confirmation across ATM +/-5 strikes.
+
+New primary methodology
+-----------------------
+- Stage-2 definition remains unchanged.
+- Primary confidence profile is FROZEN_D5_D15.
+- Feature identity is explicit and frozen before the next holdout:
+  bearish: fixed_pcr_change_5m + fixed_pcr_change_15m, both increasing favorability;
+  bullish: fixed_pcr_change_5m + fixed_pcr_change_15m, both decreasing favorability.
+- Quartile cut points come only from pcr-bidirectional-discriminator-100.json TRAIN cut points.
+- No current OOS bucket-validation JSON is accepted as an input.
+- Positioning freezes the exact T0 ATM strike and watches only that same strike from T0 through T+5.
+- Missing frozen-strike rows are UNAVAILABLE. No replacement with current ATM or another panel strike.
+- T0 CE/PE instrument keys are carried into the v2 premium backtest.
+- Premium backtest uses that exact T0 contract and NEXT_MINUTE_OPEN after positioning confirmation.
+
+Predeclared diagnostic profile
+------------------------------
+DELTA5_ONLY is included as a predeclared secondary hypothesis. It must not be selected after seeing a holdout and then described as pristine validation.
+
+Files
+-----
+backend/market_lab/pcr_research_methodology_v2.py
+backend/market_lab/pcr_option_ohlc_backtest_v2.py
+tests/test_pcr_research_methodology_v2.py
+tests/test_pcr_option_ohlc_backtest_v2.py
+
+Recommended workflow
+--------------------
+1. Run v2 on OOS-E and OOS-F only as retrospective diagnostics.
+2. Do not change FROZEN_D5_D15 or same-strike semantics from E/F diagnostics.
+3. Freeze/commit the methodology.
+4. Reserve OOS-G as the next untouched validation block.
+
+This patch does not modify historical caches, sidecars, execution, risk, or order placement.

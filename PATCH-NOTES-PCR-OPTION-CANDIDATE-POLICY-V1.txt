@@ -1,0 +1,18 @@
+PCR Option Candidate Policy v1
+
+Purpose
+- Freeze one provisional research policy from OOS-E discovery work.
+- Do not relearn PCR thresholds, timing, target, or stop.
+- Add round-trip cost sensitivity before fresh validation.
+
+Frozen candidate
+- BEARISH/PE: HIGH or VERY_HIGH confidence + confirmation at T0/T+1/T+2.
+- BULLISH/CE: HIGH or VERY_HIGH confidence + confirmation at T+4/T+5.
+- Entry: next-minute OPEN.
+- Exit: +5% target / -10% stop.
+- Same-bar target+stop: assume stop first.
+- Neither hit in 15m: exit at +15m close.
+
+Important
+OOS-E was used to select these rules. Its result is discovery evidence only.
+The exact rule must next be applied unchanged to an untouched fresh OOS set.

@@ -1,0 +1,25 @@
+H3 Robustness Expansion patch
+
+Changed/new files:
+- backend/market_lab/historical_oos_combined.py
+- backend/market_lab/runtime.py
+- tests/test_historical_oos_combined.py
+- examples/historical-oos-b-20-manifest.json
+
+New command:
+python -m market_lab.runtime historical-validate-h3-combined-oos \
+  --block-a data/historical-evidence/evidence-oos.csv \
+  --block-b data/historical-evidence/evidence-oos-b.csv \
+  --spec data/historical-evidence/h3-nx-spec.json \
+  --output data/historical-evidence/h3-oos-combined-validation.json
+
+Frozen H3 threshold is never recalculated.
+Combined robustness gates:
+- both OOS blocks have positive 15m mean directional points
+- combined 15m win rate >= 52%
+- combined 15m median > 0
+- combined 15m mean > 0
+- combined event-session coverage >= 12 sessions
+- combined mean MFE > mean MAE
+
+OOS-B manifest intentionally excludes 2026-06-26 because it is an NSE F&O holiday (Muharram).

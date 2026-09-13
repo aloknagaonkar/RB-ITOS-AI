@@ -1,0 +1,21 @@
+PCR Option Premium Baseline v1
+
+Purpose
+- Evaluate actual ATM CE/PE premium paths for the already-frozen HIGH/VERY_HIGH PCR confidence + positioning-confirmed events.
+- No new PCR thresholds and no change to Stage-2 definitions.
+
+Entry model
+- BULLISH -> ATM CE at positioning-confirmation timestamp.
+- BEARISH -> ATM PE at positioning-confirmation timestamp.
+- Freeze that exact instrument key.
+- Enter using its NEXT MINUTE CLOSE (not confirmation close) to avoid confirmation-candle lookahead with the existing close-only sidecar.
+
+Outputs
+- Exact same-instrument +1/+3/+5/+10/+15 minute returns from entry.
+- Maximum favorable/adverse observed MINUTE-CLOSE excursion through +15m.
+- Summaries by direction, confidence tier, and confirmation timing T0/T+1/T+2/T+3/T+4-5.
+
+Important limitations
+- This is not intrabar MFE/MAE because sidecar v1 does not store option open/high/low.
+- No stop/target, spread, brokerage, taxes, slippage, sizing, or overlap suppression.
+- A later OHLC extension should test next-minute OPEN and intrabar HIGH/LOW.
