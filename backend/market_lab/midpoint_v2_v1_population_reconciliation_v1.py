@@ -47,7 +47,7 @@ def labelled_checkpoint_rows(
             continue
 
         outcome = event.get("primary_outcome")
-        label = strength.outcome_label(outcome)
+        label = strength.outcome_label(direction, outcome)
         direction = strength.direction_for_event(event)
         if direction not in {"BULLISH", "BEARISH"}:
             continue
@@ -182,7 +182,7 @@ def main() -> None:
         source_map[key] = {
             "primary_outcome": e.get("primary_outcome"),
             "historical_outcome_label": strength.outcome_label(
-                e.get("primary_outcome")
+                direction, e.get("primary_outcome")
             ),
             "boundary_break_timestamp": e.get("boundary_break_timestamp"),
             "continuation_timestamp": e.get("continuation_timestamp"),

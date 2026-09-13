@@ -73,3 +73,14 @@ If the four extra events are simply previously `UNRESOLVED` / non-labelled
 events that now pass the frozen T+3 rules, that is a prospective-population
 definition issue. We will then decide explicitly whether V2 includes them,
 rather than allowing them in silently.
+
+
+## Fix1
+
+Corrected integration with the existing repo helper:
+
+```python
+outcome_label(direction, outcome)
+```
+
+The earlier bundle incorrectly passed only `outcome`.
