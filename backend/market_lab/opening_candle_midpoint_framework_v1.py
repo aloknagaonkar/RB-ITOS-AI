@@ -42,7 +42,7 @@ from .opening_red_midpoint_evidence_v1 import (
     underlying_by_session,
 )
 
-RESEARCH_VERSION = "OPENING_CANDLE_MIDPOINT_REVERSAL_FRAMEWORK_V1"
+RESEARCH_VERSION = "OPENING_CANDLE_MIDPOINT_REVERSAL_FRAMEWORK_V1_1"
 ALLOWED_BLOCKS = {"TRAIN", "OOS_A", "OOS_B", "OOS_C", "OOS_D"}
 
 OUTCOME_HORIZON_MINUTES = 30
@@ -498,7 +498,18 @@ def build_event(
     reclaim = {}
     reclaim_ts = parse_dt(primary["reclaim_timestamp"]) if primary["reclaim_timestamp"] else None
     reclaim_snapshots = []
-    if reclaim_ts is not None:
+
+    # V1.1 methodology guard:
+    # Reclaim-path research is valid only when the reclaim occurred BEFORE the
+    # primary continuation target and therefore won the primary path race.
+    # A later midpoint reclaim after an already-successful continuation must
+    # not be counted as a separate reversal setup.
+    primary_is_reclaim = primary["primary_outcome"] in {
+        "RED_BREAK_BULLISH_RECLAIM",
+        "GREEN_BREAK_BEARISH_RECLAIM",
+    }
+
+    if reclaim_ts is not None and primary_is_reclaim:
         reclaim = classify_reclaim_path(
             minute_rows,
             reclaim_ts=reclaim_ts,
@@ -536,9 +547,10 @@ def build_event(
         "primary_direction": setup_direction,
         **primary,
         "snapshots": snapshots,
-        "reclaim_direction": reclaim_direction if reclaim_ts else None,
-        "reclaim_analysis": reclaim if reclaim_ts else None,
+        "reclaim_direction": reclaim_direction if primary_is_reclaim else None,
+        "reclaim_analysis": reclaim if primary_is_reclaim else None,
         "reclaim_snapshots": reclaim_snapshots,
+        "reclaim_path_eligible": primary_is_reclaim,
     }
 
 
@@ -636,6 +648,7 @@ def main() -> None:
             "red_reference": "first later 5m candle with close < open",
             "green_reference": "first later 5m candle with close > open",
             "reference_midpoint_persistent": True,
+            "reclaim_path_requires_reclaim_to_win_primary_race": True,
             "red_primary_path": "midpoint down -> low break -> PE continuation or CE reclaim",
             "green_primary_path": "midpoint up -> high break -> CE continuation or PE reclaim",
             "decision_offsets_minutes": list(DECISION_OFFSETS),
@@ -652,6 +665,7 @@ def main() -> None:
             "oos_h_used": False,
             "snapshots_use_exact_or_backward_data_only": True,
             "future_outcomes_used_as_features": False,
+            "post_continuation_reclaims_excluded_from_reclaim_research": True,
             "pcr_used_as_trade_rule": False,
             "oi_used_as_trade_rule": False,
             "volume_used_as_trade_rule": False,

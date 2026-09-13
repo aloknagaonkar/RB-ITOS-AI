@@ -130,3 +130,22 @@ def test_directional_features_have_same_positive_semantics_for_both_sides():
     assert u["directional_momentum_5m"] > 0
     assert d["directional_distance_beyond_boundary_points"] > 0
     assert u["directional_distance_beyond_boundary_points"] > 0
+
+
+def test_primary_path_records_later_reclaim_but_continuation_wins_race():
+    start = datetime(2026, 8, 12, 10, 0, tzinfo=IST)
+    rows = [
+        row(10, 0, 94),   # boundary break
+        row(10, 1, 84),   # continuation target first
+        row(10, 2, 101),  # midpoint reclaim later
+    ]
+    out = classify_primary_path(
+        rows,
+        break_ts=start,
+        midpoint=100,
+        boundary=95,
+        reference_range=10,
+        direction="DOWN",
+    )
+    assert out["primary_outcome"] == "RED_BEARISH_BREAK_AND_GO"
+    assert out["reclaim_timestamp"] is not None
