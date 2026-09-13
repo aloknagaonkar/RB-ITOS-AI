@@ -11,7 +11,6 @@ def test_max_consecutive_losses():
     assert max_consecutive_losses([1, -1, -2, 3, -1, -1, -1, 2]) == 3
 
 def test_max_drawdown():
-    # equity: 2, 1, -2, 2 => max DD = -4 from peak 2 to -2
     assert max_drawdown([2, -1, -3, 4]) == -4
 
 def test_largest_winner_contribution():
@@ -21,9 +20,24 @@ def test_largest_winner_contribution():
 
 def test_summarize_payoff():
     rows = [
-        {"session_date": "2026-01-01", "direction": "BULLISH", "net_return_pct": 10},
-        {"session_date": "2026-01-02", "direction": "BULLISH", "net_return_pct": -5},
-        {"session_date": "2026-01-03", "direction": "BULLISH", "net_return_pct": -5},
+        {
+            "session_date": "2026-01-01",
+            "entry_timestamp": "2026-01-01T10:00:00+05:30",
+            "direction": "BULLISH",
+            "net_return_pct": 10,
+        },
+        {
+            "session_date": "2026-01-02",
+            "entry_timestamp": "2026-01-02T10:00:00+05:30",
+            "direction": "BULLISH",
+            "net_return_pct": -5,
+        },
+        {
+            "session_date": "2026-01-03",
+            "entry_timestamp": "2026-01-03T10:00:00+05:30",
+            "direction": "BULLISH",
+            "net_return_pct": -5,
+        },
     ]
     out = summarize(rows)
     assert out["win_rate_pct"] == pytest.approx(100 / 3)
