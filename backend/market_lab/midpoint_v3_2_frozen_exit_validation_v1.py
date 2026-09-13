@@ -39,6 +39,8 @@ from pathlib import Path
 from statistics import median
 from typing import Any, Sequence
 
+from market_lab.midpoint_v3_2_chronology_fix_v1 import chronology_key, validate_chronology_rows
+
 RESEARCH_VERSION = "MIDPOINT_V3_2_FROZEN_EXIT_VALIDATION_V1"
 SOURCE_VERSION = "MIDPOINT_V3_2_EXIT_MANAGEMENT_RESEARCH_V1"
 FROZEN_POLICY_ID = "SL5_BE5_TRAIL3_AFTER10_TIME15"
@@ -125,8 +127,6 @@ def largest_winner_contribution(values: Sequence[float], top_n: int) -> dict[str
         ),
     }
 
-def chronology_key(r: dict[str, Any]) -> tuple[str, str]:
-    return (str(r.get("session_date") or ""), str(r.get("direction") or ""))
 
 def summarize(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
     ordered = sorted(rows, key=chronology_key)
@@ -221,6 +221,8 @@ def analyze(source: dict[str, Any]) -> dict[str, Any]:
         and r.get("status") == "EXITED"
         and normalize_block(r.get("block")) in ALLOWED_BLOCKS
     ]
+
+    validate_chronology_rows(rows)
 
     for r in rows:
         r["block"] = normalize_block(r.get("block"))

@@ -306,6 +306,7 @@ def analyze(econ: dict[str, Any], blocks: Sequence[BlockInput]) -> dict[str, Any
                 "policy_id": policy.policy_id,
                 "block": block,
                 "session_date": trade["session_date"],
+                "entry_timestamp": trade.get("entry_timestamp"),
                 "direction": trade.get("direction"),
                 "oi_quality": trade.get("oi_quality"),
                 "t1_observation_state": trade.get("t1_observation_state"),
