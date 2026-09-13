@@ -1,3 +1,5 @@
+import pytest
+
 from market_lab.midpoint_v3_2_frozen_exit_validation_v1 import (
     max_consecutive_losses,
     max_drawdown,
@@ -24,7 +26,7 @@ def test_summarize_payoff():
         {"session_date": "2026-01-03", "direction": "BULLISH", "net_return_pct": -5},
     ]
     out = summarize(rows)
-    assert out["win_rate_pct"] == 100/3
+    assert out["win_rate_pct"] == pytest.approx(100 / 3)
     assert out["average_winner_pct"] == 10
     assert out["average_loser_pct"] == -5
     assert out["payoff_ratio_avg_win_to_avg_loss"] == 2
