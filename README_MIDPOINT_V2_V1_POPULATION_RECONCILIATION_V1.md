@@ -84,3 +84,26 @@ outcome_label(direction, outcome)
 ```
 
 The earlier bundle incorrectly passed only `outcome`.
+
+
+## Fix2
+
+Corrected variable ordering in `labelled_checkpoint_rows()`.
+
+Wrong:
+
+```python
+label = outcome_label(direction, outcome)
+direction = direction_for_event(event)
+```
+
+Correct:
+
+```python
+direction = direction_for_event(event)
+if direction not in {"BULLISH", "BEARISH"}:
+    continue
+label = outcome_label(direction, outcome)
+```
+
+Also added a regression test exercising this code path.

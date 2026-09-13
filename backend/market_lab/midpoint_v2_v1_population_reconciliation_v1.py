@@ -47,10 +47,10 @@ def labelled_checkpoint_rows(
             continue
 
         outcome = event.get("primary_outcome")
-        label = strength.outcome_label(direction, outcome)
         direction = strength.direction_for_event(event)
         if direction not in {"BULLISH", "BEARISH"}:
             continue
+        label = strength.outcome_label(direction, outcome)
         if label not in {"CONTINUATION", "REVERSAL"}:
             continue
 

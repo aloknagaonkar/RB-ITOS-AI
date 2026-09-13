@@ -24,3 +24,25 @@ def test_repo_outcome_label_signature_is_direction_and_outcome():
     # We intentionally do not assert a particular label here; this test
     # catches the one-argument integration mistake by exercising 2 args.
     strength.outcome_label("BULLISH", None)
+
+
+def test_labelled_checkpoint_rows_derives_direction_before_outcome_label(monkeypatch):
+    from market_lab.midpoint_v2_v1_population_reconciliation_v1 import labelled_checkpoint_rows
+
+    framework = {
+        "events": [
+            {
+                "block": "TRAIN",
+                "session_date": "2026-08-19",
+                "setup_type": "GREEN_BREAK",
+                "primary_outcome": "ANY",
+            }
+        ]
+    }
+
+    monkeypatch.setattr(strength, "direction_for_event", lambda e: "BULLISH")
+    monkeypatch.setattr(strength, "outcome_label", lambda direction, outcome: "OTHER")
+    monkeypatch.setattr(strength, "CHECKPOINTS", (1, 3))
+
+    rows = labelled_checkpoint_rows(framework)
+    assert rows == []
