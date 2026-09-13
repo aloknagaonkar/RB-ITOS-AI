@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -169,7 +170,7 @@ def _main() -> None:
 
     load_dotenv(Path(__file__).resolve().parents[2] / ".env")
     manifest = load_historical_batch_manifest(args.manifest)
-    gateway = UpstoxGateway()
+    gateway = UpstoxGateway(os.getenv("UPSTOX_ACCESS_TOKEN", ""))
 
     sessions: list[UnderlyingOHLCSession] = []
     for spec in manifest.sessions:
