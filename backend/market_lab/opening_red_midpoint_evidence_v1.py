@@ -54,7 +54,7 @@ from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-RESEARCH_VERSION = "OPENING_RED_MIDPOINT_EVIDENCE_V1"
+RESEARCH_VERSION = "OPENING_RED_MIDPOINT_EVIDENCE_V1_1"
 IST = timezone(timedelta(hours=5, minutes=30))
 
 ALLOWED_BLOCKS = {"TRAIN", "OOS_A", "OOS_B", "OOS_C", "OOS_D"}
@@ -305,42 +305,166 @@ def spot_features(
     reference_low: float,
     midpoint_cross_count: int,
 ) -> dict[str, Any]:
+    """Return every price feature that is legitimately available at ``ts``.
+
+    V1 incorrectly returned no price features at all until 15 minutes of
+    history existed. V1.1 keeps shorter-horizon information when it exists:
+    1m momentum needs 1 prior minute, 5m momentum needs 5, while 15m momentum
+    and 15m realized volatility still require the full 15-minute history.
+    """
     i = row_index.get(ts)
     if i is None:
         return {"price_status": "UNAVAILABLE"}
 
     closes = [r["close"] for r in minute_rows]
-    if i < 15:
-        return {"price_status": "UNAVAILABLE_INSUFFICIENT_HISTORY"}
+    close = closes[i]
 
-    fast = ema(closes[: i + 1], 5)
-    slow = ema(closes[: i + 1], 15)
+    fast_series = ema(closes[: i + 1], 5)
+    slow_series = ema(closes[: i + 1], 15)
 
-    one_minute_changes = [
-        closes[j] - closes[j - 1]
-        for j in range(max(1, i - 14), i + 1)
-    ]
-    realized_vol = (
-        statistics.pstdev(one_minute_changes)
-        if len(one_minute_changes) >= 2
-        else 0.0
+    spot_momentum_1m = close - closes[i - 1] if i >= 1 else None
+    spot_momentum_5m = close - closes[i - 5] if i >= 5 else None
+    spot_momentum_15m = close - closes[i - 15] if i >= 15 else None
+
+    ema_5 = fast_series[-1] if i >= 4 else None
+    ema_15 = slow_series[-1] if i >= 14 else None
+    ema_spread = (
+        ema_5 - ema_15
+        if ema_5 is not None and ema_15 is not None
+        else None
+    )
+    ema_5_slope_3m = (
+        fast_series[-1] - fast_series[-4]
+        if i >= 4
+        else None
     )
 
-    close = closes[i]
+    realized_vol_15m = None
+    if i >= 15:
+        one_minute_changes = [
+            closes[j] - closes[j - 1]
+            for j in range(i - 14, i + 1)
+        ]
+        if len(one_minute_changes) >= 2:
+            realized_vol_15m = statistics.pstdev(one_minute_changes)
+
     return {
-        "price_status": "AVAILABLE",
+        "price_status": "AVAILABLE_FULL" if i >= 15 else "AVAILABLE_PARTIAL",
+        "history_minutes_available": i,
         "spot": close,
-        "spot_momentum_1m": close - closes[i - 1],
-        "spot_momentum_5m": close - closes[i - 5],
-        "spot_momentum_15m": close - closes[i - 15],
-        "ema_5": fast[-1],
-        "ema_15": slow[-1],
-        "ema_5_minus_ema_15": fast[-1] - slow[-1],
-        "ema_5_slope_3m": fast[-1] - fast[-4] if i >= 3 else None,
-        "realized_vol_15m": realized_vol,
+        "spot_momentum_1m": spot_momentum_1m,
+        "spot_momentum_5m": spot_momentum_5m,
+        "spot_momentum_15m": spot_momentum_15m,
+        "ema_5": ema_5,
+        "ema_15": ema_15,
+        "ema_5_minus_ema_15": ema_spread,
+        "ema_5_slope_3m": ema_5_slope_3m,
+        "realized_vol_15m": realized_vol_15m,
         "distance_from_midpoint_points": close - midpoint,
         "distance_from_reference_low_points": close - reference_low,
         "midpoint_cross_count": midpoint_cross_count,
+    }
+
+
+def _count_level_crosses(
+    rows: Sequence[dict[str, Any]],
+    level: float,
+) -> int:
+    previous: str | None = None
+    crosses = 0
+    for row in rows:
+        close = row["close"]
+        side = "BELOW" if close < level else "ABOVE" if close > level else "AT"
+        if side == "AT":
+            continue
+        if previous is not None and side != previous:
+            crosses += 1
+        previous = side
+    return crosses
+
+
+def _ending_streak(
+    rows: Sequence[dict[str, Any]],
+    predicate,
+) -> int:
+    streak = 0
+    for row in reversed(rows):
+        if predicate(row):
+            streak += 1
+        else:
+            break
+    return streak
+
+
+def _record_low_count(rows: Sequence[dict[str, Any]]) -> int:
+    running_low: float | None = None
+    count = 0
+    for row in rows:
+        close = float(row["close"])
+        if running_low is None or close < running_low:
+            if running_low is not None:
+                count += 1
+            running_low = close
+    return count
+
+
+def post_break_acceptance_features(
+    minute_rows: Sequence[dict[str, Any]],
+    low_break_ts: datetime,
+    ts: datetime,
+    midpoint: float,
+    reference_low: float,
+) -> dict[str, Any]:
+    """Measure acceptance/chop using only rows available by ``ts``."""
+    observed = [
+        row
+        for row in minute_rows
+        if low_break_ts <= row["timestamp"] <= ts
+    ]
+    if not observed or observed[-1]["timestamp"] != ts:
+        return {"post_break_status": "UNAVAILABLE"}
+
+    closes = [float(row["close"]) for row in observed]
+    below_midpoint = sum(close < midpoint for close in closes)
+    below_low = sum(close < reference_low for close in closes)
+    n = len(observed)
+
+    first_close = closes[0]
+    current_close = closes[-1]
+    minutes_since = int((ts - low_break_ts).total_seconds() // 60)
+    denominator = max(1, minutes_since)
+
+    return {
+        "post_break_status": "AVAILABLE",
+        "minutes_since_low_break": minutes_since,
+        "post_break_observation_count": n,
+        "closes_below_midpoint_count": below_midpoint,
+        "closes_below_midpoint_pct": 100.0 * below_midpoint / n,
+        "closes_below_reference_low_count": below_low,
+        "closes_below_reference_low_pct": 100.0 * below_low / n,
+        "consecutive_closes_below_midpoint": _ending_streak(
+            observed, lambda row: row["close"] < midpoint
+        ),
+        "consecutive_closes_below_reference_low": _ending_streak(
+            observed, lambda row: row["close"] < reference_low
+        ),
+        "reference_low_cross_count": _count_level_crosses(
+            observed, reference_low
+        ),
+        "new_close_low_count_since_break": _record_low_count(observed),
+        "net_downside_progress_points": first_close - current_close,
+        "downside_velocity_points_per_minute": (
+            (first_close - current_close) / denominator
+        ),
+        "post_break_close_range_points": max(closes) - min(closes),
+        "post_break_full_range_points": (
+            max(float(row["high"]) for row in observed)
+            - min(float(row["low"]) for row in observed)
+        ),
+        "maximum_rebound_from_low_close_points": (
+            max(closes) - min(closes)
+        ),
+        "current_close": current_close,
     }
 
 
@@ -548,6 +672,47 @@ def first_close_at_or_below(
     return None
 
 
+def _path_metrics(
+    rows: Sequence[dict[str, Any]],
+    midpoint: float,
+    reference_low: float,
+) -> dict[str, Any]:
+    if not rows:
+        return {
+            "observation_count": 0,
+            "acceptance_below_midpoint_pct": None,
+            "acceptance_below_reference_low_pct": None,
+            "midpoint_cross_count": 0,
+            "reference_low_cross_count": 0,
+            "new_close_low_count": 0,
+            "close_range_points": None,
+            "full_range_points": None,
+            "net_downside_progress_points": None,
+        }
+
+    closes = [float(row["close"]) for row in rows]
+    return {
+        "observation_count": len(rows),
+        "acceptance_below_midpoint_pct": (
+            100.0 * sum(close < midpoint for close in closes) / len(closes)
+        ),
+        "acceptance_below_reference_low_pct": (
+            100.0 * sum(close < reference_low for close in closes) / len(closes)
+        ),
+        "midpoint_cross_count": _count_level_crosses(rows, midpoint),
+        "reference_low_cross_count": _count_level_crosses(
+            rows, reference_low
+        ),
+        "new_close_low_count": _record_low_count(rows),
+        "close_range_points": max(closes) - min(closes),
+        "full_range_points": (
+            max(float(row["high"]) for row in rows)
+            - min(float(row["low"]) for row in rows)
+        ),
+        "net_downside_progress_points": closes[0] - closes[-1],
+    }
+
+
 def classify_outcome(
     minute_rows: Sequence[dict[str, Any]],
     low_break_ts: datetime,
@@ -584,25 +749,41 @@ def classify_outcome(
             if minutes <= BREAK_AND_GO_MAX_MINUTES
             else "BREAK_AND_BASE_THEN_GO"
         )
+        path_shape = (
+            "IMMEDIATE_CONTINUATION"
+            if minutes <= BREAK_AND_GO_MAX_MINUTES
+            else "DELAYED_CONTINUATION"
+        )
+        resolution_ts = continuation_ts
     elif reclaim_ts is not None and (
         continuation_ts is None or reclaim_ts <= continuation_ts
     ):
         label = "FALSE_BREAK_RECLAIM"
+        path_shape = "RECLAIM"
         minutes = None
+        resolution_ts = reclaim_ts
     else:
         label = "SIDEWAYS_NO_CONTINUATION"
+        path_shape = "UNRESOLVED_WITHIN_30M"
         minutes = None
+        resolution_ts = horizon_end
 
     observed = [
         row
         for row in minute_rows
         if low_break_ts <= row["timestamp"] <= horizon_end
     ]
+    pre_resolution = [
+        row
+        for row in minute_rows
+        if low_break_ts <= row["timestamp"] <= resolution_ts
+    ]
     min_close = min((row["close"] for row in observed), default=None)
     max_close = max((row["close"] for row in observed), default=None)
 
     return {
         "outcome_label": label,
+        "outcome_path_shape": path_shape,
         "continuation_threshold_points": continuation_points,
         "continuation_level": continuation_level,
         "continuation_timestamp": continuation_ts.isoformat()
@@ -614,6 +795,16 @@ def classify_outcome(
         else None,
         "minimum_close_within_30m": min_close,
         "maximum_close_within_30m": max_close,
+        "pre_resolution_path_metrics": _path_metrics(
+            pre_resolution,
+            midpoint,
+            reference_low,
+        ),
+        "full_30m_path_metrics": _path_metrics(
+            observed,
+            midpoint,
+            reference_low,
+        ),
     }
 
 
@@ -714,6 +905,13 @@ def research_session(
                 midpoint,
                 low,
                 crosses,
+            ),
+            **post_break_acceptance_features(
+                minute_rows,
+                low_break_ts,
+                ts,
+                midpoint,
+                low,
             ),
             **attach_context(
                 session_date,
@@ -846,6 +1044,18 @@ def analyze_snapshot_separation(
         "distance_from_midpoint_points",
         "distance_from_reference_low_points",
         "midpoint_cross_count",
+        "minutes_since_low_break",
+        "closes_below_midpoint_pct",
+        "closes_below_reference_low_pct",
+        "consecutive_closes_below_midpoint",
+        "consecutive_closes_below_reference_low",
+        "reference_low_cross_count",
+        "new_close_low_count_since_break",
+        "net_downside_progress_points",
+        "downside_velocity_points_per_minute",
+        "post_break_close_range_points",
+        "post_break_full_range_points",
+        "maximum_rebound_from_low_close_points",
         "ce_5m_premium_change_pct",
         "ce_5m_oi_change_pct",
         "pe_5m_premium_change_pct",
@@ -1031,6 +1241,10 @@ def main() -> None:
             "midpoint_reclaim_rule": "ONE_MINUTE_CLOSE_ABOVE_ORIGINAL_MIDPOINT",
             "persistent_original_midpoint": True,
             "evidence_offsets_minutes": list(EVIDENCE_OFFSETS_MINUTES),
+            "partial_price_history_retained": True,
+            "post_break_acceptance_features": True,
+            "post_break_chop_features": True,
+            "outcome_path_metrics_recorded": True,
             "outcome_horizon_minutes": OUTCOME_HORIZON_MINUTES,
             "continuation_threshold_definition": (
                 "reference_low - max(10 points, 0.50 * reference_range)"
@@ -1043,6 +1257,8 @@ def main() -> None:
             "oos_e_f_g_h_used": False,
             "oos_h_used": False,
             "evidence_snapshots_use_exact_or_backward_data_only": True,
+            "partial_history_features_use_only_available_backwards_data": True,
+            "post_break_acceptance_features_use_only_data_at_or_before_snapshot": True,
             "pcr_used_as_trade_rule": False,
             "oi_used_as_trade_rule": False,
             "volume_used_as_trade_rule": False,

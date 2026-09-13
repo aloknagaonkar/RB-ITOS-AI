@@ -5,6 +5,9 @@ from market_lab.opening_red_midpoint_evidence_v1 import (
     classify_outcome,
     count_midpoint_crosses,
     select_reference_red_bar,
+    post_break_acceptance_features,
+    spot_features,
+    exact_row_index,
 )
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -137,3 +140,66 @@ def test_midpoint_cross_count_tracks_repeated_reclaims():
         start + timedelta(minutes=3),
         100,
     ) == 3
+
+
+def test_partial_price_features_keep_1m_and_5m_before_15m_history():
+    rows = [
+        minute(9, 15 + i, 100 + i, 101 + i, 99 + i, 100 + i)
+        for i in range(6)
+    ]
+    idx = exact_row_index(rows)
+    ts = rows[-1]["timestamp"]
+    features = spot_features(
+        rows,
+        idx,
+        ts,
+        midpoint=100.0,
+        reference_low=99.0,
+        midpoint_cross_count=0,
+    )
+    assert features["price_status"] == "AVAILABLE_PARTIAL"
+    assert features["spot_momentum_1m"] == 1.0
+    assert features["spot_momentum_5m"] == 5.0
+    assert features["spot_momentum_15m"] is None
+    assert features["realized_vol_15m"] is None
+
+
+def test_post_break_acceptance_features_detect_hold_and_chop():
+    low_break = datetime(2026, 8, 12, 10, 0, tzinfo=IST)
+    rows = [
+        minute(10, 0, 96, 97, 94, 95),
+        minute(10, 1, 95, 96, 93, 94),
+        minute(10, 2, 94, 98, 93, 97),
+        minute(10, 3, 97, 98, 94, 95),
+    ]
+    features = post_break_acceptance_features(
+        rows,
+        low_break,
+        rows[-1]["timestamp"],
+        midpoint=100.0,
+        reference_low=96.0,
+    )
+    assert features["closes_below_midpoint_pct"] == 100.0
+    assert features["closes_below_reference_low_count"] == 3
+    assert features["reference_low_cross_count"] == 2
+    assert features["minutes_since_low_break"] == 3
+    assert features["post_break_status"] == "AVAILABLE"
+
+
+def test_outcome_contains_path_metrics():
+    low_break = datetime(2026, 8, 12, 10, 0, tzinfo=IST)
+    rows = [
+        minute(10, 0, 95, 96, 94, 95),
+        minute(10, 1, 94, 95, 92, 93),
+        minute(10, 2, 93, 94, 84, 85),
+    ]
+    out = classify_outcome(
+        rows,
+        low_break,
+        midpoint=100,
+        reference_low=96,
+        reference_range=10,
+    )
+    assert out["outcome_path_shape"] == "IMMEDIATE_CONTINUATION"
+    assert out["pre_resolution_path_metrics"]["observation_count"] == 3
+    assert out["pre_resolution_path_metrics"]["acceptance_below_midpoint_pct"] == 100.0
