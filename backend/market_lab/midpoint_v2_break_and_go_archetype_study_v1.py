@@ -9,7 +9,7 @@ from pathlib import Path
 from statistics import mean, median
 from typing import Any
 
-RESEARCH_VERSION = "MIDPOINT_V2_BREAK_AND_GO_ARCHETYPE_STUDY_V1"
+RESEARCH_VERSION = "MIDPOINT_V2_BREAK_AND_GO_ARCHETYPE_STUDY_V1_FIX1"
 EXPECTED_STATE_VERSION = "MIDPOINT_STABLE_FEATURE_STATE_MACHINE_V3_2"
 EXPECTED_ECONOMICS_VERSION = "MIDPOINT_V3_2_EXACT_OPTION_ECONOMICS_V1"
 
@@ -56,7 +56,7 @@ def ffloat(v: Any) -> float | None:
 
 
 def load_underlying(path: Path) -> dict[tuple[str, str], dict[str, float]]:
-    out: dict[tuple[str, str], dict[str, float]] = {}
+    out = {}
     with path.open(newline="", encoding="utf-8-sig") as f:
         rd = csv.DictReader(f)
         headers = list(rd.fieldnames or [])
@@ -71,7 +71,7 @@ def load_underlying(path: Path) -> dict[tuple[str, str], dict[str, float]]:
             if not raw:
                 continue
             try:
-                ts = parse_dt(str(raw))
+                ts = parse_dt(raw)
             except ValueError:
                 continue
             sd = str(r.get(date_col)) if date_col and r.get(date_col) else ts.date().isoformat()
@@ -111,14 +111,23 @@ def candidate_events(state: dict[str, Any], start: date, end: date) -> list[dict
         if e.get("t3_state") != TARGET_STATE:
             continue
         out.append(e)
-    return sorted(out, key=lambda r: (r["session_date"], r.get("t3_timestamp") or ""))
+    return sorted(out, key=lambda r: r["session_date"])
 
 
-def directional_underlying_metrics(
-    market: dict[tuple[str, str], dict[str, float]],
-    session_date: str,
-    t3_timestamp: str,
-) -> dict[str, Any]:
+def resolve_t3_timestamp(state_row: dict[str, Any], econ_row: dict[str, Any] | None) -> str | None:
+    # Some V3.2 state-machine artifacts do not persist t3_timestamp.
+    # Exact economics does, and is derived from the same frozen event.
+    for source in (state_row, econ_row or {}):
+        v = source.get("t3_timestamp")
+        if v:
+            return str(v)
+    return None
+
+
+def directional_underlying_metrics(market, session_date: str, t3_timestamp: str | None):
+    if not t3_timestamp:
+        return {"available": False, "issue": "MISSING_T3_TIMESTAMP"}
+
     t3 = parse_dt(t3_timestamp)
     entry_ts = t3 + timedelta(minutes=1)
     entry_bar = market.get((session_date, entry_ts.isoformat()))
@@ -127,22 +136,22 @@ def directional_underlying_metrics(
 
     entry_open = float(entry_bar["open"])
     horizons = (5, 15, 30, 60)
-    closes: dict[str, float | None] = {}
-    favorable_close_points: dict[str, float | None] = {}
+    closes = {}
+    favorable = {}
 
     for m in horizons:
         ts = entry_ts + timedelta(minutes=m)
         bar = market.get((session_date, ts.isoformat()))
         if bar is None:
             closes[f"{m}m"] = None
-            favorable_close_points[f"{m}m"] = None
+            favorable[f"{m}m"] = None
         else:
             c = float(bar["close"])
             closes[f"{m}m"] = c
-            favorable_close_points[f"{m}m"] = entry_open - c  # bearish favorable
+            favorable[f"{m}m"] = entry_open - c
 
     bars = []
-    for m in range(0, 61):
+    for m in range(61):
         ts = entry_ts + timedelta(minutes=m)
         bar = market.get((session_date, ts.isoformat()))
         if bar is not None:
@@ -153,10 +162,6 @@ def directional_underlying_metrics(
 
     best_low = min(float(b["low"]) for _, b in bars)
     worst_high = max(float(b["high"]) for _, b in bars)
-
-    mfe_points_60m = entry_open - best_low
-    mae_points_60m = worst_high - entry_open
-
     best_close = min(float(b["close"]) for _, b in bars)
     worst_close = max(float(b["close"]) for _, b in bars)
 
@@ -166,53 +171,50 @@ def directional_underlying_metrics(
         "entry_timestamp": entry_ts.isoformat(),
         "entry_underlying_open": entry_open,
         "horizon_closes": closes,
-        "favorable_close_points": favorable_close_points,
-        "mfe_points_60m": mfe_points_60m,
-        "mae_points_60m": mae_points_60m,
+        "favorable_close_points": favorable,
+        "mfe_points_60m": entry_open - best_low,
+        "mae_points_60m": worst_high - entry_open,
         "best_close_favorable_points_60m": entry_open - best_close,
         "worst_close_adverse_points_60m": worst_close - entry_open,
         "available_post_entry_bars_0_to_60": len(bars),
     }
 
 
-def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
+def summarize(rows):
     valid = [r for r in rows if r["underlying"].get("available")]
     mfe = [r["underlying"]["mfe_points_60m"] for r in valid]
-    c15 = [
-        r["underlying"]["favorable_close_points"]["15m"]
-        for r in valid
-        if r["underlying"]["favorable_close_points"]["15m"] is not None
-    ]
-    c30 = [
-        r["underlying"]["favorable_close_points"]["30m"]
-        for r in valid
-        if r["underlying"]["favorable_close_points"]["30m"] is not None
-    ]
-    c60 = [
-        r["underlying"]["favorable_close_points"]["60m"]
-        for r in valid
-        if r["underlying"]["favorable_close_points"]["60m"] is not None
-    ]
+
+    def horizon_vals(h):
+        return [
+            r["underlying"]["favorable_close_points"][h]
+            for r in valid
+            if r["underlying"]["favorable_close_points"][h] is not None
+        ]
+
     return {
         "candidate_count": len(rows),
         "underlying_available_count": len(valid),
+        "underlying_unavailable_count": len(rows) - len(valid),
+        "underlying_issue_counts": dict(sorted(Counter(
+            r["underlying"].get("issue") for r in rows if not r["underlying"].get("available")
+        ).items())),
         "t1_oi_quality_counts": dict(sorted(Counter(r.get("t1_oi_quality") for r in rows).items())),
         "t3_oi_quality_counts": dict(sorted(Counter(r.get("t3_oi_quality") for r in rows).items())),
         "price_pass_count_counts": dict(sorted(Counter(r.get("price_pass_count") for r in rows).items())),
         "mean_mfe_points_60m": mean(mfe) if mfe else None,
         "median_mfe_points_60m": median(mfe) if mfe else None,
-        "mean_favorable_close_points_15m": mean(c15) if c15 else None,
-        "mean_favorable_close_points_30m": mean(c30) if c30 else None,
-        "mean_favorable_close_points_60m": mean(c60) if c60 else None,
+        "mean_favorable_close_points_15m": mean(horizon_vals("15m")) if horizon_vals("15m") else None,
+        "mean_favorable_close_points_30m": mean(horizon_vals("30m")) if horizon_vals("30m") else None,
+        "mean_favorable_close_points_60m": mean(horizon_vals("60m")) if horizon_vals("60m") else None,
     }
 
 
-def main() -> None:
+def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--state", required=True)
     ap.add_argument("--underlying", required=True)
     ap.add_argument("--economics", required=True)
-    ap.add_argument("--exit-research", required=False)
+    ap.add_argument("--exit-research")
     ap.add_argument("--start", default=DEFAULT_START.isoformat())
     ap.add_argument("--end", default=DEFAULT_END.isoformat())
     ap.add_argument("--output", required=True)
@@ -227,13 +229,12 @@ def main() -> None:
     if economics.get("research_version") != EXPECTED_ECONOMICS_VERSION:
         raise SystemExit(f"unexpected economics version={economics.get('research_version')!r}")
 
-    start = date.fromisoformat(args.start)
-    end = date.fromisoformat(args.end)
     market = load_underlying(Path(args.underlying))
+    start, end = date.fromisoformat(args.start), date.fromisoformat(args.end)
 
-    econ_idx = {event_key(r): r for r in (economics.get("rows") or [])}
+    econ_idx = {event_key(r): r for r in economics.get("rows") or []}
 
-    exit_idx: dict[tuple[str, str, str], dict[str, Any]] = {}
+    exit_idx = {}
     if exit_doc:
         for r in exit_doc.get("rows") or []:
             if r.get("policy_id") == FROZEN_POLICY:
@@ -242,15 +243,21 @@ def main() -> None:
     rows = []
     for e in candidate_events(state, start, end):
         key = event_key(e)
-        score = e.get("t3_score") or {}
         econ = econ_idx.get(key)
         ex = exit_idx.get(key)
+        score = e.get("t3_score") or {}
+        t3_timestamp = resolve_t3_timestamp(e, econ)
 
-        row = {
+        rows.append({
             "session_date": e["session_date"],
             "setup_type": e["setup_type"],
             "direction": e["direction"],
-            "t3_timestamp": e.get("t3_timestamp"),
+            "t3_timestamp": t3_timestamp,
+            "t3_timestamp_source": (
+                "STATE" if e.get("t3_timestamp") else
+                "EXACT_OPTION_ECONOMICS" if econ and econ.get("t3_timestamp") else
+                "UNAVAILABLE"
+            ),
             "t1_observation_state": (e.get("t1_observation") or {}).get("state"),
             "t1_oi_quality": (e.get("t1_observation") or {}).get("oi_quality"),
             "t3_oi_quality": score.get("oi_quality"),
@@ -259,14 +266,9 @@ def main() -> None:
             "price_pass_count": score.get("price_pass_count"),
             "primary_outcome": e.get("primary_outcome"),
             "underlying": directional_underlying_metrics(
-                market, e["session_date"], e["t3_timestamp"]
+                market, e["session_date"], t3_timestamp
             ),
-            "option_economics": None,
-            "frozen_exit": None,
-        }
-
-        if econ is not None:
-            row["option_economics"] = {
+            "option_economics": None if econ is None else {
                 "strike": econ.get("strike"),
                 "instrument_key": econ.get("instrument_key"),
                 "entry_timestamp": econ.get("entry_timestamp"),
@@ -275,17 +277,14 @@ def main() -> None:
                 "mae_pct_15m": econ.get("mae_pct_15m"),
                 "net_returns_pct": econ.get("net_returns_pct"),
                 "oi_quality": econ.get("oi_quality"),
-            }
-
-        if ex is not None:
-            row["frozen_exit"] = {
+            },
+            "frozen_exit": None if ex is None else {
                 "policy_id": ex.get("policy_id"),
                 "exit_timestamp": ex.get("exit_timestamp"),
                 "exit_reason": ex.get("exit_reason"),
                 "net_return_pct": ex.get("net_return_pct"),
-            }
-
-        rows.append(row)
+            },
+        })
 
     ranked = sorted(
         rows,
@@ -296,11 +295,8 @@ def main() -> None:
         ),
         reverse=True,
     )
-
     for i, r in enumerate(ranked, 1):
         r["rank_by_underlying_mfe_60m"] = i
-
-    sep7 = next((r for r in ranked if r["session_date"] == "2026-09-07"), None)
 
     result = {
         "status": "AVAILABLE",
@@ -315,13 +311,14 @@ def main() -> None:
             "retrospective_primary_outcome_used_for_candidate_selection": False,
         },
         "summary": summarize(ranked),
-        "sep7_reference": sep7,
+        "sep7_reference": next((r for r in ranked if r["session_date"] == "2026-09-07"), None),
         "ranked_rows": ranked,
         "integrity": {
             "frozen_v1_candidates_only": True,
             "ranking_uses_underlying_only": True,
             "option_pnl_used_only_descriptively": True,
             "oi_used_descriptively_not_as_posthoc_filter": True,
+            "t3_timestamp_may_be_sourced_from_exact_economics": True,
             "oos_h_used": False,
             "no_entry_rule_modified": True,
             "no_exit_rule_modified": True,
