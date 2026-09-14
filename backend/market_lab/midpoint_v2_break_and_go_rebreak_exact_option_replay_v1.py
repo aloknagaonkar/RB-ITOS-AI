@@ -9,7 +9,7 @@ from pathlib import Path
 from statistics import mean, median
 from typing import Any
 
-RESEARCH_VERSION = "MIDPOINT_V2_BREAK_AND_GO_REBREAK_EXACT_OPTION_REPLAY_V1"
+RESEARCH_VERSION = "MIDPOINT_V2_BREAK_AND_GO_REBREAK_EXACT_OPTION_REPLAY_V1_FIX1"
 EXPECTED_DIAGNOSTIC_VERSION = "MIDPOINT_V2_BREAK_AND_GO_REBREAK_REENTRY_DIAGNOSTICS_V1_FIX1"
 POLICY_ID = "SL5_BE5_TRAIL3_AFTER10_TIME15"
 
@@ -67,24 +67,68 @@ def parse_block_specs(specs, loader):
 
 def load_positioning(path: Path):
     """
-    Flexible CSV loader for exact option-chain rows.
-    Expected semantic fields:
-      timestamp, instrument_key, strike, option_type/right/type, underlying/spot
-    Underlying spot is optional because ATM can also be supplied by the
-    diagnostic's underlying confirmation close.
+    Supports both schemas:
+
+    LONG / one-option-per-row:
+      timestamp,instrument_key,strike,option_type,...
+
+    WIDE / CE+PE on one row:
+      timestamp,moving_atm,strike,ce_instrument_key,pe_instrument_key,...
+
+    For the wide schema we emit the PE leg directly because this replay is
+    bearish-only and requires an exact ATM PE.
     """
     rows = []
     with path.open(newline="", encoding="utf-8-sig") as f:
         rd = csv.DictReader(f)
         headers = list(rd.fieldnames or [])
+        lower = {h.lower(): h for h in headers}
+
         ts_col = first_existing(headers, ("timestamp", "datetime", "time", "ts"))
+
+        # Wide schema detection first.
+        pe_key_col = optional_existing(headers, ("pe_instrument_key", "put_instrument_key"))
+        moving_atm_col = optional_existing(headers, ("moving_atm", "atm", "atm_strike"))
+        strike_col = optional_existing(headers, ("strike", "strike_price"))
+
+        if pe_key_col is not None:
+            if moving_atm_col is None and strike_col is None:
+                raise ValueError(
+                    "wide positioning schema found pe_instrument_key but no moving_atm/strike"
+                )
+            for r in rd:
+                raw = r.get(ts_col)
+                inst = r.get(pe_key_col)
+                if not raw or not inst:
+                    continue
+                try:
+                    ts = parse_dt(raw)
+                except ValueError:
+                    continue
+
+                strike = ffloat(r.get(moving_atm_col)) if moving_atm_col else None
+                if strike is None and strike_col:
+                    strike = ffloat(r.get(strike_col))
+                if strike is None:
+                    continue
+
+                rows.append({
+                    "timestamp": ts.isoformat(),
+                    "instrument_key": str(inst),
+                    "strike": strike,
+                    "option_type": "PE",
+                })
+            return rows
+
+        # Long schema fallback.
         inst_col = first_existing(headers, ("instrument_key", "instrument", "instrument_token"))
         strike_col = first_existing(headers, ("strike", "strike_price"))
         type_col = first_existing(headers, ("option_type", "right", "type", "instrument_type"))
-        spot_col = optional_existing(headers, ("underlying_price", "spot", "spot_price", "underlying", "underlying_ltp"))
+
         for r in rd:
             raw = r.get(ts_col)
-            if not raw:
+            inst = r.get(inst_col)
+            if not raw or not inst:
                 continue
             try:
                 ts = parse_dt(raw)
@@ -95,10 +139,9 @@ def load_positioning(path: Path):
                 continue
             rows.append({
                 "timestamp": ts.isoformat(),
-                "instrument_key": str(r.get(inst_col)),
+                "instrument_key": str(inst),
                 "strike": strike,
                 "option_type": str(r.get(type_col)).upper(),
-                "spot": None if spot_col is None else ffloat(r.get(spot_col)),
             })
     return rows
 
@@ -152,7 +195,6 @@ def select_exact_atm_pe(positioning_rows, confirmation_ts: str, underlying_close
         and is_pe(r["option_type"])
         and int(round(r["strike"])) == target_strike
     ]
-
     if len(candidates) == 1:
         return {
             "available": True,
@@ -192,7 +234,6 @@ def replay_frozen_exit(option_market, instrument_key: str, entry_ts: datetime, e
 
         o, h, l, c = map(float, (bar["open"], bar["high"], bar["low"], bar["close"]))
 
-        # Next-bar activation: apply pending changes at start of this bar.
         if pending_be:
             active_stop = max(active_stop, entry_price)
             active_regime = "BREAKEVEN"
@@ -393,6 +434,12 @@ def main():
             "entry": "NEXT_MINUTE_OPEN",
             "nearest_strike_fallback": False,
             "nearest_time_fallback": False,
+        },
+        "source_schema_support": {
+            "wide_positioning_schema_supported": True,
+            "wide_pe_key": "pe_instrument_key",
+            "wide_atm_source_preference": ["moving_atm", "atm", "atm_strike", "strike"],
+            "long_positioning_schema_supported": True,
         },
         "exit_policy": {
             "policy_id": POLICY_ID,
