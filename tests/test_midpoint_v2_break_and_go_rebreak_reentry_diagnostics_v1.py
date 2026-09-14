@@ -1,13 +1,21 @@
-from market_lab.midpoint_v2_break_and_go_rebreak_reentry_diagnostics_v1 import normalize_stop_regime
+from market_lab.midpoint_v2_break_and_go_rebreak_reentry_diagnostics_v1 import (
+    extract_framework_rows,
+)
 
-def test_normalize_initial_sl5():
-    assert normalize_stop_regime({"stop_regime":"INITIAL_SL5"}) == "INITIAL_SL5"
+def test_framework_boundary_extract():
+    doc = {"events": [{
+        "session_date":"2026-09-07",
+        "setup_type":"RED_BREAK",
+        "reference_low":23838.25,
+        "reference_high":23861.30,
+    }]}
+    idx = extract_framework_rows(doc)
+    assert idx[("2026-09-07","RED_BREAK")]["reference_low"] == 23838.25
 
-def test_normalize_sl5_alias():
-    assert normalize_stop_regime({"stop_type":"SL5"}) == "INITIAL_SL5"
-
-def test_normalize_breakeven():
-    assert normalize_stop_regime({"active_stop_regime":"BREAKEVEN"}) == "BREAKEVEN"
-
-def test_missing_regime():
-    assert normalize_stop_regime({}) is None
+def test_green_not_used_as_red_boundary():
+    doc = {"events": [{
+        "session_date":"2026-09-07",
+        "setup_type":"GREEN_BREAK",
+        "reference_low":23828.25,
+    }]}
+    assert extract_framework_rows(doc) == {}
