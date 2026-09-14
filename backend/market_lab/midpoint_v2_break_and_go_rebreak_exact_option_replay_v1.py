@@ -9,7 +9,7 @@ from pathlib import Path
 from statistics import mean, median
 from typing import Any
 
-RESEARCH_VERSION = "MIDPOINT_V2_BREAK_AND_GO_REBREAK_EXACT_OPTION_REPLAY_V1_FIX1"
+RESEARCH_VERSION = "MIDPOINT_V2_BREAK_AND_GO_REBREAK_EXACT_OPTION_REPLAY_V1_FIX2"
 EXPECTED_DIAGNOSTIC_VERSION = "MIDPOINT_V2_BREAK_AND_GO_REBREAK_REENTRY_DIAGNOSTICS_V1_FIX1"
 POLICY_ID = "SL5_BE5_TRAIL3_AFTER10_TIME15"
 
@@ -35,6 +35,15 @@ def ffloat(v):
         return None
     try:
         return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def fint(v):
+    if v in (None, ""):
+        return None
+    try:
+        return int(float(v))
     except (TypeError, ValueError):
         return None
 
@@ -67,60 +76,57 @@ def parse_block_specs(specs, loader):
 
 def load_positioning(path: Path):
     """
-    Supports both schemas:
+    Supports the actual wide positioning schema:
+      timestamp,moving_atm,strike,strike_offset,pe_instrument_key,...
 
-    LONG / one-option-per-row:
-      timestamp,instrument_key,strike,option_type,...
+    IMPORTANT:
+    - `moving_atm` is the ATM reference for the whole +/-5 chain snapshot.
+    - `strike` is the actual strike represented by each row.
+    - `strike_offset == 0` is the canonical ATM row.
 
-    WIDE / CE+PE on one row:
-      timestamp,moving_atm,strike,ce_instrument_key,pe_instrument_key,...
-
-    For the wide schema we emit the PE leg directly because this replay is
-    bearish-only and requires an exact ATM PE.
+    FIX2 corrects FIX1, which accidentally copied moving_atm into every row's
+    strike field and therefore turned all 11 chain rows into apparent ATM
+    matches.
     """
     rows = []
     with path.open(newline="", encoding="utf-8-sig") as f:
         rd = csv.DictReader(f)
         headers = list(rd.fieldnames or [])
-        lower = {h.lower(): h for h in headers}
 
         ts_col = first_existing(headers, ("timestamp", "datetime", "time", "ts"))
-
-        # Wide schema detection first.
         pe_key_col = optional_existing(headers, ("pe_instrument_key", "put_instrument_key"))
-        moving_atm_col = optional_existing(headers, ("moving_atm", "atm", "atm_strike"))
         strike_col = optional_existing(headers, ("strike", "strike_price"))
+        moving_atm_col = optional_existing(headers, ("moving_atm", "atm", "atm_strike"))
+        offset_col = optional_existing(headers, ("strike_offset", "offset"))
+        expiry_col = optional_existing(headers, ("expiry", "expiry_date"))
 
         if pe_key_col is not None:
-            if moving_atm_col is None and strike_col is None:
-                raise ValueError(
-                    "wide positioning schema found pe_instrument_key but no moving_atm/strike"
-                )
+            if strike_col is None:
+                raise ValueError("wide positioning schema requires actual strike column")
+
             for r in rd:
                 raw = r.get(ts_col)
                 inst = r.get(pe_key_col)
-                if not raw or not inst:
+                strike = ffloat(r.get(strike_col))
+                if not raw or not inst or strike is None:
                     continue
                 try:
                     ts = parse_dt(raw)
                 except ValueError:
                     continue
 
-                strike = ffloat(r.get(moving_atm_col)) if moving_atm_col else None
-                if strike is None and strike_col:
-                    strike = ffloat(r.get(strike_col))
-                if strike is None:
-                    continue
-
                 rows.append({
                     "timestamp": ts.isoformat(),
                     "instrument_key": str(inst),
                     "strike": strike,
+                    "moving_atm": None if moving_atm_col is None else ffloat(r.get(moving_atm_col)),
+                    "strike_offset": None if offset_col is None else fint(r.get(offset_col)),
+                    "expiry": None if expiry_col is None else r.get(expiry_col),
                     "option_type": "PE",
                 })
             return rows
 
-        # Long schema fallback.
+        # Long-schema fallback.
         inst_col = first_existing(headers, ("instrument_key", "instrument", "instrument_token"))
         strike_col = first_existing(headers, ("strike", "strike_price"))
         type_col = first_existing(headers, ("option_type", "right", "type", "instrument_type"))
@@ -128,19 +134,21 @@ def load_positioning(path: Path):
         for r in rd:
             raw = r.get(ts_col)
             inst = r.get(inst_col)
-            if not raw or not inst:
+            strike = ffloat(r.get(strike_col))
+            if not raw or not inst or strike is None:
                 continue
             try:
                 ts = parse_dt(raw)
             except ValueError:
                 continue
-            strike = ffloat(r.get(strike_col))
-            if strike is None:
-                continue
+
             rows.append({
                 "timestamp": ts.isoformat(),
                 "instrument_key": str(inst),
                 "strike": strike,
+                "moving_atm": None,
+                "strike_offset": None,
+                "expiry": None if expiry_col is None else r.get(expiry_col),
                 "option_type": str(r.get(type_col)).upper(),
             })
     return rows
@@ -189,32 +197,63 @@ def is_pe(v: str) -> bool:
 
 def select_exact_atm_pe(positioning_rows, confirmation_ts: str, underlying_close: float):
     target_strike = nearest_50(underlying_close)
-    candidates = [
+
+    time_rows = [
         r for r in positioning_rows
-        if r["timestamp"] == confirmation_ts
-        and is_pe(r["option_type"])
-        and int(round(r["strike"])) == target_strike
+        if r["timestamp"] == confirmation_ts and is_pe(r["option_type"])
     ]
-    if len(candidates) == 1:
+
+    # Preferred canonical selection for the observed wide schema:
+    # exact timestamp + actual strike + offset 0.
+    offset_zero = [
+        r for r in time_rows
+        if int(round(r["strike"])) == target_strike
+        and r.get("strike_offset") == 0
+    ]
+    if len(offset_zero) == 1:
+        r = offset_zero[0]
         return {
             "available": True,
             "issue": None,
             "atm_strike": target_strike,
-            "instrument_key": candidates[0]["instrument_key"],
+            "instrument_key": r["instrument_key"],
+            "expiry": r.get("expiry"),
+            "selection_method": "EXACT_TIMESTAMP_ACTUAL_STRIKE_OFFSET_ZERO",
         }
-    if len(candidates) == 0:
+    if len(offset_zero) > 1:
+        return {
+            "available": False,
+            "issue": "AMBIGUOUS_OFFSET_ZERO_ATM_PE",
+            "atm_strike": target_strike,
+            "candidate_count": len(offset_zero),
+        }
+
+    # Long-schema compatibility: exact timestamp + exact actual strike.
+    exact = [
+        r for r in time_rows
+        if int(round(r["strike"])) == target_strike
+    ]
+    if len(exact) == 1:
+        r = exact[0]
+        return {
+            "available": True,
+            "issue": None,
+            "atm_strike": target_strike,
+            "instrument_key": r["instrument_key"],
+            "expiry": r.get("expiry"),
+            "selection_method": "EXACT_TIMESTAMP_ACTUAL_STRIKE",
+        }
+    if len(exact) == 0:
         return {
             "available": False,
             "issue": "EXACT_ATM_PE_NOT_FOUND",
             "atm_strike": target_strike,
-            "instrument_key": None,
         }
     return {
         "available": False,
         "issue": "AMBIGUOUS_EXACT_ATM_PE",
         "atm_strike": target_strike,
-        "instrument_key": None,
-        "candidate_count": len(candidates),
+        "candidate_count": len(exact),
     }
 
 
@@ -385,6 +424,8 @@ def main():
                     "confirmation_underlying_close": confirmation_close,
                     "atm_strike": selected["atm_strike"],
                     "instrument_key": inst,
+                    "expiry": selected.get("expiry"),
+                    "selection_method": selected.get("selection_method"),
                     "entry_timestamp": entry_ts.isoformat(),
                 }
             else:
@@ -402,6 +443,8 @@ def main():
                     "confirmation_underlying_close": confirmation_close,
                     "atm_strike": selected["atm_strike"],
                     "instrument_key": inst,
+                    "expiry": selected.get("expiry"),
+                    "selection_method": selected.get("selection_method"),
                     "entry_timestamp": entry_ts.isoformat(),
                     "entry_price": entry_price,
                     "exit": exit_result if exit_result.get("available") else None,
@@ -437,8 +480,10 @@ def main():
         },
         "source_schema_support": {
             "wide_positioning_schema_supported": True,
+            "wide_actual_strike_field": "strike",
+            "wide_atm_reference_field": "moving_atm",
+            "wide_atm_row_selector": "strike_offset == 0",
             "wide_pe_key": "pe_instrument_key",
-            "wide_atm_source_preference": ["moving_atm", "atm", "atm_strike", "strike"],
             "long_positioning_schema_supported": True,
         },
         "exit_policy": {
@@ -458,6 +503,8 @@ def main():
             "candidate_set_predeclared_from_structural_diagnostic": True,
             "single_close_only_case_excluded": True,
             "option_pnl_not_used_to_select_candidates": True,
+            "wide_schema_uses_actual_strike_not_moving_atm_per_row": True,
+            "wide_schema_prefers_offset_zero_atm_row": True,
             "exact_moving_atm_only": True,
             "next_minute_open_only": True,
             "frozen_exit_mechanics_reused": True,
