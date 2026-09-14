@@ -7,9 +7,9 @@ from collections import Counter
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from statistics import mean, median
-from typing import Any
+from typing import Any, Iterable
 
-RESEARCH_VERSION = "MIDPOINT_V2_BREAK_AND_GO_ARCHETYPE_STUDY_V1_FIX1"
+RESEARCH_VERSION = "MIDPOINT_V2_BREAK_AND_GO_ARCHETYPE_STUDY_V1_FIX2"
 EXPECTED_STATE_VERSION = "MIDPOINT_STABLE_FEATURE_STATE_MACHINE_V3_2"
 EXPECTED_ECONOMICS_VERSION = "MIDPOINT_V3_2_EXACT_OPTION_ECONOMICS_V1"
 
@@ -53,6 +53,69 @@ def ffloat(v: Any) -> float | None:
         return float(v)
     except (TypeError, ValueError):
         return None
+
+
+def walk_dicts(obj: Any) -> Iterable[dict[str, Any]]:
+    """Yield every dict recursively so research artifacts need not expose `rows`."""
+    if isinstance(obj, dict):
+        yield obj
+        for v in obj.values():
+            yield from walk_dicts(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from walk_dicts(v)
+
+
+def extract_economics_rows(doc: dict[str, Any]) -> list[dict[str, Any]]:
+    """
+    Accept both flat `rows` schema and nested research artifacts.
+    An economics row must identify the event and carry exact option entry fields.
+    """
+    out = []
+    seen = set()
+    for r in walk_dicts(doc):
+        if not all(r.get(k) is not None for k in ("session_date", "setup_type", "direction")):
+            continue
+        if r.get("t3_state") != TARGET_STATE:
+            continue
+        if "entry_timestamp" not in r or "entry_price" not in r:
+            continue
+        sig = (
+            str(r.get("block")),
+            str(r.get("session_date")),
+            str(r.get("setup_type")),
+            str(r.get("direction")),
+            str(r.get("entry_timestamp")),
+        )
+        if sig in seen:
+            continue
+        seen.add(sig)
+        out.append(r)
+    return out
+
+
+def extract_exit_rows(doc: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not doc:
+        return []
+    out = []
+    seen = set()
+    for r in walk_dicts(doc):
+        if r.get("policy_id") != FROZEN_POLICY:
+            continue
+        if not all(r.get(k) is not None for k in ("session_date", "direction", "entry_timestamp")):
+            continue
+        sig = (
+            str(r.get("block")),
+            str(r.get("session_date")),
+            str(r.get("direction")),
+            str(r.get("entry_timestamp")),
+            str(r.get("policy_id")),
+        )
+        if sig in seen:
+            continue
+        seen.add(sig)
+        out.append(r)
+    return out
 
 
 def load_underlying(path: Path) -> dict[tuple[str, str], dict[str, float]]:
@@ -115,12 +178,17 @@ def candidate_events(state: dict[str, Any], start: date, end: date) -> list[dict
 
 
 def resolve_t3_timestamp(state_row: dict[str, Any], econ_row: dict[str, Any] | None) -> str | None:
-    # Some V3.2 state-machine artifacts do not persist t3_timestamp.
-    # Exact economics does, and is derived from the same frozen event.
     for source in (state_row, econ_row or {}):
         v = source.get("t3_timestamp")
         if v:
             return str(v)
+
+    # Exact economics entry is frozen as next-minute OPEN after T+3.
+    # Therefore entry_timestamp - 1 minute is a deterministic reconstruction,
+    # not a future/P&L inference.
+    if econ_row and econ_row.get("entry_timestamp"):
+        return (parse_dt(str(econ_row["entry_timestamp"])) - timedelta(minutes=1)).isoformat()
+
     return None
 
 
@@ -136,8 +204,7 @@ def directional_underlying_metrics(market, session_date: str, t3_timestamp: str 
 
     entry_open = float(entry_bar["open"])
     horizons = (5, 15, 30, 60)
-    closes = {}
-    favorable = {}
+    closes, favorable = {}, {}
 
     for m in horizons:
         ts = entry_ts + timedelta(minutes=m)
@@ -191,6 +258,9 @@ def summarize(rows):
             if r["underlying"]["favorable_close_points"][h] is not None
         ]
 
+    def avg(xs):
+        return mean(xs) if xs else None
+
     return {
         "candidate_count": len(rows),
         "underlying_available_count": len(valid),
@@ -198,14 +268,16 @@ def summarize(rows):
         "underlying_issue_counts": dict(sorted(Counter(
             r["underlying"].get("issue") for r in rows if not r["underlying"].get("available")
         ).items())),
+        "economics_joined_count": sum(r["option_economics"] is not None for r in rows),
+        "frozen_exit_joined_count": sum(r["frozen_exit"] is not None for r in rows),
         "t1_oi_quality_counts": dict(sorted(Counter(r.get("t1_oi_quality") for r in rows).items())),
         "t3_oi_quality_counts": dict(sorted(Counter(r.get("t3_oi_quality") for r in rows).items())),
         "price_pass_count_counts": dict(sorted(Counter(r.get("price_pass_count") for r in rows).items())),
-        "mean_mfe_points_60m": mean(mfe) if mfe else None,
+        "mean_mfe_points_60m": avg(mfe),
         "median_mfe_points_60m": median(mfe) if mfe else None,
-        "mean_favorable_close_points_15m": mean(horizon_vals("15m")) if horizon_vals("15m") else None,
-        "mean_favorable_close_points_30m": mean(horizon_vals("30m")) if horizon_vals("30m") else None,
-        "mean_favorable_close_points_60m": mean(horizon_vals("60m")) if horizon_vals("60m") else None,
+        "mean_favorable_close_points_15m": avg(horizon_vals("15m")),
+        "mean_favorable_close_points_30m": avg(horizon_vals("30m")),
+        "mean_favorable_close_points_60m": avg(horizon_vals("60m")),
     }
 
 
@@ -232,32 +304,46 @@ def main():
     market = load_underlying(Path(args.underlying))
     start, end = date.fromisoformat(args.start), date.fromisoformat(args.end)
 
-    econ_idx = {event_key(r): r for r in economics.get("rows") or []}
+    economics_rows = extract_economics_rows(economics)
+    econ_idx = {event_key(r): r for r in economics_rows}
 
+    exit_rows = extract_exit_rows(exit_doc)
     exit_idx = {}
-    if exit_doc:
-        for r in exit_doc.get("rows") or []:
-            if r.get("policy_id") == FROZEN_POLICY:
-                exit_idx[event_key(r)] = r
+    for r in exit_rows:
+        # Exit-management rows do not always carry setup_type.
+        # Join by date+direction+entry timestamp later.
+        exit_idx[(str(r["session_date"]), str(r["direction"]), str(r["entry_timestamp"]))] = r
 
     rows = []
     for e in candidate_events(state, start, end):
         key = event_key(e)
         econ = econ_idx.get(key)
-        ex = exit_idx.get(key)
         score = e.get("t3_score") or {}
         t3_timestamp = resolve_t3_timestamp(e, econ)
+
+        ex = None
+        if econ and econ.get("entry_timestamp"):
+            ex = exit_idx.get((
+                str(e["session_date"]),
+                str(e["direction"]),
+                str(econ["entry_timestamp"]),
+            ))
+
+        if e.get("t3_timestamp"):
+            t3_source = "STATE"
+        elif econ and econ.get("t3_timestamp"):
+            t3_source = "EXACT_OPTION_ECONOMICS_T3"
+        elif econ and econ.get("entry_timestamp"):
+            t3_source = "EXACT_OPTION_ECONOMICS_ENTRY_MINUS_1M"
+        else:
+            t3_source = "UNAVAILABLE"
 
         rows.append({
             "session_date": e["session_date"],
             "setup_type": e["setup_type"],
             "direction": e["direction"],
             "t3_timestamp": t3_timestamp,
-            "t3_timestamp_source": (
-                "STATE" if e.get("t3_timestamp") else
-                "EXACT_OPTION_ECONOMICS" if econ and econ.get("t3_timestamp") else
-                "UNAVAILABLE"
-            ),
+            "t3_timestamp_source": t3_source,
             "t1_observation_state": (e.get("t1_observation") or {}).get("state"),
             "t1_oi_quality": (e.get("t1_observation") or {}).get("oi_quality"),
             "t3_oi_quality": score.get("oi_quality"),
@@ -302,6 +388,10 @@ def main():
         "status": "AVAILABLE",
         "research_version": RESEARCH_VERSION,
         "window": {"start": start.isoformat(), "end": end.isoformat()},
+        "source_discovery": {
+            "economics_candidate_rows_found": len(economics_rows),
+            "exit_policy_rows_found": len(exit_rows),
+        },
         "selection_rule": {
             "setup_type": TARGET_SETUP,
             "direction": TARGET_DIRECTION,
@@ -318,7 +408,8 @@ def main():
             "ranking_uses_underlying_only": True,
             "option_pnl_used_only_descriptively": True,
             "oi_used_descriptively_not_as_posthoc_filter": True,
-            "t3_timestamp_may_be_sourced_from_exact_economics": True,
+            "economics_rows_discovered_recursively": True,
+            "t3_from_entry_minus_1m_allowed_only_because_frozen_entry_is_next_minute_open": True,
             "oos_h_used": False,
             "no_entry_rule_modified": True,
             "no_exit_rule_modified": True,
