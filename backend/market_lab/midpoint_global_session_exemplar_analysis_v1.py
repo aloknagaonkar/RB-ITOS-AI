@@ -25,7 +25,7 @@ import csv
 import json
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from statistics import mean, median
 from typing import Any
@@ -272,40 +272,31 @@ def extract_features(
     stable: dict[str, Any] | None,
     positioning: dict[tuple[str, str, str], dict[str, Any]],
     futures: dict[tuple[str, str], dict[str, Any]],
+    diag_idx: dict[tuple[str, str, str, str], dict[str, Any]],
 ) -> dict[str, Any]:
     block = str(e.get("block"))
     session = str(e.get("session_date"))
+    setup = str(e.get("setup_type") or "")
     direction = str(e.get("direction"))
     v2 = e.get("v2_result") if isinstance(e.get("v2_result"), dict) else {}
-    signal_raw = (
-        e.get("confirmation_timestamp")
-        or v2.get("confirmation_timestamp")
-        or e.get("t3_timestamp")
-        or (stable or {}).get("t3_timestamp")
-    )
-    ts = parse_ts(signal_raw)
-    cp = latest_completed_5m(ts) if ts else None
+
+    # For global comparison, T3 is the common decision-time anchor for all 184
+    # structural events. Later V2 confirmation remains recorded separately.
+    t3_raw = e.get("t3_timestamp") or (stable or {}).get("t3_timestamp")
+    t3_ts = parse_ts(t3_raw)
+    confirmation_raw = e.get("confirmation_timestamp") or v2.get("confirmation_timestamp")
+    confirmation_ts = parse_ts(confirmation_raw)
+
+    cp = latest_completed_5m(t3_ts) if t3_ts else None
     p = positioning.get((block, session, cp.isoformat())) if cp else None
     f = futures.get((session, cp.isoformat())) if cp else None
 
-    price_features = {}
-    t3_score = (stable or {}).get("t3_score") or {}
-    pf = (stable or {}).get("price_features") or {}
-    if isinstance(pf, dict):
-        price_features.update(pf)
-
-    for key in [
-        "acceptance_pct",
-        "momentum_5m_directional",
-        "progress_points",
-        "giveback_from_best_checkpoint_points",
-        "consecutive_closes",
-        "velocity",
-    ]:
-        if key not in price_features:
-            v = e.get(key)
-            if v is not None:
-                price_features[key] = v
+    t3_score = (stable or {}).get("t3_score") or e.get("t3_score") or {}
+    price_features = actual_t3_features(
+        block, session, setup,
+        t3_ts.isoformat() if t3_ts else None,
+        diag_idx,
+    )
 
     fv_dist = None
     fv_pct = None
@@ -322,12 +313,24 @@ def extract_features(
         )
 
     return {
-        "signal_timestamp": ts.isoformat() if ts else None,
+        "t3_timestamp": t3_ts.isoformat() if t3_ts else None,
+        "signal_timestamp": (
+            confirmation_ts.isoformat()
+            if confirmation_ts
+            else (t3_ts.isoformat() if t3_ts else None)
+        ),
+        "v2_confirmation_timestamp": confirmation_ts.isoformat() if confirmation_ts else None,
         "oi_vwap_checkpoint_timestamp": cp.isoformat() if cp else None,
         "price_features": price_features,
+        "price_features_available_count": len(price_features),
         "price_pass_count": t3_score.get("price_pass_count"),
         "price_pass_ratio": t3_score.get("price_pass_ratio"),
+        "feature_passes": t3_score.get("feature_passes"),
         "oi_quality": str((stable or {}).get("oi_quality") or t3_score.get("oi_quality") or ""),
+        "exact_oi_transition_t1_to_t3": (
+            (stable or {}).get("exact_oi_transition_t1_to_t3")
+            or e.get("exact_oi_transition_t1_to_t3")
+        ),
         "oi": p,
         "futures": {
             **(f or {}),
@@ -336,7 +339,6 @@ def extract_features(
             "aligned": aligned,
         } if f else None,
     }
-
 
 def attach_option_economics(
     row: dict[str, Any],
@@ -450,6 +452,226 @@ def compact_rank(r: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+
+def walk_dicts(x: Any):
+    if isinstance(x, dict):
+        yield x
+        for v in x.values():
+            yield from walk_dicts(v)
+    elif isinstance(x, list):
+        for v in x:
+            yield from walk_dicts(v)
+
+
+def diagnostic_feature_index(doc: dict[str, Any]) -> dict[tuple[str, str, str, str], dict[str, Any]]:
+    """
+    Extract actual checkpoint feature VALUES from MIDPOINT_FAILURE_DIAGNOSTICS_V2_2.
+
+    The diagnostics artifact has evolved across research versions, so this uses
+    field discovery rather than relying on a single container path. Only rows
+    with an actual `price_features` dict are indexed.
+    """
+    out: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    for r in walk_dicts(doc):
+        pf = r.get("price_features")
+        if not isinstance(pf, dict) or not pf:
+            continue
+        block = str(r.get("block") or "")
+        session = str(r.get("session_date") or "")
+        setup = str(r.get("setup_type") or "")
+        ts_raw = pick(
+            r,
+            "timestamp",
+            "checkpoint_timestamp",
+            "provider_timestamp",
+            "t3_timestamp",
+            "datetime",
+            "time",
+        )
+        ts = parse_ts(ts_raw)
+        if block in ALLOWED_BLOCKS and session and setup and ts:
+            out[(block, session, setup, ts.isoformat())] = r
+    return out
+
+
+def actual_t3_features(
+    block: str,
+    session: str,
+    setup: str,
+    t3_timestamp: str | None,
+    diag_idx: dict[tuple[str, str, str, str], dict[str, Any]],
+) -> dict[str, Any]:
+    if not t3_timestamp:
+        return {}
+    ts = parse_ts(t3_timestamp)
+    if not ts:
+        return {}
+    row = diag_idx.get((block, session, setup, ts.isoformat()))
+    if not row:
+        return {}
+    pf = dict(row.get("price_features") or {})
+    # Normalize historical naming to the frozen V3.2 feature names.
+    if "momentum_5m_directional" not in pf and "momentum_5m" in pf:
+        pf["momentum_5m_directional"] = pf.get("momentum_5m")
+    return {
+        k: pf.get(k)
+        for k in (
+            "acceptance_pct",
+            "momentum_5m_directional",
+            "progress_points",
+            "giveback_from_best_checkpoint_points",
+            "consecutive_closes",
+            "velocity",
+        )
+        if pf.get(k) is not None
+    }
+
+
+def load_underlying(items: list[tuple[str, Path]]) -> dict[tuple[str, str, str], dict[str, Any]]:
+    out = {}
+    for block, path in items:
+        if block not in ALLOWED_BLOCKS:
+            raise ValueError(block)
+        for r in load_csv(path):
+            ts = parse_ts(pick(r, "timestamp", "datetime", "provider_timestamp", "time"))
+            if not ts:
+                continue
+            session = str(pick(r, "session_date", "date") or ts.date().isoformat())
+            out[(block, session, ts.isoformat())] = {
+                "open": num(pick(r, "open")),
+                "high": num(pick(r, "high")),
+                "low": num(pick(r, "low")),
+                "close": num(pick(r, "close")),
+            }
+    return out
+
+
+def round_atm_50(spot: float) -> float:
+    return float(int((spot + 25.0) // 50.0) * 50)
+
+
+def load_option_ohlc(items: list[tuple[str, Path]]) -> dict[str, Any]:
+    by_contract: dict[tuple[str, str, str], dict[str, dict[str, Any]]] = defaultdict(dict)
+    contract_meta: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    seen_meta = set()
+
+    for block, path in items:
+        if block not in ALLOWED_BLOCKS:
+            raise ValueError(block)
+        for r in load_csv(path):
+            ts = parse_ts(pick(r, "timestamp", "datetime", "provider_timestamp", "time"))
+            inst = str(pick(r, "instrument_key", "option_instrument_key") or "")
+            if not ts or not inst:
+                continue
+            session = str(pick(r, "session_date", "date") or ts.date().isoformat())
+            strike = num(pick(r, "strike", "strike_price"))
+            side = str(pick(r, "side", "option_side", "instrument_type") or "").upper()
+            if side in {"CALL", "CE"}:
+                side = "CE"
+            elif side in {"PUT", "PE"}:
+                side = "PE"
+
+            by_contract[(block, session, inst)][ts.isoformat()] = {
+                "open": num(pick(r, "open")),
+                "high": num(pick(r, "high")),
+                "low": num(pick(r, "low")),
+                "close": num(pick(r, "close")),
+            }
+            mk = (block, session, inst)
+            if mk not in seen_meta and strike is not None and side in {"CE", "PE"}:
+                contract_meta[(block, session)].append({
+                    "instrument_key": inst,
+                    "strike": float(strike),
+                    "side": side,
+                })
+                seen_meta.add(mk)
+    return {"series": by_contract, "meta": contract_meta}
+
+
+def counterfactual_exact_atm_economics(
+    row: dict[str, Any],
+    underlying: dict[tuple[str, str, str], dict[str, Any]],
+    option_data: dict[str, Any],
+) -> tuple[dict[str, Any] | None, str | None]:
+    """
+    Attach a common, comparable retrospective economic path for every structural
+    event at its T3 timestamp in the ORIGINAL structural direction.
+
+    This is NOT a strategy trade for rejected events; it is a counterfactual
+    measurement used only to compare opportunity quality across all 184 events.
+    """
+    block = row["block"]
+    session = row["session_date"]
+    direction = row["direction"]
+    ts = parse_ts(row.get("t3_timestamp") or row.get("signal_timestamp"))
+    if not ts:
+        return None, "MISSING_T3_TIMESTAMP"
+
+    under = underlying.get((block, session, ts.isoformat()))
+    if not under or under.get("close") is None:
+        return None, "MISSING_UNDERLYING_T3_CLOSE"
+
+    atm = round_atm_50(float(under["close"]))
+    side = "CE" if direction == "BULLISH" else "PE"
+    candidates = [
+        m for m in option_data["meta"].get((block, session), [])
+        if m["side"] == side and abs(float(m["strike"]) - atm) < 1e-9
+    ]
+    if len(candidates) != 1:
+        return None, (
+            "MISSING_EXACT_ATM_CONTRACT" if not candidates
+            else "AMBIGUOUS_EXACT_ATM_CONTRACT"
+        )
+
+    meta = candidates[0]
+    series = option_data["series"].get((block, session, meta["instrument_key"]), {})
+    entry_ts = ts + timedelta(minutes=1)
+    entry_row = series.get(entry_ts.isoformat())
+    if not entry_row or entry_row.get("open") is None:
+        return None, "MISSING_NEXT_MINUTE_OPTION_OPEN"
+
+    entry = float(entry_row["open"])
+    econ = {
+        "basis": "COUNTERFACTUAL_T3_ORIGINAL_DIRECTION_EXACT_ATM",
+        "is_actual_strategy_trade": False,
+        "option_side": side,
+        "strike": atm,
+        "instrument_key": meta["instrument_key"],
+        "entry_timestamp": entry_ts.isoformat(),
+        "entry_price": entry,
+    }
+    for h in HORIZONS:
+        exit_row = series.get((entry_ts + timedelta(minutes=h)).isoformat())
+        econ[f"net_{h}m_pct"] = (
+            None if not exit_row or exit_row.get("close") is None
+            else ((float(exit_row["close"]) / entry) - 1.0) * 100.0 - 0.5
+        )
+
+    path = [
+        series.get((entry_ts + timedelta(minutes=i)).isoformat())
+        for i in range(15)
+    ]
+    highs = [float(x["high"]) for x in path if x and x.get("high") is not None]
+    lows = [float(x["low"]) for x in path if x and x.get("low") is not None]
+    econ["mfe_pct_15m"] = (
+        ((max(highs) / entry) - 1.0) * 100.0 if highs else None
+    )
+    econ["mae_pct_15m"] = (
+        ((min(lows) / entry) - 1.0) * 100.0 if lows else None
+    )
+    econ["complete_15m_path"] = all(x is not None for x in path)
+    return econ, None
+
+
+def read_session_dates(path: Path | None) -> set[str]:
+    if path is None or not path.exists():
+        return set()
+    return {
+        line.strip()
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    }
+
 def parse_named(v: str) -> tuple[str, Path]:
     b, p = v.split("|", 1)
     if b not in ALLOWED_BLOCKS:
@@ -465,6 +687,10 @@ def main() -> None:
     ap.add_argument("--canonical-option-economics", required=True)
     ap.add_argument("--positioning", action="append", required=True, type=parse_named)
     ap.add_argument("--futures-vwap", required=True)
+    ap.add_argument("--checkpoint-diagnostics", required=True)
+    ap.add_argument("--underlying", action="append", required=True, type=parse_named)
+    ap.add_argument("--option-ohlc", action="append", required=True, type=parse_named)
+    ap.add_argument("--expected-session-dates-file", required=False)
     ap.add_argument("--sep15-intraday", required=False)
     ap.add_argument("--output", required=True)
     args = ap.parse_args()
@@ -473,6 +699,7 @@ def main() -> None:
     stable_doc = load_json(Path(args.stable_state))
     comparison = load_json(Path(args.controlled_comparison))
     economics = load_json(Path(args.canonical_option_economics))
+    checkpoint_diag = load_json(Path(args.checkpoint_diagnostics))
 
     events = load_structural_events(structural)
     stable_idx = stable_feature_index(stable_doc)
@@ -480,6 +707,9 @@ def main() -> None:
     all_option_rows = all_option_trade_index(economics)
     positioning = load_positioning(args.positioning)
     futures = load_futures(Path(args.futures_vwap))
+    diag_idx = diagnostic_feature_index(checkpoint_diag)
+    underlying = load_underlying(args.underlying)
+    option_data = load_option_ohlc(args.option_ohlc)
 
     rows = []
     for e in events:
@@ -499,12 +729,27 @@ def main() -> None:
             "midpoint_break_timestamp": e.get("midpoint_break_timestamp"),
             "boundary_break_timestamp": e.get("boundary_break_timestamp"),
         }
-        base.update(extract_features(e, stable, positioning, futures))
-        base = attach_option_economics(base, armc_idx, all_option_rows)
+        base.update(extract_features(e, stable, positioning, futures, diag_idx))
+        # Preserve actual strategy economics where available, then build a common
+        # counterfactual T3 exact-ATM path for every event for apples-to-apples ranking.
+        actual = attach_option_economics(base, armc_idx, all_option_rows)
+        base["actual_strategy_option_economics"] = actual.get("option_economics")
+        cf, cf_issue = counterfactual_exact_atm_economics(base, underlying, option_data)
+        base["option_economics"] = cf
+        base["counterfactual_economics_issue"] = cf_issue
         base["quality_bucket"] = quality_bucket(base)
         rows.append(base)
 
     sessions = sorted({r["session_date"] for r in rows})
+    expected_sessions = read_session_dates(
+        Path(args.expected_session_dates_file) if args.expected_session_dates_file else None
+    )
+    session_audit = {
+        "structural_unique_session_count": len(sessions),
+        "expected_session_count": len(expected_sessions) if expected_sessions else None,
+        "extra_in_structural_vs_expected": sorted(set(sessions) - expected_sessions) if expected_sessions else [],
+        "missing_in_structural_vs_expected": sorted(expected_sessions - set(sessions)) if expected_sessions else [],
+    }
 
     by_direction = {
         d: summarize([r for r in rows if r["direction"] == d])
@@ -523,6 +768,8 @@ def main() -> None:
         if p.exists():
             sep15 = load_json(p)
 
+    econ_issue_counts = dict(Counter(r.get("counterfactual_economics_issue") or "AVAILABLE" for r in rows))
+    feature_coverage = dict(Counter(str(r.get("price_features_available_count", 0)) for r in rows))
     result = {
         "status": "AVAILABLE",
         "research_version": RESEARCH_VERSION,
@@ -533,11 +780,19 @@ def main() -> None:
             "blocks": sorted(ALLOWED_BLOCKS),
             "forbidden_blocks": sorted(FORBIDDEN_BLOCKS),
             "sep15_current_day_included_as_external_reference": sep15 is not None,
+            "session_count_audit": session_audit,
+        },
+        "coverage": {
+            "counterfactual_option_economics": econ_issue_counts,
+            "t3_price_feature_value_count_distribution": feature_coverage,
+            "events_with_all_6_t3_feature_values": sum(1 for r in rows if r.get("price_features_available_count") == 6),
         },
         "overall": summarize(rows),
         "by_direction": by_direction,
         "by_decision_family": by_decision,
         "quality_bucket_counts": quality_counts,
+        "coverage": result["coverage"],
+        "session_count_audit": session_audit,
         "top_bullish_by_5m": [compact_rank(r) for r in top_rank(rows, "BULLISH")],
         "top_bearish_by_5m": [compact_rank(r) for r in top_rank(rows, "BEARISH")],
         "bottom_bullish_by_5m": [compact_rank(r) for r in bottom_rank(rows, "BULLISH")],
@@ -552,6 +807,8 @@ def main() -> None:
             "oos_e_f_g_h_used": False,
             "paper_or_live_order_emission_allowed": False,
             "outcomes_used_only_for_retrospective_grouping_and_ranking": True,
+            "global_ranking_uses_common_t3_counterfactual_exact_atm": True,
+            "rejected_events_are_not_mislabeled_as_actual_strategy_trades": True,
         },
         "interpretation_guard": (
             "Ranking and quality buckets use realized outcomes only for retrospective research. "
