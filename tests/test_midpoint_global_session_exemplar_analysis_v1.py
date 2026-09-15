@@ -71,3 +71,10 @@ def test_actual_t3_features_normalizes_momentum_name():
     out = actual_t3_features(*key[:3], key[3], idx)
     assert out["momentum_5m_directional"] == 32.7
     assert len(out) == 6
+
+
+def test_result_construction_has_no_self_reference():
+    import inspect
+    import market_lab.midpoint_global_session_exemplar_analysis_v1 as m
+    source = inspect.getsource(m.main)
+    assert '"coverage": result["coverage"]' not in source

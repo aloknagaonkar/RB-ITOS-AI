@@ -791,7 +791,6 @@ def main() -> None:
         "by_direction": by_direction,
         "by_decision_family": by_decision,
         "quality_bucket_counts": quality_counts,
-        "coverage": result["coverage"],
         "session_count_audit": session_audit,
         "top_bullish_by_5m": [compact_rank(r) for r in top_rank(rows, "BULLISH")],
         "top_bearish_by_5m": [compact_rank(r) for r in top_rank(rows, "BEARISH")],
