@@ -43,3 +43,15 @@ def test_valid_development_blocks_pass():
         row("BEARISH", "OOS_D", 2.0),
     ]
     assert validate_rows(rows) == []
+
+
+def test_source_schema_uses_top_level_arm_c_trades():
+    src = {
+        "comparison": {"arm_c_trade_count": 2},
+        "arm_c": {"summary": {"trade_count": 2}},
+        "arm_c_trades": [
+            row("BULLISH", "TRAIN", 1.0),
+            row("BEARISH", "OOS_A", -1.0),
+        ],
+    }
+    assert len(src["arm_c_trades"]) == src["comparison"]["arm_c_trade_count"]

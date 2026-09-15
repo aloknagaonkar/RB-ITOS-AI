@@ -109,9 +109,16 @@ def main() -> None:
 
     src = json.loads(Path(args.comparison).read_text(encoding="utf-8"))
     arm_c = src.get("arm_c") or {}
-    rows = arm_c.get("trades") or []
+    rows = src.get("arm_c_trades")
     if not isinstance(rows, list):
-        raise SystemExit("arm_c.trades missing or invalid in comparison artifact")
+        raise SystemExit("top-level arm_c_trades missing or invalid in comparison artifact")
+
+    expected_count = int((src.get("comparison") or {}).get("arm_c_trade_count") or 0)
+    if len(rows) != expected_count:
+        raise SystemExit(
+            f"Arm C population mismatch: arm_c_trades={len(rows)} "
+            f"but comparison.arm_c_trade_count={expected_count}"
+        )
 
     issues = validate_rows(rows)
     if issues:
