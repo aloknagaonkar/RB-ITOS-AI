@@ -276,6 +276,49 @@ function Health({label,value,note}:{label:string;value:string;note:string}) {
 }
 
 const positioningLabels:Record<PositioningClassification,string> = {LONG_BUILDUP:'LB',SHORT_BUILDUP:'SB',LONG_UNWINDING:'LW',SHORT_COVERING:'SC',NEUTRAL:'N',UNAVAILABLE:'—'}
+
+type OiDirectionalStatus = 'BULLISH'|'BEARISH'|'MIXED'|'UNAVAILABLE'
+
+const oiDirectionalStatus = (
+  ce?: StrikePositioningResult,
+  pe?: StrikePositioningResult,
+): OiDirectionalStatus => {
+  const ceState = ce?.classification
+  const peState = pe?.classification
+
+  if (
+    !ceState || !peState ||
+    ceState === 'UNAVAILABLE' ||
+    peState === 'UNAVAILABLE'
+  ) return 'UNAVAILABLE'
+
+  if (
+    ceState === 'LONG_BUILDUP' &&
+    peState === 'SHORT_BUILDUP'
+  ) return 'BULLISH'
+
+  if (
+    ceState === 'SHORT_BUILDUP' &&
+    peState === 'LONG_BUILDUP'
+  ) return 'BEARISH'
+
+  return 'MIXED'
+}
+
+const oiDirectionalBadge = (
+  ce?: StrikePositioningResult,
+  pe?: StrikePositioningResult,
+) => {
+  const status = oiDirectionalStatus(ce, pe)
+  const label = status === 'UNAVAILABLE' ? '—' : status
+
+  return (
+    <span className={`oi-direction ${status.toLowerCase()}`}>
+      {label}
+    </span>
+  )
+}
+
 function StrikePositioning({records,status,view,horizon,movingAtm,fixedAtm,onView,onHorizon}:{
   records:StrikePositioningResult[]; status:'loading'|'refreshing'|'ready'|'error'; view:'moving'|'fixed'|'full'; horizon:PositioningHorizon
   movingAtm:number|null; fixedAtm:number|null; onView:(v:'moving'|'fixed'|'full')=>void; onHorizon:(h:PositioningHorizon)=>void
@@ -299,12 +342,12 @@ function StrikePositioning({records,status,view,horizon,movingAtm,fixedAtm,onVie
     {status==='loading'&&!records.length?<div className="positioning-message">Strike Positioning loading...</div>:status==='error'&&!records.length?<div className="positioning-message">Strike Positioning unavailable</div>:
       view==='fixed'&&fixedAtm==null?<div className="positioning-message">Fixed Morning ATM unavailable for this session.</div>:!strikes.length?<div className="positioning-message">No positioning data available</div>:
       <div className={'positioning-table-scroll '+(view==='full'?'full':'')}><table className="positioning-table"><thead>
-        <tr className="positioning-sides"><th colSpan={4}>CALL</th><th>STRIKE</th><th colSpan={4}>PUT</th></tr>
+        <tr className="positioning-sides"><th colSpan={4}>CALL</th><th>STRIKE</th><th>OI STATUS</th><th colSpan={4}>PUT</th></tr>
         <tr><th>LTP</th><th>ΔP%</th><th>ΔOI%</th><th>State</th><th>Strike</th><th>State</th><th>ΔOI%</th><th>ΔP%</th><th>LTP</th></tr>
       </thead><tbody>{strikes.map(strike=>{const pair=pairs.get(strike)??{},isAtm=atm===strike;return <tr key={strike} className={isAtm?'positioning-atm':''}>
         <td>{value(pair.CE?.current_ltp)}</td><td>{percent(pair.CE?.price_change_pct)}</td><td>{percent(pair.CE?.observed_oi_change_pct)}</td><td>{positionState(pair.CE)}</td>
         <th scope="row">{number(strike)}{isAtm&&<small>ATM</small>}</th>
-        <td>{positionState(pair.PE)}</td><td>{percent(pair.PE?.observed_oi_change_pct)}</td><td>{percent(pair.PE?.price_change_pct)}</td><td>{value(pair.PE?.current_ltp)}</td>
+        <td>{oiDirectionalBadge(pair.CE,pair.PE)}</td><td>{positionState(pair.PE)}</td><td>{percent(pair.PE?.observed_oi_change_pct)}</td><td>{percent(pair.PE?.price_change_pct)}</td><td>{value(pair.PE?.current_ltp)}</td>
       </tr>})}</tbody></table></div>}
     <div className="panel-foot">LB Long Buildup · SB Short Buildup · LW Long Unwinding · SC Short Covering · N Neutral</div>
   </section>
