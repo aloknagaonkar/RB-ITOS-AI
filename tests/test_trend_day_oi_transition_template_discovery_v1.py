@@ -1,3 +1,5 @@
+import pytest
+
 from market_lab.trend_day_oi_transition_template_discovery_v1 import (
     sign_combo, summarize
 )
@@ -21,6 +23,6 @@ def test_summary_keeps_quantity_pct_and_pcr():
     assert s["ce_delta"]["median"]==15.0
     assert s["pe_pct"]["median"]==2.0
     assert s["activity"]["median"]==35.0
-    assert s["pcr_change"]["median"]==0.0
+    assert s["pcr_change"]["median"] == pytest.approx(0.0, abs=1e-12)
     assert s["positive_imbalance_count"]==1
     assert s["negative_imbalance_count"]==1
