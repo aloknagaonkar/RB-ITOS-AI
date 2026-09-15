@@ -115,11 +115,24 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def load_structural_events(doc: dict[str, Any]) -> list[dict[str, Any]]:
-    events = doc.get("events")
+    # Canonical MIDPOINT_V2_STRUCTURAL_RECONSTRUCTION_V1 stores its
+    # 184 reconstructed structural events in top-level `rows`, not `events`.
+    # Keep `events` as a compatibility fallback for future/alternate artifacts.
+    events = doc.get("rows")
+    source_key = "rows"
     if not isinstance(events, list):
-        raise ValueError("structural reconstruction missing top-level events list")
+        events = doc.get("events")
+        source_key = "events"
+    if not isinstance(events, list):
+        raise ValueError(
+            "structural reconstruction missing top-level rows/events list; "
+            f"keys={sorted(doc.keys())}"
+        )
+
     out = []
     for e in events:
+        if not isinstance(e, dict):
+            continue
         block = str(e.get("block") or "")
         if block in FORBIDDEN_BLOCKS:
             continue
@@ -128,10 +141,24 @@ def load_structural_events(doc: dict[str, Any]) -> list[dict[str, Any]]:
         session = str(e.get("session_date") or "")
         if not session:
             continue
+
+        # `direction` is the original structural direction.  For new V2 arms,
+        # v2_result.entry_direction may differ (failed-break reclaim). Preserve
+        # both and use original direction for the global structural population.
         direction = str(e.get("direction") or "")
         if direction not in {"BULLISH", "BEARISH"}:
             continue
-        out.append(dict(e))
+
+        row = dict(e)
+        row["_structural_source_key"] = source_key
+        out.append(row)
+
+    expected = doc.get("structural_event_count")
+    if expected is not None and len(out) != int(expected):
+        raise ValueError(
+            f"structural population mismatch: loaded={len(out)} "
+            f"expected structural_event_count={expected}"
+        )
     return out
 
 
@@ -216,18 +243,26 @@ def latest_completed_5m(ts: datetime) -> datetime:
 
 def decision_family(e: dict[str, Any]) -> str:
     t3 = str(e.get("t3_state") or "")
-    final = str(e.get("v2_final_state") or e.get("final_state") or "")
-    if final == "CONFIRM_BASE_THEN_GO":
+    v2 = e.get("v2_result") if isinstance(e.get("v2_result"), dict) else {}
+    final = str(
+        v2.get("final_state")
+        or e.get("v2_final_state")
+        or e.get("final_state")
+        or ""
+    )
+    arm = str(v2.get("entry_arm") or e.get("entry_arm") or "")
+
+    if arm == "BASE_THEN_GO" or final == "CONFIRM_BASE_THEN_GO":
         return "BASE_THEN_GO"
-    if final == "CONFIRM_FAILED_BREAK_RECLAIM":
+    if arm == "FAILED_BREAK_RECLAIM" or final == "CONFIRM_FAILED_BREAK_RECLAIM":
         return "FAILED_BREAK_RECLAIM"
-    if t3 == "CONFIRM_CONTINUATION" or final == "CONFIRM_CONTINUATION":
+    if arm == "IMMEDIATE_CONTINUATION" or t3 == "CONFIRM_CONTINUATION" or final == "CONFIRM_CONTINUATION":
         return "IMMEDIATE_CONTINUATION"
     if "CANCEL" in t3 or "CANCEL" in final:
         return "CANCEL"
     if "RECLAIM" in t3 or "RECLAIM" in final:
         return "RECLAIM"
-    if "WAIT" in t3 or "WAIT" in final:
+    if "WAIT" in t3 or "WAIT" in final or "BASE_WATCH" in final:
         return "WAIT"
     return final or t3 or "OTHER"
 
@@ -241,9 +276,10 @@ def extract_features(
     block = str(e.get("block"))
     session = str(e.get("session_date"))
     direction = str(e.get("direction"))
+    v2 = e.get("v2_result") if isinstance(e.get("v2_result"), dict) else {}
     signal_raw = (
-        e.get("absolute_confirmation_timestamp")
-        or e.get("confirmation_timestamp")
+        e.get("confirmation_timestamp")
+        or v2.get("confirmation_timestamp")
         or e.get("t3_timestamp")
         or (stable or {}).get("t3_timestamp")
     )
