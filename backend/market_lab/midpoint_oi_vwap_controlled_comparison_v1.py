@@ -101,25 +101,73 @@ def midpoint_rows(doc: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
-def load_positioning(items: list[tuple[str,Path]]) -> dict[tuple[str,str,str],dict[str,Any]]:
-    idx={}
+def load_positioning(items: list[tuple[str,Path]]) -> tuple[
+    dict[tuple[str,str,str],dict[str,Any]],
+    dict[tuple[str,str,str],dict[str,Any]],
+]:
+    """
+    Return two independent indexes:
+
+    1. checkpoint_idx:
+       exact ATM rows only at synchronized completed 5-minute checkpoints.
+       Used ONLY for CE/PE OI-state confirmation.
+
+    2. exact_atm_idx:
+       exact ATM row at every available minute.
+       Used ONLY to freeze the option contract at the midpoint confirmation
+       timestamp.
+
+    This prevents the 5-minute OI checkpoint from accidentally selecting
+    the option contract for a later midpoint confirmation.
+    """
+    checkpoint_idx={}
+    exact_atm_idx={}
+
     for block,path in items:
         validate_block(block)
+
         for r in load_csv(path):
             off=num(pick(r,"strike_offset","offset"))
-            if off is None or abs(off)>1e-9: continue
+            if off is None or abs(off)>1e-9:
+                continue
+
             ts_raw=pick(r,"timestamp","provider_timestamp","datetime","time")
-            if not ts_raw: continue
+            if not ts_raw:
+                continue
+
             ts=parse_ts(str(ts_raw))
-            if ts.minute%5 or ts.second or ts.microsecond: continue
-            session=str(pick(r,"session_date","date") or ts.date().isoformat())
-            idx[(block,session,ts.isoformat())]={
-                "ce_state":str(pick(r,"ce_5m_state","ce_state") or ""),
-                "pe_state":str(pick(r,"pe_5m_state","pe_state") or ""),
-                "moving_atm":num(pick(r,"moving_atm","atm","atm_strike","strike")),
-                "ce_instrument_key":pick(r,"ce_instrument_key"),"pe_instrument_key":pick(r,"pe_instrument_key"),
+            session=str(
+                pick(r,"session_date","date")
+                or ts.date().isoformat()
+            )
+
+            exact_row={
+                "moving_atm":num(
+                    pick(r,"moving_atm","atm","atm_strike","strike")
+                ),
+                "ce_instrument_key":pick(r,"ce_instrument_key"),
+                "pe_instrument_key":pick(r,"pe_instrument_key"),
             }
-    return idx
+
+            exact_atm_idx[
+                (block,session,ts.isoformat())
+            ]=exact_row
+
+            if ts.minute%5 or ts.second or ts.microsecond:
+                continue
+
+            checkpoint_idx[
+                (block,session,ts.isoformat())
+            ]={
+                "ce_state":str(
+                    pick(r,"ce_5m_state","ce_state") or ""
+                ),
+                "pe_state":str(
+                    pick(r,"pe_5m_state","pe_state") or ""
+                ),
+            }
+
+    return checkpoint_idx, exact_atm_idx
 
 
 def load_futures(path: Path) -> dict[tuple[str,str],dict[str,Any]]:
@@ -130,7 +178,7 @@ def load_futures(path: Path) -> dict[tuple[str,str],dict[str,Any]]:
         ts=parse_ts(str(ts_raw))
         if ts.minute%5 or ts.second or ts.microsecond: continue
         session=str(pick(r,"session_date","date") or ts.date().isoformat())
-        idx[(session,ts.isoformat())]={"futures_close":num(pick(r,"futures_close","close")),"futures_vwap":num(pick(r,"futures_vwap","vwap"))}
+        idx[(session,ts.isoformat())]={"futures_close":num(pick(r,"futures_close","close")),"futures_vwap":num(pick(r,"futures_vwap","session_vwap","vwap"))}
     return idx
 
 
@@ -181,22 +229,105 @@ def main()->None:
     arm_a=[]
     for r in arm_a_doc.get("trades",[]): validate_block(str(r.get("block"))); x=dict(r); x["arm"]=ARM_A; arm_a.append(x)
 
-    midpoint_doc=load_json(Path(args.midpoint)); mids=midpoint_rows(midpoint_doc)
-    pos=load_positioning([named(x) for x in args.positioning]); fut=load_futures(Path(args.futures_vwap)); ohlc=load_ohlc([named(x) for x in args.option_ohlc])
-    arm_c=[]; issues=Counter()
+    midpoint_doc=load_json(Path(args.midpoint))
+    mids=midpoint_rows(midpoint_doc)
+
+    checkpoint_pos, exact_atm_pos = load_positioning(
+        [named(x) for x in args.positioning]
+    )
+    fut=load_futures(Path(args.futures_vwap))
+    ohlc=load_ohlc([named(x) for x in args.option_ohlc])
+
+    arm_c=[]
+    issues=Counter()
+
     for m in mids:
-        t=parse_ts(m["midpoint_confirmation_timestamp"]); cp=floor_completed_5m(t)
-        p=pos.get((m["block"],m["session_date"],cp.isoformat())); f=fut.get((m["session_date"],cp.isoformat()))
-        if not p: issues["MISSING_POSITIONING_AT_LATEST_COMPLETED_5M"]+=1; continue
-        if not f: issues["MISSING_FUTURES_VWAP_AT_LATEST_COMPLETED_5M"]+=1; continue
-        aligned=confluence_direction({**p,**f})
-        if aligned!=m["direction"]: continue
-        side="CE" if aligned=="BULLISH" else "PE"; instrument=p.get("ce_instrument_key" if side=="CE" else "pe_instrument_key")
-        base={"arm":ARM_C,"block":m["block"],"session_date":m["session_date"],"direction":aligned,"option_side":side,
-              "midpoint_confirmation_timestamp":m["midpoint_confirmation_timestamp"],"oi_vwap_checkpoint_timestamp":cp.isoformat(),
-              "signal_timestamp":t.isoformat(),"instrument_key":instrument,"strike":p.get("moving_atm"),"ce_state":p.get("ce_state"),"pe_state":p.get("pe_state"),
-              "futures_close":f.get("futures_close"),"futures_vwap":f.get("futures_vwap")}
-        arm_c.append(apply_economics(base,ohlc))
+        t=parse_ts(m["midpoint_confirmation_timestamp"])
+        cp=floor_completed_5m(t)
+
+        p5=checkpoint_pos.get(
+            (m["block"],m["session_date"],cp.isoformat())
+        )
+        f=fut.get(
+            (m["session_date"],cp.isoformat())
+        )
+
+        if not p5:
+            issues[
+                "MISSING_POSITIONING_AT_LATEST_COMPLETED_5M"
+            ]+=1
+            continue
+
+        if not f:
+            issues[
+                "MISSING_FUTURES_VWAP_AT_LATEST_COMPLETED_5M"
+            ]+=1
+            continue
+
+        aligned=confluence_direction({**p5,**f})
+
+        if aligned!=m["direction"]:
+            continue
+
+        exact=exact_atm_pos.get(
+            (m["block"],m["session_date"],t.isoformat())
+        )
+
+        if not exact:
+            issues[
+                "MISSING_EXACT_ATM_AT_MIDPOINT_CONFIRMATION"
+            ]+=1
+            continue
+
+        side="CE" if aligned=="BULLISH" else "PE"
+
+        instrument=exact.get(
+            "ce_instrument_key"
+            if side=="CE"
+            else "pe_instrument_key"
+        )
+
+        base={
+            "arm":ARM_C,
+            "block":m["block"],
+            "session_date":m["session_date"],
+            "direction":aligned,
+            "option_side":side,
+
+            "midpoint_confirmation_timestamp":
+                m["midpoint_confirmation_timestamp"],
+
+            "oi_vwap_checkpoint_timestamp":
+                cp.isoformat(),
+
+            "signal_timestamp":
+                t.isoformat(),
+
+            "instrument_key":
+                instrument,
+
+            "strike":
+                exact.get("moving_atm"),
+
+            "ce_state":
+                p5.get("ce_state"),
+
+            "pe_state":
+                p5.get("pe_state"),
+
+            "futures_close":
+                f.get("futures_close"),
+
+            "futures_vwap":
+                f.get("futures_vwap"),
+
+            "contract_selection_timestamp":
+                t.isoformat(),
+        }
+
+        arm_c.append(
+            apply_economics(base,ohlc)
+        )
 
     def by_block(rows): return {b:summarize([r for r in rows if r.get("block")==b]) for b in sorted(ALLOWED_BLOCKS)}
     doc={"status":"AVAILABLE","research_version":RESEARCH_VERSION,"research_status":"DEVELOPMENT_CONTROLLED_COMPARISON_ONLY","arms":[ARM_A,ARM_C],

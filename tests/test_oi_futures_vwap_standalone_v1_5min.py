@@ -13,3 +13,18 @@ def test_bearish_needs_vwap_alignment():
 def test_five_minute_clock():
     assert is_five_minute_checkpoint(datetime(2026,9,15,9,20))
     assert not is_five_minute_checkpoint(datetime(2026,9,15,9,21))
+
+def test_canonical_futures_vwap_schema_uses_session_vwap(tmp_path):
+    from market_lab.oi_futures_vwap_standalone_v1_5min import load_futures_index
+
+    p = tmp_path / "futures.csv"
+    p.write_text(
+        "session_date,timestamp,close,session_vwap,instrument_key,expiry\n"
+        "2026-09-15,2026-09-15T09:20:00+05:30,25010,25000,NSE_FO|TEST,2026-09-29\n"
+    )
+
+    idx = load_futures_index(p)
+    row = idx[("2026-09-15", "2026-09-15T09:20:00+05:30")]
+
+    assert row["futures_close"] == 25010
+    assert row["futures_vwap"] == 25000

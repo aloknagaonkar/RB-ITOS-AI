@@ -1,0 +1,211 @@
+from __future__ import annotations
+
+import argparse, csv, json, math
+from collections import Counter, defaultdict
+from datetime import datetime, timedelta
+from pathlib import Path
+from statistics import mean, median
+from typing import Any
+
+RESEARCH_VERSION = "MIDPOINT_OI_VWAP_CONTROLLED_COMPARISON_V1"
+ARM_A = "ARM_A_OI_VWAP_5MIN"
+ARM_C = "ARM_C_MIDPOINT_PLUS_OI_VWAP"
+ALLOWED_BLOCKS = {"TRAIN", "OOS_A", "OOS_B", "OOS_C", "OOS_D"}
+FORBIDDEN_BLOCKS = {"OOS_E", "OOS_F", "OOS_G", "OOS_H"}
+ROUND_TRIP_COST_PCT_POINTS = 0.5
+HORIZONS = (1, 3, 5, 10, 15)
+
+
+def parse_ts(v: str) -> datetime:
+    return datetime.fromisoformat(v.replace("Z", "+00:00"))
+
+
+def num(v: Any) -> float | None:
+    if v in (None, "", "null", "None"):
+        return None
+    try: return float(v)
+    except (TypeError, ValueError): return None
+
+
+def pick(r: dict[str, Any], *names: str) -> Any:
+    for n in names:
+        if r.get(n) not in (None, ""):
+            return r[n]
+    return None
+
+
+def load_csv(path: Path) -> list[dict[str, str]]:
+    with path.open(newline="", encoding="utf-8-sig") as fh: return list(csv.DictReader(fh))
+
+
+def load_json(path: Path) -> dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def validate_block(block: str) -> None:
+    if block in FORBIDDEN_BLOCKS: raise ValueError(f"{block} is forbidden")
+    if block not in ALLOWED_BLOCKS: raise ValueError(f"unsupported block {block}")
+
+
+def floor_completed_5m(ts: datetime) -> datetime:
+    return ts.replace(minute=ts.minute - ts.minute % 5, second=0, microsecond=0)
+
+
+def oi_direction(ce: str, pe: str) -> str:
+    ce, pe = (ce or "").upper(), (pe or "").upper()
+    if ce == "LONG_BUILDUP" and pe == "SHORT_BUILDUP": return "BULLISH"
+    if ce == "SHORT_BUILDUP" and pe == "LONG_BUILDUP": return "BEARISH"
+    return "NEUTRAL"
+
+
+def confluence_direction(row: dict[str, Any]) -> str:
+    close, vwap = num(row.get("futures_close")), num(row.get("futures_vwap"))
+    if close is None or vwap is None: return "NEUTRAL"
+    d = oi_direction(str(row.get("ce_state") or ""), str(row.get("pe_state") or ""))
+    if d == "BULLISH" and close > vwap: return d
+    if d == "BEARISH" and close < vwap: return d
+    return "NEUTRAL"
+
+
+def pct_return(entry: float, exit_: float) -> float:
+    return (exit_ / entry - 1.0) * 100.0
+
+
+def metric(values: list[float]) -> dict[str, Any]:
+    if not values: return {"count":0,"positive_count":0,"win_rate_pct":None,"mean_pct":None,"median_pct":None,"sum_pct_points":None,"profit_factor":None}
+    pos, neg = [x for x in values if x > 0], [x for x in values if x < 0]
+    return {"count":len(values),"positive_count":len(pos),"win_rate_pct":100*len(pos)/len(values),"mean_pct":mean(values),"median_pct":median(values),"sum_pct_points":sum(values),"profit_factor":sum(pos)/abs(sum(neg)) if neg else (math.inf if pos else None)}
+
+
+def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    rows = [r for r in rows if r.get("entry_available")]
+    out = {"trade_count":len(rows),"direction_counts":dict(Counter(r.get("direction") for r in rows))}
+    for h in HORIZONS:
+        vals = [float(r["net_returns_pct"][f"{h}m"]) for r in rows if r.get("net_returns_pct",{}).get(f"{h}m") is not None]
+        out[f"net_{h}m"] = metric(vals)
+    return out
+
+
+def midpoint_rows(doc: dict[str, Any]) -> list[dict[str, Any]]:
+    src = doc.get("trades") if isinstance(doc.get("trades"), list) else doc.get("rows")
+    if not isinstance(src, list): raise ValueError("midpoint JSON requires top-level trades or rows")
+    out=[]
+    for r in src:
+        block=str(r.get("block") or ""); validate_block(block)
+        if str(r.get("t3_state") or "") != "CONFIRM_CONTINUATION": continue
+        direction=str(r.get("direction") or "")
+        if direction not in {"BULLISH","BEARISH"}: continue
+        ts=r.get("t3_timestamp") or r.get("confirmation_timestamp")
+        if not ts: continue
+        out.append({"block":block,"session_date":str(r["session_date"]),"direction":direction,"midpoint_confirmation_timestamp":str(ts)})
+    return out
+
+
+def load_positioning(items: list[tuple[str,Path]]) -> dict[tuple[str,str,str],dict[str,Any]]:
+    idx={}
+    for block,path in items:
+        validate_block(block)
+        for r in load_csv(path):
+            off=num(pick(r,"strike_offset","offset"))
+            if off is None or abs(off)>1e-9: continue
+            ts_raw=pick(r,"timestamp","provider_timestamp","datetime","time")
+            if not ts_raw: continue
+            ts=parse_ts(str(ts_raw))
+            if ts.minute%5 or ts.second or ts.microsecond: continue
+            session=str(pick(r,"session_date","date") or ts.date().isoformat())
+            idx[(block,session,ts.isoformat())]={
+                "ce_state":str(pick(r,"ce_5m_state","ce_state") or ""),
+                "pe_state":str(pick(r,"pe_5m_state","pe_state") or ""),
+                "moving_atm":num(pick(r,"moving_atm","atm","atm_strike","strike")),
+                "ce_instrument_key":pick(r,"ce_instrument_key"),"pe_instrument_key":pick(r,"pe_instrument_key"),
+            }
+    return idx
+
+
+def load_futures(path: Path) -> dict[tuple[str,str],dict[str,Any]]:
+    idx={}
+    for r in load_csv(path):
+        ts_raw=pick(r,"timestamp","provider_timestamp","datetime","time")
+        if not ts_raw: continue
+        ts=parse_ts(str(ts_raw))
+        if ts.minute%5 or ts.second or ts.microsecond: continue
+        session=str(pick(r,"session_date","date") or ts.date().isoformat())
+        idx[(session,ts.isoformat())]={"futures_close":num(pick(r,"futures_close","close")),"futures_vwap":num(pick(r,"futures_vwap","session_vwap","vwap"))}
+    return idx
+
+
+def load_ohlc(items: list[tuple[str,Path]]) -> dict[tuple[str,str],dict[str,dict[str,Any]]]:
+    idx:dict[tuple[str,str],dict[str,dict[str,Any]]]=defaultdict(dict)
+    for block,path in items:
+        validate_block(block)
+        for r in load_csv(path):
+            ts_raw=pick(r,"timestamp","datetime","time"); instrument=pick(r,"instrument_key","instrument")
+            if not ts_raw or not instrument: continue
+            ts=parse_ts(str(ts_raw)); session=str(pick(r,"session_date","date") or ts.date().isoformat())
+            idx[(session,str(instrument))][ts.isoformat()]={k:num(r.get(k)) for k in ("open","high","low","close")}
+    return idx
+
+
+def apply_economics(base:dict[str,Any],ohlc_idx)->dict[str,Any]:
+    r=dict(base); r.update(entry_available=False,complete_15m_path=False,issue=None)
+    instrument=r.get("instrument_key")
+    if not instrument: r["issue"]="EXACT_ATM_INSTRUMENT_UNAVAILABLE"; return r
+    entry_ts=parse_ts(r["signal_timestamp"])+timedelta(minutes=1)
+    series=ohlc_idx.get((r["session_date"],str(instrument)),{}); c=series.get(entry_ts.isoformat())
+    if not c or c.get("open") is None: r["issue"]="EXACT_NEXT_MINUTE_OPEN_UNAVAILABLE"; return r
+    entry=float(c["open"]); r.update(entry_available=True,entry_timestamp=entry_ts.isoformat(),entry_price=entry)
+    gross={}
+    for h in HORIZONS:
+        x=series.get((entry_ts+timedelta(minutes=h)).isoformat()); gross[f"{h}m"]=pct_return(entry,x["close"]) if x and x.get("close") is not None else None
+    r["gross_returns_pct"]=gross; r["net_returns_pct"]={k:(v-ROUND_TRIP_COST_PCT_POINTS if v is not None else None) for k,v in gross.items()}
+    path=[series.get((entry_ts+timedelta(minutes=i)).isoformat()) for i in range(15)]; path=[x for x in path if x]
+    r["complete_15m_path"]=len(path)==15
+    highs=[x["high"] for x in path if x.get("high") is not None]; lows=[x["low"] for x in path if x.get("low") is not None]
+    r["mfe_pct_15m"]=pct_return(entry,max(highs)) if highs else None; r["mae_pct_15m"]=pct_return(entry,min(lows)) if lows else None
+    return r
+
+
+def named(v:str)->tuple[str,Path]:
+    b,p=v.split("|",1); validate_block(b); return b,Path(p)
+
+
+def main()->None:
+    ap=argparse.ArgumentParser()
+    ap.add_argument("--arm-a",required=True); ap.add_argument("--midpoint",required=True)
+    ap.add_argument("--positioning",action="append",required=True); ap.add_argument("--option-ohlc",action="append",required=True)
+    ap.add_argument("--futures-vwap",required=True); ap.add_argument("--output",required=True)
+    args=ap.parse_args()
+
+    arm_a_doc=load_json(Path(args.arm_a))
+    if arm_a_doc.get("research_version")!="OI_FUTURES_VWAP_STANDALONE_V1_5MIN": raise ValueError("wrong Arm A artifact")
+    arm_a=[]
+    for r in arm_a_doc.get("trades",[]): validate_block(str(r.get("block"))); x=dict(r); x["arm"]=ARM_A; arm_a.append(x)
+
+    midpoint_doc=load_json(Path(args.midpoint)); mids=midpoint_rows(midpoint_doc)
+    pos=load_positioning([named(x) for x in args.positioning]); fut=load_futures(Path(args.futures_vwap)); ohlc=load_ohlc([named(x) for x in args.option_ohlc])
+    arm_c=[]; issues=Counter()
+    for m in mids:
+        t=parse_ts(m["midpoint_confirmation_timestamp"]); cp=floor_completed_5m(t)
+        p=pos.get((m["block"],m["session_date"],cp.isoformat())); f=fut.get((m["session_date"],cp.isoformat()))
+        if not p: issues["MISSING_POSITIONING_AT_LATEST_COMPLETED_5M"]+=1; continue
+        if not f: issues["MISSING_FUTURES_VWAP_AT_LATEST_COMPLETED_5M"]+=1; continue
+        aligned=confluence_direction({**p,**f})
+        if aligned!=m["direction"]: continue
+        side="CE" if aligned=="BULLISH" else "PE"; instrument=p.get("ce_instrument_key" if side=="CE" else "pe_instrument_key")
+        base={"arm":ARM_C,"block":m["block"],"session_date":m["session_date"],"direction":aligned,"option_side":side,
+              "midpoint_confirmation_timestamp":m["midpoint_confirmation_timestamp"],"oi_vwap_checkpoint_timestamp":cp.isoformat(),
+              "signal_timestamp":t.isoformat(),"instrument_key":instrument,"strike":p.get("moving_atm"),"ce_state":p.get("ce_state"),"pe_state":p.get("pe_state"),
+              "futures_close":f.get("futures_close"),"futures_vwap":f.get("futures_vwap")}
+        arm_c.append(apply_economics(base,ohlc))
+
+    def by_block(rows): return {b:summarize([r for r in rows if r.get("block")==b]) for b in sorted(ALLOWED_BLOCKS)}
+    doc={"status":"AVAILABLE","research_version":RESEARCH_VERSION,"research_status":"DEVELOPMENT_CONTROLLED_COMPARISON_ONLY","arms":[ARM_A,ARM_C],
+         "forbidden_blocks":sorted(FORBIDDEN_BLOCKS),"rules":{"arm_b_present":False,"arm_c_checkpoint_rule":"latest completed 5m checkpoint at or before midpoint confirmation","nearest_strike_fallback":False,"nearest_time_fallback":False,"round_trip_cost_pct_points":0.5},
+         "arm_a":{"summary":summarize(arm_a),"by_block":by_block(arm_a)},
+         "arm_c":{"summary":summarize(arm_c),"by_block":by_block(arm_c),"issue_counts":dict(issues)},
+         "comparison":{"arm_a_trade_count":summarize(arm_a)["trade_count"],"arm_c_trade_count":summarize(arm_c)["trade_count"]},"arm_c_trades":arm_c}
+    a=doc["comparison"]["arm_a_trade_count"]; c=doc["comparison"]["arm_c_trade_count"]; doc["comparison"]["arm_c_survival_pct_of_arm_a"]=(100*c/a if a else None)
+    Path(args.output).write_text(json.dumps(doc,indent=2,allow_nan=False,default=str),encoding="utf-8")
+    print(json.dumps({"comparison":doc["comparison"],"arm_a":doc["arm_a"]["summary"],"arm_c":doc["arm_c"]["summary"]},indent=2,default=str))
+
+if __name__=="__main__": main()

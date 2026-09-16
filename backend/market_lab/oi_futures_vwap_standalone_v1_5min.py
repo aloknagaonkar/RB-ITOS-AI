@@ -88,7 +88,7 @@ def load_futures_index(path: Path) -> dict[tuple[str, str], dict[str, Any]]:
         session = str(pick(r, "session_date", "date") or ts.date().isoformat())
         out[(session, ts.isoformat())] = {
             "futures_close": num(pick(r, "futures_close", "close")),
-            "futures_vwap": num(pick(r, "futures_vwap", "vwap")),
+            "futures_vwap": num(pick(r, "futures_vwap", "session_vwap", "vwap")),
         }
     return out
 

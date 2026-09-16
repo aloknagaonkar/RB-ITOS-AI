@@ -410,9 +410,9 @@ def main() -> None:
             from .historical_positioning import PositioningConfig
             cfg = PositioningConfig()
             if price_threshold is None:
-                price_threshold = float(getattr(cfg, "price_threshold_pct"))
+                price_threshold = float(getattr(cfg, "price_change_threshold_pct"))
             if oi_threshold is None:
-                oi_threshold = float(getattr(cfg, "oi_threshold_pct"))
+                oi_threshold = float(getattr(cfg, "oi_change_threshold_pct"))
         except Exception as exc:
             raise SystemExit(
                 "Unable to read canonical PositioningConfig defaults. "
