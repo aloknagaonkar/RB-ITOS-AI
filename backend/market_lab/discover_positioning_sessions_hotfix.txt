@@ -1,0 +1,38 @@
+from __future__ import annotations
+
+# P3H.1a hotfix note:
+# replace discover_positioning_sessions(...) in historical_positioning_adapter_v1.py
+# with the implementation below.
+
+import json
+from pathlib import Path
+
+
+def discover_positioning_sessions(
+    *,
+    data_root: str | Path = "data",
+    session_date: str | None = None,
+) -> list[Path]:
+    root = Path(data_root)
+    matches: list[Path] = []
+
+    # Discover every JSON file inside historical-positioning-cache* directories.
+    # Do not depend on one exact filename convention; validate content instead.
+    for directory in sorted(root.glob("historical-positioning-cache*")):
+        if not directory.is_dir():
+            continue
+
+        for path in sorted(directory.glob("*.json")):
+            if session_date is None:
+                matches.append(path)
+                continue
+
+            try:
+                payload = json.loads(path.read_text())
+            except Exception:
+                continue
+
+            if payload.get("session_date") == session_date:
+                matches.append(path)
+
+    return matches
