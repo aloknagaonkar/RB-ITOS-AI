@@ -21,8 +21,7 @@ from .paper_production_storage_v1 import (
 from .storage import Configuration, Observation
 from .upstox_live_futures_v1 import UpstoxLiveFuturesGatewayV1
 
-
-RUNTIME_VERSION = "OI_VWAP_CAUSAL_RUNTIME_V1"
+RUNTIME_VERSION = "OI_VWAP_CAUSAL_RUNTIME_V1.2"
 STRATEGY_VERSION = "1.0.0"
 
 
@@ -50,12 +49,7 @@ def _latest_waiting_signal(session: Session, session_date: str) -> PaperSignal |
     )
 
 
-def _previous_checkpoint_feature(
-    session: Session,
-    *,
-    config_id: int,
-    current: OICheckpointFeature,
-) -> OICheckpointFeature | None:
+def _previous_checkpoint_feature(session: Session, *, config_id: int, current: OICheckpointFeature):
     current_ts = datetime.fromisoformat(current.timestamp.replace("Z", "+00:00")).astimezone(IST)
     previous_target = current_ts - timedelta(minutes=5)
 
@@ -73,33 +67,24 @@ def _previous_checkpoint_feature(
     best = None
     for row in rows:
         try:
-            ts = datetime.fromisoformat(
-                row.snapshot["received_at"].replace("Z", "+00:00")
-            ).astimezone(IST)
+            ts = datetime.fromisoformat(row.snapshot["received_at"].replace("Z", "+00:00")).astimezone(IST)
         except Exception:
             continue
         delta = abs((ts - previous_target).total_seconds())
         if delta <= 120:
-            candidate = (delta, row.id)
-            if best is None or candidate < best[:2]:
-                best = (delta, row.id, row)
+            candidate = (delta, row.id, row)
+            if best is None or candidate[:2] < best[:2]:
+                best = candidate
 
     if best is None:
         return None
     try:
-        return build_oi_checkpoint_feature(
-            session,
-            config_id=config_id,
-            observation_id=best[2].id,
-        )
+        return build_oi_checkpoint_feature(session, config_id=config_id, observation_id=best[2].id)
     except Exception:
         return None
 
 
-def _directional_p1(
-    current: OICheckpointFeature,
-    previous: OICheckpointFeature | None,
-) -> tuple[str | None, str | None]:
+def _directional_p1(current: OICheckpointFeature, previous: OICheckpointFeature | None):
     if previous is None:
         return None, "PREVIOUS_5M_FEATURE_UNAVAILABLE"
     if current.pcr_change_5m is None:
@@ -144,6 +129,28 @@ def _vwap_aligned(direction: str, side: str) -> bool:
     )
 
 
+def _classify_oi_feature_error(exc: Exception) -> str:
+    if "09:20 session baseline unavailable" in str(exc):
+        return "SESSION_BASELINE_UNAVAILABLE"
+    return "OI_FEATURE_FAILED"
+
+
+def _normalized_checkpoint(value: str) -> datetime:
+    ts = datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(IST)
+    minute = ts.minute - ts.minute % 5
+    return ts.replace(minute=minute, second=0, microsecond=0)
+
+
+def _classify_p2_checkpoint(p1_time: str, current_time: str) -> str:
+    expected = _normalized_checkpoint(p1_time) + timedelta(minutes=5)
+    current = _normalized_checkpoint(current_time)
+    if current < expected:
+        return "TOO_EARLY"
+    if current == expected:
+        return "EXPECTED_P2"
+    return "P2_CHECKPOINT_MISSED"
+
+
 def evaluate_checkpoint(
     engine,
     *,
@@ -157,10 +164,7 @@ def evaluate_checkpoint(
     with Session(engine) as session, session.begin():
         config_row = session.get(Configuration, config_id)
         if config_row is None:
-            return RuntimeDecision(
-                "BLOCKED", "CONFIGURATION_NOT_FOUND", observation_id, None,
-                None, None, False, {}
-            )
+            return RuntimeDecision("BLOCKED", "CONFIGURATION_NOT_FOUND", observation_id, None, None, None, False, {})
 
         config = PCRConfig.model_validate(config_row.payload)
         expiry_guard = validate_option_expiry(config, today=now.astimezone(IST).date())
@@ -186,34 +190,55 @@ def evaluate_checkpoint(
                 observation_id=observation_id,
             )
         except Exception as exc:
+            reason = _classify_oi_feature_error(exc)
             record_event(
                 session,
-                event_type="OI_FEATURE_FAILED",
+                event_type=reason,
                 stage="FEATURES",
                 status="FAIL",
-                reason_code=type(exc).__name__,
+                reason_code=reason,
                 observation_id=observation_id,
                 output_data={"detail": str(exc)},
             )
             return RuntimeDecision(
-                "BLOCKED", "OI_FEATURE_FAILED", observation_id, None,
+                "BLOCKED", reason, observation_id, None,
                 None, None, False, {"detail": str(exc)}
             )
 
         waiting = _latest_waiting_signal(session, current.session_date)
 
-        # If there is a waiting setup, the next completed checkpoint is P2.
         if waiting is not None:
-            if waiting.p1_observation_id == current.observation_id:
+            checkpoint_class = _classify_p2_checkpoint(waiting.p1_time, current.timestamp)
+
+            if checkpoint_class == "TOO_EARLY":
                 return RuntimeDecision(
-                    "WAIT_P2",
-                    None,
-                    observation_id,
-                    current.timestamp,
-                    waiting.id,
-                    waiting.direction,
-                    False,
-                    {"oi": asdict(current)},
+                    "WAIT_P2", None, observation_id, current.timestamp,
+                    waiting.id, waiting.direction, False, {"oi": asdict(current)}
+                )
+
+            if checkpoint_class == "P2_CHECKPOINT_MISSED":
+                reject_waiting_signal(
+                    session,
+                    waiting,
+                    p2_observation_id=current.observation_id,
+                    p2_time=current.timestamp,
+                    reason_code="P2_CHECKPOINT_MISSED",
+                    evidence_update={"p2": asdict(current)},
+                )
+                record_event(
+                    session,
+                    signal_id=waiting.id,
+                    session_date=current.session_date,
+                    observation_id=current.observation_id,
+                    event_type="P2_CHECKPOINT_MISSED",
+                    stage="P2",
+                    status="FAIL",
+                    reason_code="P2_CHECKPOINT_MISSED",
+                )
+                return RuntimeDecision(
+                    "REJECTED", "P2_CHECKPOINT_MISSED", observation_id,
+                    current.timestamp, waiting.id, waiting.direction, False,
+                    {"oi": asdict(current)}
                 )
 
             persists = _p2_persists(waiting.direction, current)
@@ -238,14 +263,9 @@ def evaluate_checkpoint(
                     output_data={"oi": asdict(current)},
                 )
                 return RuntimeDecision(
-                    "REJECTED",
-                    "P2_PERSISTENCE_FAILED",
-                    observation_id,
-                    current.timestamp,
-                    waiting.id,
-                    waiting.direction,
-                    False,
-                    {"oi": asdict(current)},
+                    "REJECTED", "P2_PERSISTENCE_FAILED", observation_id,
+                    current.timestamp, waiting.id, waiting.direction, False,
+                    {"oi": asdict(current)}
                 )
 
             record_event(
@@ -259,22 +279,13 @@ def evaluate_checkpoint(
                 output_data={"oi": asdict(current)},
             )
             return RuntimeDecision(
-                "P2_CONFIRMED",
-                None,
-                observation_id,
-                current.timestamp,
-                waiting.id,
-                waiting.direction,
-                True,
-                {"oi": asdict(current)},
+                "P2_CONFIRMED", None, observation_id, current.timestamp,
+                waiting.id, waiting.direction, True, {"oi": asdict(current)}
             )
 
-        previous = _previous_checkpoint_feature(
-            session,
-            config_id=config_id,
-            current=current,
-        )
+        previous = _previous_checkpoint_feature(session, config_id=config_id, current=current)
         direction, p1_reason = _directional_p1(current, previous)
+
         if direction is None:
             record_event(
                 session,
@@ -290,14 +301,8 @@ def evaluate_checkpoint(
                 },
             )
             return RuntimeDecision(
-                "NO_SIGNAL",
-                p1_reason,
-                observation_id,
-                current.timestamp,
-                None,
-                None,
-                False,
-                {"oi": asdict(current)},
+                "NO_SIGNAL", p1_reason, observation_id, current.timestamp,
+                None, None, False, {"oi": asdict(current)}
             )
 
         try:
@@ -314,14 +319,9 @@ def evaluate_checkpoint(
                 output_data={"detail": str(exc)},
             )
             return RuntimeDecision(
-                "BLOCKED",
-                "FUTURES_VWAP_FETCH_FAILED",
-                observation_id,
-                current.timestamp,
-                None,
-                direction,
-                False,
-                {"oi": asdict(current), "detail": str(exc)},
+                "BLOCKED", "FUTURES_VWAP_FETCH_FAILED", observation_id,
+                current.timestamp, None, direction, False,
+                {"oi": asdict(current), "detail": str(exc)}
             )
 
         health = validate_futures_vwap_health(vwap, now=now)
@@ -337,14 +337,8 @@ def evaluate_checkpoint(
                 output_data={"health": asdict(health), "vwap": asdict(vwap)},
             )
             return RuntimeDecision(
-                "BLOCKED",
-                health.reason_code,
-                observation_id,
-                current.timestamp,
-                None,
-                direction,
-                False,
-                {"oi": asdict(current), "vwap": asdict(vwap)},
+                "BLOCKED", health.reason_code, observation_id, current.timestamp,
+                None, direction, False, {"oi": asdict(current), "vwap": asdict(vwap)}
             )
 
         if not _vwap_aligned(direction, vwap.side):
@@ -359,14 +353,8 @@ def evaluate_checkpoint(
                 output_data={"direction": direction, "vwap": asdict(vwap)},
             )
             return RuntimeDecision(
-                "REJECTED",
-                "VWAP_NOT_ALIGNED",
-                observation_id,
-                current.timestamp,
-                None,
-                direction,
-                False,
-                {"oi": asdict(current), "vwap": asdict(vwap)},
+                "REJECTED", "VWAP_NOT_ALIGNED", observation_id, current.timestamp,
+                None, direction, False, {"oi": asdict(current), "vwap": asdict(vwap)}
             )
 
         signal = get_or_create_waiting_signal(
@@ -384,7 +372,6 @@ def evaluate_checkpoint(
                 "futures_health": asdict(health),
             },
         )
-
         record_event(
             session,
             signal_id=signal.id,
@@ -395,16 +382,9 @@ def evaluate_checkpoint(
             status="WAITING",
             output_data={"direction": direction},
         )
-
         return RuntimeDecision(
-            "WAIT_P2",
-            None,
-            observation_id,
-            current.timestamp,
-            signal.id,
-            direction,
-            False,
-            {"oi": asdict(current), "vwap": asdict(vwap)},
+            "WAIT_P2", None, observation_id, current.timestamp,
+            signal.id, direction, False, {"oi": asdict(current), "vwap": asdict(vwap)}
         )
 
 

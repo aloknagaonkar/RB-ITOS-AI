@@ -1,34 +1,40 @@
 
 from __future__ import annotations
 
-"""
-Drop-in service loop for P2C.1.
-
-Key production fixes:
-- one evaluation per completed 5-minute checkpoint, not every 15-second sample
-- paper_enabled in health is always read from authoritative paper_control
-- baseline-unavailable is surfaced as a distinct blocked state
-"""
-
 import logging
 import os
 import time
 from datetime import datetime
+from pathlib import Path
 
 from dotenv import load_dotenv
+from filelock import FileLock, Timeout
 from sqlalchemy.orm import Session
 
 from .domain import IST
 from .oi_vwap_causal_runtime_v1 import evaluate_checkpoint, publish_runtime_health
-from .oi_vwap_runtime_guards_v1 import (
-    authoritative_paper_control,
-    latest_observation_checkpoint_key,
-)
-from .paper_production_storage_v1 import ensure_paper_schema, update_paper_health
-from .storage import active_config, make_engine
+from .paper_production_storage_v1 import PaperControl, ensure_paper_schema, update_paper_health
+from .storage import active_config, Observation, make_engine
+from sqlalchemy import select
 from .upstox_live_futures_v1 import UpstoxLiveFuturesGatewayV1
 
 logger = logging.getLogger(__name__)
+SERVICE_LOCK = Path("data/oi-vwap-causal-runtime.lock")
+
+
+def _checkpoint_key(received_at: str) -> str:
+    ts = datetime.fromisoformat(received_at.replace("Z", "+00:00")).astimezone(IST)
+    minute = ts.minute - (ts.minute % 5)
+    return ts.replace(minute=minute, second=0, microsecond=0).isoformat()
+
+
+def _authoritative_control(session: Session) -> dict:
+    row = session.get(PaperControl, 1)
+    return {
+        "paper_enabled": bool(row.enabled) if row else False,
+        "live_execution_enabled": False,
+        "max_open_positions": int(row.max_open_positions) if row else 4,
+    }
 
 
 def run(poll_seconds: int = 2) -> None:
@@ -36,9 +42,17 @@ def run(poll_seconds: int = 2) -> None:
     token = os.getenv("UPSTOX_ACCESS_TOKEN", "")
     engine = make_engine()
     ensure_paper_schema(engine)
-    gateway = UpstoxLiveFuturesGatewayV1(token)
+    SERVICE_LOCK.parent.mkdir(parents=True, exist_ok=True)
 
+    try:
+        lock = FileLock(str(SERVICE_LOCK), timeout=0)
+        lock.acquire()
+    except Timeout:
+        raise SystemExit("Another causal runtime service is already running.")
+
+    gateway = UpstoxLiveFuturesGatewayV1(token)
     last_checkpoint_key = None
+
     try:
         update_paper_health(
             engine,
@@ -50,8 +64,13 @@ def run(poll_seconds: int = 2) -> None:
         while True:
             with Session(engine) as session:
                 config_id, config, collection_enabled = active_config(session)
-                latest = latest_observation_checkpoint_key(session, config_id=config_id)
-                control = authoritative_paper_control(session)
+                latest = session.scalar(
+                    select(Observation)
+                    .where(Observation.config_id == config_id)
+                    .order_by(Observation.id.desc())
+                    .limit(1)
+                )
+                control = _authoritative_control(session)
 
             if not collection_enabled or latest is None:
                 update_paper_health(
@@ -63,14 +82,13 @@ def run(poll_seconds: int = 2) -> None:
                 time.sleep(poll_seconds)
                 continue
 
-            observation_id, checkpoint_key = latest
+            checkpoint_key = _checkpoint_key(latest.snapshot["received_at"])
 
-            # One strategy decision per 5-minute checkpoint.
             if checkpoint_key == last_checkpoint_key:
                 update_paper_health(
                     engine,
                     state="runtime_idle",
-                    latest_seen_observation_id=observation_id,
+                    latest_seen_observation_id=latest.id,
                     latest_checkpoint_key=checkpoint_key,
                     **control,
                 )
@@ -80,15 +98,15 @@ def run(poll_seconds: int = 2) -> None:
             decision = evaluate_checkpoint(
                 engine,
                 config_id=config_id,
-                observation_id=observation_id,
+                observation_id=latest.id,
                 futures_gateway=gateway,
                 now=datetime.now(IST),
             )
             publish_runtime_health(engine, decision)
 
-            # Refresh authoritative control values after decision health merge.
             with Session(engine) as session:
-                control = authoritative_paper_control(session)
+                control = _authoritative_control(session)
+
             update_paper_health(
                 engine,
                 latest_checkpoint_key=checkpoint_key,
@@ -105,6 +123,10 @@ def run(poll_seconds: int = 2) -> None:
             state="runtime_stopped",
             live_execution_enabled=False,
         )
+        try:
+            lock.release()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
