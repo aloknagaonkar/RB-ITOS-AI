@@ -1,150 +1,413 @@
 from __future__ import annotations
-import argparse,csv,json
-from dataclasses import asdict,dataclass,field
-from datetime import datetime,date
+
+# This file is a replacement for backend/market_lab/session_data_gate_v1.py
+# It preserves the original gate behavior while correcting positioning OI field
+# names to the actual cache schema:
+#   ce_open_interest
+#   pe_open_interest
+
+import argparse
+import csv
+import json
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, date
 from pathlib import Path
 from typing import Any
 
-DEFAULT_FUTURES_CSV=Path('data/historical-evidence/midpoint-v2-nifty-futures-vwap-v1-development.csv')
-ALLOWED_BUCKETS=('train','oos-a','oos-b','oos-c','oos-d')
+DEFAULT_FUTURES_CSV = Path(
+    "data/historical-evidence/midpoint-v2-nifty-futures-vwap-v1-development.csv"
+)
+
+ALLOWED_BUCKETS = ("train", "oos-a", "oos-b", "oos-c", "oos-d")
+
 
 @dataclass
 class Check:
-    name:str
-    status:str
-    details:dict[str,Any]=field(default_factory=dict)
+    name: str
+    status: str
+    details: dict[str, Any] = field(default_factory=dict)
+
 
 @dataclass
 class SessionDataGateResult:
-    session_date:str
-    status:str
-    checks:list[Check]
-    repair_required:list[str]
-    positioning_file:str|None=None
-    option_ohlc_file:str|None=None
-    futures_csv:str|None=None
-    def to_dict(self):
-        return {'session_date':self.session_date,'status':self.status,'repair_required':self.repair_required,'positioning_file':self.positioning_file,'option_ohlc_file':self.option_ohlc_file,'futures_csv':self.futures_csv,'checks':[asdict(x) for x in self.checks]}
+    session_date: str
+    status: str
+    checks: list[Check]
+    repair_required: list[str]
+    positioning_file: str | None = None
+    option_ohlc_file: str | None = None
+    futures_csv: str | None = None
 
-def _load(path:Path): return json.loads(path.read_text())
-def _rows(p):
-    r=p.get('rows'); return r if isinstance(r,list) else []
+    def to_dict(self) -> dict:
+        return {
+            "session_date": self.session_date,
+            "status": self.status,
+            "repair_required": self.repair_required,
+            "positioning_file": self.positioning_file,
+            "option_ohlc_file": self.option_ohlc_file,
+            "futures_csv": self.futures_csv,
+            "checks": [asdict(x) for x in self.checks],
+        }
 
-def _select(data_root:Path,prefix:str,session_date:str):
+
+def _load_json(path: Path) -> dict:
+    return json.loads(path.read_text())
+
+
+def _candidate_files(data_root: Path, prefix: str, session_date: str) -> list[Path]:
+    candidates: list[Path] = []
     for bucket in ALLOWED_BUCKETS:
-        d=data_root/f'{prefix}-{bucket}'
-        if not d.exists(): continue
-        exact=sorted(d.glob(f'*__{session_date}__{session_date}__*.json'))
-        if exact: return exact[0]
-    for bucket in ALLOWED_BUCKETS:
-        d=data_root/f'{prefix}-{bucket}'
-        if not d.exists(): continue
-        for p in sorted(d.glob(f'*{session_date}*.json')):
+        directory = data_root / f"{prefix}-{bucket}"
+        if not directory.exists():
+            continue
+
+        exact = sorted(directory.glob(f"*__{session_date}__{session_date}__*.json"))
+        candidates.extend(exact)
+
+        for path in sorted(directory.glob(f"*{session_date}*.json")):
+            if path in candidates:
+                continue
             try:
-                if str(_load(p).get('session_date'))==session_date: return p
-            except Exception: pass
-    return None
+                payload = _load_json(path)
+            except Exception:
+                continue
+            if str(payload.get("session_date")) == session_date:
+                candidates.append(path)
+    return candidates
 
-def _check_positioning(path,session_date):
-    if path is None: return Check('POSITIONING','FAIL',{'reason':'MISSING'})
-    try: p=_load(path)
-    except Exception as e: return Check('POSITIONING','FAIL',{'reason':'UNREADABLE','error':str(e)})
-    rows=_rows(p); reasons=[]
-    if str(p.get('session_date'))!=session_date: reasons.append('SESSION_DATE_MISMATCH')
-    if not rows: reasons.append('NO_ROWS')
-    ce=sum(1 for r in rows if r.get('ce_instrument_key'))
-    pe=sum(1 for r in rows if r.get('pe_instrument_key'))
-    oi=sum(1 for r in rows if r.get('ce_oi') is not None and r.get('pe_oi') is not None)
-    if not ce or not pe: reasons.append('CE_PE_INSTRUMENTS_MISSING')
-    if not oi: reasons.append('OI_MISSING')
-    times=[]
-    for r in rows:
+
+def _select_file(data_root: Path, prefix: str, session_date: str) -> Path | None:
+    candidates = _candidate_files(data_root, prefix, session_date)
+    return candidates[0] if candidates else None
+
+
+def _parse_rows(payload: dict) -> list[dict]:
+    rows = payload.get("rows")
+    return rows if isinstance(rows, list) else []
+
+
+def _timestamp_stats(rows: list[dict], session_date: str) -> dict:
+    timestamps = []
+    for row in rows:
+        raw = row.get("timestamp")
+        if not raw:
+            continue
         try:
-            ts=datetime.fromisoformat(str(r.get('timestamp')).replace('Z','+00:00'))
-            if ts.date().isoformat()==session_date: times.append(ts)
-        except Exception: pass
-    times.sort()
-    return Check('POSITIONING','PASS' if not reasons else 'FAIL',{'file':str(path),'row_count':len(rows),'ce_rows':ce,'pe_rows':pe,'rows_with_both_oi':oi,'first_timestamp':times[0].isoformat() if times else None,'last_timestamp':times[-1].isoformat() if times else None,'reasons':reasons})
+            ts = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except Exception:
+            continue
+        if ts.date().isoformat() == session_date:
+            timestamps.append(ts)
 
-def _check_option(path,session_date):
-    if path is None: return Check('OPTION_OHLC','FAIL',{'reason':'MISSING'})
-    try:p=_load(path)
-    except Exception as e:return Check('OPTION_OHLC','FAIL',{'reason':'UNREADABLE','error':str(e)})
-    rows=_rows(p); reasons=[]
-    if str(p.get('session_date'))!=session_date: reasons.append('SESSION_DATE_MISMATCH')
-    if not rows: reasons.append('NO_ROWS')
-    sides={str(r.get('side')).upper() for r in rows if r.get('side')}
-    inst={r.get('instrument_key') for r in rows if r.get('instrument_key')}
-    strikes={r.get('strike') for r in rows if r.get('strike') is not None}
-    bad=0; seen=set(); dup=0; times=[]
-    for r in rows:
+    timestamps.sort()
+    return {
+        "timestamp_count": len(timestamps),
+        "first_timestamp": timestamps[0].isoformat() if timestamps else None,
+        "last_timestamp": timestamps[-1].isoformat() if timestamps else None,
+    }
+
+
+def _check_positioning(path: Path | None, session_date: str) -> Check:
+    if path is None:
+        return Check("POSITIONING", "FAIL", {"reason": "MISSING"})
+
+    try:
+        payload = _load_json(path)
+    except Exception as exc:
+        return Check("POSITIONING", "FAIL", {"reason": "UNREADABLE", "error": str(exc)})
+
+    rows = _parse_rows(payload)
+    stats = _timestamp_stats(rows, session_date)
+
+    ce_rows = [r for r in rows if r.get("ce_instrument_key")]
+    pe_rows = [r for r in rows if r.get("pe_instrument_key")]
+
+    # Correct cache schema:
+    #   ce_open_interest
+    #   pe_open_interest
+    oi_rows = [
+        r for r in rows
+        if r.get("ce_open_interest") is not None
+        and r.get("pe_open_interest") is not None
+    ]
+
+    reasons = []
+    if payload.get("status") not in (None, "AVAILABLE"):
+        reasons.append(f"STATUS_{payload.get('status')}")
+    if str(payload.get("session_date")) != session_date:
+        reasons.append("SESSION_DATE_MISMATCH")
+    if not rows:
+        reasons.append("NO_ROWS")
+    if not ce_rows or not pe_rows:
+        reasons.append("CE_PE_INSTRUMENTS_MISSING")
+    if not oi_rows:
+        reasons.append("OPEN_INTEREST_MISSING")
+
+    return Check(
+        "POSITIONING",
+        "PASS" if not reasons else "FAIL",
+        {
+            "file": str(path),
+            "row_count": len(rows),
+            "ce_rows": len(ce_rows),
+            "pe_rows": len(pe_rows),
+            "rows_with_both_open_interest": len(oi_rows),
+            "oi_fields": ["ce_open_interest", "pe_open_interest"],
+            **stats,
+            "reasons": reasons,
+        },
+    )
+
+
+def _check_option_ohlc(path: Path | None, session_date: str) -> Check:
+    if path is None:
+        return Check("OPTION_OHLC", "FAIL", {"reason": "MISSING"})
+
+    try:
+        payload = _load_json(path)
+    except Exception as exc:
+        return Check("OPTION_OHLC", "FAIL", {"reason": "UNREADABLE", "error": str(exc)})
+
+    rows = _parse_rows(payload)
+    reasons = []
+
+    if payload.get("status") not in (None, "AVAILABLE"):
+        reasons.append(f"STATUS_{payload.get('status')}")
+    if str(payload.get("session_date")) != session_date:
+        reasons.append("SESSION_DATE_MISMATCH")
+    if not rows:
+        reasons.append("NO_ROWS")
+
+    instruments = {str(r.get("instrument_key")) for r in rows if r.get("instrument_key")}
+    sides = {str(r.get("side")).upper() for r in rows if r.get("side")}
+    strikes = {r.get("strike") for r in rows if r.get("strike") is not None}
+
+    bad_ohlc = 0
+    timestamps = []
+    unique_keys = set()
+    duplicate_key_rows = 0
+
+    for row in rows:
         try:
-            o,h,l,c=map(float,(r['open'],r['high'],r['low'],r['close']))
-            if h<max(o,c) or l>min(o,c) or h<l: bad+=1
-        except Exception: bad+=1
+            o, h, l, c = map(float, (row["open"], row["high"], row["low"], row["close"]))
+            if h < max(o, c) or l > min(o, c) or h < l:
+                bad_ohlc += 1
+        except Exception:
+            bad_ohlc += 1
+
+        raw = row.get("timestamp")
+        if raw:
+            try:
+                ts = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+                if ts.date().isoformat() == session_date:
+                    timestamps.append(ts)
+                key = (row.get("instrument_key"), ts.isoformat())
+                if key in unique_keys:
+                    duplicate_key_rows += 1
+                unique_keys.add(key)
+            except Exception:
+                pass
+
+    timestamps.sort()
+
+    if "CE" not in sides or "PE" not in sides:
+        reasons.append("CE_OR_PE_SIDE_MISSING")
+    if not instruments:
+        reasons.append("NO_INSTRUMENTS")
+    if not strikes:
+        reasons.append("NO_STRIKES")
+    if bad_ohlc:
+        reasons.append("INVALID_OHLC")
+    if duplicate_key_rows:
+        reasons.append("DUPLICATE_INSTRUMENT_TIMESTAMP")
+
+    return Check(
+        "OPTION_OHLC",
+        "PASS" if not reasons else "FAIL",
+        {
+            "file": str(path),
+            "row_count": len(rows),
+            "instrument_count": len(instruments),
+            "strike_count": len(strikes),
+            "sides": sorted(sides),
+            "first_timestamp": timestamps[0].isoformat() if timestamps else None,
+            "last_timestamp": timestamps[-1].isoformat() if timestamps else None,
+            "invalid_ohlc_rows": bad_ohlc,
+            "duplicate_instrument_timestamp_rows": duplicate_key_rows,
+            "reasons": reasons,
+        },
+    )
+
+
+def _check_futures(path: Path, session_date: str) -> Check:
+    if not path.exists():
+        return Check("FUTURES", "FAIL", {"reason": "CSV_MISSING", "file": str(path)})
+
+    rows = []
+    with path.open(newline="") as handle:
+        for row in csv.DictReader(handle):
+            if row.get("session_date") == session_date:
+                rows.append(row)
+
+    reasons = []
+    timestamps = []
+    seen = set()
+    dup = 0
+    invalid = 0
+
+    for row in rows:
         try:
-            ts=datetime.fromisoformat(str(r['timestamp']).replace('Z','+00:00')); times.append(ts)
-            k=(r.get('instrument_key'),ts.isoformat())
-            if k in seen: dup+=1
-            seen.add(k)
-        except Exception: pass
-    times.sort()
-    if 'CE' not in sides or 'PE' not in sides: reasons.append('CE_OR_PE_SIDE_MISSING')
-    if not inst: reasons.append('NO_INSTRUMENTS')
-    if not strikes: reasons.append('NO_STRIKES')
-    if bad: reasons.append('INVALID_OHLC')
-    if dup: reasons.append('DUPLICATE_INSTRUMENT_TIMESTAMP')
-    return Check('OPTION_OHLC','PASS' if not reasons else 'FAIL',{'file':str(path),'row_count':len(rows),'instrument_count':len(inst),'strike_count':len(strikes),'sides':sorted(sides),'first_timestamp':times[0].isoformat() if times else None,'last_timestamp':times[-1].isoformat() if times else None,'invalid_ohlc_rows':bad,'duplicate_instrument_timestamp_rows':dup,'reasons':reasons})
+            ts = datetime.fromisoformat(row["timestamp"].replace("Z", "+00:00"))
+            timestamps.append(ts)
+            if row["timestamp"] in seen:
+                dup += 1
+            seen.add(row["timestamp"])
 
-def _check_futures(path:Path,session_date):
-    if not path.exists(): return Check('FUTURES','FAIL',{'reason':'CSV_MISSING','file':str(path)})
-    with path.open(newline='') as h: rows=[r for r in csv.DictReader(h) if r.get('session_date')==session_date]
-    reasons=[]; times=[]; seen=set(); dup=0; invalid=0
-    for r in rows:
+            o, h, l, c = map(float, (row["open"], row["high"], row["low"], row["close"]))
+            volume = float(row["volume"])
+            vwap = float(row["session_vwap"])
+            if h < max(o, c) or l > min(o, c) or h < l or volume < 0 or vwap <= 0:
+                invalid += 1
+        except Exception:
+            invalid += 1
+
+    timestamps.sort()
+
+    if not rows:
+        reasons.append("MISSING")
+    if rows and len(rows) < 300:
+        reasons.append("TOO_FEW_1M_ROWS")
+    if timestamps:
+        if timestamps[0].strftime("%H:%M") > "09:15":
+            reasons.append("STARTS_AFTER_09_15")
+        if timestamps[-1].strftime("%H:%M") < "15:29":
+            reasons.append("ENDS_BEFORE_15_29")
+    if dup:
+        reasons.append("DUPLICATE_TIMESTAMPS")
+    if invalid:
+        reasons.append("INVALID_OHLCV_OR_VWAP")
+
+    instruments = sorted({r.get("instrument_key") for r in rows if r.get("instrument_key")})
+    expiries = sorted({r.get("expiry") for r in rows if r.get("expiry")})
+    sources = sorted({r.get("contract_source") for r in rows if r.get("contract_source")})
+
+    if len(instruments) > 1:
+        reasons.append("MULTIPLE_FUTURES_CONTRACTS")
+    if len(expiries) > 1:
+        reasons.append("MULTIPLE_FUTURES_EXPIRIES")
+
+    return Check(
+        "FUTURES",
+        "PASS" if not reasons else "FAIL",
+        {
+            "file": str(path),
+            "row_count": len(rows),
+            "instrument_keys": instruments,
+            "expiries": expiries,
+            "contract_sources": sources,
+            "first_timestamp": timestamps[0].isoformat() if timestamps else None,
+            "last_timestamp": timestamps[-1].isoformat() if timestamps else None,
+            "duplicate_timestamps": dup,
+            "invalid_rows": invalid,
+            "reasons": reasons,
+        },
+    )
+
+
+def _check_0920_baseline(positioning: Check, session_date: str) -> Check:
+    if positioning.status != "PASS":
+        return Check("SESSION_BASELINE_09_20", "FAIL", {"reason": "POSITIONING_NOT_VALID"})
+
+    path = Path(positioning.details["file"])
+    payload = _load_json(path)
+    rows = _parse_rows(payload)
+
+    matches = []
+    usable = []
+
+    for row in rows:
+        raw = row.get("timestamp")
+        if not raw:
+            continue
         try:
-            ts=datetime.fromisoformat(r['timestamp'].replace('Z','+00:00')); times.append(ts)
-            if r['timestamp'] in seen: dup+=1
-            seen.add(r['timestamp'])
-            o,hi,lo,c=map(float,(r['open'],r['high'],r['low'],r['close'])); v=float(r['volume']); vw=float(r['session_vwap'])
-            if hi<max(o,c) or lo>min(o,c) or hi<lo or v<0 or vw<=0: invalid+=1
-        except Exception: invalid+=1
-    times.sort()
-    if not rows: reasons.append('MISSING')
-    if rows and len(rows)<300: reasons.append('TOO_FEW_1M_ROWS')
-    if times and times[0].strftime('%H:%M')>'09:15': reasons.append('STARTS_AFTER_09_15')
-    if times and times[-1].strftime('%H:%M')<'15:29': reasons.append('ENDS_BEFORE_15_29')
-    if dup: reasons.append('DUPLICATE_TIMESTAMPS')
-    if invalid: reasons.append('INVALID_OHLCV_OR_VWAP')
-    inst=sorted({r.get('instrument_key') for r in rows if r.get('instrument_key')})
-    exp=sorted({r.get('expiry') for r in rows if r.get('expiry')})
-    src=sorted({r.get('contract_source') for r in rows if r.get('contract_source')})
-    if len(inst)>1: reasons.append('MULTIPLE_FUTURES_CONTRACTS')
-    if len(exp)>1: reasons.append('MULTIPLE_FUTURES_EXPIRIES')
-    return Check('FUTURES','PASS' if not reasons else 'FAIL',{'file':str(path),'row_count':len(rows),'instrument_keys':inst,'expiries':exp,'contract_sources':src,'first_timestamp':times[0].isoformat() if times else None,'last_timestamp':times[-1].isoformat() if times else None,'duplicate_timestamps':dup,'invalid_rows':invalid,'reasons':reasons})
+            ts = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except Exception:
+            continue
 
-def _check_baseline(pos:Check,session_date):
-    if pos.status!='PASS': return Check('SESSION_BASELINE_09_20','FAIL',{'reason':'POSITIONING_NOT_VALID'})
-    p=_load(Path(pos.details['file'])); matches=[]
-    for r in _rows(p):
-        try:
-            ts=datetime.fromisoformat(str(r.get('timestamp')).replace('Z','+00:00'))
-            if ts.date().isoformat()==session_date and ts.strftime('%H:%M')=='09:20': matches.append(r)
-        except Exception: pass
-    usable=[r for r in matches if r.get('ce_oi') is not None and r.get('pe_oi') is not None]
-    return Check('SESSION_BASELINE_09_20','PASS' if usable else 'FAIL',{'matching_rows':len(matches),'usable_oi_rows':len(usable),'reason':None if usable else 'GENUINE_09_20_BASELINE_UNAVAILABLE'})
+        if ts.date().isoformat() == session_date and ts.strftime("%H:%M") == "09:20":
+            matches.append(row)
+            if (
+                row.get("ce_open_interest") is not None
+                and row.get("pe_open_interest") is not None
+            ):
+                usable.append(row)
 
-def validate_session(session_date:str,*,data_root='data',futures_csv=DEFAULT_FUTURES_CSV):
-    date.fromisoformat(session_date); root=Path(data_root)
-    pf=_select(root,'historical-positioning-cache',session_date); of=_select(root,'historical-option-ohlc-cache',session_date)
-    pos=_check_positioning(pf,session_date); opt=_check_option(of,session_date); fut=_check_futures(Path(futures_csv),session_date); base=_check_baseline(pos,session_date)
-    checks=[pos,opt,fut,base]; repair=[]
-    if pos.status!='PASS': repair.append('POSITIONING')
-    if opt.status!='PASS': repair.append('OPTION_OHLC')
-    if fut.status!='PASS': repair.append('FUTURES')
-    if base.status!='PASS' and 'POSITIONING' not in repair: repair.append('SESSION_BASELINE_09_20')
-    return SessionDataGateResult(session_date,'PASS' if not repair else 'FAIL',checks,repair,str(pf) if pf else None,str(of) if of else None,str(futures_csv))
+    return Check(
+        "SESSION_BASELINE_09_20",
+        "PASS" if usable else "FAIL",
+        {
+            "matching_rows": len(matches),
+            "usable_open_interest_rows": len(usable),
+            "oi_fields": ["ce_open_interest", "pe_open_interest"],
+            "reason": None if usable else "GENUINE_09_20_BASELINE_UNAVAILABLE",
+        },
+    )
 
-def main():
-    p=argparse.ArgumentParser(); p.add_argument('--session-date',required=True); p.add_argument('--data-root',default='data'); p.add_argument('--futures-csv',default=str(DEFAULT_FUTURES_CSV)); a=p.parse_args()
-    r=validate_session(a.session_date,data_root=a.data_root,futures_csv=a.futures_csv); print(json.dumps(r.to_dict(),indent=2)); raise SystemExit(0 if r.status=='PASS' else 2)
-if __name__=='__main__': main()
+
+def validate_session(
+    session_date: str,
+    *,
+    data_root: str | Path = "data",
+    futures_csv: str | Path = DEFAULT_FUTURES_CSV,
+) -> SessionDataGateResult:
+    date.fromisoformat(session_date)
+
+    root = Path(data_root)
+    pos_file = _select_file(root, "historical-positioning-cache", session_date)
+    opt_file = _select_file(root, "historical-option-ohlc-cache", session_date)
+
+    pos = _check_positioning(pos_file, session_date)
+    opt = _check_option_ohlc(opt_file, session_date)
+    fut = _check_futures(Path(futures_csv), session_date)
+    baseline = _check_0920_baseline(pos, session_date)
+
+    checks = [pos, opt, fut, baseline]
+    repair = []
+    if pos.status != "PASS":
+        repair.append("POSITIONING")
+    if opt.status != "PASS":
+        repair.append("OPTION_OHLC")
+    if fut.status != "PASS":
+        repair.append("FUTURES")
+    if baseline.status != "PASS" and "POSITIONING" not in repair:
+        repair.append("SESSION_BASELINE_09_20")
+
+    return SessionDataGateResult(
+        session_date=session_date,
+        status="PASS" if not repair else "FAIL",
+        checks=checks,
+        repair_required=repair,
+        positioning_file=str(pos_file) if pos_file else None,
+        option_ohlc_file=str(opt_file) if opt_file else None,
+        futures_csv=str(futures_csv),
+    )
+
+
+def main() -> None:
+    p = argparse.ArgumentParser(prog="python -m market_lab.session_data_gate_v1")
+    p.add_argument("--session-date", required=True)
+    p.add_argument("--data-root", default="data")
+    p.add_argument("--futures-csv", default=str(DEFAULT_FUTURES_CSV))
+    args = p.parse_args()
+
+    result = validate_session(
+        args.session_date,
+        data_root=args.data_root,
+        futures_csv=args.futures_csv,
+    )
+    print(json.dumps(result.to_dict(), indent=2))
+    raise SystemExit(0 if result.status == "PASS" else 2)
+
+
+if __name__ == "__main__":
+    main()
