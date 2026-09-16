@@ -43,7 +43,11 @@ def main() -> None:
         payload["events"] = [
             asdict(event)
             for event in result.events
-            if event.event_type == "POSITION_CLOSED"
+            if event.event_type in {
+                "PAPER_ENTRY_REJECTED",
+                "PAPER_POSITION_OPENED",
+                "POSITION_CLOSED",
+            }
         ]
 
     print(json.dumps(payload, indent=2))
