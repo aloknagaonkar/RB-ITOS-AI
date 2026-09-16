@@ -30,17 +30,17 @@ def choose_option_ohlc_json(
     root = Path(data_root)
     allowed = ("train", "oos-a", "oos-b", "oos-c", "oos-d")
 
-    exact_candidates: list[Path] = []
+    exact = []
     for bucket in allowed:
         directory = root / f"historical-option-ohlc-cache-{bucket}"
-        if not directory.exists():
-            continue
-        exact_candidates.extend(
-            sorted(directory.glob(f"*__{session_date}__{session_date}__*.json"))
-        )
-
-    if exact_candidates:
-        return exact_candidates[0]
+        if directory.exists():
+            exact.extend(
+                sorted(directory.glob(
+                    f"*__{session_date}__{session_date}__*.json"
+                ))
+            )
+    if exact:
+        return exact[0]
 
     for bucket in allowed:
         directory = root / f"historical-option-ohlc-cache-{bucket}"
@@ -66,7 +66,7 @@ def load_option_oi_index(
     session_date: str,
     *,
     data_root: str | Path = "data",
-) -> tuple[Path, dict[tuple[datetime, float], FixedStrikeOIRow]]:
+):
     path = choose_option_ohlc_json(session_date, data_root=data_root)
     payload = json.loads(path.read_text())
 
@@ -75,7 +75,7 @@ def load_option_oi_index(
             f"Option OHLC cache is not AVAILABLE: {path}"
         )
 
-    per_side: dict[tuple[datetime, float], dict[str, int]] = {}
+    per_side = {}
 
     for row in payload.get("rows") or []:
         raw_ts = row.get("timestamp")
@@ -103,7 +103,7 @@ def load_option_oi_index(
             )
         bucket[side] = int(raw_oi)
 
-    out: dict[tuple[datetime, float], FixedStrikeOIRow] = {}
+    out = {}
     for key, sides in per_side.items():
         if "CE" in sides and "PE" in sides:
             out[key] = FixedStrikeOIRow(
@@ -120,7 +120,7 @@ def select_exact_strikes_with_oi_fallback(
     strikes: Iterable[float],
     *,
     timestamp: datetime,
-    option_oi_index: dict[tuple[datetime, float], FixedStrikeOIRow],
+    option_oi_index,
 ):
     by = {float(row.strike): row for row in rows}
     selected = []
