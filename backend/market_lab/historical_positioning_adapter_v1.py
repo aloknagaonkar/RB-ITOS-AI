@@ -4,7 +4,6 @@ import json
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Iterable
 
 from .domain import IST
 
@@ -59,16 +58,21 @@ def load_positioning_file(path: str | Path) -> PositioningSession:
         )
 
     required = (
-        "schema_version", "underlying", "session_date", "expiry",
-        "wings", "strike_interval", "rows",
+        "schema_version",
+        "underlying",
+        "session_date",
+        "expiry",
+        "wings",
+        "strike_interval",
+        "rows",
     )
-    missing = [k for k in required if k not in payload]
+    missing = [key for key in required if key not in payload]
     if missing:
         raise HistoricalPositioningAdapterError(
             f"Missing keys {missing} in {path}"
         )
 
-    rows = []
+    rows: list[PositioningRow] = []
     for raw in payload["rows"]:
         rows.append(
             PositioningRow(
@@ -116,17 +120,27 @@ def discover_positioning_sessions(
 ) -> list[Path]:
     root = Path(data_root)
     matches: list[Path] = []
-    for path in root.glob("historical-positioning-cache*/NSE_INDEX_Nifty_50__*.json"):
-        if session_date is None:
-            matches.append(path)
+
+    # Important: do not depend on exact cache filenames. Tests and future cache
+    # writers may use different names. Directory + JSON content is authoritative.
+    for directory in sorted(root.glob("historical-positioning-cache*")):
+        if not directory.is_dir():
             continue
-        try:
-            payload = json.loads(path.read_text())
-        except Exception:
-            continue
-        if payload.get("session_date") == session_date:
-            matches.append(path)
-    return sorted(matches)
+
+        for path in sorted(directory.glob("*.json")):
+            if session_date is None:
+                matches.append(path)
+                continue
+
+            try:
+                payload = json.loads(path.read_text())
+            except Exception:
+                continue
+
+            if payload.get("session_date") == session_date:
+                matches.append(path)
+
+    return matches
 
 
 def choose_positioning_session(
@@ -138,19 +152,21 @@ def choose_positioning_session(
         data_root=data_root,
         session_date=session_date,
     )
+
     if not candidates:
         raise HistoricalPositioningAdapterError(
             f"No historical positioning cache found for {session_date}"
         )
 
-    # Prefer the shortest-dated non-expired expiry for the requested session.
     target = date.fromisoformat(session_date)
-    loaded = []
+    loaded: list[tuple[date, Path, PositioningSession]] = []
+
     for path in candidates:
         try:
             item = load_positioning_file(path)
         except Exception:
             continue
+
         expiry = date.fromisoformat(item.expiry)
         if expiry >= target:
             loaded.append((expiry, path, item))
@@ -160,7 +176,7 @@ def choose_positioning_session(
             f"No usable non-expired positioning cache found for {session_date}"
         )
 
-    loaded.sort(key=lambda x: (x[0], str(x[1])))
+    loaded.sort(key=lambda item: (item[0], str(item[1])))
     return loaded[0][2]
 
 
@@ -172,10 +188,10 @@ def timestamp_groups(session: PositioningSession) -> dict[datetime, list[Positio
 
 
 def fixed_0920_rows(session: PositioningSession) -> list[PositioningRow]:
-    groups = timestamp_groups(session)
-    for ts, rows in groups.items():
+    for ts, rows in timestamp_groups(session).items():
         if ts.hour == 9 and ts.minute == 20:
             return rows
+
     raise HistoricalPositioningAdapterError(
         f"09:20 baseline unavailable in {session.source_path}"
     )
