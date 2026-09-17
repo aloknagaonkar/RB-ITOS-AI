@@ -56,9 +56,20 @@ def _recent_context(row: dict[str, Any]) -> str:
 def _pcr_context(row: dict[str, Any]) -> str:
     return (
         f"PCR={_fmt(row.get('pcr_current'),4)} "
+        f"5mAgo={_fmt(row.get('pcr_previous_same_strikes_5m'),4)} "
         f"Δ5={_fmt(row.get('pcr_change_5m'),4)} "
+        f"10mAgo={_fmt(row.get('pcr_previous_same_strikes_10m'),4)} "
         f"Δ10={_fmt(row.get('pcr_change_10m'),4)} "
+        f"15mAgo={_fmt(row.get('pcr_previous_same_strikes_15m'),4)} "
         f"Δ15={_fmt(row.get('pcr_change_15m'),4)}"
+    )
+
+
+def _session_pcr_context(row: dict[str, Any]) -> str:
+    return (
+        f"09:20={_fmt(row.get('session_pcr_baseline_0920'),4)} "
+        f"NOW={_fmt(row.get('session_pcr_current'),4)} "
+        f"Δ={_fmt(row.get('session_pcr_change_0920_to_now'),4)}"
     )
 
 
@@ -133,8 +144,11 @@ def build_rows(audit: dict[str, Any]) -> list[dict[str, Any]]:
             "recent_oi_summary": _recent_context(row),
 
             "pcr_current": row.get("pcr_current"),
+            "pcr_5m_ago_same_strikes": row.get("pcr_previous_same_strikes_5m"),
             "pcr_change_5m": row.get("pcr_change_5m"),
+            "pcr_10m_ago_same_strikes": row.get("pcr_previous_same_strikes_10m"),
             "pcr_change_10m": row.get("pcr_change_10m"),
+            "pcr_15m_ago_same_strikes": row.get("pcr_previous_same_strikes_15m"),
             "pcr_change_15m": row.get("pcr_change_15m"),
             "pcr_summary": _pcr_context(row),
 
@@ -144,6 +158,10 @@ def build_rows(audit: dict[str, Any]) -> list[dict[str, Any]]:
             "pe_session_delta_0920_to_now": row.get("pe_session_delta"),
             "session_imbalance_0920_to_now": row.get("session_imbalance"),
             "session_oi_summary": _session_context(row),
+            "session_pcr_0920": row.get("session_pcr_baseline_0920"),
+            "session_pcr_now": row.get("session_pcr_current"),
+            "session_pcr_change_0920_to_now": row.get("session_pcr_change_0920_to_now"),
+            "session_pcr_summary": _session_pcr_context(row),
 
             "futures_oi": row.get("futures_oi"),
             "futures_oi_change_5m": row.get("futures_oi_change_5m"),
@@ -191,6 +209,7 @@ def write_text(path: Path, audit: dict[str, Any], rows: list[dict[str, Any]]) ->
             f"RECENT OI (moving ATM±5, same physical strikes): {r['recent_oi_summary']}",
             f"PCR (same-strike): {r['pcr_summary']}",
             f"SESSION OI (fixed 09:20 ATM±5 → now): {r['session_oi_summary']}",
+            f"SESSION PCR (fixed 09:20 ATM±5 → now): {r['session_pcr_summary']}",
             f"FUTURES OI: {r['futures_oi_status']} / {r['futures_oi_direction']} ΔOI5={_fmt_m(r['futures_oi_change_5m'])}",
             f"VWAP: {r['vwap_side']} dist={_fmt(r['vwap_distance'],2)}",
             f"STRATEGY: {r['strategy_summary']}",

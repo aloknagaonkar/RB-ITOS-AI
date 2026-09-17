@@ -20,10 +20,29 @@ Every candle preserves two distinct option-OI views:
 The report also includes:
 - futures price 5m/10m/15m
 - futures OI status
-- corrected same-strike PCR
+- corrected same-strike recent PCR, including current ratio, prior same-strike
+  ratios at 5m/10m/15m, and the corresponding PCR changes
+- fixed-session PCR using the frozen 09:20 ATM ±5 basket, including 09:20
+  baseline PCR, current fixed-basket PCR, and 09:20→now PCR change
 - VWAP
 - existing P1/P2 strategy events
 - optional retrospective evaluation label
+
+The text/CSV output therefore keeps two PCR views separate in the same way as OI:
+
+1. **Recent PCR — moving ATM ±5**
+   - `PCR current`
+   - `PCR 5m ago on same physical strikes` and `Δ5`
+   - `PCR 10m ago on same physical strikes` and `Δ10`
+   - `PCR 15m ago on same physical strikes` and `Δ15`
+
+2. **Session PCR — fixed 09:20 ATM ±5**
+   - `09:20 PCR`
+   - `current fixed-basket PCR`
+   - `09:20 → now PCR change`
+
+No strategy decision is created from these fields; they are descriptive research
+features for candle-by-candle validation.
 
 ## Usage after running V1.1
 

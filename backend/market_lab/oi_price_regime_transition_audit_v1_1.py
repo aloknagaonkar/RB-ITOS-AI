@@ -182,6 +182,13 @@ def sign(v):
     return "NA" if v is None else "POS" if v > 0 else "NEG" if v < 0 else "ZERO"
 
 
+def calculate_pcr(pe_oi: float | None, ce_oi: float | None) -> float | None:
+    """Return PE/CE PCR when both sides are available and CE OI is non-zero."""
+    if pe_oi is None or ce_oi in (None, 0):
+        return None
+    return pe_oi / ce_oi
+
+
 
 def load_strategy_events(path: Path | None) -> dict[str, list[dict[str, Any]]]:
     if path is None:
@@ -258,6 +265,7 @@ def build_audit(date: str, positioning_file: Path, futures_csv: Path, option_ohl
     base_pe, miss_pe, _ = sum_side(cps[0], fixed_strikes, "PE", exact, fallback)
     if base_ce is None or base_pe is None:
         raise ValueError(f"09:20 fixed baseline incomplete CE={miss_ce} PE={miss_pe}")
+    session_pcr_baseline = calculate_pcr(base_pe, base_ce)
 
     rows=[]; prev_fc=None; prev_foi=None; bull_streak=0; bear_streak=0
     for ts in cps:
@@ -289,11 +297,11 @@ def build_audit(date: str, positioning_file: Path, futures_csv: Path, option_ohl
         ce_d10,pe_d10,imb10 = horizon_delta(10)
         ce_d15,pe_d15,imb15 = horizon_delta(15)
 
-        pcr=(pe/ce) if ce not in (None,0) and pe is not None else None
+        pcr=calculate_pcr(pe, ce)
 
         def previous_same_pcr(minutes):
             pce,ppe = prev_same[minutes]
-            return (ppe/pce) if pce not in (None,0) and ppe is not None else None
+            return calculate_pcr(ppe, pce)
 
         pcr_prev5 = previous_same_pcr(5)
         pcr_prev10 = previous_same_pcr(10)
@@ -303,6 +311,12 @@ def build_audit(date: str, positioning_file: Path, futures_csv: Path, option_ohl
         pcr_d15=(pcr-pcr_prev15) if pcr is not None and pcr_prev15 is not None else None
         fce,fce_miss,fce_fb=sum_side(ts,fixed_strikes,"CE",exact,fallback); fpe,fpe_miss,fpe_fb=sum_side(ts,fixed_strikes,"PE",exact,fallback)
         ce_s=(fce-base_ce) if fce is not None else None; pe_s=(fpe-base_pe) if fpe is not None else None; sess=(pe_s-ce_s) if ce_s is not None and pe_s is not None else None
+        session_pcr_current = calculate_pcr(fpe, fce)
+        session_pcr_change = (
+            session_pcr_current - session_pcr_baseline
+            if session_pcr_current is not None and session_pcr_baseline is not None
+            else None
+        )
 
         fr=fut.get(ts); fc=fr["close"] if fr else None; foi=fr["oi"] if fr else None
         pc=(fc-prev_fc) if fc is not None and prev_fc is not None else None
@@ -326,10 +340,17 @@ def build_audit(date: str, positioning_file: Path, futures_csv: Path, option_ohl
             "ce_oi":ce,"pe_oi":pe,"ce_delta_5m":ce_d,"pe_delta_5m":pe_d,"imbalance_5m":imb,"imbalance_sign":sign(imb),
             "ce_delta_10m":ce_d10,"pe_delta_10m":pe_d10,"imbalance_10m":imb10,
             "ce_delta_15m":ce_d15,"pe_delta_15m":pe_d15,"imbalance_15m":imb15,
-            "pcr_current":pcr,"pcr_previous_same_strikes_5m":pcr_prev5,"pcr_change_5m":pcr_d,"pcr_change_sign":sign(pcr_d),
+            "pcr_current":pcr,
+            "pcr_previous_same_strikes_5m":pcr_prev5,
+            "pcr_previous_same_strikes_10m":pcr_prev10,
+            "pcr_previous_same_strikes_15m":pcr_prev15,
+            "pcr_change_5m":pcr_d,"pcr_change_sign":sign(pcr_d),
             "pcr_change_10m":pcr_d10,"pcr_change_15m":pcr_d15,
             "morning_fixed_atm":morning_atm,"fixed_strikes":",".join(str(int(x)) for x in fixed_strikes),"fixed_ce_oi":fce,"fixed_pe_oi":fpe,
             "ce_session_delta":ce_s,"pe_session_delta":pe_s,"session_imbalance":sess,
+            "session_pcr_baseline_0920":session_pcr_baseline,
+            "session_pcr_current":session_pcr_current,
+            "session_pcr_change_0920_to_now":session_pcr_change,
             "futures_bar_start":fr["bar_start"] if fr else None,"futures_close":fc,"futures_price_change_5m":pc,"futures_price_change_10m":pc10,"futures_price_change_15m":pc15,"futures_oi":foi,"futures_oi_change_5m":oc,
             "futures_oi_status":oi_status,"futures_oi_direction":oi_dir,"bullish_oi_status_streak":bull_streak,"bearish_oi_status_streak":bear_streak,
             "vwap":vw,"vwap_distance":vd,"vwap_side":vs,"bullish_evidence_votes":bv,"bearish_evidence_votes":sv,"consensus_hint":hint,
