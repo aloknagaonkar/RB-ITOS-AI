@@ -73,6 +73,34 @@ def _session_pcr_context(row: dict[str, Any]) -> str:
     )
 
 
+
+def _oi_horizon_context(row: dict[str, Any], minutes: int) -> str:
+    return (
+        f"REF CE={_fmt_m(row.get(f'ce_oi_previous_same_strikes_{minutes}m'))} "
+        f"PE={_fmt_m(row.get(f'pe_oi_previous_same_strikes_{minutes}m'))} | "
+        f"NOW CE={_fmt_m(row.get('ce_oi'))} PE={_fmt_m(row.get('pe_oi'))} | "
+        f"ΔCE={_fmt_m(row.get(f'ce_delta_{minutes}m'))} "
+        f"ΔPE={_fmt_m(row.get(f'pe_delta_{minutes}m'))} "
+        f"IMB={_fmt_m(row.get(f'imbalance_{minutes}m'))} | "
+        f"PCR REF={_fmt(row.get(f'pcr_previous_same_strikes_{minutes}m'),4)} "
+        f"NOW={_fmt(row.get('pcr_current'),4)} "
+        f"Δ={_fmt(row.get(f'pcr_change_{minutes}m'),4)}"
+    )
+
+
+def _session_full_context(row: dict[str, Any]) -> str:
+    return (
+        f"09:20 CE={_fmt_m(row.get('fixed_ce_oi_baseline_0920'))} "
+        f"PE={_fmt_m(row.get('fixed_pe_oi_baseline_0920'))} | "
+        f"NOW CE={_fmt_m(row.get('fixed_ce_oi'))} PE={_fmt_m(row.get('fixed_pe_oi'))} | "
+        f"ΔCE={_fmt_m(row.get('ce_session_delta'))} "
+        f"ΔPE={_fmt_m(row.get('pe_session_delta'))} "
+        f"IMB={_fmt_m(row.get('session_imbalance'))} | "
+        f"PCR 09:20={_fmt(row.get('session_pcr_baseline_0920'),4)} "
+        f"NOW={_fmt(row.get('session_pcr_current'),4)} "
+        f"Δ={_fmt(row.get('session_pcr_change_0920_to_now'),4)}"
+    )
+
 def _price_context(row: dict[str, Any]) -> str:
     return (
         f"FUT={_fmt(row.get('futures_close'),2)} "
@@ -136,11 +164,26 @@ def build_rows(audit: dict[str, Any]) -> list[dict[str, Any]]:
             "moving_atm_pm5_strikes": row.get("moving_strikes"),
             "price_context": _price_context(row),
 
+            "current_ce_oi": row.get("ce_oi"),
+            "current_pe_oi": row.get("pe_oi"),
+            "ce_oi_5m_ago_same_strikes": row.get("ce_oi_previous_same_strikes_5m"),
+            "pe_oi_5m_ago_same_strikes": row.get("pe_oi_previous_same_strikes_5m"),
             "recent_ce_delta_5m": row.get("ce_delta_5m"),
             "recent_pe_delta_5m": row.get("pe_delta_5m"),
             "recent_imbalance_5m": row.get("imbalance_5m"),
+            "ce_oi_10m_ago_same_strikes": row.get("ce_oi_previous_same_strikes_10m"),
+            "pe_oi_10m_ago_same_strikes": row.get("pe_oi_previous_same_strikes_10m"),
+            "recent_ce_delta_10m": row.get("ce_delta_10m"),
+            "recent_pe_delta_10m": row.get("pe_delta_10m"),
             "recent_imbalance_10m": row.get("imbalance_10m"),
+            "ce_oi_15m_ago_same_strikes": row.get("ce_oi_previous_same_strikes_15m"),
+            "pe_oi_15m_ago_same_strikes": row.get("pe_oi_previous_same_strikes_15m"),
+            "recent_ce_delta_15m": row.get("ce_delta_15m"),
+            "recent_pe_delta_15m": row.get("pe_delta_15m"),
             "recent_imbalance_15m": row.get("imbalance_15m"),
+            "oi_5m_summary": _oi_horizon_context(row, 5),
+            "oi_10m_summary": _oi_horizon_context(row, 10),
+            "oi_15m_summary": _oi_horizon_context(row, 15),
             "recent_oi_summary": _recent_context(row),
 
             "pcr_current": row.get("pcr_current"),
@@ -154,6 +197,10 @@ def build_rows(audit: dict[str, Any]) -> list[dict[str, Any]]:
 
             "fixed_0920_atm": row.get("morning_fixed_atm"),
             "fixed_0920_pm5_strikes": row.get("fixed_strikes"),
+            "fixed_ce_oi_0920": row.get("fixed_ce_oi_baseline_0920"),
+            "fixed_pe_oi_0920": row.get("fixed_pe_oi_baseline_0920"),
+            "fixed_ce_oi_now": row.get("fixed_ce_oi"),
+            "fixed_pe_oi_now": row.get("fixed_pe_oi"),
             "ce_session_delta_0920_to_now": row.get("ce_session_delta"),
             "pe_session_delta_0920_to_now": row.get("pe_session_delta"),
             "session_imbalance_0920_to_now": row.get("session_imbalance"),
@@ -162,6 +209,7 @@ def build_rows(audit: dict[str, Any]) -> list[dict[str, Any]]:
             "session_pcr_now": row.get("session_pcr_current"),
             "session_pcr_change_0920_to_now": row.get("session_pcr_change_0920_to_now"),
             "session_pcr_summary": _session_pcr_context(row),
+            "session_full_summary": _session_full_context(row),
 
             "futures_oi": row.get("futures_oi"),
             "futures_oi_change_5m": row.get("futures_oi_change_5m"),
@@ -206,10 +254,11 @@ def write_text(path: Path, audit: dict[str, Any], rows: list[dict[str, Any]]) ->
             f"=== {r['timestamp']} ===",
             f"Spot/ATM: spot={r['spot']} moving_atm={r['moving_atm']}",
             f"PRICE: {r['price_context']}",
-            f"RECENT OI (moving ATM±5, same physical strikes): {r['recent_oi_summary']}",
-            f"PCR (same-strike): {r['pcr_summary']}",
-            f"SESSION OI (fixed 09:20 ATM±5 → now): {r['session_oi_summary']}",
-            f"SESSION PCR (fixed 09:20 ATM±5 → now): {r['session_pcr_summary']}",
+            f"CURRENT OI (moving ATM±5): CE={_fmt_m(r['current_ce_oi'])} PE={_fmt_m(r['current_pe_oi'])} PCR={_fmt(r['pcr_current'],4)}",
+            f"5M OI+PCR (same physical strikes): {r['oi_5m_summary']}",
+            f"10M OI+PCR (same physical strikes): {r['oi_10m_summary']}",
+            f"15M OI+PCR (same physical strikes): {r['oi_15m_summary']}",
+            f"SESSION OI+PCR (fixed 09:20 ATM±5 → now): {r['session_full_summary']}",
             f"FUTURES OI: {r['futures_oi_status']} / {r['futures_oi_direction']} ΔOI5={_fmt_m(r['futures_oi_change_5m'])}",
             f"VWAP: {r['vwap_side']} dist={_fmt(r['vwap_distance'],2)}",
             f"STRATEGY: {r['strategy_summary']}",

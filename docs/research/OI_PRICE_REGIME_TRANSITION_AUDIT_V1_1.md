@@ -76,3 +76,15 @@ python -m market_lab.oi_price_regime_transition_audit_v1_1 \
 ```
 
 The same command works for any date with available historical positioning/futures data.
+
+## Explicit OI reference totals for candle validation
+
+For each moving ATM±5 candle the audit also exposes the CE and PE OI totals on the same physical strikes at T-5, T-10 and T-15. This lets the reporter show both the reference totals and the current totals before displaying CE/PE changes, imbalance and PCR change.
+
+Fields:
+- `ce_oi_previous_same_strikes_5m`, `pe_oi_previous_same_strikes_5m`
+- `ce_oi_previous_same_strikes_10m`, `pe_oi_previous_same_strikes_10m`
+- `ce_oi_previous_same_strikes_15m`, `pe_oi_previous_same_strikes_15m`
+- `fixed_ce_oi_baseline_0920`, `fixed_pe_oi_baseline_0920`
+
+The fixed-session fields preserve exact 09:20 CE/PE OI totals so the session view can display 09:20 → current totals, changes, imbalance and PCR together.

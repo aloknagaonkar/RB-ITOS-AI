@@ -54,3 +54,13 @@ python -m market_lab.candle_by_candle_validation_v1 \
 ```
 
 Use the same command for any date by changing the input/output date.
+
+## Full OI + PCR horizon presentation
+
+The human-readable report now prints one complete line for each horizon:
+- 5m: reference CE/PE OI, current CE/PE OI, CE/PE changes, imbalance, reference PCR, current PCR, PCR change.
+- 10m: same fields using the exact current physical strike basket at T-10.
+- 15m: same fields using the exact current physical strike basket at T-15.
+- Session: fixed 09:20 ATM±5 CE/PE OI totals, current fixed-basket CE/PE OI totals, CE/PE buildup, session imbalance, 09:20 PCR, current fixed PCR and session PCR change.
+
+This is reporting only and does not alter strategy logic.
