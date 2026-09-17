@@ -116,7 +116,13 @@ def _current_pm2(rows: Iterable[PositioningRow]) -> list[PositioningRow]:
 
 def build_historical_oi_features(
     session: PositioningSession,
+    *,
+    option_oi_index=None,
 ) -> list[OICheckpointFeature]:
+    if option_oi_index is not None:
+        from .fixed_strike_oi_fallback_v1 import (
+            select_exact_strikes_with_oi_fallback,
+        )
     groups = timestamp_groups(session)
     if not groups:
         return []
@@ -168,13 +174,29 @@ def build_historical_oi_features(
             None if pcr_now is None or pcr_prev is None else pcr_now - pcr_prev
         )
 
-        current_fixed = _select_exact_strikes(current_rows, fixed_strikes)
+        if option_oi_index is None:
+            current_fixed = _select_exact_strikes(current_rows, fixed_strikes)
+        else:
+            current_fixed = select_exact_strikes_with_oi_fallback(
+                current_rows,
+                fixed_strikes,
+                timestamp=ts,
+                option_oi_index=option_oi_index,
+            )
         ce_fixed, pe_fixed = _sum_oi(current_fixed)
         ce_session_delta = ce_fixed - baseline_ce
         pe_session_delta = pe_fixed - baseline_pe
         session_imbalance = pe_session_delta - ce_session_delta
 
-        previous_fixed = _select_exact_strikes(previous_rows, fixed_strikes)
+        if option_oi_index is None:
+            previous_fixed = _select_exact_strikes(previous_rows, fixed_strikes)
+        else:
+            previous_fixed = select_exact_strikes_with_oi_fallback(
+                previous_rows,
+                fixed_strikes,
+                timestamp=previous_ts,
+                option_oi_index=option_oi_index,
+            )
         ce_fixed_prev, pe_fixed_prev = _sum_oi(previous_fixed)
         previous_session_imbalance = (
             (pe_fixed_prev - baseline_pe) - (ce_fixed_prev - baseline_ce)
@@ -282,7 +304,16 @@ def replay_date(
         session_date,
         csv_path=futures_csv,
     )
-    features = build_historical_oi_features(positioning)
+    from .fixed_strike_oi_fallback_v1 import load_option_oi_index
+
+    _option_oi_source, option_oi_index = load_option_oi_index(
+        session_date,
+        data_root=data_root,
+    )
+    features = build_historical_oi_features(
+        positioning,
+        option_oi_index=option_oi_index,
+    )
 
     result = ReplayResult(
         session_date=session_date,
