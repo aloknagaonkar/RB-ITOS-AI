@@ -1,7 +1,7 @@
 import csv
 from pathlib import Path
 
-from backend.market_lab.change_pcr_transition_lead_lag_v1 import (
+from market_lab.change_pcr_transition_lead_lag_v1 import (
     detect_transitions,
     build_event_windows,
 )

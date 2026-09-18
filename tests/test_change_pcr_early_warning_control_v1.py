@@ -1,4 +1,4 @@
-from backend.market_lab.change_pcr_early_warning_control_v1 import (
+from market_lab.change_pcr_early_warning_control_v1 import (
     normalized_oi_dominance,
     build_candle_table,
     candidate_warning,

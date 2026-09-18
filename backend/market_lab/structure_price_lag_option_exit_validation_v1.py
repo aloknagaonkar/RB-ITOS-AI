@@ -371,8 +371,21 @@ def write_csv(rows, path):
     if not rows:
         p.write_text("")
         return
+
+    fieldnames = []
+    seen = set()
+    for row in rows:
+        for key in row.keys():
+            if key not in seen:
+                seen.add(key)
+                fieldnames.append(key)
+
     with p.open("w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        w = csv.DictWriter(
+            f,
+            fieldnames=fieldnames,
+            extrasaction="raise",
+        )
         w.writeheader()
         w.writerows(rows)
 

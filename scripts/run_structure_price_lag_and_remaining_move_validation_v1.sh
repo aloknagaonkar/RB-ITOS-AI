@@ -76,6 +76,7 @@ for d in "${DATES[@]}"; do
   python -m market_lab.oi_price_regime_transition_audit_v1_1 \
     --session-date "$d" \
     --moving-wings 5 \
+    --futures-csv data/historical-evidence/midpoint-v2-nifty-futures-vwap-v1-all180.csv \
     --csv "$csv" \
     --json-output "$json"
 done
