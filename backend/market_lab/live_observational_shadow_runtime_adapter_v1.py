@@ -7,7 +7,7 @@ from typing import Literal
 
 from .live_observational_shadow_v1 import AuditStore, ShadowEngine, reconstruct_states
 
-MODEL = "LIVE_OBSERVATIONAL_SHADOW_RUNTIME_ADAPTER_V1"
+MODEL = "LIVE_OBSERVATIONAL_SHADOW_RUNTIME_ADAPTER_V1_1"
 
 Direction = Literal["BULLISH", "BEARISH"]
 All3State = Literal["BULLISH_ALL_3", "BEARISH_ALL_3", "MIXED", "INCOMPLETE"]
@@ -20,12 +20,6 @@ SUPPORTIVE_FUTURES = {
 
 @dataclass(frozen=True)
 class CompletedFiveMinuteCheckpoint:
-    """
-    Normalized input produced by the existing live feature/runtime layer.
-
-    The adapter intentionally does not calculate ALL_3, futures OI, ATM, or
-    option prices. It only consumes already-computed exact values.
-    """
     session_date: str
     timestamp: datetime
     all3_state: All3State
@@ -56,16 +50,7 @@ class CompletedOptionMinute:
 
 
 class LiveShadowRuntimeAdapterV1:
-    """
-    Production-safe bridge into LIVE_OBSERVATIONAL_SHADOW_V1.
-
-    Safety:
-    - no broker/order dependency
-    - no order placement
-    - no calculation of ALL_3/futures/ATM
-    - no nearest strike/time fallback
-    - deterministic duplicate identity
-    """
+    """Production-safe bridge into LIVE_OBSERVATIONAL_SHADOW_V1."""
 
     def __init__(self, events_jsonl: str | Path):
         self.store = AuditStore(events_jsonl)
@@ -77,7 +62,6 @@ class LiveShadowRuntimeAdapterV1:
         direction: Direction,
         candle1_timestamp: datetime,
     ) -> str:
-        # Deterministic ID makes duplicate detection restart-safe.
         stamp = candle1_timestamp.strftime("%Y%m%dT%H%M%S%z")
         return f"OBS-{session_date}-{direction}-{stamp}"
 
@@ -92,12 +76,6 @@ class LiveShadowRuntimeAdapterV1:
         checkpoint: CompletedFiveMinuteCheckpoint,
         previous_directional_all3: str | None,
     ) -> str | None:
-        """
-        Create DETECTED only when a NEW opposite directional ALL_3 appears.
-
-        previous_directional_all3 should be the most recent prior directional
-        ALL_3 state supplied by the existing live runtime.
-        """
         if checkpoint.all3_state not in {"BULLISH_ALL_3", "BEARISH_ALL_3"}:
             return None
 
@@ -105,7 +83,6 @@ class LiveShadowRuntimeAdapterV1:
             "BULLISH" if checkpoint.all3_state == "BULLISH_ALL_3" else "BEARISH"
         )
         opposite = "BEARISH_ALL_3" if direction == "BULLISH" else "BULLISH_ALL_3"
-
         if previous_directional_all3 != opposite:
             return None
 
@@ -115,11 +92,13 @@ class LiveShadowRuntimeAdapterV1:
         if self._existing(oid) is not None:
             return oid
 
+        # PROD COMPAT FIX: installed ShadowEngine expects candle1_timestamp,
+        # not all3_candle1_timestamp.
         return self.shadow.detect(
             session_date=checkpoint.session_date,
             direction=direction,
             all3_state=checkpoint.all3_state,
-            all3_candle1_timestamp=checkpoint.timestamp,
+            candle1_timestamp=checkpoint.timestamp,
             spot_c1=checkpoint.spot,
             observation_id=oid,
         )
@@ -132,6 +111,7 @@ class LiveShadowRuntimeAdapterV1:
         s = self._existing(oid)
         if s is None:
             raise KeyError(oid)
+
         expected = f"{s.direction}_ALL_3"
         survived = checkpoint.all3_state == expected
 
@@ -141,7 +121,6 @@ class LiveShadowRuntimeAdapterV1:
             spot_c2=checkpoint.spot,
             all3_survived=survived,
         )
-
         if not survived:
             return "REJECTED"
 
@@ -164,10 +143,7 @@ class LiveShadowRuntimeAdapterV1:
         if not aligned:
             return "REJECTED"
 
-        self.shadow.classify_spot_lag(
-            oid,
-            timestamp=checkpoint.timestamp,
-        )
+        self.shadow.classify_spot_lag(oid, timestamp=checkpoint.timestamp)
         return "CLASSIFIED"
 
     def on_exact_option_resolved(
@@ -179,13 +155,12 @@ class LiveShadowRuntimeAdapterV1:
         if s is None:
             raise KeyError(oid)
         if s.status != "CLASSIFIED":
-            raise ValueError(f"{oid} must be CLASSIFIED before option resolution; got {s.status}")
-
+            raise ValueError(
+                f"{oid} must be CLASSIFIED before option resolution; got {s.status}"
+            )
         if not resolution.option_instrument_key:
             self.shadow.incomplete(
-                oid,
-                resolution.timestamp,
-                "NO_EXACT_ATM_INSTRUMENT",
+                oid, resolution.timestamp, "NO_EXACT_ATM_INSTRUMENT"
             )
             return "INCOMPLETE"
 
@@ -206,7 +181,9 @@ class LiveShadowRuntimeAdapterV1:
         if s is None:
             raise KeyError(oid)
         if s.status != "OPTION_RESOLVED":
-            raise ValueError(f"{oid} must be OPTION_RESOLVED before entry; got {s.status}")
+            raise ValueError(
+                f"{oid} must be OPTION_RESOLVED before entry; got {s.status}"
+            )
 
         self.shadow.open_hypothetical_entry(
             oid,
