@@ -3,6 +3,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from market_lab.api import create_app
+from market_lab.storage import make_engine
 
 
 def test_live_shadow_status_without_files(tmp_path: Path, monkeypatch):
@@ -12,7 +13,9 @@ def test_live_shadow_status_without_files(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(ui, "EVENTS_PATH", tmp_path / "events.jsonl")
     monkeypatch.setattr(ui, "HEALTH_PATH", tmp_path / "health.jsonl")
 
-    app = create_app("sqlite://")
+    db_path = tmp_path / "live-shadow-ui-test.db"
+    engine = make_engine(f"sqlite:///{db_path}")
+    app = create_app(engine)
     with TestClient(app) as client:
         response = client.get("/api/live-shadow/status")
         assert response.status_code == 200
