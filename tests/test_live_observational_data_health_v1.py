@@ -58,7 +58,12 @@ def test_stale_spot_fails_closed():
 def test_missing_oi_can_be_unhealthy():
     now = datetime(2026,9,18,10,0,tzinfo=IST)
     s = snapshot_at(now)
-    s.quotes[0].oi = None
-    s.quotes[1].oi = None
+
+    missing_oi_quotes = [
+        q.model_copy(update={"oi": None})
+        for q in s.quotes
+    ]
+    s = s.model_copy(update={"quotes": missing_oi_quotes})
+
     r = evaluate_snapshot_health(s)
     assert r.state == "UNHEALTHY"

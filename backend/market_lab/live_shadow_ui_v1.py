@@ -1,4 +1,5 @@
 from __future__ import annotations
+from .live_shadow_step_audit_v1 import ShadowStepAuditStoreV1
 
 import json
 from dataclasses import asdict
@@ -20,6 +21,7 @@ router = APIRouter(prefix="/api/live-shadow", tags=["live-shadow"])
 DATA_DIR = Path("data/live-observation/shadow-v1")
 EVENTS_PATH = DATA_DIR / "events.jsonl"
 HEALTH_PATH = DATA_DIR / "data-health.jsonl"
+STEP_AUDIT_PATH = DATA_DIR / "step-audit.jsonl"
 
 
 def _states() -> list[dict[str, Any]]:
@@ -135,4 +137,32 @@ def live_shadow_observation(observation_id: str):
     return {
         "observation": matches[0],
         "events": _event_history(observation_id),
+    }
+
+
+@router.get("/step-audit")
+def live_shadow_step_audit(limit: int = 200):
+    if limit < 1 or limit > 2000:
+        raise HTTPException(
+            status_code=422,
+            detail="limit must be between 1 and 2000",
+        )
+
+    if not STEP_AUDIT_PATH.exists():
+        return {
+            "chain_ok": True,
+            "chain_issue": None,
+            "rows": [],
+        }
+
+    store = ShadowStepAuditStoreV1(STEP_AUDIT_PATH)
+    chain_ok, chain_issue = store.verify_chain()
+
+    rows = store.read_all()[-limit:]
+    rows.reverse()
+
+    return {
+        "chain_ok": chain_ok,
+        "chain_issue": chain_issue,
+        "rows": rows,
     }

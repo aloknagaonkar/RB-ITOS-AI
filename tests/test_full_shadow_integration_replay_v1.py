@@ -65,26 +65,29 @@ def test_full_detect_to_closed_replay(tmp_path: Path):
 
     # Establish a prior BEARISH directional state.
     t0 = datetime(2026,9,18,9,45,tzinfo=IST)
-    for mins, ce, pe in ((15,1900,1300),(10,1600,1200),(5,1300,1100),(0,1000,1000)):
+    for mins, ce, pe in ((15,1000,1000),(10,1200,1100),(5,1500,1200),(0,1900,1300)):
         cp = r.add_market_snapshot(snap(t0 - timedelta(minutes=mins), ce, pe))
     assert cp.all3_state == "BEARISH_ALL_3"
 
-    # Build a new bullish ALL_3 at 10:00.
-    t1 = datetime(2026,9,18,10,0,tzinfo=IST)
-    r.add_market_snapshot(snap(t1 - timedelta(minutes=10), 1100,1300))
-    r.add_market_snapshot(snap(t1 - timedelta(minutes=5), 1200,1600))
-    cp1 = r.add_market_snapshot(snap(t1, 1300,1900, spot=25000))
+    # The first actual bullish ALL_3 transition occurs at 09:50.
+    t1 = datetime(2026,9,18,9,50,tzinfo=IST)
+
+    cp1 = r.add_market_snapshot(
+        snap(t1, 1100,1300, spot=25000)
+    )
     assert cp1.all3_state == "BULLISH_ALL_3"
     assert cp1.previous_directional_all3 == "BEARISH_ALL_3"
 
     oid = r.detect_from_checkpoint(cp1)
     assert oid
 
-    # C2 remains bullish at 10:05.
-    cp2 = r.add_market_snapshot(snap(t1 + timedelta(minutes=5), 1400,2200, spot=24995))
+    # C2 remains bullish at 09:55.
+    cp2 = r.add_market_snapshot(
+        snap(t1 + timedelta(minutes=5), 1200,1600, spot=24995)
+    )
     assert cp2.all3_state == "BULLISH_ALL_3"
 
-    # Futures 10:00 -> 10:05 = long buildup.
+    # Futures 09:50 -> 09:55 = long buildup.
     assert r.process_futures_candle(fut(t1, 25000, 100000)) is None
     f2 = r.process_futures_candle(
         fut(t1 + timedelta(minutes=5), 25020, 101000)
@@ -124,18 +127,28 @@ def test_option_gap_becomes_incomplete(tmp_path: Path):
     r = FullShadowIntegrationReplayV1(tmp_path / "events.jsonl")
 
     t0 = datetime(2026,9,18,9,45,tzinfo=IST)
-    for mins, ce, pe in ((15,1900,1300),(10,1600,1200),(5,1300,1100),(0,1000,1000)):
+    for mins, ce, pe in ((15,1000,1000),(10,1200,1100),(5,1500,1200),(0,1900,1300)):
         r.add_market_snapshot(snap(t0 - timedelta(minutes=mins), ce, pe))
 
-    t1 = datetime(2026,9,18,10,0,tzinfo=IST)
-    r.add_market_snapshot(snap(t1 - timedelta(minutes=10), 1100,1300))
-    r.add_market_snapshot(snap(t1 - timedelta(minutes=5), 1200,1600))
-    cp1 = r.add_market_snapshot(snap(t1, 1300,1900))
-    oid = r.detect_from_checkpoint(cp1)
+    t1 = datetime(2026,9,18,9,50,tzinfo=IST)
 
-    cp2 = r.add_market_snapshot(snap(t1+timedelta(minutes=5), 1400,2200, spot=24995))
+    cp1 = r.add_market_snapshot(
+        snap(t1, 1100,1300, spot=25000)
+    )
+    assert cp1.all3_state == "BULLISH_ALL_3"
+    assert cp1.previous_directional_all3 == "BEARISH_ALL_3"
+
+    oid = r.detect_from_checkpoint(cp1)
+    assert oid
+
+    cp2 = r.add_market_snapshot(
+        snap(t1+timedelta(minutes=5), 1200,1600, spot=24995)
+    )
+
     r.process_futures_candle(fut(t1, 25000,100000))
-    f2 = r.process_futures_candle(fut(t1+timedelta(minutes=5),25020,101000))
+    f2 = r.process_futures_candle(
+        fut(t1+timedelta(minutes=5),25020,101000)
+    )
     assert r.confirm_c2(oid, cp2, f2) == "CLASSIFIED"
     r.resolve_option(oid, cp2)
     r.open_exact_next_minute(

@@ -16,7 +16,7 @@ if imp not in text:
 if "step_audit_path" not in text:
     pat = re.compile(
         r"(class LiveShadowProductionCoordinatorV1:.*?"
-        r"def __init__\(\s*self\s*,\s*\*\s*,\s*engine\s*,\s*config_id\s*:\s*int\s*,"
+        r"def __init__\(\s*self\s*,\s*\*\s*,\s*engine\s*,\s*config_id(?:\s*:\s*int)?\s*,"
         r"\s*market_sources\s*,\s*events_path\s*,\s*health_path)(\s*\)\s*:)",
         re.S,
     )
@@ -40,17 +40,16 @@ if "step_audit_path" not in text:
 # 3) Store
 if "self.step_audit" not in text:
     m = re.search(
-        r"^(?P<indent>\s*)self\.health\s*=\s*HealthJournal\(health_path\)\s*$",
+        r"^(?P<indent>\s*)self\._bootstrapped\s*=\s*False\s*$",
         text,
         re.M,
     )
     if not m:
-        raise SystemExit("coordinator health store semantic anchor not found")
+        raise SystemExit("coordinator bootstrap semantic anchor not found")
     insert = (
-        m.group(0)
-        + "\n"
-        + m.group("indent")
-        + "self.step_audit = ShadowStepAuditStoreV1(step_audit_path)"
+        m.group("indent")
+        + "self.step_audit = ShadowStepAuditStoreV1(step_audit_path)\n"
+        + m.group(0)
     )
     text = text[:m.start()] + insert + text[m.end():]
 
