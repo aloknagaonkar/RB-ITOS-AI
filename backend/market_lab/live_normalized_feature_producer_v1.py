@@ -4,18 +4,12 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Iterable, Literal
 
-from .domain import Snapshot
-from .live_observational_data_health_v1 import (
-    SnapshotHealthReport,
-    evaluate_snapshot_health,
-    strategy_dependency_gate,
-)
+from .domain import IST, Snapshot
+from .live_observational_data_health_v1 import evaluate_snapshot_health, strategy_dependency_gate
 
-MODEL = "LIVE_NORMALIZED_FEATURE_PRODUCER_V1"
-
+MODEL = "LIVE_NORMALIZED_FEATURE_PRODUCER_V1_1"
 HORIZONS_MINUTES = (5, 10, 15)
 All3State = Literal["BULLISH_ALL_3", "BEARISH_ALL_3", "MIXED", "INCOMPLETE"]
-
 
 @dataclass(frozen=True)
 class HorizonFeature:
@@ -32,12 +26,18 @@ class HorizonFeature:
     pcr_change: float | None
     state: str
 
+@dataclass(frozen=True)
+class CheckpointSnapshot:
+    checkpoint_timestamp: datetime
+    snapshot: Snapshot
 
 @dataclass(frozen=True)
 class LiveNormalizedCheckpoint:
     model: str
     session_date: str
     timestamp: datetime
+    source_received_at: datetime
+    source_delay_ms: float
     spot: float
     moving_atm: float
     strike_interval: float
@@ -54,215 +54,87 @@ class LiveNormalizedCheckpoint:
     health_reason: str | None
     features: tuple[HorizonFeature, ...]
 
-
 def _round_atm(spot: float, strike_interval: float) -> float:
-    # Mirrors existing research convention: nearest strike interval.
     return round(spot / strike_interval) * strike_interval
-
 
 def _infer_strike_interval(snapshot: Snapshot) -> float:
     strikes = sorted({float(c.strike) for c in snapshot.catalog})
-    diffs = sorted({round(b - a, 10) for a, b in zip(strikes, strikes[1:]) if b > a})
-    if not diffs:
-        raise ValueError("Cannot infer strike interval from snapshot catalog")
+    diffs = sorted({round(b-a, 10) for a,b in zip(strikes,strikes[1:]) if b>a})
+    if not diffs: raise ValueError("Cannot infer strike interval from snapshot catalog")
     return diffs[0]
 
-
 def _quote_index(snapshot: Snapshot):
-    contracts = {c.key: c for c in snapshot.catalog}
-    quotes = {q.key: q for q in snapshot.quotes}
-    out = {}
-    for key, c in contracts.items():
-        q = quotes.get(key)
-        out[(float(c.strike), c.side)] = q
-    return out
-
+    contracts={c.key:c for c in snapshot.catalog}; quotes={q.key:q for q in snapshot.quotes}
+    return {(float(c.strike),c.side):quotes.get(key) for key,c in contracts.items()}
 
 def _sum_side(snapshot: Snapshot, strikes: Iterable[float], side: str) -> float | None:
-    idx = _quote_index(snapshot)
-    total = 0.0
+    idx=_quote_index(snapshot); total=0.0
     for strike in strikes:
-        q = idx.get((float(strike), side))
-        if q is None or q.oi is None:
-            return None
-        total += float(q.oi)
+        q=idx.get((float(strike),side))
+        if q is None or q.oi is None: return None
+        total+=float(q.oi)
     return total
 
+def _pcr(pe,ce):
+    if pe is None or ce in (None,0): return None
+    return pe/ce
 
-def _pcr(pe: float | None, ce: float | None) -> float | None:
-    if pe is None or ce in (None, 0):
-        return None
-    return pe / ce
-
-
-def _state(imbalance: float | None, pcr_change: float | None) -> str:
-    if imbalance is None or pcr_change is None:
-        return "NA"
-    if imbalance > 0 and pcr_change > 0:
-        return "BULLISH"
-    if imbalance < 0 and pcr_change < 0:
-        return "BEARISH"
+def _state(imbalance,pcr_change):
+    if imbalance is None or pcr_change is None: return "NA"
+    if imbalance>0 and pcr_change>0:return "BULLISH"
+    if imbalance<0 and pcr_change<0:return "BEARISH"
     return "MIXED"
 
-
-def _all3(states: tuple[str, str, str]) -> All3State:
-    if "NA" in states:
-        return "INCOMPLETE"
-    if all(x == "BULLISH" for x in states):
-        return "BULLISH_ALL_3"
-    if all(x == "BEARISH" for x in states):
-        return "BEARISH_ALL_3"
+def _all3(states):
+    if "NA" in states:return "INCOMPLETE"
+    if all(x=="BULLISH" for x in states):return "BULLISH_ALL_3"
+    if all(x=="BEARISH" for x in states):return "BEARISH_ALL_3"
     return "MIXED"
 
-
-def _exact_snapshot(
-    history: list[Snapshot],
-    target: datetime,
-) -> Snapshot | None:
-    matches = [s for s in history if s.received_at == target]
-    if len(matches) > 1:
-        raise ValueError(f"Duplicate exact snapshot at {target.isoformat()}")
-    return matches[0] if matches else None
-
-
-def _atm_instrument_keys(
-    snapshot: Snapshot,
-    atm: float,
-) -> tuple[str | None, str | None]:
-    ce = [c.key for c in snapshot.catalog if float(c.strike) == atm and c.side == "CE"]
-    pe = [c.key for c in snapshot.catalog if float(c.strike) == atm and c.side == "PE"]
-    if len(ce) > 1 or len(pe) > 1:
-        raise ValueError("Ambiguous exact ATM contract")
-    return (ce[0] if ce else None, pe[0] if pe else None)
-
+def _atm_keys(snapshot,atm):
+    ce=[c.key for c in snapshot.catalog if float(c.strike)==atm and c.side=="CE"]
+    pe=[c.key for c in snapshot.catalog if float(c.strike)==atm and c.side=="PE"]
+    if len(ce)>1 or len(pe)>1: raise ValueError("Ambiguous exact ATM contract")
+    return (ce[0] if ce else None,pe[0] if pe else None)
 
 class LiveNormalizedFeatureProducerV1:
-    """
-    Produces the live 5/10/15 ALL_3 feature checkpoint from exact Snapshot history.
+    def __init__(self,wings:int=5):
+        if wings!=5: raise ValueError("V1 is frozen to moving ATM +/-5")
+        self.wings=wings; self.history:list[CheckpointSnapshot]=[]; self.last_directional_all3=None
 
-    Important:
-    - uses the CURRENT moving ATM +/- wings physical strikes
-    - compares those SAME physical strikes at T-5/T-10/T-15
-    - exact timestamp only
-    - no nearest timestamp
-    - no nearest strike
-    - futures OI is deliberately not calculated here
-    """
+    def add_snapshot(self,snapshot:Snapshot,checkpoint_timestamp:datetime|None=None)->None:
+        checkpoint_timestamp=checkpoint_timestamp or snapshot.received_at
+        if checkpoint_timestamp.tzinfo is None: raise ValueError("checkpoint_timestamp must be timezone-aware")
+        if self.history and checkpoint_timestamp<=self.history[-1].checkpoint_timestamp: raise ValueError("Out-of-order or duplicate checkpoint")
+        if snapshot.received_at<checkpoint_timestamp: raise ValueError("Snapshot cannot be received before its checkpoint")
+        self.history.append(CheckpointSnapshot(checkpoint_timestamp,snapshot))
 
-    def __init__(self, wings: int = 5):
-        if wings != 5:
-            raise ValueError("V1 is frozen to moving ATM +/-5")
-        self.wings = wings
-        self.history: list[Snapshot] = []
-        self.last_directional_all3: str | None = None
+    def _exact(self,target):
+        rows=[x.snapshot for x in self.history if x.checkpoint_timestamp==target]
+        if len(rows)>1: raise ValueError("Duplicate checkpoint")
+        return rows[0] if rows else None
 
-    def add_snapshot(self, snapshot: Snapshot) -> None:
-        if self.history and snapshot.received_at <= self.history[-1].received_at:
-            raise ValueError("Out-of-order or duplicate snapshot")
-        self.history.append(snapshot)
-
-    def build_current(self) -> LiveNormalizedCheckpoint:
-        if not self.history:
-            raise ValueError("No snapshots available")
-        current = self.history[-1]
-
-        health = evaluate_snapshot_health(current)
-        allowed, reason = strategy_dependency_gate(health, dependency="ALL3")
-
-        interval = _infer_strike_interval(current)
-        atm = _round_atm(current.spot, interval)
-        strikes = tuple(
-            atm + offset * interval
-            for offset in range(-self.wings, self.wings + 1)
-        )
-
-        available_catalog_strikes = {float(c.strike) for c in current.catalog}
-        if any(s not in available_catalog_strikes for s in strikes):
-            allowed = False
-            reason = "DATA_HEALTH_ALL3_MISSING_CURRENT_STRIKE_BASKET"
-
-        features = []
+    def build_current(self)->LiveNormalizedCheckpoint:
+        if not self.history: raise ValueError("No snapshots available")
+        entry=self.history[-1]; current=entry.snapshot; checkpoint=entry.checkpoint_timestamp
+        health=evaluate_snapshot_health(current); allowed,reason=strategy_dependency_gate(health,dependency="ALL3")
+        delay_ms=(current.received_at-checkpoint).total_seconds()*1000.0
+        interval=_infer_strike_interval(current); atm=_round_atm(current.spot,interval)
+        strikes=tuple(atm+i*interval for i in range(-self.wings,self.wings+1))
+        if any(s not in {float(c.strike) for c in current.catalog} for s in strikes):
+            allowed=False; reason="DATA_HEALTH_ALL3_MISSING_CURRENT_STRIKE_BASKET"
+        current_ce=_sum_side(current,strikes,"CE"); current_pe=_sum_side(current,strikes,"PE"); features=[]
         for minutes in HORIZONS_MINUTES:
-            current_ce = _sum_side(current, strikes, "CE")
-            current_pe = _sum_side(current, strikes, "PE")
-
-            prior = _exact_snapshot(
-                self.history,
-                current.received_at - timedelta(minutes=minutes),
-            )
-
-            if prior is None:
-                prior_ce = prior_pe = None
-            else:
-                prior_ce = _sum_side(prior, strikes, "CE")
-                prior_pe = _sum_side(prior, strikes, "PE")
-
-            ce_delta = (
-                current_ce - prior_ce
-                if current_ce is not None and prior_ce is not None
-                else None
-            )
-            pe_delta = (
-                current_pe - prior_pe
-                if current_pe is not None and prior_pe is not None
-                else None
-            )
-            imbalance = (
-                pe_delta - ce_delta
-                if pe_delta is not None and ce_delta is not None
-                else None
-            )
-            prior_pcr = _pcr(prior_pe, prior_ce)
-            current_pcr = _pcr(current_pe, current_ce)
-            pcr_change = (
-                current_pcr - prior_pcr
-                if current_pcr is not None and prior_pcr is not None
-                else None
-            )
-
-            features.append(HorizonFeature(
-                horizon_minutes=minutes,
-                current_ce_oi=current_ce,
-                current_pe_oi=current_pe,
-                prior_ce_oi=prior_ce,
-                prior_pe_oi=prior_pe,
-                ce_delta=ce_delta,
-                pe_delta=pe_delta,
-                imbalance=imbalance,
-                prior_pcr=prior_pcr,
-                current_pcr=current_pcr,
-                pcr_change=pcr_change,
-                state=_state(imbalance, pcr_change),
-            ))
-
-        states = tuple(x.state for x in features)
-        all3 = _all3(states)  # type: ignore[arg-type]
-        previous = self.last_directional_all3
-        if all3 in {"BULLISH_ALL_3", "BEARISH_ALL_3"}:
-            self.last_directional_all3 = all3
-
-        ce_key, pe_key = _atm_instrument_keys(current, atm)
-
-        if not allowed:
-            all3 = "INCOMPLETE"
-
-        return LiveNormalizedCheckpoint(
-            model=MODEL,
-            session_date=current.received_at.astimezone().date().isoformat(),
-            timestamp=current.received_at,
-            spot=float(current.spot),
-            moving_atm=atm,
-            strike_interval=interval,
-            moving_strikes=strikes,
-            state_5m=features[0].state,
-            state_10m=features[1].state,
-            state_15m=features[2].state,
-            all3_state=all3,
-            previous_directional_all3=previous,
-            ce_instrument_key=ce_key,
-            pe_instrument_key=pe_key,
-            health_state=health.state,
-            health_allowed=allowed,
-            health_reason=reason,
-            features=tuple(features),
-        )
+            prior=self._exact(checkpoint-timedelta(minutes=minutes))
+            prior_ce=_sum_side(prior,strikes,"CE") if prior else None; prior_pe=_sum_side(prior,strikes,"PE") if prior else None
+            ce_delta=current_ce-prior_ce if current_ce is not None and prior_ce is not None else None
+            pe_delta=current_pe-prior_pe if current_pe is not None and prior_pe is not None else None
+            imbalance=pe_delta-ce_delta if pe_delta is not None and ce_delta is not None else None
+            prior_pcr=_pcr(prior_pe,prior_ce); current_pcr=_pcr(current_pe,current_ce)
+            pcr_change=current_pcr-prior_pcr if current_pcr is not None and prior_pcr is not None else None
+            features.append(HorizonFeature(minutes,current_ce,current_pe,prior_ce,prior_pe,ce_delta,pe_delta,imbalance,prior_pcr,current_pcr,pcr_change,_state(imbalance,pcr_change)))
+        all3=_all3(tuple(f.state for f in features)); previous=self.last_directional_all3
+        if all3 in {"BULLISH_ALL_3","BEARISH_ALL_3"}: self.last_directional_all3=all3
+        ce_key,pe_key=_atm_keys(current,atm)
+        if not allowed: all3="INCOMPLETE"
+        return LiveNormalizedCheckpoint(MODEL,checkpoint.astimezone(IST).date().isoformat(),checkpoint,current.received_at,delay_ms,float(current.spot),atm,interval,strikes,features[0].state,features[1].state,features[2].state,all3,previous,ce_key,pe_key,health.state,allowed,reason,tuple(features))
