@@ -1,0 +1,6 @@
+.hoi-build{border:1px solid #29404c;border-radius:12px;padding:14px;margin:14px 0}
+.hoi-build-head h4{margin:0 0 4px}.hoi-build-head p,.hoi-build-note{margin:0;opacity:.72}
+.hoi-build-form{display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin-top:12px}
+.hoi-build-form label{display:flex;flex-direction:column;gap:5px;font-size:.82rem}.hoi-build-form input{min-width:150px}
+.hoi-build-status{display:grid;grid-template-columns:auto 1fr;gap:5px 12px;margin-top:12px}.hoi-build-status span{opacity:.65}
+.hoi-build-error{margin-top:10px}.hoi-build-note{margin-top:10px;font-size:.84rem}
