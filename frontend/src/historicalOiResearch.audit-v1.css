@@ -1,0 +1,9 @@
+.hoi-audit{padding:14px 8px;text-align:left}
+.hoi-audit-title{font-weight:700;margin-bottom:12px}
+.hoi-audit-grid{display:grid;grid-template-columns:repeat(3,minmax(220px,1fr));gap:12px}
+.hoi-audit-grid section{border:1px solid #29404c;border-radius:10px;padding:10px}
+.hoi-audit-grid h4{margin:0 0 8px}
+.hoi-audit-grid section>div{display:flex;justify-content:space-between;gap:12px;padding:4px 0}
+.hoi-audit-grid span{opacity:.7}.hoi-audit-grid b{text-align:right}
+.hoi-audit-note{opacity:.72;margin:10px 0 0;font-size:.84rem}
+@media(max-width:1000px){.hoi-audit-grid{grid-template-columns:1fr}}
