@@ -1,90 +1,90 @@
-CONTROL FAILURE EXPIRY-AWARE VALIDATION V6.2
-=============================================
+CONTROL FAILURE MOVE-START PROXIMITY V6.3
+=========================================
 
-This version does TWO things together:
+Purpose
+-------
+Evaluate the existing expiry-aware V6.2 control-failure events specifically
+around the retrospective confirmed directional move starts.
 
-1) Corrects basket width using the frozen expiry-aware rule:
-   expiry day / 0 sessions left -> ATM ±1
-   1 trading session left       -> ATM ±2
-   2 trading sessions left      -> ATM ±3
-   3 trading sessions left      -> ATM ±4
-   4+ trading sessions left     -> ATM ±5
+This version DOES NOT:
+- change V5 signal logic
+- change expiry-aware basket selection
+- change exact-strike behavior
+- rebuild historical OI
 
-   Example:
-   Wednesday -> next Tuesday expiry
-   Thu, Fri, Mon, Tue = 4 sessions left -> ATM ±5
+It only changes attribution/evaluation.
 
-2) Runs the earlier suggested component-order study on the corrected
-   expiry-aware events:
-   SAME_CANDLE
-   FAILURE_THEN_DECAY
-   DECAY_THEN_FAILURE
+Method
+------
+For each confirmed move start:
+- use only SAME-DIRECTION V6.2 events
+- search fixed windows:
+  ±5m
+  ±10m
+  ±15m
+  ±20m
+  ±30m
+- select the nearest candidate
+- if equal distance, prefer the pre/at-move candidate
+- report:
+  lead/lag
+  absolute distance from move start
+  component order
+  selected wings
+  ATM state and breadth
+  imbalance / velocity / acceleration
+  +5/+10/+15/+30
+  MFE/MAE
 
-   It reports:
-   - event count
-   - unique sessions
-   - average + median lead/lag to retrospective move start
-   - average + median +5/+10/+15/+30 directional movement
-   - average + median MFE/MAE
-   - +15m and +30m positive-direction hit rates
-   - same-direction vs opposite-direction events
+Primary research window:
+±15 minutes
 
-Important:
-- Existing V5 control-failure logic is NOT changed.
-- Exact physical strikes only.
-- No nearest-strike fallback.
-- No interpolation.
-- Unavailable historical sessions remain unavailable.
-- Uses exact expiry stored in each positioning.json.
-- Trading-session count currently means Mon-Fri sessions between
-  session date (exclusive) and expiry (inclusive). The mapping is printed
-  for every date so holiday edge cases can be audited explicitly.
+The component-order study is repeated INSIDE that ±15m move-start neighborhood:
+- SAME_CANDLE
+- FAILURE_THEN_DECAY
+- DECAY_THEN_FAILURE
 
-Copy into ~/RB-ITOS-AI preserving folders:
-scripts/validate_control_failure_expiry_aware_v6_2.py
-tests/test_validate_control_failure_expiry_aware_v6_2.py
+Copy
+----
+scripts/validate_control_failure_move_start_proximity_v6_3.py
+tests/test_validate_control_failure_move_start_proximity_v6_3.py
 
-TEST
+Test
 ----
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
 
-python -m pytest   tests/test_validate_control_failure_expiry_aware_v6_2.py -v
+python -m pytest   tests/test_validate_control_failure_move_start_proximity_v6_3.py -v
 
-RUN
+Run
 ---
-python scripts/validate_control_failure_expiry_aware_v6_2.py
+python scripts/validate_control_failure_move_start_proximity_v6_3.py
 
-The script reuses the historical positioning.json files already built.
-It does NOT rebuild the 36 sessions.
-
-OUTPUTS
--------
+Inputs reused
+-------------
 data/historical-evidence/control-failure-expiry-aware-v6-2/
-  expiry-aware-inventory-v6-2.csv
   control-failure-events-expiry-aware-v6-2.csv
   expiry-aware-validation-matrix-v6-2.csv
-  component-order-study-v6-2.csv
-  expiry-aware-validation-summary-v6-2.json
-  v5-pm1/
-  v5-pm2/
-  v5-pm3/
-  v5-pm4/
-  v5-pm5/
 
-CHECK FIRST
------------
-The console prints:
+data/historical-evidence/
+  trend-day-move-start-oi-replay-v1.json
 
-=== EXPIRY-AWARE BASKET MAP ===
-DATE | direction | expiry | sessions_left | wings | basket size | status
+Outputs
+-------
+data/historical-evidence/control-failure-move-start-proximity-v6-3/
+  move-start-proximity-detail-v6-3.csv
+  move-start-proximity-summary-v6-3.csv
+  move-start-proximity-order-study-v6-3.csv
+  move-start-proximity-summary-v6-3.json
 
-Verify this mapping before interpreting results.
+Interpretation
+--------------
+lead_lag_minutes = signal_time - confirmed_move_start_time
 
-The most important final console section is:
+negative = signal BEFORE move start
+0        = signal at move start
+positive = signal AFTER move start
 
-=== EARLIER SUGGESTED TEST: COMPONENT ORDER STUDY ===
-
-This is the earlier test requested:
-- SAME_CANDLE vs FAILURE_THEN_DECAY vs DECAY_THEN_FAILURE
-- after applying the correct expiry-aware basket width.
+The primary question:
+Does the current control-failure theory produce a same-direction event within
+about ±15 minutes of the confirmed directional move start?
