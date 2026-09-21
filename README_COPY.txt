@@ -1,154 +1,69 @@
-BRANCH B — TREND / PULLBACK CONTINUATION — PRICE STRUCTURE V1
-==============================================================
+BRANCH C — HILEGA-MILEGA — BULLISH TODAY V1
+============================================
 
-Purpose
--------
-Start Branch B independently from the paused Control-Failure branch.
+Only bullish validation for 2026-09-21.
 
-The first question is deliberately simple:
+Frozen bullish rule
+-------------------
+RSI(9) crosses ABOVE EMA3(RSI9)
+AND
+RSI(9) > WMA21(RSI9)
+AND
+EMA3(RSI9) > WMA21(RSI9)
 
-Can causal PRICE STRUCTURE alone identify the continuation/pullback moves
-we want to capture?
+No RSI-50 condition.
+No bearish condition.
+No OI/PCR.
+No extra filters.
 
-OI/PCR are NOT used in the trigger.
-
-Population
-----------
-Uses all AVAILABLE sessions from the existing expiry-aware inventory
-(currently expected to be 28 sessions).
-
-Source
+Output
 ------
-Existing historical positioning.json files are reused only as a source of the
-exact minute-by-minute Nifty spot series.
+The console prints exact 5-minute candle timings:
 
-No new historical data build is required.
+  HH:MM -> HH:MM
+  close
+  RSI9
+  EMA3(RSI)
+  WMA21(RSI)
 
-5-minute price structure
-------------------------
-Exact 5-minute checkpoints are built from the minute spot series.
-
-EMA family:
-  EMA 3
-  EMA 10
-  EMA 21
-
-These match the price-structure family being studied on the user's chart.
-
-Trend definition
-----------------
-Bullish:
-  EMA3 > EMA10 > EMA21
-  EMA21 slope over prior 3 bars > 0
-
-Bearish:
-  exact mirror.
-
-The trend must already exist BEFORE the trigger bar.
-
-Frozen discovery variants
--------------------------
-
-A_TREND_RESUME
-  - established trend before trigger
-  - at least one counter-trend 5m close in previous 3 bars
-  - trigger close breaks beyond the prior 2-bar pullback structure
-
-B_CONTROLLED_PULLBACK
-  A
-  +
-  pullback closes do not close through EMA21
-
-C_EMA10_RECLAIM
-  B
-  +
-  pullback reaches/touches EMA10 zone
-  +
-  trigger closes back on trend side of EMA3
-
-D_STRUCTURE_HOLD
-  B
-  +
-  pullback close-extreme holds the earlier close structure
-  (higher structural low for bullish / lower structural high for bearish)
-
-Candidate emission
-------------------
-Candidates are EDGE-TRIGGERED.
-
-If a condition remains true for multiple 5m bars, it does NOT emit a new
-candidate on every bar. It emits only when the condition changes false -> true.
-
-This avoids manufacturing repeated signals from one continuation episode.
-
-Forward evaluation
-------------------
-From the causal 5m trigger close:
-
-  +5m
-  +10m
-  +15m
-  +30m
-
-  30m MFE
-  30m MAE
-
-Also reported descriptively:
-  whether the candidate is same-direction and within +/-15m of the existing
-  retrospective trend-day move-start marker.
-
-The move-start marker is EVALUATION ONLY and never participates in detection.
-
-Important
----------
-This is candidate discovery, NOT a finished trading rule.
-
-No option entry.
-No CE/PE selection.
-No OI/PCR filter.
-No profit threshold.
-No parameter optimization.
+so each occurrence can be checked directly on TradingView.
 
 Test
 ----
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
 
-python -m pytest   tests/test_validate_trend_pullback_continuation_price_structure_v1.py -v
+python -m pytest   tests/test_validate_hilega_milega_bullish_today_v1.py -v
 
-Run
----
-python scripts/validate_trend_pullback_continuation_price_structure_v1.py
+Basic run
+---------
+python scripts/validate_hilega_milega_bullish_today_v1.py   --session-date 2026-09-21
+
+Default target file:
+data/historical-evidence/historical-oi-build/2026-09-21/positioning.json
+
+If today's positioning.json is elsewhere
+-----------------------------------------
+python scripts/validate_hilega_milega_bullish_today_v1.py   --session-date 2026-09-21   --positioning /exact/path/to/positioning.json
+
+Recommended TradingView-accurate warm-up
+-----------------------------------------
+RSI and WMA need prior bars. If the previous trading session's positioning
+file exists, supply it:
+
+python scripts/validate_hilega_milega_bullish_today_v1.py   --session-date 2026-09-21   --warmup-positioning data/historical-evidence/historical-oi-build/2026-09-18/positioning.json
+
+If more historical warm-up is available, --warmup-positioning may be repeated
+oldest first.
+
+Without prior-session warm-up, the script labels the run SAME_SESSION_ONLY
+and warns that early-morning TradingView values may differ.
 
 Outputs
 -------
-data/historical-evidence/trend-pullback-continuation-price-v1/
+data/historical-evidence/branch-c-hilega-milega-bullish-today-v1/
+  bullish-signals-today-v1.csv
+  bullish-signals-today-v1.json
 
-  price-structure-candidates-v1.csv
-  price-structure-summary-v1.csv
-  price-structure-errors-v1.csv
-  price-structure-summary-v1.json
-
-Main console section
---------------------
-=== BRANCH B PRICE-STRUCTURE DISCOVERY ===
-
-What we inspect first
----------------------
-For A/B/C/D, bullish and bearish separately:
-
-- events
-- sessions
-- signals/session
-- near-move count
-- median +15m
-- median +30m
-- hit15
-- hit30
-- MFE30
-- MAE30
-
-This first pass answers whether the simple continuation structure itself
-contains enough directional behavior to justify deeper research.
-
-Only after that do we add OI/PCR as confirmation.
+After running, paste the console section:
+=== BULLISH CANDLE TIMINGS TO VALIDATE ON CHART ===
