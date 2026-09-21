@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .domain import Snapshot
+from .domain import IST, Snapshot
 from .gateways import UpstoxGateway
 from .storage import Observation, make_engine
 
@@ -177,6 +177,37 @@ def download_futures(
     expiries = available_expiries(client)
     contract = resolve_active_future(client, session_date, expiries)
     raw = fetch_one_minute_candles(client, contract, session_date)
+
+    # Current-session futures can legitimately return zero rows from the
+    # standard historical endpoint before the provider has finalized EOD data.
+    # For today's still-current contract, fall back to the causal intraday API.
+    if (
+        not raw
+        and contract.source == "CURRENT_INSTRUMENT_SEARCH_API"
+        and session_date == datetime.now(IST).date()
+    ):
+        from urllib.parse import quote
+        from .midpoint_v2_nifty_futures_vwap_v1 import normalize_candles
+
+        encoded = quote(contract.instrument_key, safe="")
+        response = client.get(
+            f"/v3/historical-candle/intraday/{encoded}/minutes/1"
+        )
+        response.raise_for_status()
+
+        intraday_raw = (
+            response.json()
+            .get("data", {})
+            .get("candles", [])
+        )
+        raw = normalize_candles(intraday_raw)
+
+    if not raw:
+        raise RuntimeError(
+            "No 1-minute NIFTY futures candles returned for "
+            f"{session_date} {contract.instrument_key} "
+            f"using {contract.source}"
+        )
 
     path = futures_cache_path(session_date, cache_root)
     path.parent.mkdir(parents=True, exist_ok=True)

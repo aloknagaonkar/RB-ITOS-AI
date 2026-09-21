@@ -36,24 +36,18 @@ def replay_dir(
     return Path(root) / session_date.isoformat()
 
 
-def resolve_session_config_id(engine, session_date: date) -> int:
-    with Session(engine) as session:
-        rows = session.execute(
-            select(Observation.config_id, func.count(Observation.id))
-            .where(Observation.session_date == session_date.isoformat())
-            .group_by(Observation.config_id)
-            .order_by(Observation.config_id)
-        ).all()
+def resolve_session_config_ids(engine, session_date: date) -> list[int]:
+    from .historical_replay_session_config_v1 import (
+        resolve_session_config_ids as _resolve_session_config_ids,
+    )
+    return _resolve_session_config_ids(engine, session_date)
 
-    if not rows:
-        raise RuntimeError(f"No stored observations for {session_date}")
-    if len(rows) != 1:
-        raise RuntimeError(
-            "Historical session contains multiple configuration IDs; "
-            "fail-closed instead of guessing: "
-            + ", ".join(f"{config_id}:{count}" for config_id, count in rows)
-        )
-    return int(rows[0][0])
+
+def resolve_session_config_id(engine, session_date: date) -> int:
+    from .historical_replay_session_config_v1 import (
+        resolve_session_config_id as _resolve_session_config_id,
+    )
+    return _resolve_session_config_id(engine, session_date)
 
 
 class HistoricalEventTimeAuditProxyV1:

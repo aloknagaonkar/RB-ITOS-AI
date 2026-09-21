@@ -32,8 +32,13 @@ def run_job(*, job_id: str, action: str, session_date: date,
                 result = {"download": download_missing(session_date),
                           "readiness_after_download": readiness(session_date)}
             elif action == "RUN_REPLAY":
-                from .historical_replay_day_v1_1 import run_day
-                result = run_day(session_date, overwrite=overwrite, progress=False)
+                from .historical_replay_day_v1_2 import run_day
+                result = run_day(
+            session_date,
+            output_root="data/live-observation/replay",
+            overwrite=overwrite,
+            progress=False,
+        )
             else:
                 raise ValueError(f"Unsupported action: {action}")
             _write(status_path, {**_base(job_id, action, session_date),

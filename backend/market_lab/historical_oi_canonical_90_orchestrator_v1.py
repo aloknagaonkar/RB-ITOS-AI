@@ -8,7 +8,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from .historical_oi_auto_enrichment_v1 import run_auto_enrichment
+from .historical_oi_cache_reuse_rate_limit_v1 import run_cache_reuse_enrichment
 
 MODEL = "HISTORICAL_OI_CANONICAL_90_ORCHESTRATOR_V1"
 DEFAULT_CANONICAL = Path("data/historical-evidence/oi-pattern-library-90d-historical-only-v1.csv")
@@ -232,7 +232,7 @@ def run_orchestrator(
             continue
 
         try:
-            built = run_auto_enrichment(
+            built = run_cache_reuse_enrichment(
                 session_date=d,
                 expiry=resolved["expiry"],
                 canonical_path=canonical_path,

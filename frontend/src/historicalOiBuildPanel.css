@@ -4,3 +4,9 @@
 .hoi-build-form label{display:flex;flex-direction:column;gap:5px;font-size:.82rem}.hoi-build-form input{min-width:150px}
 .hoi-build-status{display:grid;grid-template-columns:auto 1fr;gap:5px 12px;margin-top:12px}.hoi-build-status span{opacity:.65}
 .hoi-build-error{margin-top:10px}.hoi-build-note{margin-top:10px;font-size:.84rem}
+.hoi-attempts{margin-top:12px}
+.hoi-attempts h5{margin:0 0 6px}
+.hoi-attempts table{border-collapse:collapse;width:100%;font-size:.84rem}
+.hoi-attempts th,.hoi-attempts td{padding:6px 8px;border-bottom:1px solid #233845;text-align:left}
+.hoi-contract-warning{margin-top:12px;padding:10px 12px;border:1px solid #8b6b32;border-radius:8px}
+
