@@ -1,33 +1,47 @@
-STRIKE BREADTH TRANSITION V3
-===========================
+OI PRICE FAILURE TRANSITION V4
+==============================
 
-Copy into the root of ~/RB-ITOS-AI preserving folders.
+Research-only analyzer centered on the dated 5-minute candles around the event.
 
-Files
------
-scripts/analyze_strike_breadth_transition_v3.py
-tests/test_analyze_strike_breadth_transition_v3.py
+Copy into ~/RB-ITOS-AI preserving folders:
+
+scripts/analyze_oi_price_failure_transition_v4.py
+tests/test_analyze_oi_price_failure_transition_v4.py
 
 Test
 ----
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
-python -m pytest tests/test_analyze_strike_breadth_transition_v3.py -v
+python -m pytest tests/test_analyze_oi_price_failure_transition_v4.py -v
 
 Run
 ---
-python scripts/analyze_strike_breadth_transition_v3.py   --input data/live-observation/analysis/2026-09-21-fixed-event-oi-pm2-per-strike-v2.csv
+python scripts/analyze_oi_price_failure_transition_v4.py \
+  --date 2026-09-21 \
+  --breadth-input data/live-observation/analysis/2026-09-21-fixed-event-oi-pm2-strike-breadth-summary-v3.csv \
+  --focus-times 10:35 10:40
 
-Research outputs
+Candle semantics
 ----------------
-- bullish/bearish/mixed strike count
-- bullish/bearish breadth %
-- ATM state
-- ATM +/-1 breadth
-- ATM +/-2 breadth
-- CE delta acceleration
-- PE delta acceleration
-- per-strike imbalance velocity
-- aggregate imbalance velocity
+checkpoint 2026-09-21 10:35 = completed 5m candle 2026-09-21 10:30 -> 10:35
+checkpoint 2026-09-21 10:40 = completed 5m candle 2026-09-21 10:35 -> 10:40
 
-This module is research-only and does not modify strategy or execution logic.
+Research metrics
+----------------
+- exact session date and candle start/end timestamp
+- spot and 5m spot change
+- aggregate OI imbalance
+- imbalance velocity
+- imbalance acceleration
+- bullish/bearish strike breadth
+- ATM strike state
+- OI direction vs actual price response
+- transition phase:
+  BEARISH_ACCELERATING
+  BEARISH_FADING
+  BEARISH_FADING_REVERSAL
+  PRICE_OI_DIVERGENCE
+  EARLY_BULL_TRANSITION
+  BROAD_BULLISH_CONFIRMATION
+
+No strategy or execution logic is modified.
