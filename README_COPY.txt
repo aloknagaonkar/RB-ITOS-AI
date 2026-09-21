@@ -1,46 +1,36 @@
-BRANCH C — HILEGA-MILEGA BULLISH V1.1
-=====================================
+BRANCH C — HILEGA-MILEGA — BULLISH TRANSITION AUDIT V1.2
+=========================================================
 
-Strict bullish rule on the same completed 5-minute candle:
+Purpose
+-------
+Do NOT impose a combined bullish timing rule yet.
+Print each upward crossover event independently so the exact sequence can be checked on TradingView.
 
-Condition 1
------------
-RSI(9) crosses upward above EMA3(RSI9):
-  prev RSI9 <= prev EMA3
-  curr RSI9 > curr EMA3
+Events audited
+--------------
+1. RSI9 crosses EMA3(RSI9) upward
+2. RSI9 crosses WMA21(RSI9) upward
+3. EMA3(RSI9) crosses WMA21(RSI9) upward
 
-Condition 2
------------
-Both RSI9 and EMA3(RSI9) cross upward above WMA21(RSI9):
-  prev RSI9 <= prev WMA21
-  curr RSI9 > curr WMA21
-  prev EMA3 <= prev WMA21
-  curr EMA3 > curr WMA21
+For each transition candle, also print whether RSI9 / EMA3 / WMA21 are each sloping upward.
 
-Upward slope condition retained from the prior clarification:
-  curr RSI9 > prev RSI9
-  curr EMA3 > prev EMA3
-  curr WMA21 > prev WMA21
-
-No RSI-50 condition.
-No bearish logic.
+No bearish rule.
 No OI/PCR.
-No option logic.
+No RSI-50 filter.
+No fixed multi-candle timing window.
 
-The script fetches current-day Nifty 1-minute candles from the Upstox V3 intraday endpoint and historical 1-minute warm-up dates from the V3 historical endpoint, builds exact completed 5-minute bars, calculates RSI9 / EMA3(RSI9) / WMA21(RSI9), and prints exact chart candle timings.
-
-TEST
+Test
 ----
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
-python -m pytest tests/test_validate_hilega_milega_bullish_today_v1_1.py -v
+python -m pytest tests/test_validate_hilega_milega_bullish_transition_audit_v1_2.py -v
 
-RUN FOR 2026-09-21
-------------------
-python scripts/validate_hilega_milega_bullish_today_v1_1.py \
+Run
+---
+python scripts/validate_hilega_milega_bullish_transition_audit_v1_2.py \
   --session-date 2026-09-21 \
   --warmup-date 2026-09-17 \
   --warmup-date 2026-09-18
 
-Paste the section:
-  === STRICT BULLISH CANDLE TIMINGS TO VALIDATE ON CHART ===
+Paste this console section back:
+=== BULLISH TRANSITION SEQUENCE TO VALIDATE ON CHART ===
