@@ -1,118 +1,133 @@
-CONTROL FAILURE CONTEXT DISCRIMINATION V6.8
-=============================================
+CONTROL FAILURE CONTEXT GENERALIZATION V6.9
+===========================================
 
 Purpose
 -------
-Compare full-day intrabar candidates that occur near a confirmed directional
-move start against candidates occurring elsewhere in the session.
+Test whether V6.8's context relationship generalizes to an unseen trading
+session rather than merely describing the same sessions used for discovery.
 
 Population
 ----------
-Uses the existing V6.7 candidate file from all 28 available sessions.
+All 28 currently available sessions from the V6.8 enriched candidate file.
 
-NEAR_MOVE
-  V6.7 same-direction candidate within +/-15m of the retrospective
-  confirmed move start.
+Validation
+----------
+Leave-one-session-out (LOSO):
 
-NON_MOVE
-  Every other V6.7 full-day candidate.
+  train/discover on 27 sessions
+  score the 1 held-out session
+  repeat for all 28 sessions
 
-The retrospective move start is used only as the evaluation label.
-It is NOT used to construct contextual features.
+The held-out session's NEAR_MOVE/NON_MOVE labels are NEVER used to choose
+features or construct the score for that fold.
 
-Critical causality rule
+Direction normalization
 -----------------------
-ALL V6.8 context is computed at:
+Bullish and bearish candidates are mapped into common research variables:
 
-  trigger_time - 1 minute
+  opposite_spot_pressure_5m/10m/15m
+  opposite_oi_pressure_5m/10m/15m
+  opposite_pcr_pressure_5m/10m/15m
+  opposite_oi_velocity_5m
+  opposite_oi_acceleration_5m
 
-or earlier.
+plus:
+  failure_count_5m
+  max_consecutive_failure_count
+  failure_earliness
+  decay_count_5m
 
-No trigger-minute data and no future data are used in contextual features.
+Example:
+  bullish candidate + prior bearish 15m spot trend -> positive
+  bearish candidate + prior bullish 15m spot trend -> positive
 
-Context features
-----------------
-Exact expiry-aware physical basket for that date.
+Fold feature discovery
+----------------------
+Within each 27-session training fold:
 
-Pre-trigger price:
-  spot trend 5m / 10m / 15m
+- compare NEAR_MOVE vs NON_MOVE medians
+- scale separation by pooled MAD
+- rank features by absolute training-only robust separation
+- use the top 6 features
 
-Pre-trigger OI/PCR:
-  CE delta 5m / 10m / 15m
-  PE delta 5m / 10m / 15m
-  imbalance 5m / 10m / 15m
-  current PCR
-  PCR change 5m / 10m / 15m
-  5m imbalance velocity
-  5m imbalance acceleration
+No held-out-session labels participate.
 
-Immediate pre-trigger structure:
-  1m ATM state
-  1m bullish/bearish strike breadth
-  1m breadth change
+Scoring
+-------
+Each held-out row receives a score based on whether its normalized features
+are closer to the TRAINING NEAR_MOVE medians than to TRAINING NON_MOVE
+medians.
 
-Other context:
-  time of day
-  minutes since 09:15
-  expiry-aware selected wings
-  existing V6.7 intrabar failure/persistence fields
+Evaluation
+----------
+Threshold-free:
+  pooled leave-one-session-out AUC
+  median per-fold AUC
 
-Exactness
----------
-No nearest timestamp.
-No nearest strike.
-No interpolation.
-Exact physical strikes only.
-Missing context is written to the errors CSV.
+Fixed rank cuts:
+  top 5%
+  top 10%
+  top 20%
 
-No threshold optimization
--------------------------
-V6.8 is discovery/attribution only.
-It ranks numeric features by descriptive robust separation between
-NEAR_MOVE and NON_MOVE populations.
+For each cut:
+  lift
+  recall
+  precision
 
-It does NOT select a live threshold or strategy rule.
+These rank cuts are evaluation diagnostics only and are NOT live thresholds.
+
+Interpretation
+--------------
+AUC:
+  0.50 = no ranking separation
+  >0.50 = context learned from other sessions tends to rank held-out
+          NEAR_MOVE candidates above held-out NON_MOVE candidates
+
+Lift:
+  >1.0 = the top-ranked subset contains more genuine near-move events than
+         the held-out/base population rate
+
+No trading rule or profitability claim is made by V6.9.
 
 Test
 ----
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
 
-python -m pytest   tests/test_validate_control_failure_context_discrimination_v6_8.py -v
+python -m pytest   tests/test_validate_control_failure_context_generalization_v6_9.py -v
 
 Run
 ---
-V6.7 must already have been run.
+V6.8 must already have completed.
 
-python scripts/validate_control_failure_context_discrimination_v6_8.py
+python scripts/validate_control_failure_context_generalization_v6_9.py
 
-Inputs
-------
-data/historical-evidence/control-failure-full-day-intrabar-v6-7/
-  full-day-intrabar-candidates-v6-7.csv
-
-data/historical-evidence/control-failure-expiry-aware-v6-2/
-  expiry-aware-inventory-v6-2.csv
-
-data/historical-evidence/historical-oi-build/<date>/
-  positioning.json
+Input
+-----
+data/historical-evidence/control-failure-context-discrimination-v6-8/
+  context-enriched-candidates-v6-8.csv
 
 Outputs
 -------
-data/historical-evidence/control-failure-context-discrimination-v6-8/
+data/historical-evidence/control-failure-context-generalization-v6-9/
 
-  context-enriched-candidates-v6-8.csv
-  context-numeric-comparison-v6-8.csv
-  context-categorical-comparison-v6-8.csv
-  context-errors-v6-8.csv
-  context-discrimination-summary-v6-8.json
+  loso-fold-results-v6-9.csv
+  loso-scored-candidates-v6-9.csv
+  loso-summary-v6-9.csv
+  loso-summary-v6-9.json
 
 Main console section
 --------------------
-=== PRE-TRIGGER CONTEXT DISCRIMINATION: TOP DESCRIPTIVE SEPARATIONS ===
+=== LEAVE-ONE-SESSION-OUT GENERALIZATION ===
 
-Main research question
-----------------------
-What pre-trigger context distinguishes the small number of control-failure
-events occurring around genuine move starts from the thousands of similar
-events occurring elsewhere during the trading day?
+What we want to see
+-------------------
+We are NOT looking for a perfect AUC.
+
+The useful result would be:
+- pooled LOSO AUC meaningfully above 0.50
+- positive lift at top 5% / 10%
+- similar behavior across more than only a handful of folds
+
+If V6.9 collapses toward AUC ~0.50 and lift ~1.0, the apparent V6.8 context
+relationship is not generalizing well enough and should not become a strategy.
