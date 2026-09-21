@@ -42,8 +42,6 @@ from .historical_replay_operations_api_v1 import router as historical_replay_ope
 
 from .historical_oi_enrichment_api_v1 import router as historical_oi_enrichment_router
 
-from .live_fixed_session_ui_projection_v1 import attach_fixed_session_trends, load_fixed_anchor_index, project_fixed_session_ui
-
 def create_app(engine=None, historical_gateway_factory=None):
     @asynccontextmanager
     async def lifespan(app):
@@ -119,7 +117,6 @@ def create_app(engine=None, historical_gateway_factory=None):
             count = session.scalar(
                 select(func.count()).select_from(Observation).where(Observation.config_id == config_id)
             )
-            fixed_anchor_index = load_fixed_anchor_index()
             history = []
             previous_signature = None
             for row in reversed(rows):
@@ -132,19 +129,9 @@ def create_app(engine=None, historical_gateway_factory=None):
                         "spot": row.snapshot["spot"],
                         "evaluation": row.evaluation,
                         "range_changed": previous_signature is not None and signature != previous_signature,
-                        "fixed_session_ui": project_fixed_session_ui(
-                            row.snapshot,
-                            row.evaluation,
-                            anchor_index=fixed_anchor_index,
-                        ),
                     }
                 )
                 previous_signature = signature
-            attach_fixed_session_trends(
-                history,
-                tolerance_seconds=config.trend_timestamp_tolerance_seconds,
-                flat_threshold=config.trend_flat_threshold,
-            )
             latest = rows[0] if rows else None
             receipt_age = (
                 (datetime.now(timezone.utc) - datetime.fromisoformat(latest.recorded_at)).total_seconds()
@@ -266,10 +253,6 @@ def create_app(engine=None, historical_gateway_factory=None):
                 "recorded_at": row.recorded_at,
                 "snapshot": row.snapshot,
                 "evaluation": row.evaluation,
-                "fixed_session_ui": project_fixed_session_ui(
-                    row.snapshot,
-                    row.evaluation,
-                ),
             }
 
     @app.post("/api/replay/{config_id}")
