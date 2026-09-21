@@ -1,19 +1,28 @@
-Branch C V1.4 — Same-candle EMA3-WMA21 gap audit
+Branch C V1.6 — Bullish / Strong Bullish
 
-Purpose:
-- Check whether same-candle EMA3-WMA21 gap expansion removes 2026-09-15 11:10.
-- Verify whether accepted 2026-09-21 signals still pass.
-- No next-candle confirmation, so added delay is always 0 minutes.
+BULLISH:
+1. RSI9 crosses EMA3 upward.
+2. Later RSI9 crosses WMA21 upward.
+3. RSI9 > 50 on that RSI/WMA crossover candle.
 
-Requires prior V1.1 and V1.3 scripts already in repo.
+STRONG BULLISH:
+- Bullish already active.
+- RSI9 > WMA21 and EMA3 > WMA21.
+- If true on same bullish candle: strong_delay=0m.
+- If EMA3 gets above WMA21 later: strong_time is recorded with delay.
 
-Run:
-python -m pytest tests/test_validate_hilega_milega_bullish_gap_audit_v1_4.py -v
+No maximum sequence duration.
 
-python scripts/validate_hilega_milega_bullish_gap_audit_v1_4.py \
+Suggested run:
+python -m pytest tests/test_validate_hilega_milega_bullish_strong_v1_6.py -v
+
+python scripts/validate_hilega_milega_bullish_strong_v1_6.py \
   --session-date 2026-09-15 \
+  --session-date 2026-09-16 \
+  --session-date 2026-09-17 \
+  --session-date 2026-09-18 \
   --session-date 2026-09-21 \
   --intraday-date 2026-09-21
 
 Paste:
-=== BRANCH C SAME-CANDLE GAP AUDIT ===
+=== BRANCH C BULLISH / STRONG BULLISH ===
