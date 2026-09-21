@@ -1,69 +1,46 @@
-BRANCH C — HILEGA-MILEGA — BULLISH TODAY V1
-============================================
+BRANCH C — HILEGA-MILEGA BULLISH V1.1
+=====================================
 
-Only bullish validation for 2026-09-21.
+Strict bullish rule on the same completed 5-minute candle:
 
-Frozen bullish rule
--------------------
-RSI(9) crosses ABOVE EMA3(RSI9)
-AND
-RSI(9) > WMA21(RSI9)
-AND
-EMA3(RSI9) > WMA21(RSI9)
+Condition 1
+-----------
+RSI(9) crosses upward above EMA3(RSI9):
+  prev RSI9 <= prev EMA3
+  curr RSI9 > curr EMA3
+
+Condition 2
+-----------
+Both RSI9 and EMA3(RSI9) cross upward above WMA21(RSI9):
+  prev RSI9 <= prev WMA21
+  curr RSI9 > curr WMA21
+  prev EMA3 <= prev WMA21
+  curr EMA3 > curr WMA21
+
+Upward slope condition retained from the prior clarification:
+  curr RSI9 > prev RSI9
+  curr EMA3 > prev EMA3
+  curr WMA21 > prev WMA21
 
 No RSI-50 condition.
-No bearish condition.
+No bearish logic.
 No OI/PCR.
-No extra filters.
+No option logic.
 
-Output
-------
-The console prints exact 5-minute candle timings:
+The script fetches current-day Nifty 1-minute candles from the Upstox V3 intraday endpoint and historical 1-minute warm-up dates from the V3 historical endpoint, builds exact completed 5-minute bars, calculates RSI9 / EMA3(RSI9) / WMA21(RSI9), and prints exact chart candle timings.
 
-  HH:MM -> HH:MM
-  close
-  RSI9
-  EMA3(RSI)
-  WMA21(RSI)
-
-so each occurrence can be checked directly on TradingView.
-
-Test
+TEST
 ----
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
+python -m pytest tests/test_validate_hilega_milega_bullish_today_v1_1.py -v
 
-python -m pytest   tests/test_validate_hilega_milega_bullish_today_v1.py -v
+RUN FOR 2026-09-21
+------------------
+python scripts/validate_hilega_milega_bullish_today_v1_1.py \
+  --session-date 2026-09-21 \
+  --warmup-date 2026-09-17 \
+  --warmup-date 2026-09-18
 
-Basic run
----------
-python scripts/validate_hilega_milega_bullish_today_v1.py   --session-date 2026-09-21
-
-Default target file:
-data/historical-evidence/historical-oi-build/2026-09-21/positioning.json
-
-If today's positioning.json is elsewhere
------------------------------------------
-python scripts/validate_hilega_milega_bullish_today_v1.py   --session-date 2026-09-21   --positioning /exact/path/to/positioning.json
-
-Recommended TradingView-accurate warm-up
------------------------------------------
-RSI and WMA need prior bars. If the previous trading session's positioning
-file exists, supply it:
-
-python scripts/validate_hilega_milega_bullish_today_v1.py   --session-date 2026-09-21   --warmup-positioning data/historical-evidence/historical-oi-build/2026-09-18/positioning.json
-
-If more historical warm-up is available, --warmup-positioning may be repeated
-oldest first.
-
-Without prior-session warm-up, the script labels the run SAME_SESSION_ONLY
-and warns that early-morning TradingView values may differ.
-
-Outputs
--------
-data/historical-evidence/branch-c-hilega-milega-bullish-today-v1/
-  bullish-signals-today-v1.csv
-  bullish-signals-today-v1.json
-
-After running, paste the console section:
-=== BULLISH CANDLE TIMINGS TO VALIDATE ON CHART ===
+Paste the section:
+  === STRICT BULLISH CANDLE TIMINGS TO VALIDATE ON CHART ===
