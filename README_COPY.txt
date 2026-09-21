@@ -1,22 +1,43 @@
-Branch C V1.6 — Bullish / Strong Bullish
+Branch C V1.7 — Five-day manual validation
 
-BULLISH:
-1. RSI9 crosses EMA3 upward.
-2. Later RSI9 crosses WMA21 upward.
-3. RSI9 > 50 on that RSI/WMA crossover candle.
+Purpose
+-------
+Reconstruct the bullish state machine for manual chart validation.
+This is NOT a profitability/backtest filter.
 
-STRONG BULLISH:
-- Bullish already active.
-- RSI9 > WMA21 and EMA3 > WMA21.
-- If true on same bullish candle: strong_delay=0m.
-- If EMA3 gets above WMA21 later: strong_time is recorded with delay.
+Current state rules
+-------------------
+NEUTRAL -> ARMED:
+  RSI9 crosses EMA3 upward.
 
-No maximum sequence duration.
+ARMED -> BULLISH:
+  RSI9 later crosses WMA21 upward AND RSI9 > 50.
 
-Suggested run:
-python -m pytest tests/test_validate_hilega_milega_bullish_strong_v1_6.py -v
+BULLISH -> STRONG:
+  EMA3 > WMA21 while bullish remains active.
 
-python scripts/validate_hilega_milega_bullish_strong_v1_6.py \
+BULLISH -> NEUTRAL:
+  RSI9 crosses below WMA21.
+
+During an active BULLISH state:
+  another RSI↑EMA or RSI↑WMA event is logged as CONTINUATION,
+  not as a new bullish start.
+
+Manual validation dates
+-----------------------
+2026-09-15
+2026-09-16
+2026-09-17
+2026-09-18
+2026-09-21
+
+Run tests
+---------
+python -m pytest tests/test_validate_hilega_milega_manual_validation_v1_7.py -v
+
+Run report
+----------
+python scripts/validate_hilega_milega_manual_validation_v1_7.py \
   --session-date 2026-09-15 \
   --session-date 2026-09-16 \
   --session-date 2026-09-17 \
@@ -24,5 +45,13 @@ python scripts/validate_hilega_milega_bullish_strong_v1_6.py \
   --session-date 2026-09-21 \
   --intraday-date 2026-09-21
 
-Paste:
-=== BRANCH C BULLISH / STRONG BULLISH ===
+CSV output
+----------
+data/historical-evidence/branch-c-manual-validation-v1-7.csv
+
+Fill:
+manual_label = CORRECT / FALSE / LATE / EARLY / CONTINUATION / MISSED
+manual_notes = your chart observation
+
+Paste back:
+=== BRANCH C FIVE-DAY MANUAL VALIDATION ===
