@@ -1,49 +1,53 @@
-Branch C V2.0 — Opening-gap diagnostic
+Branch C V2.1 — 120-trading-session opening robustness test
 
-Purpose
--------
-Compare the five opening-alignment sessions without imposing a new threshold.
+Goal
+----
+Validate the proposed opening-only confirmation rule over a much larger sample.
 
-Dates:
-2026-08-10
-2026-08-20
-2026-08-24
-2026-09-03
-2026-09-18
+Opening rule under test
+-----------------------
+09:15 FULL alignment:
+  RSI > 50
+  EMA3 > 50
+  WMA21 > 50
+  RSI > EMA3 > WMA21
 
-Measures
---------
-previous session close
-09:15 open / close
-09:20 close
-09:25 close
+=> OPENING_ALIGNMENT
 
-gap points / %
-gap retained % at 09:20 / 09:25
-gap fill % at 09:20 / 09:25
+09:20:
+  RSI > WMA21
+  => OPENING_HOLDING
 
-RSI, EMA3, WMA21 at 09:15 / 09:20 / 09:25
-RSI-WMA gap
-EMA-WMA gap
+  RSI <= WMA21
+  => OPENING_REJECTED_0920
 
-No threshold or rejection rule is introduced.
+09:25:
+  RSI > WMA21
+  => OPENING_BULLISH_CONFIRMED
+
+  RSI <= WMA21
+  => OPENING_REJECTED_0925
+
+No gap threshold is used.
+Gap measurements remain diagnostic context only.
 
 Run tests
 ---------
-python -m pytest tests/test_validate_hilega_milega_opening_gap_diagnostic_v2_0.py -v
+python -m pytest tests/test_validate_hilega_milega_opening_120_session_v2_1.py -v
 
-Run diagnostic
---------------
-python scripts/validate_hilega_milega_opening_gap_diagnostic_v2_0.py \
-  --session-date 2026-08-10 \
-  --session-date 2026-08-20 \
-  --session-date 2026-08-24 \
-  --session-date 2026-09-03 \
-  --session-date 2026-09-18
+Run 120 trading sessions
+------------------------
+python scripts/validate_hilega_milega_opening_120_session_v2_1.py \
+  --end-date 2026-09-21 \
+  --trading-sessions 120 \
+  --calendar-lookback-days 190 \
+  --intraday-date 2026-09-21
 
-CSV
----
-data/historical-evidence/branch-c-opening-gap-diagnostic-v2-0.csv
+Output CSV
+----------
+data/historical-evidence/branch-c-opening-120-session-v2-1.csv
 
-Paste back:
-=== BRANCH C OPENING GAP DIAGNOSTIC V2.0 ===
+Paste back
+----------
+=== SUMMARY ===
+plus the printed opening-alignment rows.
