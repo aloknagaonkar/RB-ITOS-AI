@@ -1,123 +1,142 @@
-CONTROL FAILURE FORWARD-OUTCOME GENERALIZATION V6.11
-====================================================
+CONTROL FAILURE FORWARD PATH / EXIT OPPORTUNITY V6.12
+======================================================
 
 Purpose
 -------
-Stop optimizing toward retrospective NEAR_MOVE labels and test the economic
-question more directly:
+Finish Branch A before deciding whether to move this control-failure idea
+into an options-premium backtest.
 
-Can causal pre-trigger context rank candidates that later produce better
-directional price outcomes on chronologically unseen sessions?
+V6.12 does NOT change the entry model.
 
-Population
-----------
-Same 28 available sessions from V6.8.
+It analyzes the exact next-30-minute 1-minute price path after the
+chronologically unseen V6.11 Variant-A candidates.
 
-Chronological validation
-------------------------
-Minimum prior history = 8 sessions.
+Primary question
+----------------
+Are the entries actually finding useful moves, but fixed +15m/+30m exits are
+giving back too much of the favorable excursion?
 
-train on prior sessions only
-score next unseen future session
-expand history by one session
-repeat
+Input
+-----
+data/historical-evidence/control-failure-forward-outcome-v6-11/
+  forward-outcome-scored-candidates-v6-11.csv
 
-No future session can affect an earlier test session.
+The V6.11 score was learned chronologically from PRIOR sessions only.
 
-Primary population
-------------------
-Variant A is PRIMARY.
-Variants B/C/D/E are reported for comparison.
+Selection
+---------
+Variant A only.
 
-Frozen continuous training target
----------------------------------
-No profitable-trade threshold is introduced.
+Rank groups are calculated LOCALLY inside each unseen test session:
 
-training_target =
-    (directional move +15m + directional move +30m) / 2
+  ALL_PRIMARY_A
+  TOP5_FOLD
+  TOP10_FOLD
+  TOP20_FOLD
+  BOTTOM50_FOLD
 
-This remains continuous.
+This avoids comparing raw score magnitudes across different historical folds.
 
-Direction-normalized causal features
-------------------------------------
-opposite_spot_pressure_5m/10m/15m
-opposite_oi_pressure_5m/10m/15m
-opposite_pcr_pressure_5m/10m/15m
-opposite_oi_velocity_5m
-opposite_oi_acceleration_5m
-failure_count_5m
-max_consecutive_failure_count
-failure_earliness
-decay_count_5m
+Exactness
+---------
+For every candidate V6.12 requires:
 
-For each training fold
-----------------------
-- compute Spearman relation between each feature and the frozen continuous
-  forward-outcome target using TRAINING sessions only
-- choose top 6 features by absolute training Spearman
-- robust-center/scale from training only
-- score the next unseen session
+  trigger minute
+  trigger+1
+  trigger+2
+  ...
+  trigger+30
 
-No test-session outcome participates in feature selection or scoring.
+All must exist exactly.
 
-Evaluation
-----------
-Threshold-free:
-  pooled score-vs-outcome Spearman
-  median per-fold Spearman
+No nearest timestamp.
+No interpolation.
+No shortened path.
 
-Fixed rank diagnostics:
-  top 5%
-  top 10%
-  top 20%
-  top 50%
+Candidates lacking any exact minute are written to the errors CSV.
 
-For each:
-  median/mean +5m/+10m/+15m/+30m
-  hit rates
-  median MFE30
-  median MAE30
+Metrics
+-------
+Full 30-minute path:
 
-Also:
-  bottom 50% forward-return comparison
+  MFE30
+  MAE30
+  time to MFE
+  time to MAE
 
-No rank cut is selected as a live threshold.
+  did MFE happen before MAE?
+  did MAE happen before MFE?
+
+  adverse excursion before MFE
+  favorable excursion before MAE
+
+  MFE / MAE within:
+    0-5m
+    0-10m
+    0-15m
+    0-20m
+    0-30m
+
+  giveback:
+    MFE -> +15m
+    MFE -> +30m
+
+  actual +15m
+  actual +30m
+
+No exit threshold is selected.
 
 Test
 ----
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
 
-python -m pytest   tests/test_validate_control_failure_forward_outcome_generalization_v6_11.py -v
+python -m pytest   tests/test_validate_control_failure_forward_path_v6_12.py -v
 
 Run
 ---
-V6.8 must already have completed.
+V6.11 must already have completed.
 
-python scripts/validate_control_failure_forward_outcome_generalization_v6_11.py
+python scripts/validate_control_failure_forward_path_v6_12.py
 
 Outputs
 -------
-data/historical-evidence/control-failure-forward-outcome-v6-11/
+data/historical-evidence/control-failure-forward-path-v6-12/
 
-  forward-outcome-fold-results-v6-11.csv
-  forward-outcome-scored-candidates-v6-11.csv
-  forward-outcome-summary-v6-11.csv
-  forward-outcome-summary-v6-11.json
+  forward-path-candidates-v6-12.csv
+  forward-path-summary-v6-12.csv
+  forward-path-errors-v6-12.csv
+  forward-path-summary-v6-12.json
 
 Main console section
 --------------------
-=== CHRONOLOGICAL FORWARD-OUTCOME GENERALIZATION ===
+=== FORWARD PATH / EXIT OPPORTUNITY ===
 
-What matters most for Variant A
--------------------------------
-We want to see whether, on future unseen sessions:
+What matters most
+-----------------
+For TOP10_FOLD:
 
-- pooled score/outcome Spearman is positive
-- top10 median +15m and +30m are positive
-- top10 +15/+30 hit rates move meaningfully above 50%
-- top10 MFE is materially larger than adverse excursion
-- top10 outperforms the full population and bottom 50%
+1. median MFE30
+2. median MAE30
+3. median time-to-MFE
+4. median adverse-before-MFE
+5. MFE-before-MAE %
+6. MFE giveback by +15/+30
+7. comparison with BOTTOM50_FOLD
 
-If those do not survive, this control-failure research branch should not be
-pushed into an option-premium strategy merely by adding more fitted filters.
+Potentially interesting pattern:
+  strong MFE
+  modest adverse-before-MFE
+  relatively early time-to-MFE
+  substantial giveback by fixed +30m
+
+That would suggest entry may contain usable opportunity but exit management
+needs work.
+
+Unfavorable pattern:
+  MFE only after large adverse excursion
+  MAE commonly occurs before MFE
+  TOP10 path looks similar to BOTTOM50
+
+That would argue for pausing/stopping this control-failure branch rather than
+adding more fitted entry features.
