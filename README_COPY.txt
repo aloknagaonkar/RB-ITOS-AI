@@ -1,29 +1,50 @@
-CONTROL FAILURE CONTEXT GENERALIZATION V6.9
-===========================================
+CONTROL FAILURE CHRONOLOGICAL WALK-FORWARD V6.10
+================================================
 
 Purpose
 -------
-Test whether V6.8's context relationship generalizes to an unseen trading
-session rather than merely describing the same sessions used for discovery.
+Remove the remaining look-forward concern from V6.9.
 
-Population
-----------
-All 28 currently available sessions from the V6.8 enriched candidate file.
+V6.9:
+  train on all other sessions, including later dates.
 
-Validation
-----------
-Leave-one-session-out (LOSO):
+V6.10:
+  train only on sessions chronologically BEFORE the test session.
 
-  train/discover on 27 sessions
-  score the 1 held-out session
-  repeat for all 28 sessions
+Frozen walk-forward design
+--------------------------
+All 28 available sessions remain in chronological order.
 
-The held-out session's NEAR_MOVE/NON_MOVE labels are NEVER used to choose
-features or construct the score for that fold.
+Minimum prior history:
+  8 sessions
 
-Direction normalization
------------------------
-Bullish and bearish candidates are mapped into common research variables:
+Therefore:
+  first 8 sessions = history warm-up only
+  remaining 20 sessions = chronological unseen test sessions
+
+Example:
+  train sessions 1..8
+  test session 9
+
+  train sessions 1..9
+  test session 10
+
+  ...
+
+  train sessions 1..27
+  test session 28
+
+No future session can affect an earlier test session.
+
+Primary research population
+---------------------------
+Variant A is PRIMARY.
+
+Variants B/C/D/E are still reported for comparison only.
+
+Direction-normalized features
+-----------------------------
+Same frozen V6.9 representation:
 
   opposite_spot_pressure_5m/10m/15m
   opposite_oi_pressure_5m/10m/15m
@@ -31,103 +52,112 @@ Bullish and bearish candidates are mapped into common research variables:
   opposite_oi_velocity_5m
   opposite_oi_acceleration_5m
 
-plus:
   failure_count_5m
   max_consecutive_failure_count
   failure_earliness
   decay_count_5m
 
-Example:
-  bullish candidate + prior bearish 15m spot trend -> positive
-  bearish candidate + prior bullish 15m spot trend -> positive
+Feature discovery
+-----------------
+For EACH chronological fold:
 
-Fold feature discovery
-----------------------
-Within each 27-session training fold:
+- use only earlier sessions
+- compare training NEAR_MOVE vs NON_MOVE
+- rank by training-only robust separation
+- select top 6 eligible features
+- score the next unseen future session
 
-- compare NEAR_MOVE vs NON_MOVE medians
-- scale separation by pooled MAD
-- rank features by absolute training-only robust separation
-- use the top 6 features
+Held-out/test labels never select features.
 
-No held-out-session labels participate.
+Early-fold safety
+-----------------
+A feature must have at least:
+  5 training NEAR_MOVE values
+  30 training NON_MOVE values
 
-Scoring
--------
-Each held-out row receives a score based on whether its normalized features
-are closer to the TRAINING NEAR_MOVE medians than to TRAINING NON_MOVE
-medians.
+Otherwise it is not eligible.
+
+If a fold has no eligible features, V6.10 reports that rather than using
+future information or fabricating fallback features.
 
 Evaluation
 ----------
-Threshold-free:
-  pooled leave-one-session-out AUC
+Ranking/generalization:
+  pooled chronological walk-forward AUC
   median per-fold AUC
 
-Fixed rank cuts:
+Fixed rank diagnostics:
   top 5%
   top 10%
   top 20%
 
-For each cut:
-  lift
-  recall
-  precision
+For EACH ranked subset, V6.10 ALSO reports actual directional price outcome:
 
-These rank cuts are evaluation diagnostics only and are NOT live thresholds.
+  median/mean +5m
+  median/mean +10m
+  median/mean +15m
+  median/mean +30m
 
-Interpretation
---------------
-AUC:
-  0.50 = no ranking separation
-  >0.50 = context learned from other sessions tends to rank held-out
-          NEAR_MOVE candidates above held-out NON_MOVE candidates
+  hit rates
+  median MFE30
+  median MAE30
 
-Lift:
-  >1.0 = the top-ranked subset contains more genuine near-move events than
-         the held-out/base population rate
+This is the bridge between:
+  "Does it rank known transitions?"
+and
+  "Do high-ranked unseen candidates have better forward price behavior?"
 
-No trading rule or profitability claim is made by V6.9.
+Important
+---------
+No rank cut is selected as a live threshold.
+No CE/PE premium profitability is claimed here.
+No threshold tuning is performed.
 
 Test
 ----
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
 
-python -m pytest   tests/test_validate_control_failure_context_generalization_v6_9.py -v
+python -m pytest   tests/test_validate_control_failure_chronological_walkforward_v6_10.py -v
 
 Run
 ---
 V6.8 must already have completed.
 
-python scripts/validate_control_failure_context_generalization_v6_9.py
+python scripts/validate_control_failure_chronological_walkforward_v6_10.py
 
-Input
------
-data/historical-evidence/control-failure-context-discrimination-v6-8/
-  context-enriched-candidates-v6-8.csv
+Default:
+  minimum prior sessions = 8
 
-Outputs
--------
-data/historical-evidence/control-failure-context-generalization-v6-9/
+Output
+------
+data/historical-evidence/control-failure-chronological-walkforward-v6-10/
 
-  loso-fold-results-v6-9.csv
-  loso-scored-candidates-v6-9.csv
-  loso-summary-v6-9.csv
-  loso-summary-v6-9.json
+  walkforward-fold-results-v6-10.csv
+  walkforward-scored-candidates-v6-10.csv
+  walkforward-summary-v6-10.csv
+  walkforward-summary-v6-10.json
 
 Main console section
 --------------------
-=== LEAVE-ONE-SESSION-OUT GENERALIZATION ===
+=== CHRONOLOGICAL WALK-FORWARD GENERALIZATION ===
 
-What we want to see
--------------------
-We are NOT looking for a perfect AUC.
+What matters most
+-----------------
+For PRIMARY Variant A:
 
-The useful result would be:
-- pooled LOSO AUC meaningfully above 0.50
-- positive lift at top 5% / 10%
-- similar behavior across more than only a handful of folds
+1. Is chronological AUC still > 0.50?
+2. Does top-10% lift remain > 1?
+3. Do top-ranked unseen candidates show better +15m/+30m median directional
+   movement than the full candidate population?
+4. Are +15m/+30m hit rates above the ~50% noise level?
+5. Is MFE/MAE behavior improving enough to justify an option-premium backtest?
 
-If V6.9 collapses toward AUC ~0.50 and lift ~1.0, the apparent V6.8 context
-relationship is not generalizing well enough and should not become a strategy.
+If V6.10 collapses toward:
+  AUC ~0.50
+  lift ~1.0
+  forward hit rates ~50%
+then V6.9 was not robust enough.
+
+If V6.10 survives chronologically, the next step is to freeze the candidate
+signal and test actual CE/PE option premium economics including costs.
