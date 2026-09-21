@@ -197,16 +197,9 @@ export default function App() {
         <div className="instrument-bar"><div><b>{state.config.underlying.split('|').at(-1)}</b><span>EXPIRY {state.config.expiry}</span></div>
           <div>ATM ±{state.config.wings} strikes <i/> Anchor {state.config.anchor_time} IST <i/> Configuration v{state.config_id}</div></div>
         <div className="metrics">{(['fixed','moving','full'] as const).map(mode=>{
-          const rawResult = pcrLatest?.evaluation.results.find(r=>r.mode===mode)
-          const result = mode==='fixed' ? displayFixedResult(pcrLatest,rawResult) : rawResult
-          const trendAt = (horizon: 300|900|1800) => {
-            const existing = trends.find(trend =>
-              trend.mode === mode && trend.requested_horizon_seconds === horizon)
-
-            return mode === 'fixed'
-              ? fixedSessionTrend(pcrLatest, horizon, existing)
-              : existing
-          }
+          const result = pcrLatest?.evaluation.results.find(r=>r.mode===mode)
+          const trendAt = (horizon: 300|900|1800) => trends.find(trend =>
+            trend.mode === mode && trend.requested_horizon_seconds === horizon)
           const fiveMinute = trendAt(300)
           const fifteenMinute = trendAt(900)
           const thirtyMinute = trendAt(1800)
@@ -234,12 +227,8 @@ export default function App() {
         <section className="panel"><div className="panel-heading"><div><h2>Observation inspector</h2><p>Select a chart point to inspect the exact inputs.</p></div><select aria-label="Observation" value={selected ?? ''} onChange={e=>setSelected(e.target.value?Number(e.target.value):null)}>
           <option value="">Follow latest observation</option>{[...state.history].reverse().map(p=><option key={p.id} value={p.id}>#{p.id} · {dateTime(p.evaluation.observed_at)}</option>)}</select></div>
           {detail ? <>
-            <div className="inspector-meta"><span>Spot <b>{number(detail.snapshot.spot,2)}</b></span><span>Observed <b>{dateTime(detail.snapshot.received_at)} IST</b></span><span>Anchor <b>{displayAnchorStatus(detail)}</b></span><button onClick={exportDetail}>Export inputs ↓</button></div>
-            <div className="oi-sections">{detail.evaluation.results.map(result=>
-              result.mode==='fixed' && fixedSessionUi(detail)
-                ? <FixedSessionOISection key={result.mode} detail={detail}/>
-                : <OISection key={result.mode} detail={detail} result={result}/>
-            )}</div>
+            <div className="inspector-meta"><span>Spot <b>{number(detail.snapshot.spot,2)}</b></span><span>Observed <b>{dateTime(detail.snapshot.received_at)} IST</b></span><span>Anchor <b>{words(detail.evaluation.anchor_status)}</b></span><button onClick={exportDetail}>Export inputs ↓</button></div>
+            <div className="oi-sections">{detail.evaluation.results.map(result=><OISection key={result.mode} detail={detail} result={result}/>)}</div>
             <div className="panel-foot">OI units: {detail.snapshot.oi_unit} · Engine {detail.evaluation.engine_version} · Configuration v{detail.config_id}</div>
           </> : <div className="empty">No observation selected.</div>}
         </section>
@@ -365,52 +354,6 @@ function StrikePositioning({records,status,view,horizon,movingAtm,fixedAtm,onVie
         <td>{oiDirectionalBadge(pair.CE,pair.PE)}</td><td>{positionState(pair.PE)}</td><td>{percent(pair.PE?.observed_oi_change_pct)}</td><td>{percent(pair.PE?.price_change_pct)}</td><td>{value(pair.PE?.current_ltp)}</td>
       </tr>})}</tbody></table></div>}
     <div className="panel-foot">LB Long Buildup · SB Short Buildup · LW Long Unwinding · SC Short Covering · N Neutral</div>
-  </section>
-}
-
-
-function fixedSessionUi(record:any){
-  const value=record?.fixed_session_ui
-  return value?.status==='AVAILABLE' ? value : null
-}
-function displayFixedResult(record:any,result:any){
-  return fixedSessionUi(record)?.display_result ?? result
-}
-function displayAnchorStatus(detail:any){
-  const value=fixedSessionUi(detail)
-  if(!value) return words(detail?.evaluation?.anchor_status)
-  return value.provenance==='ANCHOR_LIVE' ? 'live' : 'recovered'
-}
-function fixedSessionTrend(record:any,horizon:number,existing:any){
-  return record?.fixed_session_trends?.[String(horizon)] ?? existing
-}
-function FixedSessionOISection({detail}:{detail:any}){
-  const value=fixedSessionUi(detail)
-  if(!value) return null
-  const result=value.display_result
-  const pct=(v:number|null|undefined)=>v==null?'—':`${signed(v,2)}%`
-  return <section className="oi-section fixed">
-    <div className="oi-heading">
-      <div>
-        <h2>Fixed morning ATM</h2>
-        <p>ATM {number(value.atm)} / {value.strikes.length} strikes / {result.received}/{result.expected} contracts · {value.label}</p>
-      </div>
-      <strong>{value.current_pcr==null?'—':Number(value.current_pcr).toFixed(3)} <small>PCR</small></strong>
-    </div>
-    <div className="table-scroll"><table>
-      <thead><tr><th>Strike</th><th>Call OI</th><th>Call ΔOI</th><th>Call Δ%</th><th>Put OI</th><th>Put ΔOI</th><th>Put Δ%</th><th>Strike PCR</th></tr></thead>
-      <tbody>{value.rows.map((row:any)=><tr key={row.strike}>
-        <td>{number(row.strike)}</td><td>{number(row.call_oi)}</td><td>{signed(row.call_change_oi)}</td><td>{pct(row.call_change_pct)}</td>
-        <td>{number(row.put_oi)}</td><td>{signed(row.put_change_oi)}</td><td>{pct(row.put_change_pct)}</td>
-        <td>{row.strike_pcr==null?'—':Number(row.strike_pcr).toFixed(3)}</td>
-      </tr>)}</tbody>
-      <tfoot><tr><th>Total</th><th>{number(value.current_ce_oi)}</th><th>{signed(value.ce_delta)}</th><th>{pct(result.call_change_pct)}</th>
-        <th>{number(value.current_pe_oi)}</th><th>{signed(value.pe_delta)}</th><th>{pct(result.put_change_pct)}</th>
-        <th>{value.current_pcr==null?'—':Number(value.current_pcr).toFixed(3)}</th></tr></tfoot>
-    </table></div>
-    <p className="oi-issue">{value.label}
-      {value.source_candle_time ? ` · source ${new Date(value.source_candle_time).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false})} completed 1m` : ''}
-    </p>
   </section>
 }
 
