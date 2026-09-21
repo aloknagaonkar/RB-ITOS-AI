@@ -81,14 +81,15 @@ def resolve_expiry(ds: str, build_root: Path) -> tuple[str | None, str]:
     return None, str(r.get("status") or "UNRESOLVED")
 
 
-def build_missing(ds: str, expiry: str) -> None:
+def build_missing(ds: str, expiry: str) -> int:
     cmd = [
         sys.executable, "-m", "market_lab.historical_oi_build_job_v1",
         "--job-id", f"control-failure-v6-{ds.replace('-', '')}",
         "--session-date", ds,
         "--expiry", expiry,
     ]
-    subprocess.run(cmd, check=True)
+    proc = subprocess.run(cmd, check=False)
+    return proc.returncode
 
 
 def dte(ds: str, expiry: str | None) -> int | None:
@@ -309,7 +310,9 @@ def main() -> int:
         p = _positioning_path(build_root, ds)
         expiry, source = resolve_expiry(ds, build_root)
         if args.build_missing and not p.exists() and expiry:
-            build_missing(ds, expiry)
+            rc = build_missing(ds, expiry)
+            if rc != 0:
+                print(f"{ds}: historical build returned rc={rc}; recording as unavailable and continuing")
         exists = p.exists()
         if exists:
             # Prefer exact expiry recorded by the resulting build.
