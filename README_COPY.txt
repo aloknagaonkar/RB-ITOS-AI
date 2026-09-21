@@ -1,34 +1,40 @@
-Branch C V2.4 — Same-candle RSI/WMA + EMA/WMA crossover validation
+Branch C V2.5 — Real-data Same-candle Crossover Audit
 
-This version formalizes one important rule:
+Purpose
+-------
+Test historical Nifty data for cases where:
 
-After RSI↑EMA3 has armed the setup, RSI↑WMA21 and EMA3↑WMA21 may happen
-on the SAME 5-minute candle.
+1. RSI↑EMA3 happened earlier and ARMED the setup.
+2. On a later 5-minute candle:
+   RSI↑WMA21
+   AND
+   EMA3↑WMA21
+   happen on the SAME candle.
+3. RSI > 50.
+4. The state is immediately classified BULLISH + STRONG_BULLISH.
 
-That candle is allowed to transition directly:
+The script scans the same 120-session history used by the previous audits.
 
-ARMED
-  -> ACTIVE_SETUP
-  -> BULLISH        (if RSI > 50)
-  -> STRONG_BULLISH (if EMA3 > WMA21)
+For every same-candle event it prints:
+- date
+- signal candle time
+- Nifty close
+- RSI9
+- EMA3
+- WMA21
+- RSI-WMA distance
+- EMA-WMA distance
+- bullish-end time
+- Nifty points from signal to bullish end
 
-No extra 5-minute wait is required.
+Run tests
+---------
+python -m pytest tests/test_validate_hilega_milega_same_candle_real_data_v2_5.py -v
 
-Three supported patterns
-------------------------
-A. RSI↑WMA first; EMA3 crosses above WMA later.
-B. RSI↑WMA and EMA3↑WMA on the same candle.
-C. EMA3 is already above WMA when RSI↑WMA occurs.
+Run audit
+---------
+python scripts/validate_hilega_milega_same_candle_real_data_v2_5.py   --end-date 2026-09-21   --trading-sessions 120   --calendar-lookback-days 190   --intraday-date 2026-09-21
 
-Sequence context is preserved: without the earlier RSI↑EMA3 arming event,
-a same-candle RSI/WMA + EMA/WMA crossover does not create a new setup.
-
-Run
----
-python -m pytest tests/test_validate_hilega_milega_same_candle_cross_v2_4.py -v
-
-python scripts/validate_hilega_milega_same_candle_cross_v2_4.py
-
-Expected
---------
-PASS: same-candle RSI↑WMA + EMA3↑WMA is accepted immediately.
+Output
+------
+data/historical-evidence/branch-c-same-candle-real-data-v2-5.csv
