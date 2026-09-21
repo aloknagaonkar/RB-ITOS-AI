@@ -1,8 +1,10 @@
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
+from .historical_replay_data_api_v1 import router as historical_replay_data_router
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
@@ -34,6 +36,12 @@ from .storage import (
 )
 
 
+from .historical_replay_ui_api_v1 import router as historical_replay_router
+
+from .historical_replay_operations_api_v1 import router as historical_replay_operations_router
+
+from .historical_oi_enrichment_api_v1 import router as historical_oi_enrichment_router
+
 def create_app(engine=None, historical_gateway_factory=None):
     @asynccontextmanager
     async def lifespan(app):
@@ -43,7 +51,7 @@ def create_app(engine=None, historical_gateway_factory=None):
 
     app = FastAPI(title="Market Strategy Lab", version="0.1.0", lifespan=lifespan)
     app.include_router(live_shadow_router)
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "testserver", "8.234.67.73"])
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "testserver", "34.93.78.135"])
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -53,16 +61,29 @@ def create_app(engine=None, historical_gateway_factory=None):
 
     @app.middleware("http")
     async def local_mutations(request: Request, call_next):
-        if request.method == "POST" and request.headers.get("origin") not in (
-            None,
-            "http://localhost:5173",
-            "http://127.0.0.1:5173",
-            "http://localhost:8000",
-            "http://127.0.0.1:8000",
-            "http://localhost:8123",
-            "http://127.0.0.1:8123",
-        ):
-            return JSONResponse({"detail": "Untrusted origin"}, status_code=403)
+        if request.method == "POST":
+            origin = request.headers.get("origin")
+            host = request.headers.get("host")
+
+            explicit_trusted_origins = {
+                "http://localhost:5173",
+                "http://127.0.0.1:5173",
+                "http://localhost:8000",
+                "http://127.0.0.1:8000",
+                "http://localhost:8123",
+                "http://127.0.0.1:8123",
+            }
+
+            same_host_origin = False
+            if origin and host:
+                try:
+                    same_host_origin = urlsplit(origin).netloc == host
+                except ValueError:
+                    same_host_origin = False
+
+            if origin is not None and origin not in explicit_trusted_origins and not same_host_origin:
+                return JSONResponse({"detail": "Untrusted origin"}, status_code=403)
+
         return await call_next(request)
 
     @app.get("/api/health")
@@ -325,6 +346,12 @@ def create_app(engine=None, historical_gateway_factory=None):
             return trend_results(
                 session, config_id, mode=mode, latest_only=True, limit=500, panels_only=panels_only
             )
+
+    app.include_router(historical_replay_data_router)
+    app.include_router(historical_replay_router)
+
+    app.include_router(historical_replay_operations_router)
+    app.include_router(historical_oi_enrichment_router)
 
     # Development uses Vite proxy; built UI can be served by the same local backend.
     dist = Path("frontend/dist")

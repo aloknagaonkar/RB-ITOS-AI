@@ -12,7 +12,6 @@ from .live_option_minute_source_v1 import LiveOptionMinuteSourceV1
 from .live_shadow_source_integration_v1 import to_shadow_option_minute
 from .storage import Observation
 from .live_shadow_step_audit_v1 import ShadowStepAuditStoreV1, normalized_checkpoint_payload
-from .live_fixed_session_anchor_recovery_v1 import LiveFixedSessionAnchorManagerV1
 MODEL="LIVE_SHADOW_PRODUCTION_WIRING_V1";FINAL={"CLOSED","REJECTED","INCOMPLETE"}
 
 def floor_5m(ts):
@@ -33,7 +32,6 @@ class HealthJournal:
 class LiveShadowProductionCoordinatorV1:
     def __init__(self,*,engine,config_id,market_sources,events_path,health_path, step_audit_path="data/live-observation/shadow-v1/step-audit.jsonl"):
         self.engine=engine;self.config_id=config_id;self.sources=market_sources;self.adapter=LiveShadowRuntimeAdapterV1(events_path);self.features=LiveNormalizedFeatureProducerV1();self.health=HealthJournal(health_path);self._bootstrapped=False
-        self.fixed_session_anchor=LiveFixedSessionAnchorManagerV1(engine=engine,config_id=config_id)
         self.step_audit = ShadowStepAuditStoreV1(step_audit_path)
     def bootstrap(self,checkpoint,*,lookback_minutes=30):
         if self._bootstrapped:return
@@ -74,12 +72,6 @@ class LiveShadowProductionCoordinatorV1:
 
         self.features.add_snapshot(snap,checkpoint_timestamp=checkpoint)
         cp=self.features.build_current()
-        fixed_anchor=self.fixed_session_anchor.ensure(checkpoint)
-        fixed_metrics=self.fixed_session_anchor.metrics(snap,checkpoint)
-        self.step_audit.append(
-            event_time=datetime.now(IST),checkpoint=checkpoint,stage="FIXED_SESSION_ANCHOR",status=fixed_anchor.status,
-            payload={"provenance":fixed_anchor.provenance,"checkpoint_time":fixed_anchor.checkpoint_time,"source_candle_time":fixed_anchor.source_candle_time,"source_semantics":fixed_anchor.source_semantics,"provider":fixed_anchor.provider,"spot":fixed_anchor.spot,"atm":fixed_anchor.atm,"strikes":list(fixed_anchor.strikes),"contract_count":len(fixed_anchor.legs),"ce_total":fixed_anchor.ce_total,"pe_total":fixed_anchor.pe_total,"fixed_pcr":fixed_anchor.fixed_pcr,"fallback_used":fixed_anchor.fallback_used,"issue":fixed_anchor.issue,"fixed_session":fixed_metrics.payload() if fixed_metrics is not None else None},
-        )
 
         self.step_audit.append(
             event_time=datetime.now(IST),
@@ -114,7 +106,7 @@ class LiveShadowProductionCoordinatorV1:
             },
         )
 
-        self.health.append({"model":MODEL,"checkpoint":checkpoint.isoformat(),"source_received_at":cp.source_received_at.isoformat(),"source_delay_ms":cp.source_delay_ms,"health_state":cp.health_state,"health_allowed":cp.health_allowed,"health_reason":cp.health_reason,"all3_state":cp.all3_state,"fixed_session_anchor":{"status":fixed_anchor.status,"provenance":fixed_anchor.provenance,"checkpoint_time":fixed_anchor.checkpoint_time,"source_candle_time":fixed_anchor.source_candle_time,"source_semantics":fixed_anchor.source_semantics,"provider":fixed_anchor.provider,"spot":fixed_anchor.spot,"atm":fixed_anchor.atm,"strikes":list(fixed_anchor.strikes),"contract_count":len(fixed_anchor.legs),"ce_total":fixed_anchor.ce_total,"pe_total":fixed_anchor.pe_total,"fixed_pcr":fixed_anchor.fixed_pcr,"fallback_used":fixed_anchor.fallback_used,"issue":fixed_anchor.issue},"fixed_session":fixed_metrics.payload() if fixed_metrics is not None else None})
+        self.health.append({"model":MODEL,"checkpoint":checkpoint.isoformat(),"source_received_at":cp.source_received_at.isoformat(),"source_delay_ms":cp.source_delay_ms,"health_state":cp.health_state,"health_allowed":cp.health_allowed,"health_reason":cp.health_reason,"all3_state":cp.all3_state})
         for oid,s in list(self.adapter.states().items()):
             if s.status!="DETECTED" or not s.candle1_timestamp:continue
             c1=datetime.fromisoformat(s.candle1_timestamp)

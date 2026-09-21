@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from .domain import Snapshot
 from .storage import Observation
+from .historical_replay_session_config_v1 import resolve_session_config_ids
 
 MODEL = "HISTORICAL_REPLAY_SNAPSHOT_INDEX_V1"
 
@@ -57,10 +58,17 @@ class HistoricalReplaySnapshotIndexV1:
     ) -> "HistoricalReplaySnapshotIndexV1":
         # Select only the snapshot JSON column. Do not ORM-load Observation rows,
         # because that would also decode the large evaluation JSON column.
+        config_ids = resolve_session_config_ids(engine, session_date)
+        if config_id not in config_ids:
+            raise RuntimeError(
+                f"Requested config_id {config_id} is not part of "
+                f"{session_date} replay-equivalent session configs {config_ids}"
+            )
+
         with Session(engine) as session:
             raw_snapshots = session.scalars(
                 select(Observation.snapshot).where(
-                    Observation.config_id == config_id,
+                    Observation.config_id.in_(config_ids),
                     Observation.session_date == session_date.isoformat(),
                 ).order_by(Observation.id)
             ).all()

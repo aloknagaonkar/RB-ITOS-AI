@@ -10,19 +10,34 @@ def _audit_scope():
     assert m, "Audit function not found"
     return text[m.end():m.end()+6000]
 
+def _has_const(scope: str, name: str) -> bool:
+    # Accept normal TypeScript formatting:
+    #   const fixedCePct=
+    #   const fixedCePct =
+    #   const fixedCePct     =
+    return re.search(rf"\bconst\s+{re.escape(name)}\s*=", scope) is not None
+
 def test_audit_scope_variables_present():
     scope = _audit_scope()
-    for needle in (
-        "const movingChecks=movingValidation(row)",
-        "const fixedChecks=fixedValidation(row)",
-        "const fixedCePct=",
-        "const fixedPePct=",
-        "const fixedImbalance=",
-        "const fixedBasePcr=",
-        "const fixedCurrentPcr=",
-        "const fixedPcrChange=",
+
+    assert re.search(
+        r"\bconst\s+movingChecks\s*=\s*movingValidation\s*\(\s*row\s*\)",
+        scope,
+    )
+    assert re.search(
+        r"\bconst\s+fixedChecks\s*=\s*fixedValidation\s*\(\s*row\s*\)",
+        scope,
+    )
+
+    for name in (
+        "fixedCePct",
+        "fixedPePct",
+        "fixedImbalance",
+        "fixedBasePcr",
+        "fixedCurrentPcr",
+        "fixedPcrChange",
     ):
-        assert needle in scope
+        assert _has_const(scope, name), f"{name} declaration missing from Audit scope"
 
 def test_validation_functions_exist():
     text = Path("frontend/src/historicalOiResearch.tsx").read_text()
@@ -33,7 +48,7 @@ def test_validation_functions_exist():
 def test_jsx_references_have_scope_declarations():
     text = Path("frontend/src/historicalOiResearch.tsx").read_text()
     scope = _audit_scope()
-    for name in (
+    referenced = (
         "movingChecks",
         "fixedChecks",
         "fixedCePct",
@@ -42,6 +57,7 @@ def test_jsx_references_have_scope_declarations():
         "fixedBasePcr",
         "fixedCurrentPcr",
         "fixedPcrChange",
-    ):
+    )
+    for name in referenced:
         if name in text:
-            assert f"const {name}" in scope
+            assert _has_const(scope, name), f"{name} referenced by JSX but not declared in Audit scope"

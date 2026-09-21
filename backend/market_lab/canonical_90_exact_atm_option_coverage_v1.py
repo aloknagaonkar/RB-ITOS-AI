@@ -236,14 +236,17 @@ def attach_exact_option_coverage(
         needed_by_file[p].append(row)
 
     for p, file_rows in needed_by_file.items():
-        keys: dict[tuple[str, str], set[str]] = {}
+        # Multiple eligible events can reuse the same exact option contract in
+        # the same session. Build a UNION of timestamps needed for reading the
+        # source file, but evaluate each event against its own 16-minute window.
+        keys: dict[tuple[str, str], set[str]] = defaultdict(set)
         for row in file_rows:
             entry = _dt(row["entry_timestamp"])
             expected = {
                 _iso_minute(entry + timedelta(minutes=i))
                 for i in range(16)  # entry bar plus exact +1 ... +15 bars
             }
-            keys[(row["session_date"], row["instrument_key"])] = expected
+            keys[(row["session_date"], row["instrument_key"])].update(expected)
 
         seen: dict[tuple[str, str], dict[str, dict[str, str]]] = defaultdict(dict)
 
@@ -272,7 +275,11 @@ def attach_exact_option_coverage(
         for row in file_rows:
             key = (row["session_date"], row["instrument_key"])
             entry = row["entry_timestamp"]
-            expected = sorted(keys[key])
+            entry_dt = _dt(entry)
+            expected = sorted(
+                _iso_minute(entry_dt + timedelta(minutes=i))
+                for i in range(16)
+            )
             actual = seen.get(key, {})
 
             if entry not in actual:
@@ -297,9 +304,25 @@ def attach_exact_option_coverage(
 
             missing_ts = [t for t in expected if t not in actual]
             if missing_ts:
-                row["coverage_status"] = "INCOMPLETE_15M_PATH"
+                # NSE option minute bars for the regular session end with the
+                # 15:29 bar. If every missing timestamp is 15:30 or later on
+                # the same session date, this is deterministic session-end
+                # censoring rather than a data gap.
+                missing_dt = [_dt(t) for t in missing_ts]
+                session_end_censored = all(
+                    t.date().isoformat() == row["session_date"]
+                    and (t.hour, t.minute) >= (15, 30)
+                    for t in missing_dt
+                )
+                row["coverage_status"] = (
+                    "SESSION_END_CENSORED"
+                    if session_end_censored
+                    else "INCOMPLETE_15M_PATH"
+                )
                 row["entry_open"] = entry_open
-                row["path_rows_available"] = len(actual)
+                row["path_rows_available"] = sum(
+                    1 for t in expected if t in actual
+                )
                 row["missing_timestamps"] = missing_ts
                 continue
 
@@ -358,6 +381,7 @@ def run(
             "nearest_time_fallback": False,
             "entry": "exact next-minute OPEN after C2",
             "path_requirement": "entry minute through entry+15 minutes inclusive",
+            "session_end_censoring": "missing timestamps only at 15:30 or later are classified SESSION_END_CENSORED",
         },
         "rows": rows,
     }

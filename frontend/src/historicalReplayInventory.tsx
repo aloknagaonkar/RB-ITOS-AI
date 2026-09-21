@@ -1,4 +1,4 @@
-import {useEffect,useMemo,useState} from 'react'
+import {useMemo,useState} from 'react'
 import './historicalReplayInventory.css'
 
 type Row={session_date:string;classification:string;snapshot_records:number;strict_covered:number;legacy_covered:number;expected_checkpoints:number;futures_status:string}
@@ -21,8 +21,6 @@ export default function HistoricalReplayInventory({selectedDate,onSelectDate}:Pr
     }catch(e){setError(String(e))}
     finally{setLoading(false)}
   }
-
-  useEffect(()=>{void refresh()},[])
   const visible=useMemo(()=>filter==='ALL'?rows:rows.filter(r=>r.classification===filter),[rows,filter])
 
   return <section className="hri">

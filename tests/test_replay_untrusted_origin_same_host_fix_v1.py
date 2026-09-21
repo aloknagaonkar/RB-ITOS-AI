@@ -38,18 +38,18 @@ def build_app():
 
 
 def test_external_same_host_origin_allowed():
-    c = TestClient(build_app(), base_url="http://8.234.67.73:8123")
-    r = c.post("/x", headers={"Origin":"http://8.234.67.73:8123"})
+    c = TestClient(build_app(), base_url="http://34.93.78.135:8123")
+    r = c.post("/x", headers={"Origin":"http://34.93.78.135:8123"})
     assert r.status_code == 200
 
 
 def test_cross_host_origin_rejected():
-    c = TestClient(build_app(), base_url="http://8.234.67.73:8123")
+    c = TestClient(build_app(), base_url="http://34.93.78.135:8123")
     r = c.post("/x", headers={"Origin":"http://evil.example"})
     assert r.status_code == 403
 
 
 def test_originless_cli_post_allowed():
-    c = TestClient(build_app(), base_url="http://8.234.67.73:8123")
+    c = TestClient(build_app(), base_url="http://34.93.78.135:8123")
     r = c.post("/x")
     assert r.status_code == 200

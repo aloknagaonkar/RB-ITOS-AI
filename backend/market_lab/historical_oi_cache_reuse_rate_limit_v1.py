@@ -10,11 +10,41 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .historical_oi_enrichment_v1 import _load_built, _load_canonical, enrich_session, write_csv
+from .historical_oi_enrichment_v1 import _load_canonical, enrich_session, write_csv
 from .historical_oi_auto_enrichment_v1 import required_raw_wings_from_session
 
 MODEL = "HISTORICAL_OI_CACHE_REUSE_RATE_LIMIT_V1"
 ANALYTICAL_WINGS = 5
+
+
+def _load_session_compatible(path: Path, session_date: str) -> dict[str, Any]:
+    # Accept newer build-wrapper JSON and older single-session cache JSON.
+    doc = json.loads(path.read_text(encoding="utf-8"))
+
+    if isinstance(doc, dict) and isinstance(doc.get("sessions"), list):
+        matches = [
+            s for s in doc["sessions"]
+            if isinstance(s, dict) and str(s.get("session_date")) == session_date
+        ]
+    elif isinstance(doc, dict) and str(doc.get("session_date")) == session_date:
+        matches = [doc]
+    else:
+        matches = []
+
+    if len(matches) != 1:
+        raise ValueError(
+            f"Expected exactly one compatible session for {session_date}, found {len(matches)}"
+        )
+
+    session = matches[0]
+    if str(session.get("status")) != "AVAILABLE":
+        raise ValueError(
+            f"Compatible session is not AVAILABLE for {session_date}: {session.get('status')}"
+        )
+    if not isinstance(session.get("rows"), list) or not session["rows"]:
+        raise ValueError(f"Compatible session has no rows for {session_date}")
+
+    return session
 
 
 def _session_from_file(path: Path, session_date: str, expiry: str) -> dict[str, Any] | None:
@@ -171,7 +201,7 @@ def run_cache_reuse_enrichment(
             cache_dir=build_dir / "cache-w5",
         )
 
-    phase_a_session = _load_built(phase_a_source, session_date)
+    phase_a_session = _load_session_compatible(phase_a_source, session_date)
     coverage = required_raw_wings_from_session(phase_a_session)
     required = int(coverage["required_raw_wings"])
 
@@ -191,7 +221,7 @@ def run_cache_reuse_enrichment(
             cache_dir=build_dir / f"cache-w{required}",
         )
 
-    final_session = _load_built(final_source, session_date)
+    final_session = _load_session_compatible(final_source, session_date)
     canonical_rows = _load_canonical(Path(canonical_path), session_date)
     enriched = enrich_session(canonical_rows, final_session, session_date)
 

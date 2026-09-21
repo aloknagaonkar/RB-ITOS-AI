@@ -216,6 +216,7 @@ def load_checkpoints(
 
 
 def _field(row: dict[str, Any], stem: str, horizon: int) -> float | None:
+    # Prefer explicit flat fields when present.
     candidates = [
         f"{stem}_{horizon}m",
         f"{stem}_{horizon}",
@@ -225,6 +226,47 @@ def _field(row: dict[str, Any], stem: str, horizon: int) -> float | None:
             value = _f(row.get(key))
             if value is not None:
                 return value
+
+    # Canonical enriched schema stores the causal 5m/10m/15m values under
+    # moving_horizons["5m"|"10m"|"15m"].
+    horizons = row.get("moving_horizons")
+    if isinstance(horizons, dict):
+        h = horizons.get(f"{horizon}m")
+        if isinstance(h, dict):
+            status = str(h.get("status") or "").upper()
+            if status and status != "AVAILABLE":
+                return None
+
+            nested_key = {
+                "ce_delta": "ce_delta",
+                "pe_delta": "pe_delta",
+                "imbalance": "imbalance",
+                "pcr_change": "pcr_change",
+            }.get(stem)
+
+            if nested_key:
+                value = _f(h.get(nested_key))
+                if value is not None:
+                    return value
+
+    # Backward-compatible 5m aliases used by enrichment UI/API.
+    if horizon == 5:
+        alias = {
+            "ce_delta": "m_ce_delta",
+            "pe_delta": "m_pe_delta",
+            "pcr_change": "m_pcr_change",
+        }.get(stem)
+        if alias:
+            value = _f(row.get(alias))
+            if value is not None:
+                return value
+
+        if stem == "imbalance":
+            ce = _f(row.get("m_ce_delta"))
+            pe = _f(row.get("m_pe_delta"))
+            if ce is not None and pe is not None:
+                return pe - ce
+
     return None
 
 
@@ -247,7 +289,11 @@ def build_checkpoint_dataset(rows: list[dict[str, Any]]) -> list[dict[str, Any]]
                 "pcr_current": _f(
                     row.get("pcr_current")
                     if "pcr_current" in row
-                    else row.get("moving_pcr")
+                    else (
+                        row.get("moving_pcr")
+                        if "moving_pcr" in row
+                        else row.get("m_pcr")
+                    )
                 ),
             }
 
@@ -475,6 +521,20 @@ def run(
 ) -> dict[str, Any]:
     source_rows = load_checkpoints(enrichment_root, canonical_coverage)
     checkpoints = build_checkpoint_dataset(source_rows)
+
+    oi_coverage = {
+        f"{lb}m": sum(
+            1 for r in checkpoints
+            if r.get(f"imbalance_{lb}m") is not None
+        )
+        for lb in OI_LOOKBACKS
+    }
+    if oi_coverage["5m"] == 0:
+        raise ValueError(
+            "No 5m OI imbalance values were extracted from enriched rows. "
+            "Expected canonical enriched moving_horizons schema."
+        )
+
     attribution = analyze(checkpoints)
 
     session_dates = sorted({r["session_date"] for r in checkpoints})
@@ -486,6 +546,7 @@ def run(
         "session_count": len(session_dates),
         "session_dates": session_dates,
         "checkpoint_count": len(checkpoints),
+        "oi_coverage_by_lookback": oi_coverage,
         "forward_horizons_minutes": list(FORWARD_HORIZONS),
         "oi_lookbacks_minutes": list(OI_LOOKBACKS),
         "move_thresholds_points": list(MOVE_THRESHOLDS),
@@ -566,6 +627,7 @@ def main() -> None:
         "model": result["model"],
         "session_count": result["session_count"],
         "checkpoint_count": result["checkpoint_count"],
+        "oi_coverage_by_lookback": result["oi_coverage_by_lookback"],
         "movement_definition": result["movement_definition"],
         "preview_first_50_points": preview,
         "output_json": args.output_json,

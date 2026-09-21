@@ -18,7 +18,8 @@ SESSION_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 router = APIRouter(prefix="/api/live-shadow/replay", tags=["live-shadow-replay"])
 
 
-def _session_dir(session_date: str, replay_root: Path = REPLAY_ROOT) -> Path:
+def _session_dir(session_date: str, replay_root: Path | None = None) -> Path:
+    replay_root = REPLAY_ROOT if replay_root is None else replay_root
     try:
         parsed = date.fromisoformat(session_date)
     except ValueError as exc:
@@ -66,7 +67,8 @@ def _read_jsonl(path: Path, *, limit: int | None = None) -> list[dict[str, Any]]
     return rows
 
 
-def list_sessions(replay_root: Path = REPLAY_ROOT) -> list[dict[str, Any]]:
+def list_sessions(replay_root: Path | None = None) -> list[dict[str, Any]]:
+    replay_root = REPLAY_ROOT if replay_root is None else replay_root
     if not replay_root.exists():
         return []
 

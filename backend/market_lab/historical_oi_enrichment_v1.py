@@ -22,11 +22,10 @@ def _timestamp_key(v: str) -> str:
 
 
 def _load_canonical(path: Path, session_date: str) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
     with path.open(newline="", encoding="utf-8-sig") as f:
-        rows = [dict(r) for r in csv.DictReader(f) if r.get("session_date") == session_date]
-    if not rows:
-        raise ValueError(f"No canonical rows for {session_date}")
-    return rows
+        return [dict(r) for r in csv.DictReader(f) if r.get("session_date") == session_date]
 
 
 def _load_built(path: Path, session_date: str) -> dict[str, Any]:
@@ -105,6 +104,32 @@ def _strike_interval(session: dict[str, Any]) -> float:
     return min(diffs)
 
 
+def _built_checkpoint_rows(built_session: dict[str, Any], session_date: str) -> list[dict[str, Any]]:
+    rows = built_session.get("rows") or []
+    by_ts = _index_rows(rows)
+    output = []
+    from datetime import timedelta
+    start = datetime.fromisoformat(f"{session_date}T09:20:00+05:30")
+    end = datetime.fromisoformat(f"{session_date}T15:25:00+05:30")
+    t = start
+    while t <= end:
+        ts = t.isoformat()
+        at = by_ts.get(ts)
+        if at:
+            vals = list(at.values())
+            atms = {float(r["moving_atm"]) for r in vals if r.get("moving_atm") is not None}
+            spots = {float(r["spot"]) for r in vals if r.get("spot") is not None}
+            if len(atms) != 1: raise ValueError(f"Ambiguous moving ATM at {ts}: {sorted(atms)}")
+            if len(spots) != 1: raise ValueError(f"Ambiguous spot at {ts}: {sorted(spots)}")
+            moving_atm = next(iter(atms))
+            spot = next(iter(spots))
+            atm_row = at.get(moving_atm) or {}
+            output.append({"block":"BUILT_ONLY","source":"DOWNLOADED_ENRICHMENT","session_date":session_date,"time":t.strftime("%H:%M"),"timestamp":ts,"spot":spot,"moving_atm":moving_atm,"fixed_atm":None,"ce_state":atm_row.get("ce_5m_state") or "UNAVAILABLE","pe_state":atm_row.get("pe_5m_state") or "UNAVAILABLE","atm_ce_price_pct":atm_row.get("ce_5m_premium_change_pct"),"atm_pe_price_pct":atm_row.get("pe_5m_premium_change_pct"),"pattern_family":None,"forward_5m_points":None,"forward_10m_points":None,"forward_15m_points":None})
+        t += timedelta(minutes=5)
+    if not output: raise ValueError(f"Built source contains no exact 5-minute checkpoints for {session_date}")
+    return output
+
+
 def enrich_session(
     canonical_rows: list[dict[str, Any]],
     built_session: dict[str, Any],
@@ -113,6 +138,11 @@ def enrich_session(
     built_rows = built_session.get("rows") or []
     by_ts = _index_rows(built_rows)
     interval = _strike_interval(built_session)
+
+    source_mode = "CANONICAL_ENRICHMENT"
+    if not canonical_rows:
+        canonical_rows = _built_checkpoint_rows(built_session, session_date)
+        source_mode = "BUILT_ONLY_ENRICHMENT"
 
     canonical_by_time = {str(r.get("time")): r for r in canonical_rows}
     anchor = canonical_by_time.get("09:20")
@@ -245,6 +275,7 @@ def enrich_session(
     return {
         "model": MODEL,
         "session_date": session_date,
+        "source_mode": source_mode,
         "source_provenance": "HISTORICAL_CANDLE_RECONSTRUCTION",
         "fixed_atm": fixed_atm,
         "fixed_strikes": fixed_strikes,
@@ -310,6 +341,7 @@ def main():
         "model":MODEL,
         "session_date":args.session_date,
         "row_count":doc["row_count"],
+        "source_mode":doc["source_mode"],
         "status_counts":doc["status_counts"],
         "fixed_atm":doc["fixed_atm"],
         "json":str(json_path),

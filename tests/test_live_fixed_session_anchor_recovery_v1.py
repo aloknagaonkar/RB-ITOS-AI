@@ -68,7 +68,7 @@ def snap(bump=0):
         for side in ("CE","PE"):
             key=f"K-{strike}-{side}"; cs.append(Contract(key=key,strike=float(strike),side=side)); qs.append(Quote(key=key,oi=strike*(2 if side=="CE" else 3)+bump))
     t=datetime(2026,9,21,9,20,10,tzinfo=IST)
-    return Snapshot(provider="upstox",underlying="NSE_INDEX|Nifty 50",expiry=date(2026,9,22),started_at=t,received_at=t,spot=23384.65,catalog=cs,quotes=qs,raw={})
+    return Snapshot(provider="upstox",underlying="NSE_INDEX|Nifty 50",expiry=date(2026,9,22),started_at=t,received_at=t,spot=23384.65,spot_feed_at=t,catalog=cs,quotes=qs,raw={})
 
 def test_live_capture_and_deltas():
     a=capture_live_fixed_anchor(snapshot=snap(),session_date=date(2026,9,21),anchor_time="09:20",wings=5)
