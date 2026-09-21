@@ -1,37 +1,41 @@
-LIVE UPSTOX FIXED-ANCHOR RECOVERY V1
+LIVE FIXED SESSION UI V1
 
-From ~/RB-ITOS-AI after extracting the ZIP to /tmp/live-upstox-anchor-recovery-v1:
+Copy additive files:
+  cp backend/market_lab/live_fixed_session_ui_projection_v1.py backend/market_lab/
+  cp tests/test_live_fixed_session_ui_projection_v1.py tests/
+  cp scripts/apply_live_fixed_session_ui_v1.py scripts/
+  cp docs/research/LIVE_FIXED_SESSION_UI_V1.md docs/research/
 
-cp /tmp/live-upstox-anchor-recovery-v1/backend/market_lab/live_fixed_session_anchor_recovery_v1.py backend/market_lab/
-cp /tmp/live-upstox-anchor-recovery-v1/tests/test_live_fixed_session_anchor_recovery_v1.py tests/
-cp /tmp/live-upstox-anchor-recovery-v1/scripts/apply_live_fixed_session_anchor_recovery_v1.py scripts/
-cp /tmp/live-upstox-anchor-recovery-v1/scripts/verify_live_fixed_session_anchor_recovery_v1.py scripts/
-cp /tmp/live-upstox-anchor-recovery-v1/docs/research/LIVE_FIXED_SESSION_ANCHOR_RECOVERY_V1.md docs/research/
+Apply:
+  python scripts/apply_live_fixed_session_ui_v1.py
 
-python scripts/apply_live_fixed_session_anchor_recovery_v1.py
-python -m pytest tests/test_live_fixed_session_anchor_recovery_v1.py -v
+Test:
+  python -m pytest \
+    tests/test_live_fixed_session_anchor_recovery_v1.py \
+    tests/test_live_fixed_session_ui_projection_v1.py -v
 
-set -a
-source .env
-set +a
-python scripts/verify_live_fixed_session_anchor_recovery_v1.py
+Compile:
+  python -m py_compile \
+    backend/market_lab/live_fixed_session_ui_projection_v1.py \
+    backend/market_lab/api.py
 
-git diff -- \
-  backend/market_lab/live_fixed_session_anchor_recovery_v1.py \
-  backend/market_lab/live_shadow_production_wiring_v1.py \
-  tests/test_live_fixed_session_anchor_recovery_v1.py \
-  scripts/apply_live_fixed_session_anchor_recovery_v1.py \
-  scripts/verify_live_fixed_session_anchor_recovery_v1.py \
-  docs/research/LIVE_FIXED_SESSION_ANCHOR_RECOVERY_V1.md
+Build frontend:
+  cd frontend && npm run build && cd ..
 
-Only after tests + verification pass:
+Restart:
+  ./scripts/restart.sh
 
-git add \
-  backend/market_lab/live_fixed_session_anchor_recovery_v1.py \
-  backend/market_lab/live_shadow_production_wiring_v1.py \
-  tests/test_live_fixed_session_anchor_recovery_v1.py \
-  scripts/apply_live_fixed_session_anchor_recovery_v1.py \
-  scripts/verify_live_fixed_session_anchor_recovery_v1.py \
-  docs/research/LIVE_FIXED_SESSION_ANCHOR_RECOVERY_V1.md
+Verify latest state:
+  curl -s http://127.0.0.1:8123/api/state | python -c 'import sys,json;d=json.load(sys.stdin);x=d["history"][-1];print(json.dumps({"id":x["id"],"fixed_session_ui":x.get("fixed_session_ui"),"fixed_session_trends":x.get("fixed_session_trends")},indent=2))'
 
-Never use: git add .
+Verify latest observation detail:
+  ID=$(curl -s http://127.0.0.1:8123/api/state | python -c 'import sys,json;d=json.load(sys.stdin);print(d["history"][-1]["id"])')
+  curl -s "http://127.0.0.1:8123/api/observations/$ID" | python -c 'import sys,json;d=json.load(sys.stdin);print(json.dumps(d.get("fixed_session_ui"),indent=2))'
+
+Temporary backups created by patcher:
+  backend/market_lab/api.py.pre-fixed-session-ui-v1
+  frontend/src/App.tsx.pre-fixed-session-ui-v1
+
+Do NOT stage backups.
+Do NOT use git add .
+Do not commit until tests/build/API/UI verification pass.
