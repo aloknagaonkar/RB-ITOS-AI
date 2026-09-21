@@ -1,93 +1,124 @@
-CONTROL FAILURE INTRABAR PERSISTENCE & CONTINUATION V6.6
-==========================================================
+CONTROL FAILURE FULL-DAY INTRABAR FALSE-POSITIVE VALIDATION V6.7
+================================================================
 
-Purpose
+SESSION POPULATION
+------------------
+Uses ALL currently available frozen historical sessions from the V6.2
+expiry-aware inventory.
+
+Expected from the current population:
+- 28 AVAILABLE sessions
+- 8 UNAVAILABLE sessions
+
+The 8 unavailable dates are not silently removed. They are reported explicitly.
+
+PURPOSE
 -------
-Use the 12 V6.5 one-minute events to test whether genuine directional-start
-candles differ from weaker/early candidates through:
-
-- number of direction-control failures in the 5m candle
-- longest consecutive failure run
-- timing of the first failure
-- cumulative direction-normalized price displacement at minute 1..5
-- price continuation during the next 1m / 2m after first failure
-- ATM transition/support after first failure
-- strike-breadth transition/support after first failure
-- decay count
-
-No changes to:
-- V5 control-failure theory
-- V6.2 expiry-aware wings
-- V6.3 ±15m evaluation logic
-- V6.5 one-minute event generation
-- strategy/execution logic
+Test whether intrabar control-failure persistence still works when scanning
+the ENTIRE trading day instead of only known move-start candles.
 
 No threshold optimization is performed.
 
-Outcome comparison
+FROZEN VARIANTS
+---------------
+A
+  >= 1 direction-control failure
+  causal trigger = first failure minute
+
+B
+  >= 2 direction-control failures
+  causal trigger = second failure minute
+
+C
+  >= 2 failures
+  AND first failure <= minute 2
+  causal trigger = second failure minute
+
+D
+  >= 2 failures
+  AND direction-normalized next-2m continuation after first failure > 0
+  trigger occurs only after both:
+  - second failure is observable
+  - both continuation minutes are observable
+
+E
+  D
+  AND first failure <= minute 2
+
+IMPORTANT
+---------
+Variant triggers are causal minute timestamps.
+They are NOT automatically assigned to the 5-minute candle close.
+
+SCAN METHOD
+-----------
+For every available session:
+- scan all exact clock-aligned 5-minute windows
+- use 1-minute checkpoints inside each window
+- evaluate BOTH bullish and bearish control failure
+- use V6.2 expiry-aware basket width for that session
+- exact physical strikes only
+- exact minute timestamps only
+- no nearest strike
+- no interpolation
+- missing data is reported
+
+FORWARD VALIDATION
 ------------------
-Events are grouped DESCRIPTIVELY using only the sign of already-measured
-directional follow-through:
+Measured from each variant's causal trigger minute:
 
-POSITIVE_15_AND_30
-  move_15m > 0 and move_30m > 0
++5m
++10m
++15m
++30m
 
-MIXED_15_30
-  only one of move_15m / move_30m is positive
+median and mean directional movement
+hit rates
+30m MFE
+30m MAE
 
-NON_POSITIVE_15_AND_30
-  neither is positive
+Also report:
+- signals/session
+- sessions with signals
+- candidates within +/-15m of the known move start in the frozen session direction
+- candidates elsewhere in the day
 
-This grouping is research-only and is NOT a live trading rule.
+The known move start is evaluation-only and is never used to generate
+a candidate.
 
-Test
+TEST
 ----
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
 
-python -m pytest   tests/test_validate_control_failure_intrabar_persistence_v6_6.py -v
+python -m pytest   tests/test_validate_control_failure_full_day_intrabar_v6_7.py -v
 
-Run
+RUN
 ---
-IMPORTANT:
-V6.6 expects V6.5 to have been generated with --all-matched, because it is
-intended to analyze all 12 matched events.
+python scripts/validate_control_failure_full_day_intrabar_v6_7.py
 
-python scripts/validate_control_failure_intrabar_v6_5.py   --all-matched
+INPUTS
+------
+data/historical-evidence/control-failure-expiry-aware-v6-2/
+  expiry-aware-inventory-v6-2.csv
 
-python scripts/validate_control_failure_intrabar_persistence_v6_6.py
+data/historical-evidence/historical-oi-build/<date>/
+  positioning.json
 
-Outputs
+data/historical-evidence/
+  trend-day-move-start-oi-replay-v1.json
+
+OUTPUTS
 -------
-data/historical-evidence/control-failure-intrabar-persistence-v6-6/
-  intrabar-persistence-event-detail-v6-6.csv
-  intrabar-persistence-group-summary-v6-6.csv
-  intrabar-persistence-summary-v6-6.json
+data/historical-evidence/control-failure-full-day-intrabar-v6-7/
 
-Key event metrics
------------------
-failure_count_5m
-max_consecutive_failure_count
-first_failure_minute_from_candle_start
-decay_count_5m
+  full-day-intrabar-candidates-v6-7.csv
+  full-day-intrabar-summary-v6-7.csv
+  full-day-intrabar-errors-v6-7.csv
+  full-day-intrabar-summary-v6-7.json
 
-directional_cum_price_m1 ... m5
-
-next_1m_directional_after_first_failure
-next_2m_directional_after_first_failure
-next_1m_continues
-next_2m_continues
-
-atm_support_at_first_failure
-atm_support_after_first_failure
-
-breadth_support_at_first_failure
-breadth_support_after_first_failure
-
-Main question
+MAIN QUESTION
 -------------
-Does repeated/persistent price-vs-OI control failure plus continued
-directional price displacement distinguish the cleaner move-start candles
-from early or weaker control-failure events?
-
-V6.6 deliberately does NOT select a threshold from these 12 events.
+Does repeated intrabar price-vs-OI control failure plus short-horizon
+continuation remain useful across ALL intraday windows, or did it look
+strong mainly because earlier analysis started near known move starts?
