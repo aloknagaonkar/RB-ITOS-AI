@@ -1,42 +1,34 @@
-Branch C V2.3 — RSI / EMA3 / WMA21 Candle-by-Candle Audit
+Branch C V2.4 — Same-candle RSI/WMA + EMA/WMA crossover validation
 
-Purpose
--------
-Inspect exact indicator values for a bullish signal from bullish start
-through bullish end.
+This version formalizes one important rule:
 
-Example: 29 May 2026, 09:35 -> 09:45
-----------------------------------------
-python scripts/validate_hilega_milega_indicator_audit_v2_3.py \
-  --date 2026-05-29 \
-  --start 09:35 \
-  --end 09:45
+After RSI↑EMA3 has armed the setup, RSI↑WMA21 and EMA3↑WMA21 may happen
+on the SAME 5-minute candle.
 
-All completed bullish signals on 29 May:
----------------------------------------
-python scripts/validate_hilega_milega_indicator_audit_v2_3.py \
-  --date 2026-05-29 \
-  --all-signals
+That candle is allowed to transition directly:
 
-Output columns
---------------
-TIME
-CLOSE
-RSI9
-EMA3
-WMA21
-RSI-EMA3
-RSI-WMA21
-EMA3-WMA21
-RSI>50
-EMA3>WMA21
-RSI>EMA3
-RSI>WMA21
+ARMED
+  -> ACTIVE_SETUP
+  -> BULLISH        (if RSI > 50)
+  -> STRONG_BULLISH (if EMA3 > WMA21)
 
-Generated CSV
--------------
-data/historical-evidence/branch-c-indicator-audit-v2-3.csv
+No extra 5-minute wait is required.
 
-Tests
------
-python -m pytest tests/test_validate_hilega_milega_indicator_audit_v2_3.py -v
+Three supported patterns
+------------------------
+A. RSI↑WMA first; EMA3 crosses above WMA later.
+B. RSI↑WMA and EMA3↑WMA on the same candle.
+C. EMA3 is already above WMA when RSI↑WMA occurs.
+
+Sequence context is preserved: without the earlier RSI↑EMA3 arming event,
+a same-candle RSI/WMA + EMA/WMA crossover does not create a new setup.
+
+Run
+---
+python -m pytest tests/test_validate_hilega_milega_same_candle_cross_v2_4.py -v
+
+python scripts/validate_hilega_milega_same_candle_cross_v2_4.py
+
+Expected
+--------
+PASS: same-candle RSI↑WMA + EMA3↑WMA is accepted immediately.
