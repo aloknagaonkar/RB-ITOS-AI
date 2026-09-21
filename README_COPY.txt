@@ -1,68 +1,49 @@
-Branch C V1.9 — 30-session robustness audit
+Branch C V2.0 — Opening-gap diagnostic
 
 Purpose
 -------
-Test two unresolved state rules over 30 trading sessions without changing
-the normal intraday progression logic.
+Compare the five opening-alignment sessions without imposing a new threshold.
 
-Rule A — Opening alignment
---------------------------
-09:15 full alignment:
-  RSI > 50
-  EMA3 > 50
-  WMA21 > 50
-  RSI > EMA3 > WMA21
+Dates:
+2026-08-10
+2026-08-20
+2026-08-24
+2026-09-03
+2026-09-18
 
-=> OPENING_ALIGNMENT only.
+Measures
+--------
+previous session close
+09:15 open / close
+09:20 close
+09:25 close
 
-Next 5m candle:
-  if RSI remains > WMA21:
-      OPENING_BULLISH_CONFIRMED
-  else:
-      OPENING_ALIGNMENT_FAILED
+gap points / %
+gap retained % at 09:20 / 09:25
+gap fill % at 09:20 / 09:25
 
-This intentionally adds +5m confirmation only to opening-alignment cases.
+RSI, EMA3, WMA21 at 09:15 / 09:20 / 09:25
+RSI-WMA gap
+EMA-WMA gap
 
-Rule B — Two-stage invalidation
--------------------------------
-First RSI cross below WMA21:
-  WEAKENING
-
-Next candle:
-  if RSI still < WMA21:
-      BULLISH_END_CONFIRMED
-  if RSI recovered > WMA21:
-      WEAKENING_RECOVERY / CONTINUATION
-
-Normal progression retained
----------------------------
-ACTIVE_SETUP:
-  RSI↑EMA -> RSI↑WMA
-
-BULLISH:
-  RSI > WMA21 and RSI > 50
-
-STRONG_BULLISH:
-  RSI > WMA21, EMA3 > WMA21, RSI > 50
-
-FULL_BULLISH_ALIGNMENT:
-  RSI > 50, EMA3 > 50, WMA21 > 50, RSI > EMA3 > WMA21
+No threshold or rejection rule is introduced.
 
 Run tests
 ---------
-python -m pytest tests/test_validate_hilega_milega_30_session_robustness_v1_9.py -v
+python -m pytest tests/test_validate_hilega_milega_opening_gap_diagnostic_v2_0.py -v
 
-Run 30 trading sessions ending 2026-09-21
------------------------------------------
-python scripts/validate_hilega_milega_30_session_robustness_v1_9.py \
-  --end-date 2026-09-21 \
-  --trading-sessions 30 \
-  --calendar-lookback-days 50 \
-  --intraday-date 2026-09-21
+Run diagnostic
+--------------
+python scripts/validate_hilega_milega_opening_gap_diagnostic_v2_0.py \
+  --session-date 2026-08-10 \
+  --session-date 2026-08-20 \
+  --session-date 2026-08-24 \
+  --session-date 2026-09-03 \
+  --session-date 2026-09-18
 
-Output CSV:
-data/historical-evidence/branch-c-30-session-robustness-v1-9.csv
+CSV
+---
+data/historical-evidence/branch-c-opening-gap-diagnostic-v2-0.csv
 
 Paste back:
-=== SUMMARY ===
-and the sections for 2026-09-17, 2026-09-18, 2026-09-21.
+=== BRANCH C OPENING GAP DIAGNOSTIC V2.0 ===
