@@ -14,6 +14,7 @@ from .hilega_milega_strategy_v1 import (
 )
 from .live_shadow_step_audit_v1 import ShadowStepAuditStoreV1
 from .hilega_milega_option_candidate_v1 import build_bullish_ce_candidate_set
+from .hilega_milega_option_snapshot_v1 import observe_exact_candidate_market_snapshot
 
 MODEL = "HILEGA_MILEGA_LIVE_SHADOW_V1"
 OBSERVATION_ONLY = True
@@ -232,6 +233,34 @@ class HilegaMilegaLiveShadowCoordinatorV1:
                 "paper_order_enabled": False,
             })
             self._audit_runtime(now, "OPTION_CANDIDATE_SET", status, payload)
+            if candidate_set.status == "AVAILABLE":
+                try:
+                    snapshot = observe_exact_candidate_market_snapshot(
+                        signal_bar_ts=bar.ts,
+                        candidate_set=candidate_set,
+                        option_minutes=self.sources.option_intraday_1m,
+                    )
+                    snapshot_payload = snapshot.payload()
+                    snapshot_payload.update({
+                        "entry_events": [e.event_type for e in entry_events],
+                        "order_created": False,
+                        "execution_enabled": False,
+                        "paper_order_enabled": False,
+                    })
+                    snapshot_status = "PASS" if snapshot.status == "AVAILABLE" else snapshot.status
+                    self._audit_runtime(now, "OPTION_CANDIDATE_MARKET_SNAPSHOT", snapshot_status, snapshot_payload)
+                except Exception as exc:
+                    self._audit_runtime(now, "OPTION_CANDIDATE_MARKET_SNAPSHOT", "FAILED", {
+                        "signal_bar": bar.ts.isoformat(),
+                        "signal_spot": bar.close,
+                        "expiry": self.option_expiry.isoformat(),
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                        "selected_instrument_key": None,
+                        "order_created": False,
+                        "execution_enabled": False,
+                        "paper_order_enabled": False,
+                    })
         except Exception as exc:
             self._audit_runtime(now, "OPTION_CANDIDATE_SET", "FAILED", {
                 "signal_bar": bar.ts.isoformat(),

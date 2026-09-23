@@ -162,3 +162,38 @@ def test_option_candidate_observation_is_audited_but_never_selects_or_orders(tmp
     assert row["payload"]["selected_instrument_key"] is None
     assert row["payload"]["selection_policy"]=="UNDECIDED_CANDIDATE_SET_ONLY"
     assert row["payload"]["order_created"] is False
+
+
+def test_option_candidate_market_snapshot_is_exact_and_never_selects_or_orders(tmp_path):
+    from datetime import date, datetime
+    from market_lab.domain import IST
+    from market_lab.hilega_milega_live_shadow_v1 import HilegaMilegaLiveShadowCoordinatorV1
+    from market_lab.hilega_milega_strategy_v1 import FiveMinuteBar, IndicatorSnapshot
+    from market_lab.live_option_minute_source_v1 import CompletedOptionMinute
+
+    class Sources:
+        def option_contracts(self, underlying, expiry):
+            return [
+                {"expiry":expiry.isoformat(),"strike_price":strike,"instrument_type":"CE","instrument_key":f"CE-{strike}"}
+                for strike in [23250,23300,23350,23400,23450]
+            ]
+        def option_intraday_1m(self, instrument_key):
+            return [CompletedOptionMinute(instrument_key,datetime(2026,9,23,9,44,tzinfo=IST),100,102,99,101,123)]
+
+    path=tmp_path/'audit.jsonl'
+    c=HilegaMilegaLiveShadowCoordinatorV1(
+        market_sources=Sources(), step_audit_path=path, health_path=tmp_path/'h.jsonl',
+        option_expiry=date(2026,9,24),
+    )
+    c.strategy.audit_store=c.step_audit
+    c.strategy.previous_indicators=IndicatorSnapshot(51,52,50)
+    bar=FiveMinuteBar(datetime(2026,9,23,9,40,tzinfo=IST),23370,23382,23368,23355,None)
+    events=c.strategy._process_enriched_bar(bar,IndicatorSnapshot(55,53,51))
+    c._observe_option_candidates(datetime(2026,9,23,9,45,30,tzinfo=IST),bar,events)
+    rows=c.step_audit.read_all()
+    snap=[x for x in rows if x['stage']=='OPTION_CANDIDATE_MARKET_SNAPSHOT'][-1]
+    assert snap['status']=='PASS'
+    assert snap['payload']['expected_option_minute'].endswith('09:44:00+05:30')
+    assert len(snap['payload']['snapshots'])==5
+    assert snap['payload']['selected_instrument_key'] is None
+    assert snap['payload']['order_created'] is False
