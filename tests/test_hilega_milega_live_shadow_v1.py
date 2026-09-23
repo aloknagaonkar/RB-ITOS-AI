@@ -128,3 +128,37 @@ def test_live_process_ignores_partial_tail_after_bootstrap(tmp_path):
     assert out['status']=='NO_NEW_COMPLETED_BAR'
     assert c._last_bar_ts.strftime('%H:%M')=='10:00'
     assert c.step_audit.verify_chain()==(True,None)
+
+
+def test_option_candidate_observation_is_audited_but_never_selects_or_orders(tmp_path):
+    from datetime import date
+    from market_lab.hilega_milega_live_shadow_v1 import HilegaMilegaLiveShadowCoordinatorV1
+    from market_lab.hilega_milega_strategy_v1 import FiveMinuteBar, IndicatorSnapshot
+    from market_lab.live_shadow_step_audit_v1 import ShadowStepAuditStoreV1
+
+    class Sources:
+        def option_contracts(self, underlying, expiry):
+            rows=[]
+            for strike in [23250,23300,23350,23400,23450]:
+                rows.append({"expiry":expiry.isoformat(),"strike_price":strike,"instrument_type":"CE","instrument_key":f"CE-{strike}"})
+            return rows
+
+    path=tmp_path/"audit.jsonl"
+    c=HilegaMilegaLiveShadowCoordinatorV1(market_sources=Sources(),step_audit_path=path,health_path=tmp_path/"h.jsonl",option_expiry=date(2026,9,24))
+    c.strategy.audit_store=c.step_audit
+    # Drive canonical enriched strategy directly to create a Route A entry event,
+    # then run only the additive option-observation hook.
+    from market_lab.domain import IST
+    from datetime import datetime
+    prev=IndicatorSnapshot(51,52,50)
+    cur=IndicatorSnapshot(55,53,51)
+    c.strategy.previous_indicators=prev
+    bar=FiveMinuteBar(datetime(2026,9,23,9,40,tzinfo=IST),23370,23382,23368,23355,None)
+    events=c.strategy._process_enriched_bar(bar,cur)
+    c._observe_option_candidates(datetime(2026,9,23,9,45,30,tzinfo=IST),bar,events)
+    lines=[__import__('json').loads(x) for x in path.read_text().splitlines()]
+    row=[x for x in lines if x["stage"]=="OPTION_CANDIDATE_SET"][-1]
+    assert row["status"]=="PASS"
+    assert row["payload"]["selected_instrument_key"] is None
+    assert row["payload"]["selection_policy"]=="UNDECIDED_CANDIDATE_SET_ONLY"
+    assert row["payload"]["order_created"] is False

@@ -351,6 +351,13 @@ class HilegaMilegaBullishEngineV1:
         note: str | None = None,
     ) -> None:
         event_types = [e.event_type for e in events]
+        selected_route = None
+        if "ENTRY_PATH1_ROUTE_A_CROSS_RSI50_ABOVE_WMA21" in event_types:
+            selected_route = "ROUTE_A"
+        elif "ENTRY_PATH1_ROUTE_B_STRUCTURAL" in event_types:
+            selected_route = "ROUTE_B"
+        elif "OPENING_BULLISH_CONFIRMED" in event_types:
+            selected_route = "OPENING_PATH"
         fresh_cross = bool(d.get("rsi_cross_ema_up"))
         route_a_eligible = fresh_cross and state_before != "BULLISH_ACTIVE"
         route_b_eligible = (
@@ -366,6 +373,8 @@ class HilegaMilegaBullishEngineV1:
                 "state_before": state_before,
                 "state_after": self.session.name,
                 "events_emitted": event_types,
+                "selected_route": selected_route,
+                "route_b_suppressed_by_route_a_priority": selected_route == "ROUTE_A" and route_b_eligible and not self._route_b_fail_reasons(d),
                 "route_a_eligible": route_a_eligible,
                 "route_a_pass": route_a_eligible and not self._route_a_fail_reasons(d),
                 "route_a_fail_reasons": self._route_a_fail_reasons(d) if route_a_eligible else [],

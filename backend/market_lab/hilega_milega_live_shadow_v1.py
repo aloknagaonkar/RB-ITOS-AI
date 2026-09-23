@@ -13,6 +13,7 @@ from .hilega_milega_strategy_v1 import (
     STRATEGY_VERSION,
 )
 from .live_shadow_step_audit_v1 import ShadowStepAuditStoreV1
+from .hilega_milega_option_candidate_v1 import build_bullish_ce_candidate_set
 
 MODEL = "HILEGA_MILEGA_LIVE_SHADOW_V1"
 OBSERVATION_ONLY = True
@@ -74,12 +75,18 @@ class HilegaMilegaLiveShadowCoordinatorV1:
         health_path: str | Path = "data/live-observation/hilega-milega-v1/data-health.jsonl",
         cache_root: str | Path = "data/historical-evidence/hilega-milega-underlying-cache-v1",
         warmup_calendar_days: int = 45,
+        option_expiry: date | None = None,
+        option_candidate_wings: int = 2,
+        option_strike_step: float = 50.0,
     ) -> None:
         self.sources = market_sources
         self.step_audit = ShadowStepAuditStoreV1(step_audit_path)
         self.health = HealthJournalV1(health_path)
         self.cache_root = Path(cache_root)
         self.warmup_calendar_days = int(warmup_calendar_days)
+        self.option_expiry = option_expiry
+        self.option_candidate_wings = int(option_candidate_wings)
+        self.option_strike_step = float(option_strike_step)
         self.strategy = HilegaMilegaBullishEngineV1(audit_store=None)
         self._bootstrapped_date: date | None = None
         self._last_bar_ts: datetime | None = None
@@ -192,6 +199,50 @@ class HilegaMilegaLiveShadowCoordinatorV1:
         })
         return events
 
+    def _observe_option_candidates(self, now: datetime, bar, events: list) -> None:
+        entry_events = [e for e in events if e.event_type.startswith("ENTRY_")]
+        if not entry_events:
+            return
+        if self.option_expiry is None:
+            self._audit_runtime(now, "OPTION_CANDIDATE_SET", "NOT_CONFIGURED", {
+                "signal_bar": bar.ts.isoformat(),
+                "signal_spot": bar.close,
+                "reason": "HILEGA_MILEGA_OPTION_EXPIRY_NOT_CONFIGURED",
+                "selection_policy": "UNDECIDED_CANDIDATE_SET_ONLY",
+                "selected_instrument_key": None,
+                "order_created": False,
+            })
+            return
+        try:
+            rows = self.sources.option_contracts(UNDERLYING, self.option_expiry)
+            candidate_set = build_bullish_ce_candidate_set(
+                signal_spot=bar.close,
+                expiry=self.option_expiry,
+                contracts=rows,
+                strike_step=self.option_strike_step,
+                wings=self.option_candidate_wings,
+            )
+            status = "PASS" if candidate_set.status == "AVAILABLE" else "INCOMPLETE"
+            payload = candidate_set.payload()
+            payload.update({
+                "signal_bar": bar.ts.isoformat(),
+                "entry_events": [e.event_type for e in entry_events],
+                "order_created": False,
+                "execution_enabled": False,
+                "paper_order_enabled": False,
+            })
+            self._audit_runtime(now, "OPTION_CANDIDATE_SET", status, payload)
+        except Exception as exc:
+            self._audit_runtime(now, "OPTION_CANDIDATE_SET", "FAILED", {
+                "signal_bar": bar.ts.isoformat(),
+                "signal_spot": bar.close,
+                "expiry": self.option_expiry.isoformat(),
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+                "selected_instrument_key": None,
+                "order_created": False,
+            })
+
     def process(self, now: datetime) -> dict[str, Any]:
         now = now.astimezone(IST)
         self.bootstrap(now)
@@ -219,6 +270,7 @@ class HilegaMilegaLiveShadowCoordinatorV1:
 
         bar = matches[0]
         events = self.strategy.on_bar(bar)
+        self._observe_option_candidates(now, bar, events)
         self._last_bar_ts = bar.ts
         self._audit_runtime(now, "UNDERLYING_5M_BUILD", "PROCESSED", {
             "bar_timestamp": bar.ts.isoformat(),

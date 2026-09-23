@@ -1,6 +1,6 @@
 """Observation-only shadow worker; run alongside market_lab.worker."""
 import os,time
-from datetime import datetime
+from datetime import date,datetime
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
 from .domain import IST,in_session
@@ -18,7 +18,9 @@ def run():
     selected=os.getenv('LIVE_SHADOW_STRATEGY',HILEGA_STRATEGY_ID).strip().upper()
     try:
         if selected==HILEGA_STRATEGY_ID:
-            coord=HilegaMilegaLiveShadowCoordinatorV1(market_sources=sources)
+            expiry_raw=os.getenv("HILEGA_MILEGA_OPTION_EXPIRY","").strip()
+            option_expiry=date.fromisoformat(expiry_raw) if expiry_raw else None
+            coord=HilegaMilegaLiveShadowCoordinatorV1(market_sources=sources,option_expiry=option_expiry)
             while True:
                 now=datetime.now(IST)
                 if not in_session(now):time.sleep(5);continue

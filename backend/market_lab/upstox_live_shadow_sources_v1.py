@@ -31,6 +31,12 @@ class UpstoxLiveShadowSourcesV1:
         rows.sort(key=lambda x:x.timestamp)
         if len({x.timestamp for x in rows})!=len(rows):raise ValueError("Duplicate option minute timestamps")
         return rows
+    def option_contracts(self,underlying:str,expiry:date):
+        body=self.gateway._get("/v2/option/contract",params={"instrument_key":underlying,"expiry_date":expiry.isoformat()})
+        rows=body.get("data")
+        if not isinstance(rows,list):raise ValueError("Option contract catalog unavailable")
+        return rows
+
     def historical_candles(self,instrument_key:str,session_date:date):
         encoded=quote(instrument_key,safe="");d=session_date.isoformat()
         body=self.gateway._get(f"/v3/historical-candle/{encoded}/minutes/1/{d}/{d}")
