@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException
 from .hilega_milega_strategy_v1 import STRATEGY_ID, STRATEGY_VERSION
 from .live_shadow_step_audit_v1 import ShadowStepAuditStoreV1
 from .hilega_milega_audit_report_v1 import build_audit_index, build_detailed_audit_report
+from .hilega_milega_trade_dashboard_v1 import project_shadow_dashboard
 
 MODEL = "HILEGA_MILEGA_LIVE_SHADOW_UI_V1"
 DATA_DIR = Path("data/live-observation/hilega-milega-v1")
@@ -114,3 +115,9 @@ def audit_detail(checkpoint: str):
         rows, checkpoint=checkpoint, mode="LIVE_SHADOW",
         chain_ok=chain_ok, chain_issue=chain_issue,
     )
+
+
+@router.get("/trade-dashboard")
+def trade_dashboard():
+    """Same read-only projector usable by historical replay and live shadow."""
+    return project_shadow_dashboard(_rows())

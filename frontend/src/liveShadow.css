@@ -13,3 +13,20 @@
 .hilega-audit-section>b{display:block;margin-bottom:9px;color:#c9d7df;font-size:10px}
 .hilega-audit-section pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0f1d25;border:1px solid #263945;border-radius:5px;padding:9px;margin:0;font-size:8px;color:#88a4b3;max-height:230px;overflow:auto}
 @media(max-width:1200px){.hilega-main-columns{grid-template-columns:1fr}.hilega-audit-panel{position:static;max-height:none}}
+
+/* HILEGA LIVE AUDIT + ECONOMICS V3: inline expanded audit, never a sidebar */
+.hilega-dashboard-summary{grid-template-columns:repeat(4,minmax(0,1fr))}
+.hilega-dashboard-warning{padding:12px 16px;color:#d6ba81;background:#2e2b23;font-size:11px;line-height:1.55}
+.hilega-economics-table{min-width:900px}
+.hilega-ledger{display:grid;gap:13px;padding:14px}
+.hilega-trade-card{border:1px solid #354a56;border-radius:7px;background:#12222b;overflow:hidden}
+.hilega-trade-head{padding:14px;display:flex;justify-content:space-between;align-items:center;gap:14px}
+.hilega-trade-head b{color:#d6e3e9;font-size:12px}
+.hilega-trade-head small{display:block;color:#8199a9;margin-top:7px}
+.hilega-inline-audit{padding:16px;background:#10212a;border-top:2px solid #466e79}
+.hilega-inline-audit h3{font-size:13px;color:#d2e4e8;margin:0 0 12px}
+.hilega-expand-row td{padding:0!important;text-align:left!important}
+.hilega-expand-row .hilega-inline-audit{max-height:none;min-width:740px}
+.hilega-audit-body .shadow-table{min-width:1060px}
+@media(max-width:1250px){.hilega-dashboard-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:760px){.hilega-dashboard-summary{grid-template-columns:1fr}.hilega-trade-head{align-items:flex-start;flex-direction:column}}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 
 type AuditReport = {
   checkpoint:string
@@ -66,72 +66,97 @@ function AuditDetail({r}:{r:AuditReport}){
       <span>Candidate status <b>{words(r.option_candidate?.status)}</b></span><span>Market snapshot <b>{words(r.option_market_snapshot?.status)}</b></span>
       <span>Lifecycle <b>{words(lifecycleState(r))}</b></span><span>Audit chain <b>{r.audit_integrity.chain_ok?'HEALTHY':'CHECK'}</b></span>
     </div>
-    {legs.length>0&&<div className="hilega-audit-section"><b>ATM±2 CE shadow legs</b><div className="shadow-table-scroll"><table className="shadow-table"><thead><tr><th>Role</th><th>Strike</th><th>Entry</th><th>Latest / Exit</th><th>Move</th><th>MFE</th><th>MAE</th></tr></thead><tbody>{legs.map((x:any)=><tr key={x.instrument_key}><td>{x.relation_to_atm===0?'ATM':`ATM${x.relation_to_atm>0?'+':''}${x.relation_to_atm}`}</td><td>{num(x.strike,0)} CE</td><td>{num(x.entry_open)}</td><td>{num(x.exit_open??x.latest_close)}</td><td>{num(x.current_points??x.exit_points)}</td><td>{num(x.mfe_points)}</td><td>{num(x.mae_points)}</td></tr>)}</tbody></table></div></div>}
-    <div className="hilega-audit-section"><b>Transitions</b><pre>{JSON.stringify(r.transitions,null,2)}</pre></div>
+    {legs.length>0&&<div className="hilega-audit-section"><b>ATM±2 CE entry / exit audit — independent shadow observations, not executed P&L</b><div className="shadow-table-scroll"><table className="shadow-table"><thead><tr><th>Role</th><th>Strike</th><th>CE entry price</th><th>CE exit price</th><th>Live premium</th><th>Realized pts</th><th>Realized %</th><th>Unrealized pts</th><th>MFE</th><th>MAE</th></tr></thead><tbody>{legs.map((x:any)=><tr key={x.instrument_key}><td>{x.relation_to_atm===0?'ATM':`ATM${x.relation_to_atm>0?'+':''}${x.relation_to_atm}`}</td><td>{num(x.strike,0)} CE</td><td>{num(x.entry_open)}</td><td>{num(x.exit_open)}</td><td>{num(x.latest_close)}</td><td>{num(x.realized_points)}</td><td>{x.realized_return_pct==null?"—":`${num(x.realized_return_pct)}%`}</td><td>{num(x.current_points)}</td><td>{num(x.mfe_points)}</td><td>{num(x.mae_points)}</td></tr>)}</tbody></table></div></div>}
+    <div className="hilega-audit-section"><b>Option data availability</b><p>Only exact causal 1-minute option prices are displayed. Missing values mean unavailable or incomplete, not zero P&L.</p><div className="shadow-detail-grid"><span>Lifecycle issue <b>{String(r.option_lifecycle.exit?.issue??r.option_lifecycle.updates.at(-1)?.issue??r.option_lifecycle.start?.issue??"None recorded")}</b></span><span>Execution <b>DISABLED</b></span><span>Quantity <b>NONE</b></span></div></div><div className="hilega-audit-section"><b>Transitions</b><pre>{JSON.stringify(r.transitions,null,2)}</pre></div>
     <div className="hilega-audit-section"><b>Audit integrity</b><pre>{JSON.stringify(r.audit_integrity,null,2)}</pre></div>
   </div>
 }
 
+
+type TradeLeg={relation_to_atm:number;strike:number;instrument_key:string;entry_timestamp:string|null;entry_open:number|null;latest_close:number|null;current_points:number|null;current_return_pct:number|null;mfe_points:number|null;mae_points:number|null;exit_timestamp:string|null;exit_open:number|null;realized_points:number|null;realized_return_pct:number|null}
+type Trade={signal_bar:string;signal_boundary?:string;signal_spot?:number;source:string|null;expiry:string|null;atm:number|null;status:string;complete:boolean;issue?:string|null;exit_reason?:string|null;legs:TradeLeg[]}
+type Dashboard={account_pnl_rupees:null;warning:string;measurement:string;trade_count:number;complete_closed_count:number;active_count:number;incomplete_count:number;by_role:Array<{role:number;closed_count:number;positive_count:number;total_realized_premium_points:number;mean_return_pct:number|null;open_count:number;missing_count:number}>;trades:Trade[]}
+const role=(r:number)=>r===0?'ATM':`ATM${r>0?'+':''}${r}`
+const signed=(v:number|null|undefined)=>v==null?'—':`${v>0?'+':''}${num(v)}`
 export default function HilegaMilegaShadow(){
   const [status,setStatus]=useState<Status|null>(null)
   const [rows,setRows]=useState<AuditReport[]>([])
-  const [selected,setSelected]=useState<AuditReport|null>(null)
+  const [dashboard,setDashboard]=useState<Dashboard|null>(null)
+  const [expanded,setExpanded]=useState<string|null>(null)
+  const [detail,setDetail]=useState<AuditReport|null>(null)
   const [auditLoading,setAuditLoading]=useState(false)
   const [error,setError]=useState('')
-  const refresh=async()=>{const [s,a]=await Promise.all([get<Status>('/status'),get<AuditReport[]>('/audit-index?limit=100')]);setStatus(s);setRows(a);setError('')}
-  useEffect(()=>{let active=true;const poll=()=>void refresh().catch(e=>active&&setError((e as Error).message));poll();const t=setInterval(poll,3000);return()=>{active=false;clearInterval(t)}},[])
-
-  const activity=useMemo(()=>rows.filter(r=>r.transitions.length>0 || (r.strategy.events_emitted||[]).length>0),[rows])
+  const refresh=async()=>{
+    const [s,a,d]=await Promise.all([get<Status>('/status'),get<AuditReport[]>('/audit-index?limit=200'),get<Dashboard>('/trade-dashboard')])
+    setStatus(s);setRows(a);setDashboard(d);setError('')
+  }
+  useEffect(()=>{let active=true;const poll=()=>void refresh().catch(e=>active&&setError((e as Error).message));poll();const t=setInterval(poll,5000);return()=>{active=false;clearInterval(t)}},[])
+  const activity=useMemo(()=>rows.filter(r=>r.transitions.length>0||(r.strategy.events_emitted||[]).length>0),[rows])
   const entries=useMemo(()=>activity.flatMap(r=>r.transitions.filter(isEntry).map(t=>({r,t}))),[activity])
   const exits=useMemo(()=>activity.flatMap(r=>r.transitions.filter(isExit).map(t=>({r,t}))),[activity])
-  const lastEntry=entries[0]??null
-  const lastExit=exits[0]??null
-  const activeState=String(status?.latest_decision?.payload?.state_after??rows[0]?.strategy.state_after??'NO DATA')
-
+  const latestEntry=entries[0]??null
+  const latestExit=exits[0]??null
+  const latestState=String(status?.latest_decision?.payload?.state_after??rows[0]?.strategy.state_after??'NO DATA')
+  const detailBySignal=useMemo(()=>new Map((dashboard?.trades??[]).map(x=>[x.signal_bar,x])),[dashboard])
   const openAudit=async(r:AuditReport)=>{
-    setSelected(r) // show the panel immediately, then hydrate with the endpoint response
-    setAuditLoading(true)
-    try{
-      const detail=await get<AuditReport>('/audit-detail?checkpoint='+encodeURIComponent(r.checkpoint))
-      setSelected(detail);setError('')
-    }catch(e){setError(`Audit detail failed: ${(e as Error).message}`)}
-    finally{setAuditLoading(false)}
+    if(expanded===r.checkpoint){setExpanded(null);setDetail(null);return}
+    setExpanded(r.checkpoint);setDetail(r);setAuditLoading(true)
+    try{const response=await get<AuditReport>('/audit-detail?checkpoint='+encodeURIComponent(r.checkpoint));setDetail(response);setError('')}
+    catch(e){setError(`Detailed audit failed: ${(e as Error).message}`)}finally{setAuditLoading(false)}
   }
-
-  return <div className="shadow-page">
+  const openTradeAudit=async(checkpoint:string)=>{
+    if(expanded===checkpoint){setExpanded(null);setDetail(null);return}
+    const cached=rows.find(r=>r.checkpoint===checkpoint)
+    setExpanded(checkpoint);setDetail(cached??null);setAuditLoading(true)
+    try{const response=await get<AuditReport>('/audit-detail?checkpoint='+encodeURIComponent(checkpoint));setDetail(response);setError('')}
+    catch(e){setError(`Detailed trade audit failed: ${(e as Error).message}`)}finally{setAuditLoading(false)}
+  }
+  return <div className="shadow-page hilega-page">
     {error&&<div className="banner error">{error}</div>}
-    <div className="shadow-safety"><b>HILEGA-MILEGA · OBSERVATION ONLY</b><span>Execution disabled</span><span>Paper orders disabled</span><span>ATM±2 CE shadow</span><span>Audit chain {status?.step_audit_chain_ok?'healthy':'check'}</span></div>
-
-    <div className="shadow-metrics">
-      <article><span>Strategy state</span><b>{words(activeState)}</b><small>Latest canonical live-shadow state</small></article>
-      <article><span>Last entry detected</span><b>{lastEntry?tm(lastEntry.t.event_time??lastEntry.r.checkpoint):'—'}</b><small>{lastEntry?`${words(lastEntry.t.source??lastEntry.t.event_type)} · NIFTY ${num(lastEntry.t.price)}`:'No entry recorded'}</small></article>
-      <article><span>Last exit</span><b>{lastExit?tm(lastExit.t.event_time??lastExit.r.checkpoint):'—'}</b><small>{lastExit?`${words(lastExit.t.exit_reason??lastExit.t.source??lastExit.t.event_type)} · NIFTY ${num(lastExit.t.price)}`:'No exit recorded'}</small></article>
+    <div className="shadow-safety"><b>HILEGA-MILEGA · OBSERVATION ONLY</b><span>Execution disabled</span><span>Paper orders disabled</span><span>Five independent ATM±2 CE observations</span><span>Audit chain {status?.step_audit_chain_ok?'healthy':'check'}</span></div>
+    <div className="shadow-metrics hilega-dashboard-summary">
+      <article><span>Strategy state</span><b>{words(latestState)}</b><small>Latest recorded decision</small></article>
+      <article><span>Last entry detected</span><b>{latestEntry?tm(latestEntry.t.event_time??latestEntry.r.checkpoint):'—'}</b><small>{latestEntry?`Route ${words(latestEntry.r.strategy.selected_route)} · NIFTY ${num(latestEntry.t.price)}`:'No entry recorded'}</small></article>
+      <article><span>Last exit detected</span><b>{latestExit?tm(latestExit.t.event_time??latestExit.r.checkpoint):'—'}</b><small>{latestExit?`${words(latestExit.t.exit_reason??latestExit.t.event_type)} · NIFTY ${num(latestExit.t.price)}`:'No exit recorded'}</small></article>
+      <article><span>Completed 5-leg lifecycles</span><b>{dashboard?.complete_closed_count??'—'}</b><small>{dashboard?`${dashboard.active_count} active · ${dashboard.incomplete_count} incomplete`:'Dashboard loading'}</small></article>
     </div>
-
-    <div className="shadow-columns hilega-main-columns">
-      <section className="panel shadow-panel">
-        <div className="panel-heading"><div><h2>Hilega-Milega entry / exit activity</h2><p>Operational view only. RSI, EMA3, WMA21 and condition details are kept inside Audit.</p></div><span className="pill teal">{activity.length} EVENTS</span></div>
-        {!activity.length?<div className="empty">No Hilega-Milega entry/exit activity yet. Detailed decisions remain available through audit once recorded.</div>:
-        <div className="shadow-table-scroll"><table className="shadow-table hilega-activity-table"><thead><tr><th>Time</th><th>Event</th><th>Route</th><th>State</th><th>Underlying</th><th>Option shadow</th><th>Exit details</th><th>Audit</th></tr></thead><tbody>{activity.map(r=>{
-          const entry=firstEntry(r);const exit=firstExit(r);const event=entry??exit??r.transitions[0]??null
-          const eventName=event?.event_type??r.strategy.events_emitted?.[0]??'STATE CHANGE'
-          return <tr key={r.checkpoint} className={selected?.checkpoint===r.checkpoint?'selected':''}>
-            <td>{tm(event?.event_time??r.checkpoint)}</td>
-            <td className={entry?'positive':exit?'negative':''}>{entry?'ENTRY DETECTED':exit?'EXIT':'STATE CHANGE'}<small className="hilega-subline">{words(eventName)}</small></td>
-            <td>{words(r.strategy.selected_route)}</td>
-            <td>{words(r.strategy.state_after)}</td>
-            <td>{num(event?.price??r.bar.close)}</td>
-            <td>{words(lifecycleState(r))}</td>
-            <td>{exit?<><b>{num(exit.price)}</b><small className="hilega-subline">{words(exit.exit_reason??exit.source??eventName)}</small></>: '—'}</td>
-            <td><button onClick={()=>void openAudit(r)}>{selected?.checkpoint===r.checkpoint&&auditLoading?'Loading…':'Audit'}</button></td>
-          </tr>
-        })}</tbody></table></div>}
-      </section>
-
-      <section className="panel shadow-panel hilega-audit-panel">
-        <div className="panel-heading"><div><h2>Detailed audit report</h2><p>{selected?selected.checkpoint:'Click Audit beside an entry, exit or state event.'}</p></div>{selected&&<button onClick={()=>setSelected(null)}>Close</button>}</div>
-        {!selected?<div className="empty">Select <b>Audit</b> to see RSI/EMA/WMA values, route checks, exact option details, transitions and hash-chain integrity here.</div>:<AuditDetail r={selected}/>} 
-      </section>
-    </div>
+    <section className="panel shadow-panel">
+      <div className="panel-heading"><div><h2>Shadow premium P&amp;L dashboard</h2><p>Realized option premium points for each CE strike independently. Never a combined portfolio return.</p></div><span className="pill teal">OBSERVATIONAL</span></div>
+      {!dashboard?<div className="empty">Loading shadow economics…</div>:<>
+        <div className="hilega-dashboard-warning">{dashboard.warning} Account P&amp;L (₹): <b>Not available without an executed quantity and costs.</b></div>
+        <div className="shadow-table-scroll"><table className="shadow-table hilega-economics-table"><thead><tr><th>CE role</th><th>Completed trades</th><th>Positive</th><th>Realized premium points</th><th>Mean realized return</th><th>Active</th><th>Unavailable</th></tr></thead><tbody>
+          {dashboard.by_role.map(x=><tr key={x.role}><td>{role(x.role)}</td><td>{x.closed_count}</td><td>{x.positive_count}</td><td className={x.closed_count?(x.total_realized_premium_points>=0?'positive':'negative'):''}>{x.closed_count?signed(x.total_realized_premium_points):'—'}</td><td>{x.mean_return_pct==null?'—':`${signed(x.mean_return_pct)}%`}</td><td>{x.open_count}</td><td>{x.missing_count}</td></tr>)}
+        </tbody></table></div>
+      </>}
+    </section>
+    <section className="panel shadow-panel">
+      <div className="panel-heading"><div><h2>CE entry / exit trade ledger</h2><p>Audit expands directly below the selected card/row, matching the historical replay interaction.</p></div><span className="pill teal">{dashboard?.trade_count??0} SHADOW SIGNALS</span></div>
+      {!dashboard?.trades.length?<div className="empty">No CE shadow starts yet; historical NIFTY entries without exact option data are not assigned option P&amp;L.</div>:<div className="hilega-ledger">
+        {dashboard.trades.map(t=>{
+          const isOpen=expanded===t.signal_bar
+          return <article className="hilega-trade-card" key={t.signal_bar}>
+            <div className="hilega-trade-head"><div><b>{dt(t.signal_bar)}</b> · {words(t.source)} <span className="shadow-stage">{words(t.status)}</span><small>Expiry {t.expiry??'—'} · ATM {num(t.atm,0)} · Signal NIFTY {num(t.signal_spot)}</small></div>
+              <button onClick={()=>void openTradeAudit(t.signal_bar)}>{isOpen?'Hide audit':'Audit ▾'}</button>
+            </div>
+            {t.issue&&<div className="hilega-dashboard-warning">Data limitation: {t.issue}</div>}
+            {t.legs.length>0&&<div className="shadow-table-scroll"><table className="shadow-table hilega-economics-table"><thead><tr><th>CE</th><th>Entry time</th><th>Entry premium</th><th>Latest premium</th><th>Exit time</th><th>Exit premium</th><th>Realized pts</th><th>Realized %</th><th>Current pts</th><th>MFE</th><th>MAE</th></tr></thead><tbody>{t.legs.map(l=><tr key={l.instrument_key}><td>{role(l.relation_to_atm)} · {num(l.strike,0)} CE</td><td>{tm(l.entry_timestamp)}</td><td>{num(l.entry_open)}</td><td>{num(l.latest_close)}</td><td>{tm(l.exit_timestamp)}</td><td>{num(l.exit_open)}</td><td className={l.realized_points==null?'':l.realized_points>=0?'positive':'negative'}>{signed(l.realized_points)}</td><td>{l.realized_return_pct==null?'—':`${signed(l.realized_return_pct)}%`}</td><td>{signed(l.current_points)}</td><td>{num(l.mfe_points)}</td><td>{num(l.mae_points)}</td></tr>)}</tbody></table></div>}
+            {isOpen&&<div className="hilega-inline-audit"><h3>Full detailed audit · {t.signal_bar}</h3>{auditLoading&&<p>Refreshing detailed audit…</p>}{detail&&<AuditDetail r={detail}/>}</div>}
+          </article>
+        })}
+      </div>}
+    </section>
+    <section className="panel shadow-panel">
+      <div className="panel-heading"><div><h2>Underlying entry / exit activity and decision audit</h2><p>Underlying points are chart-validation observations, not option/account P&amp;L. Click Audit to expand in place.</p></div><span className="pill teal">{activity.length} EVENTS</span></div>
+      {!activity.length?<div className="empty">No recorded entry / exit events yet.</div>:<div className="shadow-table-scroll"><table className="shadow-table hilega-activity-table"><thead><tr><th>Time</th><th>Event</th><th>Route</th><th>Underlying</th><th>Exit reason</th><th>Audit</th></tr></thead><tbody>
+        {activity.map(r=>{
+          const entry=firstEntry(r),exit=firstExit(r),e=entry??exit??r.transitions[0]
+          const thisOpen=expanded===r.checkpoint
+          const linked=detailBySignal.get(r.checkpoint)
+          return <Fragment key={r.checkpoint}><tr><td>{tm(e?.event_time??r.checkpoint)}</td><td>{entry?'ENTRY DETECTED':exit?'EXIT':'STATE CHANGE'}</td><td>{words(r.strategy.selected_route)}</td><td>{num(e?.price??r.bar.close)}</td><td>{exit?words(exit.exit_reason??exit.event_type):'—'}</td><td><button onClick={()=>void openAudit(r)}>{thisOpen?'Hide audit':'Audit ▾'}</button></td></tr>
+            {thisOpen&&<tr key={`${r.checkpoint}-audit`} className="hilega-expand-row"><td colSpan={6}><div className="hilega-inline-audit"><h3>Detailed decision audit · {dt(r.checkpoint)}</h3>{linked&&<p>Linked ATM±2 lifecycle: {words(linked.status)} · {linked.legs.length} exact CE legs</p>}{auditLoading&&<p>Refreshing detailed report…</p>}{detail&&<AuditDetail r={detail}/>}</div></td></tr>}
+          </Fragment>
+        })}
+      </tbody></table></div>}
+    </section>
   </div>
 }

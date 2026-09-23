@@ -72,6 +72,20 @@ def build_detailed_audit_report(
 ) -> dict[str, Any]:
     all_rows = list(rows)
     related = [r for r in all_rows if _related_to_checkpoint(r, checkpoint)]
+    # An exit checkpoint must display the entire corresponding CE trade, not
+    # only records created at the exit candle. Strategy emits this immutable
+    # original_entry_time in the structural/cutoff exit transition.
+    linked_signal_bar = checkpoint
+    for row in related:
+        if row.get("stage") != "STRATEGY_TRANSITION":
+            continue
+        p = row.get("payload") or {}
+        if row.get("checkpoint") != checkpoint:
+            continue
+        entry = (p.get("details") or {}).get("original_entry_time")
+        if entry and ("EXIT" in str(p.get("event_type") or row.get("status") or "")):
+            linked_signal_bar = entry
+            break
     strategy_rows = [r for r in related if r.get("stage") in STRATEGY_STAGES]
 
     decision = next((r for r in strategy_rows if r.get("stage") == "STRATEGY_DECISION"), None)
@@ -81,7 +95,10 @@ def build_detailed_audit_report(
     rp = (result or {}).get("payload") or {}
     ip = (indicator or {}).get("payload") or {}
 
-    option_rows = [r for r in all_rows if r.get("stage") in OPTION_STAGES and _related_to_checkpoint(r, checkpoint)]
+    option_rows = [r for r in all_rows if r.get("stage") in OPTION_STAGES and (
+        _related_to_checkpoint(r, checkpoint) or
+        (linked_signal_bar != checkpoint and _related_to_checkpoint(r, linked_signal_bar))
+    )]
     candidate = next((r for r in option_rows if r.get("stage") == "OPTION_CANDIDATE_SET"), None)
     market_snapshot = next((r for r in option_rows if r.get("stage") == "OPTION_CANDIDATE_MARKET_SNAPSHOT"), None)
     lifecycle_start = next((r for r in option_rows if r.get("stage") in {"OPTION_SHADOW_LIFECYCLE_START", "OPTION_SHADOW_LIFECYCLE_RESTORE"}), None)
@@ -103,6 +120,7 @@ def build_detailed_audit_report(
         "model": MODEL,
         "mode": mode,
         "checkpoint": checkpoint,
+        "linked_signal_bar": linked_signal_bar,
         "strategy": {
             "strategy_id": dp.get("strategy_id") or rp.get("strategy_id") or ip.get("strategy_id"),
             "strategy_version": dp.get("strategy_version") or rp.get("strategy_version") or ip.get("strategy_version"),
