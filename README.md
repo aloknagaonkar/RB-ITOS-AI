@@ -1,86 +1,28 @@
-# Market Strategy Lab
+# Hilega-Milega Historical Replay add-on (existing UI)
 
-Independent Indian market research application, created from scratch in its own Git repository on `feature/pcr-foundation`. It has no imports, shared database, configuration files, or dependencies on the surrounding application. Run every command below from this project directory.
+This additive patch mounts a read-only historical Hilega panel on your EXISTING Historical Replay page and exposes two API endpoints to read prior Phase 7D captures.
 
-## First release
+## Notes about uploaded ZIP
 
-- React/TypeScript dashboard: fixed morning ATM, moving ATM and full-expiry PCR; three separate strike-level OI/change tables with totals, chart, input export, data health and versioned parameters.
-- Pure Python calculation engine; contract OI comes from the provider, PCR is calculated locally.
-- Separate recording worker with pause/resume, heartbeat, bounded network timeouts, retry backoff and one local collector lock.
-- Upstox REST adapter: contract catalog, full option chain and underlying quote. Token stays in the backend environment.
-- Raw responses, normalized observations, configuration versions, calculation results and morning anchors are persisted together.
-- Deterministic replay verifies recorded calculations. This is not a historical trading backtest.
-- SQLite for a zero-service local preview; PostgreSQL configuration and Docker Compose for development with PostgreSQL.
+The supplied source ZIP lacks the actual Sep 23 `data/historical-evidence/hilega-phase7d-2026-09-23-d4` capture and appears older than your installed Phase 7D.3 VM files: its historical capture CLI does not yet expose `--record-input-evidence`. Do not replace your live worker or other existing repo files with source extracted from that ZIP. Only use this additive patch.
 
-Automated orders, paper fills, entry/exit strategies, WebSocket streaming, stock screening and multi-provider failover are later milestones. This release cannot place orders. No live-account connection has been verified yet.
+## Install on VM
 
-## Local setup (PowerShell)
+1. Copy/extract this patch ZIP to your VM (outside the repo or to a temporary directory).
+2. `cd ~/RB-ITOS-AI`
+3. `python /path/to/patch/install.py --repo "$PWD" --check`
+4. If check passes, back up or commit any uncommitted changes, then:
+   `python /path/to/patch/install.py --repo "$PWD" --apply`
+5. `PYTHONPATH=backend python -m pytest tests/test_hilega_historical_ui_api_v1.py -q`
+6. `cd frontend && npm run build`
+7. Confirm that your September 23 evidence exists under `data/historical-evidence/hilega-phase7d-2026-09-23-d4`.
+8. Deploy API/frontend by your normal procedure **only after** tests and build pass, taking care to avoid any unnecessary live-shadow worker restarts.
 
-Requirements: Python 3.11+ and Node.js 22.12+.
+## What this patch does NOT do
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e '.[dev]'
-Copy-Item .env.example .env
-npm --prefix frontend install --os=win32 --cpu=x64 --include=optional
-npm --prefix frontend run build
-.\.venv\Scripts\python.exe -m market_lab.cli seed-demo --count 90
-.\.venv\Scripts\python.exe -m uvicorn market_lab.api:app --host 127.0.0.1 --port 8000
-```
-
-Open http://127.0.0.1:8000. The built UI is served by FastAPI. For frontend development, use `npm --prefix frontend run dev` and open port 5173; its API proxy uses port 8000.
-
-In a second terminal, from this project directory:
-
-```powershell
-.\.venv\Scripts\python.exe -m market_lab.worker
-```
-
-For normal local operation, control both services from the project directory:
-
-```powershell
-.\start.cmd
-.\status.cmd
-.\restart.cmd
-.\stop.cmd
-```
-
-These commands maintain validated PID files under `data/runtime` and logs under `data/logs`. Starting the platform does not enable data collection; that remains controlled from the dashboard.
-
-Click **Start collection** in the dashboard. Closing the browser does not stop the worker. Click **Pause collection** to stop further attempts; an in-flight observation can still finish. Stop the worker with Ctrl+C. Only one worker/seed process may hold the local collector lock. The API may run separately.
-
-Demo data is visibly labelled synthetic. Each worker tick advances one simulated market minute every five wall-clock seconds. Seeding starts at the configured morning anchor and uses the same recording/calculation pipeline. It does not represent the current market. Re-running the seed command appends observations; it does not reset data.
-
-## Connect Upstox data
-
-1. Put your access token in this project's `.env` as `UPSTOX_ACCESS_TOKEN`. Never commit it or paste it into the UI.
-2. Pause collection. In Configuration, choose Upstox, set the correct underlying instrument key and an explicitly listed expiry, then save a new version.
-3. Restart the worker to load the token, then start collection. API credentials and account entitlements must be checked against your subscription.
-4. Start before the morning capture window to observe fixed ATM. A late first start correctly produces a missed anchor. Moving and full-chain calculations can still run when their inputs pass validation.
-
-The adapter uses only GET requests to market-data endpoints. No order endpoint is implemented. Upstox OI update timestamps are unknown in the option-chain schema; recent retrieval does not establish field-level freshness. Underlying quote feed time is separate evidence, not proof of the last individual field update.
-
-## PostgreSQL
-
-```powershell
-docker compose up -d db
-```
-
-Set `DATABASE_URL=postgresql+psycopg://lab:local_lab@localhost:5432/market_lab` in `.env`, then restart the API and worker. This creates a separate database; it does not migrate existing SQLite recordings. The Compose password is for local development only. PostgreSQL runtime verification requires an available Docker/PostgreSQL instance; SQLite is the verified preview path.
-
-## Checks
-
-```powershell
-.\.venv\Scripts\python.exe -m pytest -c pyproject.toml tests -q
-.\.venv\Scripts\python.exe -m ruff check --config pyproject.toml backend tests
-npm --prefix frontend run build
-.\.venv\Scripts\python.exe -m market_lab.cli replay
-```
-
-Dependency versions for the validated build are captured in `requirements-lock.txt` and `frontend/package-lock.json`. Use `pip install -r requirements-lock.txt` then `pip install -e . --no-deps` to reproduce the Python environment; use `npm --prefix frontend ci --os=win32 --cpu=x64 --include=optional` for the UI on Windows. Omit platform flags on other operating systems.
-
-## Design and limitations
-
-Read [architecture](docs/architecture.md), [PCR specification](docs/pcr-spec.md) and [delivery checklist](docs/delivery.md).
-
-The server is intended for local use bound to loopback. It has host/origin checks, but no user authentication or multi-user authorization. Do not expose it publicly. The initial session gate covers weekday regular hours, not exchange holidays or special sessions. Schema creation is for this first release; migrations, retention, backups and distributed collector leases are pending. The dashboard displays the latest 240 observations for the active version; the database retains earlier records and API inspection/replay supports previous configuration IDs.
+- Does not rerun historical broker acquisition or modify captured files.
+- Does not assert real-time/historical parity, especially given earlier 11 close mismatches.
+- Does not read one-minute source tapes to draw an independent 1-minute chart; displays 5-minute OHLC from verified recorded audits only.
+- Does not implement a new strategy or modify the original Historical Replay job runner.
+- Does not send orders, touch credentials or restart your VM services.
+- This first panel is historical review only. A broker chart overlay or same-input replay comparison requires verified persisted market-source tapes and a later additive step.

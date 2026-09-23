@@ -1,0 +1,10 @@
+.hime-replay{border:1px solid #8a98a8;border-radius:12px;padding:20px;margin:20px 0;max-width:100%;overflow:hidden}
+.hime-replay p{line-height:1.45}.hime-replay select,.hime-replay button{padding:7px;margin:4px}
+.hime-meta,.hime-controls,.hime-cards{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin:10px 0}
+.hime-meta span,.hime-cards>div{padding:10px;border:1px solid #8885;border-radius:7px}
+.hime-cards>div{flex:1;min-width:185px}.hime-cards p{margin:5px 0}
+.hime-error{color:#c43}.hime-warning{border-left:3px solid #c90;padding-left:10px}
+.hime-chart-scroll{overflow-x:auto;border:1px solid #8885;padding:8px;margin:16px 0}.hime-chart-scroll small{display:block}
+.hime-replay details{margin:8px 0;border:1px solid #8885;border-radius:7px;padding:8px}
+.hime-replay pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:350px;overflow:auto;font-size:12px}
+.hime-review textarea{display:block;min-height:70px;width:min(100%,700px);margin:10px 0}
