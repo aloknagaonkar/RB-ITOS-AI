@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from typing import Callable, Iterable
 
 from .domain import IST
-from .hilega_milega_option_candidate_v1 import OptionCandidateSet
+from .hilega_milega_option_candidate_v1 import OptionCandidate, OptionCandidateSet
 from .live_option_minute_source_v1 import validate_option_minute
 
 MODEL = "HILEGA_MILEGA_OPTION_SHADOW_LIFECYCLE_V1"
@@ -57,6 +57,7 @@ class ShadowOptionLifecycleSnapshot:
     exit_reason: str | None
     legs: tuple[ShadowOptionLegSnapshot, ...]
     issue: str | None = None
+    pending_exit_boundary: str | None = None
 
     def payload(self) -> dict:
         out = asdict(self)
@@ -102,7 +103,57 @@ class HilegaMilegaOptionShadowLifecycleV1:
 
     @property
     def active(self) -> bool:
-        return bool(self._snapshot and self._snapshot.active)
+        # Strategy-exited observations MUST NOT remain economically active.
+        return bool(self._snapshot and self._snapshot.status == "ACTIVE" and self._snapshot.active)
+
+    @property
+    def pending_exit(self) -> bool:
+        return bool(self._snapshot and self._snapshot.status == "PENDING_EXACT_EXIT")
+
+    @classmethod
+    def from_audited_active_snapshot(cls, payload: dict) -> "HilegaMilegaOptionShadowLifecycleV1":
+        """Restore ONLY an audited complete five-leg identity, never invent an entry.
+
+        The frozen audited instrument keys and entry premiums are reused; live
+        contract-master changes cannot silently substitute another strike/key.
+        """
+        if payload.get("status") not in ("ACTIVE", "PENDING_EXACT_EXIT"):
+            raise ValueError("RESTORE_REQUIRES_AUDITED_ACTIVE_OR_PENDING_SNAPSHOT")
+        legs = tuple(ShadowOptionLegSnapshot(**{
+            k: row.get(k) for k in ShadowOptionLegSnapshot.__dataclass_fields__
+        }) for row in payload.get("legs", []))
+        if sorted(leg.relation_to_atm for leg in legs) != [-2, -1, 0, 1, 2]:
+            raise ValueError("RESTORE_REQUIRES_EXACT_FIVE_AUDITED_LEGS")
+        if any(not leg.instrument_key or leg.entry_open is None or leg.entry_open <= 0 for leg in legs):
+            raise ValueError("RESTORE_INVALID_AUDITED_ENTRY")
+        if payload.get("selection_policy") != SELECTION_POLICY:
+            raise ValueError("RESTORE_WRONG_SELECTION_POLICY")
+        candidate_set = OptionCandidateSet(
+            model="HILEGA_MILEGA_OPTION_CANDIDATE_V1", status="AVAILABLE",
+            expiry=payload["expiry"], signal_spot=payload["signal_spot"],
+            atm=payload["atm"], strike_step=50.0, wings=2, side="CE",
+            selection_policy="UNDECIDED_CANDIDATE_SET_ONLY", selected_instrument_key=None,
+            candidates=tuple(OptionCandidate(leg.strike, leg.side, leg.instrument_key,
+                leg.relation_to_atm, leg.expiry) for leg in legs),
+        )
+        obj = cls()
+        obj._candidate_set = candidate_set
+        obj._snapshot = ShadowOptionLifecycleSnapshot(
+            model=MODEL, status=payload["status"],
+            signal_bar=payload["signal_bar"], signal_boundary=payload["signal_boundary"],
+            signal_spot=payload["signal_spot"], source=payload.get("source"),
+            expiry=payload["expiry"], atm=payload["atm"],
+            selection_policy=SELECTION_POLICY,
+            shadow_selected_instrument_keys=tuple(leg.instrument_key for leg in legs),
+            active=payload["status"] == "ACTIVE",
+            latest_completed_minute=payload.get("latest_completed_minute"),
+            exit_reason=payload.get("exit_reason"), legs=legs,
+            issue=payload.get("issue"),
+            pending_exit_boundary=payload.get("pending_exit_boundary"),
+        )
+        if obj.pending_exit and not obj._snapshot.pending_exit_boundary:
+            raise ValueError("RESTORE_PENDING_EXIT_BOUNDARY_REQUIRED")
+        return obj
 
     @staticmethod
     def _rows_by_ts(rows: Iterable) -> tuple[dict[datetime, object], bool]:
@@ -232,7 +283,9 @@ class HilegaMilegaOptionShadowLifecycleV1:
                 legs=tuple(legs),
                 issue=";".join(issues) if issues else "INCOMPLETE_ATM_PLUS_MINUS_2_ENTRY",
             )
-            self._candidate_set = None
+            # Exact candidate identity is frozen; retry only this original
+            # boundary when the missing minute has become completed data.
+            self._candidate_set = candidate_set
             return self._snapshot
 
         self._candidate_set = candidate_set
@@ -375,10 +428,18 @@ class HilegaMilegaOptionShadowLifecycleV1:
         exit_reason: str,
         option_minutes: Callable[[str], Iterable],
     ) -> ShadowOptionLifecycleSnapshot | None:
-        if not self.active or self._snapshot is None or self._candidate_set is None:
+        if self.pending_exit:
+            if _minute_key(exit_boundary).isoformat() != self._snapshot.pending_exit_boundary or exit_reason != self._snapshot.exit_reason:
+                raise ValueError("PENDING_EXACT_EXIT_IS_IMMUTABLE")
+        elif not self.active:
+            return self._snapshot
+        if self._snapshot is None or self._candidate_set is None:
             return self._snapshot
 
         boundary = _minute_key(exit_boundary)
+        entry_boundary = datetime.fromisoformat(self._snapshot.signal_boundary)
+        if boundary <= entry_boundary:
+            raise ValueError("EXIT_BOUNDARY_MUST_FOLLOW_ENTRY_BOUNDARY")
         leg_by_key = {x.instrument_key: x for x in self._snapshot.legs}
         new_legs: list[ShadowOptionLegSnapshot] = []
         issues: list[str] = []
@@ -414,9 +475,9 @@ class HilegaMilegaOptionShadowLifecycleV1:
             )
 
         if issues or len(new_legs) != 5:
-            return ShadowOptionLifecycleSnapshot(
+            self._snapshot = ShadowOptionLifecycleSnapshot(
                 model=MODEL,
-                status="INCOMPLETE_EXIT",
+                status="PENDING_EXACT_EXIT",
                 signal_bar=self._snapshot.signal_bar,
                 signal_boundary=self._snapshot.signal_boundary,
                 signal_spot=self._snapshot.signal_spot,
@@ -425,12 +486,14 @@ class HilegaMilegaOptionShadowLifecycleV1:
                 atm=self._snapshot.atm,
                 selection_policy=SELECTION_POLICY,
                 shadow_selected_instrument_keys=self._snapshot.shadow_selected_instrument_keys,
-                active=True,
+                active=False,
                 latest_completed_minute=self._snapshot.latest_completed_minute,
                 exit_reason=exit_reason,
                 legs=self._snapshot.legs,
                 issue=";".join(issues) if issues else "INCOMPLETE_EXACT_EXIT",
+                pending_exit_boundary=boundary.isoformat(),
             )
+            return self._snapshot
 
         self._snapshot = ShadowOptionLifecycleSnapshot(
             model=MODEL,
@@ -450,3 +513,24 @@ class HilegaMilegaOptionShadowLifecycleV1:
             issue=None,
         )
         return self._snapshot
+
+    def retry_pending_exit(self, *, option_minutes: Callable[[str], Iterable]) -> ShadowOptionLifecycleSnapshot | None:
+        if not self.pending_exit or self._snapshot is None:
+            return self._snapshot
+        return self.close(
+            exit_boundary=datetime.fromisoformat(self._snapshot.pending_exit_boundary),
+            exit_reason=self._snapshot.exit_reason,
+            option_minutes=option_minutes,
+        )
+
+    def retry_missing_entry(self, *, option_minutes: Callable[[str], Iterable]) -> ShadowOptionLifecycleSnapshot:
+        if self._snapshot is None or self._snapshot.status != "INCOMPLETE" or self._candidate_set is None:
+            raise ValueError("NO_RETRIABLE_EXACT_ENTRY")
+        old = self._snapshot
+        return self.start(
+            signal_bar_ts=datetime.fromisoformat(old.signal_bar),
+            signal_spot=old.signal_spot,
+            source=old.source,
+            candidate_set=self._candidate_set,
+            option_minutes=option_minutes,
+        )

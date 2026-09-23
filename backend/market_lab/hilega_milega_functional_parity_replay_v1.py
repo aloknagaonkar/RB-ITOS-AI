@@ -30,6 +30,7 @@ class HistoricalParityMarketSourcesV1:
         self.session_date = session_date
         self._underlying = sorted(gateway.historical_candles(UNDERLYING, session_date), key=lambda x: x.timestamp)
         self._option_cache: dict[str, list[CompletedOptionMinute]] = {}
+        self._as_of: datetime | None = None
 
     def historical_candles(self, instrument_key: str, session_date: date):
         return self.gateway.historical_candles(instrument_key, session_date)
@@ -38,6 +39,7 @@ class HistoricalParityMarketSourcesV1:
         if now is None:
             return list(self._underlying)
         local = now.astimezone(IST)
+        self._as_of = local
         return [x for x in self._underlying if x.timestamp.astimezone(IST) <= local]
 
     def option_contracts(self, underlying: str, expiry: date):
@@ -67,7 +69,12 @@ class HistoricalParityMarketSourcesV1:
                 )
                 for x in rows
             ]
-        return list(self._option_cache[instrument_key])
+        # Replay cannot see the forming option candle or future session rows.
+        # Match the live source's completed-minute availability contract.
+        if self._as_of is None:
+            return []
+        cutoff = self._as_of.replace(second=0, microsecond=0)
+        return [x for x in self._option_cache[instrument_key] if x.timestamp.astimezone(IST) < cutoff]
 
 
 def normalize_functional_audit(rows: list[dict]) -> list[dict]:
@@ -82,6 +89,8 @@ def normalize_functional_audit(rows: list[dict]) -> list[dict]:
         "OPTION_SHADOW_LIFECYCLE_START",
         "OPTION_SHADOW_LIFECYCLE_UPDATE",
         "OPTION_SHADOW_LIFECYCLE_EXIT",
+        "OPTION_SHADOW_LIFECYCLE_ENTRY_RETRY",
+        "OPTION_SHADOW_LIFECYCLE_EXIT_RETRY",
         "SESSION_CUTOFF_SOURCE",
         "UNDERLYING_5M_BUILD",
     }

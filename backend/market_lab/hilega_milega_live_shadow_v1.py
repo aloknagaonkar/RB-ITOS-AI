@@ -95,6 +95,9 @@ class HilegaMilegaLiveShadowCoordinatorV1:
         self._cutoff_done_date: date | None = None
         self.option_shadow = HilegaMilegaOptionShadowLifecycleV1()
         self._option_shadow_last_update_minute: datetime | None = None
+        # Pending exits are independent of the next strategy entry; never
+        # allow a new signal to overwrite an unresolved five-strike exit.
+        self._pending_option_exits: dict[str, HilegaMilegaOptionShadowLifecycleV1] = {}
 
     def _health(self, *, now: datetime, status: str, **payload: Any) -> None:
         self.health.append({
@@ -163,6 +166,7 @@ class HilegaMilegaLiveShadowCoordinatorV1:
         # Bootstrap history is intentionally not written into the live audit.
         self.strategy.audit_store = self.step_audit
         self._bootstrapped_date = session_date
+        self._restore_pending_option_exits(now)
         self._restore_option_shadow(now)
         if self.strategy.session.session_locked:
             self._cutoff_done_date = session_date
@@ -201,6 +205,79 @@ class HilegaMilegaLiveShadowCoordinatorV1:
     def _latest_completed_option_minute(now: datetime) -> datetime:
         local = now.astimezone(IST).replace(second=0, microsecond=0)
         return local - timedelta(minutes=1)
+
+    def _restore_pending_option_exits(self, now: datetime) -> None:
+        """Recover pending exits from verified append-only audit, not candle inference.
+
+        Keep every signal independent. Terminal CLOSED rows suppress restoration.
+        This method never rewrites the historic audit trail.
+        """
+        ok, issue = self.step_audit.verify_chain()
+        if not ok:
+            self._health(now=now, status="AUDIT_CHAIN_INVALID_PENDING_RESTORE_BLOCKED", issue=issue)
+            return
+        latest: dict[str, dict] = {}
+        stages = {
+            "OPTION_SHADOW_LIFECYCLE_START", "OPTION_SHADOW_LIFECYCLE_RESTORE",
+            "OPTION_SHADOW_LIFECYCLE_ENTRY_RETRY", "OPTION_SHADOW_LIFECYCLE_UPDATE",
+            "OPTION_SHADOW_LIFECYCLE_EXIT", "OPTION_SHADOW_LIFECYCLE_EXIT_RETRY",
+        }
+        for row in self.step_audit.read_all():
+            if row.get("stage") not in stages:
+                continue
+            payload = row.get("payload") or {}
+            signal = payload.get("signal_bar")
+            if signal and signal.startswith(now.date().isoformat()):
+                latest[signal] = payload
+        for signal, payload in latest.items():
+            if payload.get("status") != "PENDING_EXACT_EXIT":
+                continue
+            try:
+                tracker = HilegaMilegaOptionShadowLifecycleV1.from_audited_active_snapshot(payload)
+                self._pending_option_exits[signal] = tracker
+                self._audit_runtime(now, "OPTION_SHADOW_PENDING_EXIT_RESTORE", "PASS", tracker.snapshot.payload())
+            except (ValueError, KeyError, TypeError) as exc:
+                self._audit_runtime(now, "OPTION_SHADOW_PENDING_EXIT_RESTORE", "FAILED", {
+                    "signal_bar": signal, "reason": str(exc), "order_created": False,
+                })
+
+    def _retry_pending_option_exits(self, now: datetime) -> None:
+        for signal, tracker in list(self._pending_option_exits.items()):
+            try:
+                previous_issue = tracker.snapshot.issue if tracker.snapshot else None
+                snap = tracker.retry_pending_exit(option_minutes=self.sources.option_intraday_1m)
+                if snap is None:
+                    continue
+                # Append on resolution or changed evidence only. Repeated exact
+                # minute polling must not masquerade as new transitions.
+                if snap.status == "CLOSED" or snap.issue != previous_issue:
+                    self._audit_runtime(now, "OPTION_SHADOW_LIFECYCLE_EXIT_RETRY", snap.status, snap.payload())
+                if snap.status == "CLOSED":
+                    del self._pending_option_exits[signal]
+            except Exception as exc:
+                self._audit_runtime(now, "OPTION_SHADOW_LIFECYCLE_EXIT_RETRY", "FAILED", {
+                    "signal_bar": signal, "reason": str(exc), "order_created": False,
+                })
+
+    def _retry_missing_option_entry(self, now: datetime) -> None:
+        snap = self.option_shadow.snapshot
+        if (snap is None or snap.status != "INCOMPLETE" or
+                not self.strategy.session.active or
+                self.option_shadow._candidate_set is None):
+            return
+        if self.strategy.session.entry_time is None or self.strategy.session.entry_time.isoformat() != snap.signal_bar:
+            return
+        # Causal: exact entry minute must already be complete before recovery.
+        if self._latest_completed_option_minute(now) < datetime.fromisoformat(snap.signal_boundary):
+            return
+        try:
+            retried = self.option_shadow.retry_missing_entry(
+                option_minutes=self.sources.option_intraday_1m)
+            self._audit_runtime(now, "OPTION_SHADOW_LIFECYCLE_ENTRY_RETRY", retried.status, retried.payload())
+        except Exception as exc:
+            self._audit_runtime(now, "OPTION_SHADOW_LIFECYCLE_ENTRY_RETRY", "FAILED", {
+                "signal_bar": snap.signal_bar, "reason": str(exc), "order_created": False,
+            })
 
     def _restore_option_shadow(self, now: datetime) -> None:
         if not self.strategy.session.active:
@@ -255,6 +332,7 @@ class HilegaMilegaLiveShadowCoordinatorV1:
             })
 
     def _update_option_shadow(self, now: datetime) -> None:
+        self._retry_missing_option_entry(now)
         if not self.option_shadow.active:
             return
         through = self._latest_completed_option_minute(now)
@@ -296,6 +374,10 @@ class HilegaMilegaLiveShadowCoordinatorV1:
                 return
             status = "PASS" if snap.status == "CLOSED" else snap.status
             self._audit_runtime(now, "OPTION_SHADOW_LIFECYCLE_EXIT", status, snap.payload())
+            if snap.status == "PENDING_EXACT_EXIT":
+                self._pending_option_exits[snap.signal_bar] = self.option_shadow
+                self.option_shadow = HilegaMilegaOptionShadowLifecycleV1()
+                self._option_shadow_last_update_minute = None
         except Exception as exc:
             self._audit_runtime(now, "OPTION_SHADOW_LIFECYCLE_EXIT", "FAILED", {
                 "exit_boundary": exit_boundary.isoformat(),
@@ -423,6 +505,7 @@ class HilegaMilegaLiveShadowCoordinatorV1:
         self.bootstrap(now)
         intraday = self.sources.nifty_intraday_1m(now=now)
         cutoff_events = self.process_cutoff(now, intraday=intraday)
+        self._retry_pending_option_exits(now)
         self._update_option_shadow(now)
 
         target = latest_completed_5m_label(now)
@@ -448,6 +531,13 @@ class HilegaMilegaLiveShadowCoordinatorV1:
         events = self.strategy.on_bar(bar)
         for event in events:
             if event.event_type == "STRUCTURAL_EXIT_RSI_CROSS_BELOW_WMA21":
+                if self.option_shadow.snapshot is not None and self.option_shadow.snapshot.status == "INCOMPLETE":
+                    self._audit_runtime(now, "OPTION_SHADOW_ENTRY_UNAVAILABLE_AT_EXIT", "INCOMPLETE", {
+                        "signal_bar": self.option_shadow.snapshot.signal_bar,
+                        "exit_boundary": (bar.ts + timedelta(minutes=5)).isoformat(),
+                        "reason": "EXACT_ENTRY_NOT_OBSERVED_BEFORE_EXIT",
+                        "order_created": False,
+                    })
                 self._close_option_shadow(
                     now,
                     exit_boundary=bar.ts + timedelta(minutes=5),

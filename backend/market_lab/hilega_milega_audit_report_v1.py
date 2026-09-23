@@ -19,6 +19,9 @@ OPTION_STAGES = {
     "OPTION_SHADOW_LIFECYCLE_RESTORE",
     "OPTION_SHADOW_LIFECYCLE_UPDATE",
     "OPTION_SHADOW_LIFECYCLE_EXIT",
+    "OPTION_SHADOW_LIFECYCLE_ENTRY_RETRY",
+    "OPTION_SHADOW_LIFECYCLE_EXIT_RETRY",
+    "OPTION_SHADOW_PENDING_EXIT_RESTORE",
 }
 
 
@@ -101,9 +104,11 @@ def build_detailed_audit_report(
     )]
     candidate = next((r for r in option_rows if r.get("stage") == "OPTION_CANDIDATE_SET"), None)
     market_snapshot = next((r for r in option_rows if r.get("stage") == "OPTION_CANDIDATE_MARKET_SNAPSHOT"), None)
-    lifecycle_start = next((r for r in option_rows if r.get("stage") in {"OPTION_SHADOW_LIFECYCLE_START", "OPTION_SHADOW_LIFECYCLE_RESTORE"}), None)
+    lifecycle_start = next((r for r in option_rows if r.get("stage") in {"OPTION_SHADOW_LIFECYCLE_START", "OPTION_SHADOW_LIFECYCLE_RESTORE", "OPTION_SHADOW_LIFECYCLE_ENTRY_RETRY"} and (r.get("payload") or {}).get("status") == "ACTIVE"), None)
+    if lifecycle_start is None:
+        lifecycle_start = next((r for r in option_rows if r.get("stage") in {"OPTION_SHADOW_LIFECYCLE_START", "OPTION_SHADOW_LIFECYCLE_RESTORE", "OPTION_SHADOW_LIFECYCLE_ENTRY_RETRY"}), None)
     lifecycle_updates = [r for r in option_rows if r.get("stage") == "OPTION_SHADOW_LIFECYCLE_UPDATE"]
-    lifecycle_exit = next((r for r in reversed(option_rows) if r.get("stage") == "OPTION_SHADOW_LIFECYCLE_EXIT"), None)
+    lifecycle_exit = next((r for r in reversed(option_rows) if r.get("stage") in {"OPTION_SHADOW_LIFECYCLE_EXIT", "OPTION_SHADOW_LIFECYCLE_EXIT_RETRY"}), None)
 
     conditions = {
         "rsi_cross_ema_up": dp.get("rsi_cross_ema_up"),
@@ -170,6 +175,8 @@ def build_detailed_audit_report(
             "start": None if lifecycle_start is None else {"status": lifecycle_start.get("status"), **(lifecycle_start.get("payload") or {})},
             "updates": [{"status": r.get("status"), **(r.get("payload") or {})} for r in lifecycle_updates],
             "exit": None if lifecycle_exit is None else {"status": lifecycle_exit.get("status"), **(lifecycle_exit.get("payload") or {})},
+            "entry_retries": [{"status": r.get("status"), **(r.get("payload") or {})} for r in option_rows if r.get("stage") == "OPTION_SHADOW_LIFECYCLE_ENTRY_RETRY"],
+            "exit_retries": [{"status": r.get("status"), **(r.get("payload") or {})} for r in option_rows if r.get("stage") == "OPTION_SHADOW_LIFECYCLE_EXIT_RETRY"],
         },
         "audit_integrity": {
             "chain_ok": chain_ok,

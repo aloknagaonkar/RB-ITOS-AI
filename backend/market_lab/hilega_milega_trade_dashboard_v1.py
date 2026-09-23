@@ -14,6 +14,9 @@ LIFECYCLE = {
     'OPTION_SHADOW_LIFECYCLE_RESTORE',
     'OPTION_SHADOW_LIFECYCLE_UPDATE',
     'OPTION_SHADOW_LIFECYCLE_EXIT',
+    'OPTION_SHADOW_LIFECYCLE_ENTRY_RETRY',
+    'OPTION_SHADOW_LIFECYCLE_EXIT_RETRY',
+    'OPTION_SHADOW_PENDING_EXIT_RESTORE',
 }
 ROLES = (-2, -1, 0, 1, 2)
 
@@ -36,13 +39,19 @@ def project_shadow_dashboard(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
     trades = []
     for key in sorted(by_signal):
         events = by_signal[key]['events']
-        starts = [e for e in events if e[1] == 'OPTION_SHADOW_LIFECYCLE_START' and e[3].get('status') == 'ACTIVE']
+        starts = [e for e in events if e[1] in ('OPTION_SHADOW_LIFECYCLE_START', 'OPTION_SHADOW_LIFECYCLE_ENTRY_RETRY') and e[3].get('status') == 'ACTIVE']
         restores = [e for e in events if e[1] == 'OPTION_SHADOW_LIFECYCLE_RESTORE' and e[3].get('status') == 'ACTIVE']
         entries = starts or restores
         entry = entries[0][3] if entries else None
         updates = [e for e in events if e[1] == 'OPTION_SHADOW_LIFECYCLE_UPDATE' and e[3].get('status') == 'ACTIVE']
-        exits = [e for e in events if e[1] == 'OPTION_SHADOW_LIFECYCLE_EXIT' and e[3].get('status') == 'CLOSED']
-        last = exits[-1][3] if exits else (updates[-1][3] if updates else entry)
+        exits = [e for e in events if e[1] in ('OPTION_SHADOW_LIFECYCLE_EXIT', 'OPTION_SHADOW_LIFECYCLE_EXIT_RETRY') and e[3].get('status') == 'CLOSED']
+        attempts = [e for e in events if e[1] in ('OPTION_SHADOW_LIFECYCLE_EXIT', 'OPTION_SHADOW_LIFECYCLE_EXIT_RETRY', 'OPTION_SHADOW_PENDING_EXIT_RESTORE')]
+        pending = [e for e in attempts if e[3].get('status') == 'PENDING_EXACT_EXIT']
+        # An attempted exit bounds the economic observation: later legacy
+        # updates (including bad historical records) cannot inflate MFE/MAE.
+        first_exit_index = min((e[0] for e in attempts), default=None)
+        valid_updates = [e for e in updates if first_exit_index is None or e[0] < first_exit_index]
+        last = exits[-1][3] if exits else (valid_updates[-1][3] if valid_updates else entry)
         failures = [e for e in events if e[3].get('status') not in ('ACTIVE', 'CLOSED')]
         if not entry:
             trades.append({
@@ -72,7 +81,7 @@ def project_shadow_dashboard(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
                 'realized_points': latest.get('realized_points'),
                 'realized_return_pct': latest.get('realized_return_pct'),
             })
-        attempted_exit = any(e[1] == 'OPTION_SHADOW_LIFECYCLE_EXIT' for e in events)
+        attempted_exit = bool(attempts)
         complete_exit = bool(exits) and len(legs) == 5 and all(
             l['relation_to_atm'] in ROLES and
             l['entry_open'] is not None and l['exit_open'] is not None and
@@ -82,10 +91,11 @@ def project_shadow_dashboard(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
             'signal_bar': key, 'signal_boundary': entry.get('signal_boundary'),
             'signal_spot': entry.get('signal_spot'), 'source': entry.get('source'),
             'expiry': entry.get('expiry'), 'atm': entry.get('atm'),
-            'status': 'CLOSED' if complete_exit else ('INCOMPLETE_EXIT' if attempted_exit else 'ACTIVE'),
-            'complete': complete_exit, 'exit_reason': (last or {}).get('exit_reason'),
-            'issue': failures[-1][3].get('issue') if failures else None,
-            'legs': legs, 'update_count': len(updates),
+            'status': 'CLOSED' if complete_exit else ('PENDING_EXACT_EXIT' if pending else ('INCOMPLETE_EXIT' if attempted_exit else 'ACTIVE')),
+            'complete': complete_exit, 'exit_reason': (exits[-1][3].get('exit_reason') if exits else (pending[-1][3].get('exit_reason') if pending else (last or {}).get('exit_reason'))),
+            'issue': pending[-1][3].get('issue') if pending else (failures[-1][3].get('issue') if failures else None),
+            'legs': legs, 'update_count': len(valid_updates),
+            'pending_exit_boundary': pending[-1][3].get('pending_exit_boundary') if pending else None,
         })
 
     by_role: dict[int, dict[str, Any]] = {r: {
@@ -120,6 +130,7 @@ def project_shadow_dashboard(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
         'trade_count': len(trades),
         'complete_closed_count': sum(t['complete'] for t in trades),
         'incomplete_count': sum(t['status'] in ('NO_EXACT_ENTRY', 'INCOMPLETE_EXIT') for t in trades),
+        'pending_exit_count': sum(t['status'] == 'PENDING_EXACT_EXIT' for t in trades),
         'active_count': sum(t['status'] == 'ACTIVE' for t in trades),
         'by_role': [by_role[r] for r in ROLES],
         'trades': list(reversed(trades)),

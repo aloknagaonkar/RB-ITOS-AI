@@ -39,6 +39,9 @@ def status():
         "OPTION_SHADOW_LIFECYCLE_RESTORE",
         "OPTION_SHADOW_LIFECYCLE_UPDATE",
         "OPTION_SHADOW_LIFECYCLE_EXIT",
+        "OPTION_SHADOW_LIFECYCLE_ENTRY_RETRY",
+        "OPTION_SHADOW_LIFECYCLE_EXIT_RETRY",
+        "OPTION_SHADOW_PENDING_EXIT_RESTORE",
     }]
     latest_option_shadow = option_shadow_rows[-1] if option_shadow_rows else None
     return {
@@ -88,6 +91,9 @@ def option_shadow(limit: int = 200):
         "OPTION_SHADOW_LIFECYCLE_RESTORE",
         "OPTION_SHADOW_LIFECYCLE_UPDATE",
         "OPTION_SHADOW_LIFECYCLE_EXIT",
+        "OPTION_SHADOW_LIFECYCLE_ENTRY_RETRY",
+        "OPTION_SHADOW_LIFECYCLE_EXIT_RETRY",
+        "OPTION_SHADOW_PENDING_EXIT_RESTORE",
     }
     rows = [x for x in _rows() if x.get("stage") in stages][-limit:]
     rows.reverse()
