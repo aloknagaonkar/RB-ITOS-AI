@@ -7,7 +7,7 @@ from urllib.parse import quote
 
 import httpx
 
-from .domain import Contract, HistoricalCandle, HistoricalOptionContract, PCRConfig, Quote, Snapshot
+from .domain import Contract, HistoricalCandle, HistoricalOptionContract, PCRConfig, Quote, Snapshot, IST
 
 UTC = timezone.utc
 
@@ -276,6 +276,33 @@ class UpstoxGateway:
             raise GatewayError(
                 "Upstox expired historical option candle data failed schema validation."
             ) from None
+
+    # Phase 7D.1: explicit provider sources. No fallback to a different date,
+    # strike or synthetic candle; record source names at the adapter boundary.
+    def active_option_contracts(self, underlying: str, expiry: date) -> list[HistoricalOptionContract]:
+        body = self._get('/v2/option/contract',
+                         {'instrument_key': underlying, 'expiry_date': expiry.isoformat()})
+        try:
+            return normalize_upstox_historical_option_contracts(underlying, expiry, body)
+        except (ValueError, KeyError, TypeError):
+            raise GatewayError('Upstox active option contract data failed schema validation.') from None
+
+    def intraday_candles(self, instrument_key: str, session_date: date) -> list[HistoricalCandle]:
+        if session_date != datetime.now(IST).date():
+            raise GatewayError('Intraday endpoint cannot retrieve a previous session.')
+        key = quote(instrument_key, safe='')
+        body = self._get(f'/v3/historical-candle/intraday/{key}/minutes/1', {})
+        try:
+            rows = normalize_upstox_historical_candles(instrument_key, session_date, body)
+            if any(row.timestamp.astimezone(IST).date() != session_date for row in rows):
+                raise ValueError('Intraday response contains a different session')
+            return rows
+        except (ValueError, KeyError, TypeError):
+            raise GatewayError('Intraday candles failed requested-session validation.') from None
+
+    def active_option_historical_candles(self, instrument_key: str, session_date: date) -> list[HistoricalCandle]:
+        # Active contracts use the normal V3 historical endpoint, not expired-instruments.
+        return self.historical_candles(instrument_key, session_date)
 
     def close(self):
         self.client.close()

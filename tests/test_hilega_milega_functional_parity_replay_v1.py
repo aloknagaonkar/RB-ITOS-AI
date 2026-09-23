@@ -14,6 +14,11 @@ class Gateway:
             self.underlying.append(HistoricalCandle(provider="upstox",instrument_key="NSE_INDEX|Nifty 50",session_date=self.d,timestamp=start+timedelta(minutes=i),open=px,high=px+1,low=px-1,close=px+.5,volume=100,open_interest=None))
         self.contracts=[HistoricalOptionContract(instrument_key=f"CE-{s}",underlying="NSE_INDEX|Nifty 50",expiry=date(2026,9,29),strike=s,side="CE") for s in [22900,22950,23000,23050,23100]]
 
+    def intraday_candles(self,instrument_key,session_date):
+        if instrument_key == "NSE_INDEX|Nifty 50":
+            return list(self.underlying)
+        return self.historical_option_candles(instrument_key,session_date)
+    def active_option_contracts(self, underlying, expiry): return list(self.contracts)
     def historical_candles(self,instrument_key,session_date):
         return list(self.underlying) if instrument_key=="NSE_INDEX|Nifty 50" and session_date==self.d else []
     def historical_option_contracts(self,underlying,expiry):

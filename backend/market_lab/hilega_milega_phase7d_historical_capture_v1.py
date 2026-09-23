@@ -43,15 +43,30 @@ def main(argv: list[str] | None = None) -> int:
                           low=r.low, close=r.close, volume=r.volume) for r in rows]
             raw = json.dumps(canon, sort_keys=True, separators=(',', ':')).encode()
             return {'count': len(canon), 'sha256': hashlib.sha256(raw).hexdigest()}
+        selected_baskets = [row.get('payload', {}) for row in replay.coordinator.step_audit.read_all()
+                            if row.get('stage') == 'OPTION_CANDIDATE_SET']
         manifest = {
             'model': 'HILEGA_MILEGA_PHASE7D_CAPTURE_MANIFEST_V1',
             'capture_utc': datetime.now(timezone.utc).isoformat(),
             'session_date': args.session_date.isoformat(), 'expiry': args.expiry.isoformat(),
-            'source': 'UPSTOX_HISTORICAL_API',
+            'source': replay.sources.underlying_source,
+            'request_acquisition_date_ist': replay.sources.acquisition_today.isoformat(),
+            'option_contract_source': replay.sources.option_contract_source,
+            'option_contract_catalog_ce': replay.sources.option_contract_coverage,
+            'signal_time_five_strike_baskets': selected_baskets,
+            'option_candle_sources': replay.sources.option_candle_sources,
             'note': 'Historical broker responses do not prove original live response availability timing.',
-            'underlying': digest(replay.sources._underlying),
-            'options': {key: digest(rows) for key, rows in sorted(replay.sources._option_cache.items())},
+            'underlying': {**digest(replay.sources._underlying),
+                           'first': replay.sources._underlying[0].timestamp.isoformat(),
+                           'last': replay.sources._underlying[-1].timestamp.isoformat()},
+            'options': {key: {**digest(rows),
+                              'first': rows[0].timestamp.isoformat() if rows else None,
+                              'last': rows[-1].timestamp.isoformat() if rows else None,
+                              'source': replay.sources.option_candle_sources.get(key)}
+                        for key, rows in sorted(replay.sources._option_cache.items())},
             'summary': summary,
+            'missing_data': [x for x in selected_baskets if x.get('status') != 'AVAILABLE'
+                             or x.get('issue')],
         }
         (args.output_root/'source-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
         print(json.dumps({'status': 'CAPTURED', 'output_root': str(args.output_root),

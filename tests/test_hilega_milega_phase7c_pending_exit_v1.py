@@ -186,6 +186,12 @@ def test_historical_parity_source_does_not_expose_future_option_minutes():
     from market_lab.hilega_milega_functional_parity_replay_v1 import HistoricalParityMarketSourcesV1
     from market_lab.domain import HistoricalCandle
     class Gateway:
+        def intraday_candles(self, instrument_key, session_date):
+            return [] if instrument_key == "NSE_INDEX|Nifty 50" else self.historical_option_candles(instrument_key,session_date)
+        def active_option_contracts(self, underlying, expiry):
+            from market_lab.domain import HistoricalOptionContract
+            return [HistoricalOptionContract(instrument_key='CE-23450', underlying=underlying,
+                expiry=expiry,strike=23450,side='CE')]
         def historical_candles(self, instrument_key, session_date): return []
         def historical_option_candles(self, instrument_key, session_date):
             return [HistoricalCandle(provider='upstox',instrument_key=instrument_key,
@@ -193,7 +199,8 @@ def test_historical_parity_source_does_not_expose_future_option_minutes():
                 open=100+i,high=102+i,low=99+i,close=101+i,
                 volume=10,open_interest=None) for i in range(3)]
     g=Gateway()
-    source=HistoricalParityMarketSourcesV1(g, D)
+    source=HistoricalParityMarketSourcesV1(g, D, acquisition_today=D)
+    source.option_contracts("NSE_INDEX|Nifty 50", date(2026,9,29))
     assert source.option_intraday_1m('CE-23450')==[]
     source.nifty_intraday_1m(now=ENTRY+timedelta(seconds=30))
     assert source.option_intraday_1m('CE-23450')==[]

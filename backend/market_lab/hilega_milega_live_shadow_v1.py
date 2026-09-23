@@ -9,6 +9,7 @@ from .domain import IST
 from .hilega_milega_historical_replay_v1 import UNDERLYING, aggregate_exact_5m, load_or_fetch_1m
 from .hilega_milega_strategy_v1 import (
     HilegaMilegaBullishEngineV1,
+    SessionState,
     STRATEGY_ID,
     STRATEGY_VERSION,
 )
@@ -152,6 +153,14 @@ class HilegaMilegaLiveShadowCoordinatorV1:
                 bars_replayed += len(bars)
                 sessions_loaded += 1
             d += timedelta(days=1)
+
+        # Preserve indicator warmup but clear the previous session's locked/armed
+        # strategy state even before the first target-day 5m candle completes.
+        # This is the same session boundary reset used by the canonical engine;
+        # no indicator updates or synthetic bars are introduced here.
+        self.strategy.session = SessionState(session_date=session_date)
+        self.strategy.previous_indicators = None
+        self.strategy.previous_bar = None
 
         current = self.sources.nifty_intraday_1m(now=now)
         completed_label = latest_completed_5m_label(now)
