@@ -139,13 +139,18 @@ class HilegaMilegaLiveShadowCoordinatorV1:
         start = session_date - timedelta(days=self.warmup_calendar_days)
         d = start
         while d < session_date:
-            candles = load_or_fetch_1m(
-                self.sources,
-                underlying=UNDERLYING,
-                session_date=d,
-                cache_root=self.cache_root,
-                refresh_cache=False,
-            )
+            if hasattr(self.sources, "warmup_candles"):
+                # Exact response actually consumed from cache or broker is
+                # captured once; playback supplies it without broker access.
+                candles = self.sources.warmup_candles(d, self.cache_root)
+            else:
+                candles = load_or_fetch_1m(
+                    self.sources,
+                    underlying=UNDERLYING,
+                    session_date=d,
+                    cache_root=self.cache_root,
+                    refresh_cache=False,
+                )
             if candles:
                 bars = aggregate_exact_5m(candles, d)
                 for bar in bars:

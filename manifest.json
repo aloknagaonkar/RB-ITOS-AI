@@ -1,20 +1,35 @@
 {
-  "purpose": "Phase 7D.2 14:50 completed bar before 14:55 cutoff, no entry at cutoff; no post-cutoff updates",
+  "purpose": "Phase7D.3 opt-in append-only exact source-call tape + historical input snapshots + strict offline tape playback; strategy unchanged",
   "files": {
     "backend/market_lab/hilega_milega_live_shadow_v1.py": {
-      "expected_before_sha256": "22b4d785cfa8ad625e005f43b4b03685263925aeb84298627d847aef6629a409",
-      "patched_sha256": "d614eecbe459af7899946cb4952ac6c1a59a0fa7ed74d4634816e2cbd64bbe86",
-      "mode": "replace"
+      "mode": "replace",
+      "expected_before_sha256": "d614eecbe459af7899946cb4952ac6c1a59a0fa7ed74d4634816e2cbd64bbe86",
+      "patched_sha256": "2eab76ae8b41ea67478b77b7bf79f481ca4d7fc560b795438344ef28eb459730"
     },
-    "backend/market_lab/hilega_milega_strategy_v1.py": {
-      "expected_before_sha256": "e870f85b0a71c59a49bdd69994c84904e0d7fadb28151a5c877962cf8c841e21",
-      "patched_sha256": "1579301a0b7616195ecd2fa707b1138dd747ee3e6a81d3266c952b56fa804035",
-      "mode": "replace"
+    "backend/market_lab/hilega_milega_phase7d_historical_capture_v1.py": {
+      "mode": "replace",
+      "expected_before_sha256": "8deb6833bce693b836e7651c2943b619d96a256fbaa01a9b5f000f60dbea5bee",
+      "patched_sha256": "f803578914ca904c7f2a074e664b38f8f8087cb0303fc938df08a5bc217da17f"
     },
-    "tests/test_hilega_phase7d2_cutoff_order_v1.py": {
+    "backend/market_lab/live_shadow_worker_v1.py": {
+      "mode": "replace",
+      "expected_before_sha256": "00f59b6169beb9f1c2ba12124a72e9ca09e05df397b2fadc28c13eca40ea8593",
+      "patched_sha256": "5afb2464892ebc6ea0891a0af264223366fb95dc989cd269ea4be863addaadc7"
+    },
+    "backend/market_lab/hilega_market_evidence_v1.py": {
+      "mode": "add",
       "expected_before_sha256": null,
-      "patched_sha256": "c945b08e0c3cc7d6a1861d25331f028ac1d1a9814b9fe8dda0aebfcc9619e08c",
-      "mode": "add"
+      "patched_sha256": "21041d508b490624a8f42726a54e770fc04f4904cdfda460f39aa603111883be"
+    },
+    "backend/market_lab/hilega_market_evidence_replay_v1.py": {
+      "mode": "add",
+      "expected_before_sha256": null,
+      "patched_sha256": "b63dc0744c44b0156c1f12e4f7fd4ce4c6a072f51d8defe56055f80922f0434a"
+    },
+    "tests/test_hilega_phase7d3_market_evidence_v1.py": {
+      "mode": "add",
+      "expected_before_sha256": null,
+      "patched_sha256": "c06d520d979fa2f88c72d9cc1a181373486a2c5ac74f8818158ae7a7ab7e03cc"
     }
   }
 }
