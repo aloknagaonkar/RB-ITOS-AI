@@ -13,7 +13,7 @@ assert.deepEqual((out.diagnostics??[]).filter(d=>d.category===ts.DiagnosticCateg
 const moduleBox={exports:{}}
 const mockRequire=name=>name==='react'?{useMemo:()=>{},useState:()=>{},Fragment:Symbol('Fragment')}:name==='react/jsx-runtime'?{jsx:()=>{},jsxs:()=>{}}:name.endsWith('.css')?{}:require(name)
 new Function('require','module','exports',out.outputText)(mockRequire,moduleBox,moduleBox.exports)
-const {eventKind,pathText,computedPremiumPoints,decisionText}=moduleBox.exports
+const {eventKind,pathText,computedPremiumPoints,decisionText,deriveDecisionRows}=moduleBox.exports
 const r=(over={})=>({checkpoint:'2026-09-23T09:35:00+05:30',transitions:[],strategy:{state_before:'PATH1_IDLE',state_after:'PATH1_IDLE',events_emitted:[]},route_a:{},route_b:{},...over})
 assert.equal(eventKind(r({transitions:[{event_type:'ENTRY_PATH1_ROUTE_A_CROSS_RSI50_ABOVE_WMA21'}]})),'ENTRY')
 assert.equal(eventKind(r({transitions:[{event_type:'STRUCTURAL_EXIT_RSI_CROSS_BELOW_WMA21'}]})),'EXIT')
@@ -25,5 +25,19 @@ assert.equal(pathText(r({strategy:{state_before:'OPENING_CANDIDATE',state_after:
 assert.equal(computedPremiumPoints({entry_open:100,exit_open:112.5,exit_timestamp:'2026-09-23T10:00:00+05:30'}),12.5)
 assert.equal(computedPremiumPoints({entry_open:100,exit_open:null,exit_timestamp:null}),null)
 assert.equal(computedPremiumPoints({entry_open:100,exit_open:90,exit_timestamp:'2026-09-23T10:00:00+05:30'}),-10)
-assert.match(decisionText(r({transitions:[{event_type:'ENTRY_OPENING_BULLISH_CONFIRMED'}]})),/entry signal/i)
+assert.equal(decisionText(r({transitions:[{event_type:'ENTRY_OPENING_BULLISH_CONFIRMED'}]})),'BULLISH_ENTRY')
+assert.equal(decisionText(r({strategy:{state_before:'BULLISH_ACTIVE',state_after:'BULLISH_ACTIVE',events_emitted:[]}})),'BULLISH_CONTINUATION')
+assert.equal(decisionText(r({transitions:[{event_type:'STRUCTURAL_EXIT_RSI_CROSS_BELOW_WMA21'}]})),'BULLISH_EXIT')
+const session=deriveDecisionRows([
+  r({checkpoint:'2026-09-23T09:35:00+05:30',transitions:[{event_type:'ENTRY_PATH1_ROUTE_B_STRUCTURAL'}],strategy:{state_before:'PATH1_ARMED',state_after:'BULLISH_ACTIVE',selected_route:'ROUTE_B'}}),
+  r({checkpoint:'2026-09-23T09:40:00+05:30',strategy:{state_before:'BULLISH_ACTIVE',state_after:'BULLISH_ACTIVE'}}),
+  r({checkpoint:'2026-09-23T09:45:00+05:30',transitions:[{event_type:'STRUCTURAL_EXIT_RSI_CROSS_BELOW_WMA21',details:{original_entry_time:'2026-09-23T09:35:00+05:30'}}],strategy:{state_before:'BULLISH_ACTIVE',state_after:'PATH1_IDLE'}}),
+  r({checkpoint:'2026-09-23T09:50:00+05:30',strategy:{state_before:'PATH1_IDLE',state_after:'PATH1_IDLE'}})
+])
+assert.equal(session[1].origin,session[0].report.checkpoint)
+assert.equal(session[1].originRoute,'ROUTE B')
+assert.equal(session[2].origin,session[0].report.checkpoint)
+assert.equal(session[3].origin,null)
+assert.equal(session[3].originRoute,null)
+assert.equal(eventKind(r({strategy:{state_before:'BULLISH_ACTIVE',state_after:'BULLISH_ACTIVE',events_emitted:[]},transitions:[{event_type:'STRUCTURAL_EXIT_RSI_CROSS_BELOW_WMA21'}]})),'EXIT')
 console.log('PASS: Hilega shared decision/CE contract assertions')

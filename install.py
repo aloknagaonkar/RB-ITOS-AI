@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Safe, frontend-only Hilega audit table installer. --check before --apply.
+"""Safe, frontend-only Hilega bullish display installer. --check before --apply.
 
 Works with the installed independent-session component and existing live page;
 never modifies backend, strategy, runtime services or existing evidence.
 """
 from __future__ import annotations
 import argparse
+import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 import shutil
@@ -25,12 +26,18 @@ SECTION_START='    <section className="panel shadow-panel">\n      <div classNam
 def target_content(repo:Path,patch:Path):
     changes={}
     issues=[]
+    prior_hashes={
+        'frontend/src/hilegaDecisionTable.tsx':'8e4249a194bf184d19f2763a5796fd241ed18fa670e6fc64e69951d90a6c34f3',
+        'frontend/src/hilegaDecisionTable.css':'9c3d8892b8d6aa2adf2ffce760d5b4772b23e97f87abd0229459616315995a7f',
+        'tests/test_hilega_decision_table_v1.cjs':'553e38520dd6a83ca6cb91be7b95021aedaad3bf6d7b11da8f3a3b4f04c7edb5',
+    }
     for rel in sorted(NEW):
         dest=repo/rel; src=patch/'files'/rel
         if not src.is_file():issues.append(f'Missing patch file: {rel}');continue
-        if dest.exists() and dest.read_bytes()!=src.read_bytes():
-            issues.append(f'Existing shared component differs: {rel}; do not overwrite manually')
-        elif not dest.exists():changes[rel]=src.read_text()
+        if not dest.exists() or hashlib.sha256(dest.read_bytes()).hexdigest()==prior_hashes[rel]:
+            changes[rel]=src.read_text()
+        elif dest.read_bytes()!=src.read_bytes():
+            issues.append(f'Unknown modified shared component: {rel}; no overwrite permitted')
     for rel in [REPLACE,LIVE,PARENT]:
         if not (repo/rel).is_file():issues.append(f'Missing target: {rel}')
     if issues:return changes,issues
@@ -95,7 +102,7 @@ def main():
     print('\n'.join('PATCH: '+x for x in changes) or 'ALREADY INSTALLED: no changes needed')
     if a.check:print('CHECK PASSED; no files changed.');return
     if not changes:print('No changes necessary.');return
-    backup=repo/'.hilega-unified-table-backup'/datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
+    backup=repo/'.hilega-bullish-status-backup'/datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
     for rel in changes:
         old=repo/rel
         if old.exists():

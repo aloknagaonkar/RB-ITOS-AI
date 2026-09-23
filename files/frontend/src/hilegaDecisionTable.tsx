@@ -34,41 +34,70 @@ const json=(v:unknown)=>JSON.stringify(v??{},null,2)
 const isEntry=(x:any)=>String(x?.event_type??'').startsWith('ENTRY_')
 const isExit=(x:any)=>String(x?.event_type??'').includes('EXIT')
 const transitions=(r:HilegaAudit)=>list(r.transitions)
+// Display classifications are derived from recorded transitions and state, not
+// independent entry/exit calculations. EXIT always has precedence over ENTRY.
 export function eventKind(r:HilegaAudit):Kind {
   const t=transitions(r)
-  if(t.some(isExit))return 'EXIT'
-  if(t.some(isEntry))return 'ENTRY'
-  const emitted=list(r.strategy?.events_emitted).map(String)
-  if(emitted.some(x=>/REJECTED/.test(x)))return 'REJECTED'
-  if(emitted.some(x=>/CANDIDATE|ARMED|DETECT/.test(x)))return 'DETECTED'
-  const after=String(r.strategy?.state_after??'').toUpperCase()
-  if(/ACTIVE|IN_POSITION|POSITION_OPEN|IN_TRADE/.test(after))return 'ACTIVE'
-  if(r.route_a?.eligible===true && r.route_a?.pass===false && r.route_b?.eligible===true && r.route_b?.pass===false)return 'REJECTED'
+  const events=list(r.strategy?.events_emitted).map(String)
+  if(t.some(isExit)||events.some(x=>x.includes('EXIT')))return 'EXIT'
+  if(t.some(isEntry)||events.some(x=>x.startsWith('ENTRY_')))return 'ENTRY'
+  if(String(r.strategy?.state_after??'').toUpperCase()==='BULLISH_ACTIVE')return 'ACTIVE'
+  if(events.some(x=>x.includes('REJECTED')))return 'REJECTED'
+  if(events.some(x=>/CANDIDATE|ARMED|DETECT|OPENING_HOLD/.test(x)) ||
+     String(r.strategy?.state_after??'').toUpperCase()==='PATH1_ARMED')return 'DETECTED'
   return 'NONE'
 }
 export function decisionText(r:HilegaAudit):string {
-  const k=eventKind(r)
-  const exit=transitions(r).find(isExit)
-  if(k==='EXIT')return String(exit?.exit_reason??exit?.event_type??'Exit detected').replaceAll('_',' ')
-  if(k==='ENTRY')return 'CE entry signal confirmed'
-  if(k==='DETECTED')return 'Candidate detected / armed'
-  if(k==='ACTIVE')return 'Position monitoring'
-  if(k==='REJECTED')return 'Candidate rejected / conditions not confirmed'
-  return val(r.strategy?.note && r.strategy.note!=='None'?r.strategy.note:'No entry / exit signal')
+  switch(eventKind(r)) {
+    case 'ENTRY':return 'BULLISH_ENTRY'
+    case 'ACTIVE':return 'BULLISH_CONTINUATION'
+    case 'EXIT':return 'BULLISH_EXIT'
+    case 'DETECTED':return 'ARMED / OPENING CANDIDATE'
+    case 'REJECTED':return 'SETUP REJECTED'
+    default:return 'NO_SIGNAL'
+  }
 }
-export function pathText(r:HilegaAudit):string {
+// Preserve the original entry route on continuation and exit, when earlier
+// records in the currently available timeline prove it. Never infer an origin
+// from a later successful trade or a future candle.
+export function pathText(r:HilegaAudit,carriedRoute?:string):string {
   const route=r.strategy?.selected_route
   if(route)return String(route).replaceAll('_',' ')
-  const allEvents=list(r.strategy?.events_emitted).map(String)
-  if(allEvents.some(x=>x.startsWith('OPENING_')) || [r.strategy?.state_before,r.strategy?.state_after].some(x=>String(x??'').startsWith('OPENING_')))return 'Opening path'
-  const transition=transitions(r)[0]
-  if(transition?.source)return String(transition.source).replaceAll('_',' ')
+  const events=list(r.strategy?.events_emitted).map(String)
+  const origin=transitions(r).find(isEntry)
+  const source=origin?.source
+  if(source)return String(source).replaceAll('_',' ')
+  if(events.some(x=>x.startsWith('OPENING_')) || [r.strategy?.state_before,r.strategy?.state_after].some(x=>String(x??'').startsWith('OPENING_')))return 'Opening path'
+  if(carriedRoute && (eventKind(r)==='ACTIVE' || eventKind(r)==='EXIT'))return carriedRoute
   if(r.route_a?.eligible===true && r.route_b?.eligible===true)return 'Route A / Route B'
   if(r.route_a?.eligible===true)return 'Route A'
   if(r.route_b?.eligible===true)return 'Route B'
-  if(eventKind(r)==='ACTIVE')return 'Active trade (route not recorded)'
+  if(eventKind(r)==='ACTIVE'||eventKind(r)==='EXIT')return 'Entry route not in available records'
   if(r.strategy?.state_after)return val(r.strategy.state_after).replaceAll('_',' ')
   return 'Not evaluated'
+}
+export type DecisionRow = {report:HilegaAudit;origin:string|null;originRoute:string|null}
+export function deriveDecisionRows(reports:HilegaAudit[]):DecisionRow[] {
+  let origin:string|null=null,originRoute:string|null=null,sessionDate:string|null=null
+  return [...reports].sort((a,b)=>a.checkpoint.localeCompare(b.checkpoint)).map(report=>{
+    const date=report.checkpoint.slice(0,10)
+    if(sessionDate!==date){origin=null;originRoute=null;sessionDate=date}
+    const kind=eventKind(report)
+    if(kind==='ENTRY'){
+      origin=report.checkpoint
+      originRoute=pathText(report)
+    }
+    const result={report,origin,originRoute}
+    if(kind==='EXIT'){
+      // Exit transitions carry immutable original entry identity when recorded.
+      const linked=transitions(report).find(isExit)?.details?.original_entry_time
+      if(linked)result.origin=String(linked)
+      origin=null;originRoute=null
+    } else if(kind==='NONE' && String(report.strategy?.state_after??'')==='SESSION_LOCKED'){
+      origin=null;originRoute=null
+    }
+    return result
+  })
 }
 function score(v:any):string {return v===true?'PASS':v===false?'FAIL':'NOT EVALUATED'}
 function evidence(key:string,i:Record<string,any>):string {
@@ -166,7 +195,7 @@ function CeTable({r,allowedUntil}:{r:HilegaAudit;allowedUntil?:string}){
     })}
   </tbody></table><p className="hd-muted">Hypothetical premium points per independent CE contract; not executed account P&amp;L. No substitute premiums or assumed quantity/costs.</p></div>
 }
-function Detail({r,allowedUntil}:{r:HilegaAudit;allowedUntil?:string}){
+function Detail({r,allowedUntil,origin,originRoute}:{r:HilegaAudit;allowedUntil?:string;origin?:string|null;originRoute?:string|null}){
   const cand=r.bar??{},ind=r.indicators??{},conditions=r.conditions??{}
   const entry=transitions(r).find(isEntry),exit=transitions(r).find(isExit)
   const reasons=[...list(r.route_a?.fail_reasons),...list(r.route_b?.fail_reasons)]
@@ -176,9 +205,12 @@ function Detail({r,allowedUntil}:{r:HilegaAudit;allowedUntil?:string}){
     <div className="hd-cards">
       <article><b>Nifty candle</b><span>{clock(r.checkpoint)} IST</span><span>O {val(cand.open)} · H {val(cand.high)} · L {val(cand.low)} · C {val(cand.close)}</span><span>Volume {val(cand.volume)}</span></article>
       <article><b>Indicators</b><span>RSI9 {money(ind.rsi9)} (prev {money(ind.previous_rsi9)})</span><span>EMA3(RSI) {money(ind.ema3_rsi)} (prev {money(ind.previous_ema3_rsi)})</span><span>WMA21(RSI) {money(ind.wma21_rsi)} (prev {money(ind.previous_wma21_rsi)})</span></article>
-      <article><b>Strategy state</b><span>{val(r.strategy?.state_before)} → {val(r.strategy?.state_after)}</span><span>Route: {pathText(r)}</span><span>Route A: {score(r.route_a?.pass)} · Route B: {score(r.route_b?.pass)}</span><span>Priority suppression: {score(r.strategy?.route_b_suppressed_by_route_a_priority)}</span></article>
+      <article><b>Strategy state</b><span>{val(r.strategy?.state_before)} → {val(r.strategy?.state_after)}</span><span>Decision: {decisionText(r)}</span><span>Original entry route: {originRoute??pathText(r)}</span><span>Entry signal candle: {origin?clock(origin):'Not available in current timeline'}</span><span>Route A: {score(r.route_a?.pass)} · Route B: {score(r.route_b?.pass)}</span><span>Priority suppression: {score(r.strategy?.route_b_suppressed_by_route_a_priority)}</span></article>
       <article><b>Entry / exit</b><span>Entry: {entry?`${eventAt(entry,r)} · Nifty ${money(entry.price)}`:'Not detected'}</span><span>Exit: {exit?`${eventAt(exit,r)} · Nifty ${money(exit.price)}`:'Not detected'}</span><span>Reason: {val(exit?.exit_reason??exit?.event_type)}</span></article>
     </div>
+    {eventKind(r)==='ENTRY'&&<div className="hd-entry-reason"><b>BULLISH_ENTRY confirmed by {pathText(r)}</b><p>Recorded conditions and previous/current indicators are shown below. Only the strategy's recorded transition constitutes an entry; frontend condition checks do not generate new signals.</p></div>}
+    {eventKind(r)==='ACTIVE'&&<div className="hd-continuation-reason"><b>BULLISH_CONTINUATION</b><p>Recorded state remains BULLISH_ACTIVE and no exit event was emitted for this candle. No new entry is generated. Origin {origin?clock(origin):'not present in available records'}.</p></div>}
+    {eventKind(r)==='EXIT'&&<div className="hd-exit-reason"><b>BULLISH_EXIT</b><p>Recorded exit: {val(exit?.exit_reason??exit?.event_type??list(r.strategy?.events_emitted).find((x:any)=>String(x).includes('EXIT')))}. Original entry signal: {origin?clock(origin):'not available in current timeline'}. Option exit is independently pending until its exact source minute is recorded.</p></div>}
     <h4>Opening / Route A / Route B conditions</h4>
     <div className="hd-scroll"><table className="hd-table"><thead><tr><th>Check</th><th>Result</th><th>Recorded value</th></tr></thead><tbody>{Object.entries(conditionNames).map(([k,label])=><tr key={k}><td>{label}</td><td><span className={`hd-badge ${conditions[k]===true?'hd-pass':conditions[k]===false?'hd-fail':'hd-neutral'}`}>{score(conditions[k])}</span></td><td>{evidence(k,ind)}</td></tr>)}</tbody></table></div>
     {reasons.length>0&&<p className="hd-muted">Recorded rejection reasons: {reasons.map(String).join(' · ')}</p>}
@@ -202,7 +234,8 @@ export default function HilegaDecisionTable({reports,mode,fetchDetail,visibleUnt
   const [error,setError]=useState('')
   const ordered=useMemo(()=>[...reports].filter(r=>!visibleUntil || r.checkpoint<=visibleUntil)
     .sort((a,b)=>a.checkpoint.localeCompare(b.checkpoint)),[reports,visibleUntil])
-  const filtered=ordered.filter(r=>filter==='ALL'||eventKind(r)===filter)
+  const contextual=useMemo(()=>deriveDecisionRows(ordered),[ordered])
+  const filtered=contextual.filter(({report:r})=>filter==='ALL'||eventKind(r)===filter)
   useEffect(()=>{
     if(mode!=='LIVE'||!open||!fetchDetail)return
     let active=true
@@ -225,14 +258,14 @@ export default function HilegaDecisionTable({reports,mode,fetchDetail,visibleUnt
   return <div className="hd-shell">
     <div className="hd-toolbar"><strong>{mode==='LIVE'?'Live-shadow':'Historical'} candle decision audit</strong><span>{ordered.length} checkpoints available</span>
       <label>Filter <select aria-label={`${mode} candle filter`} value={filter} onChange={e=>setFilter(e.target.value as Filter)}>
-        {(['ALL','DETECTED','ENTRY','EXIT','ACTIVE','REJECTED'] as Filter[]).map(k=><option key={k} value={k}>{k==='ALL'?'All candles':k}</option>)}
+        {(['ALL','DETECTED','ENTRY','EXIT','ACTIVE','REJECTED'] as Filter[]).map(k=><option key={k} value={k}>{({ALL:'All candles',DETECTED:'Armed / candidates',ENTRY:'Bullish entries',EXIT:'Bullish exits',ACTIVE:'Bullish continuations',REJECTED:'Rejected setups'} as Record<Filter,string>)[k]}</option>)}
       </select></label>
     </div>
     {error&&<p role="alert" className="hd-warning">{error}</p>}
     <div className="hd-scroll"><table className="hd-table hd-main"><thead><tr><th>Time (IST)</th><th>Strategy decision</th><th>Opening path / Route A / Route B</th><th>Signal detected</th><th>Audit</th></tr></thead><tbody>
-      {filtered.map(r=>{const k=eventKind(r),opened=open===r.checkpoint,report=details[r.checkpoint]??r
-        return <Fragment key={r.checkpoint}><tr className={`hd-row hd-${k.toLowerCase()}`}><td>{clock(r.checkpoint)}</td><td>{decisionText(r)}</td><td>{pathText(r)}</td><td><span className={`hd-badge hd-${k.toLowerCase()}`}>{k==='ENTRY'?'BUY CE':k==='EXIT'?'EXIT CE':k==='NONE'?'NO SIGNAL':k}</span></td><td><button aria-expanded={opened} aria-label={`Audit ${r.checkpoint}`} onClick={()=>void toggle(r)}>{opened?'Hide audit':'View audit ▾'}</button></td></tr>
-        {opened&&<tr className="hd-expanded"><td colSpan={5}>{loading&&!details[r.checkpoint]&&<p>Loading complete audit…</p>}<Detail r={report} allowedUntil={candleBoundary(visibleUntil)}/></td></tr>}
+      {filtered.map(({report:r,origin,originRoute})=>{const k=eventKind(r),opened=open===r.checkpoint,report=details[r.checkpoint]??r
+        return <Fragment key={r.checkpoint}><tr className={`hd-row hd-${k.toLowerCase()}`}><td>{clock(r.checkpoint)}</td><td><strong>{decisionText(r)}</strong></td><td>{pathText(r,originRoute??undefined)}</td><td><span className={`hd-badge hd-${k.toLowerCase()}`}>{k==='ENTRY'?'BULLISH_ENTRY':k==='EXIT'?'BULLISH_EXIT':k==='ACTIVE'?'BULLISH_CONTINUATION':k==='DETECTED'?'ARMED':k==='NONE'?'NO SIGNAL':'REJECTED'}</span></td><td><button aria-expanded={opened} aria-label={`Audit ${r.checkpoint}`} onClick={()=>void toggle(r)}>{opened?'Hide audit':'View audit ▾'}</button></td></tr>
+        {opened&&<tr className="hd-expanded"><td colSpan={5}>{loading&&!details[r.checkpoint]&&<p>Loading complete audit…</p>}<Detail r={report} origin={origin} originRoute={originRoute} allowedUntil={candleBoundary(visibleUntil)}/></td></tr>}
         </Fragment>
       })}
       {!filtered.length&&<tr><td colSpan={5}>{emptyMessage??'No recorded checkpoints for this selection.'}</td></tr>}

@@ -1,93 +1,43 @@
-# Unified Hilega-Milega historical replay and live-shadow decision tables
+# Hilega-Milega BULLISH_ENTRY / BULLISH_CONTINUATION / BULLISH_EXIT UI
 
-This frontend-only patch adds one shared canonical-audit presentation component to
-BOTH the existing Historical Replay → Hilega panel and the Hilega Shadow Live page.
-No strategy rules, market adapters, backend routes, broker calls, live worker,
-execution permissions or immutable evidence are modified.
+Frontend-only cumulative patch for the existing RB-ITOS-AI **Hilega-Milega Historical Replay** and **Hilega Shadow Live** interfaces. It retains the existing ALL3 replay. If the earlier unified-table patch is not installed, this package installs its components first; if it is installed, it upgrades only the shared presentation and its tests.
 
-## Changes
+## Behaviors
 
-- The original ALL3 Historical Replay page is preserved. Hilega retains its own
-  session and capture selectors; `d4` on 2026-09-23 is the first test capture.
-- The Hilega historical panel uses a primary five-column checkpoint table:
-  Time IST | Strategy decision | Opening/Route A/Route B | Signal detected | Audit.
-- Each row has colored DETECTED/ENTRY/EXIT/ACTIVE/REJECTED statuses and
-  expandable audit cards, recorded condition matrix, candidate records and CE
-  premium analysis; filters simplify review.
-- Entry/exit audits show independent ATM±2 CE entry/exit time and OPEN premiums,
-  premium-point P&L, P&L %, MFE, MAE where present; missing exact prices stay
-  unavailable. No rupee/account profit is inferred.
-- Historical mode offers **Full-session table** for retrospective inspection or
-  **Candle-by-candle mode** for progressive review. Progressive review restricts
-  future checkpoints and, where event timestamps prove availability, linked CE
-  updates/results; otherwise linked details remain unavailable until full review.
-- Historical manual notes stay in browser localStorage using the prior
-  `hime-review:<capture_id>` key and can be exported as JSON. Audits are immutable.
-- Hilega Shadow Live continues polling its existing API and ledger. It displays
-  every available audited decision checkpoint in the SAME five-column table;
-  opening an audit retrieves full detail and refreshes it every five seconds.
-- No existing live shadow service restart is required; the app serves
-  `frontend/dist` directly once the frontend build completes.
+- Green `BULLISH_ENTRY` **on the signal candle**, never on the later option premium acquisition minute.
+- Light-green `BULLISH_CONTINUATION` on subsequent completed candles whose *recorded strategy state* remains `BULLISH_ACTIVE` without a recorded exit. This is not another entry signal.
+- Red `BULLISH_EXIT` when a structural/cutoff exit event is recorded. Exit takes precedence over continuation, including when exact option exit prices are still pending.
+- Amber `ARMED / OPENING CANDIDATE`; muted rejected setups; neutral candles with no recorded signal.
+- Preserve original Opening Path, Route A or Route B identity across available entry/continuation/exit rows; if earlier records are missing, explicitly display that entry route is unavailable. Do not carry routes across session dates or closed positions.
+- Each row retains `View audit`: OHLC, previous/current RSI9/EMA3/WMA21, recorded conditions and failure reasons, lifecycle event timestamps, five independent ATM±2 CE entry/exit OPEN premiums and derived premium-points/percentage results, where the evidence exists.
+- Progressive historical mode hides future checkpoints and only displays option records whose timestamps are available by the selected candle boundary. Full-session retrospective mode can show completed trade results.
+- No changes to the strategy algorithm, backend, execution permissions, market-data acquisition, journal or worker process.
 
-**Important scope:** This patch LOADS completed Hilega historical captures. It does
-not introduce a new broker-download/replay job endpoint. The existing ALL3
-Run Replay action must NOT be mistaken for a Hilega replay runner.
+## Installation (VM)
 
-## Compatibility
-
-Based on the user-supplied repository ZIP and the subsequently installed
-independent-Hilega-session component (`hilega-independent-session-selector-fix`).
-The installer recognizes the exact existing historical component version and
-existing live page activity-table anchor, and refuses unknown modifications.
-It also accepts either parent invocation, with or without the obsolete date prop.
-
-## Install on VM (after transferring ZIP)
+Transfer ZIP to VM and from the repo root:
 
 ```bash
-unzip hilega-unified-decision-tables-patch.zip -d /tmp/
+unzip hilega-bullish-status-ui-patch.zip -d /tmp/
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
-python /tmp/hilega-unified-table-patch/install.py --repo "$PWD" --check
-python /tmp/hilega-unified-table-patch/install.py --repo "$PWD" --apply
+python /tmp/hilega-bullish-status-patch/install.py --repo "$PWD" --check
+# ONLY IF CHECK PASSES
+python /tmp/hilega-bullish-status-patch/install.py --repo "$PWD" --apply
 node tests/test_hilega_decision_table_v1.cjs
 cd frontend && npm run build
 ```
 
-Only run `--apply` if `--check` passes. If it says BLOCKED, paste the output;
-do not overwrite files manually. The patch backs up each modified existing
-source file beneath `.hilega-unified-table-backup/<timestamp>/` and is
-idempotent if run again unchanged.
+After the build succeeds, hard-refresh both pages in the browser. The FastAPI application serves `frontend/dist` directly, so **do not restart the API, main worker or live-shadow worker for this frontend-only change**.
 
-After the frontend build, Ctrl+Shift+R in the browser. No `scripts/restart.sh`
-or live-shadow/API restart is required. Your live worker and its evidence file
-stay running with the existing journal lock.
+## Compatibility and safeguards
 
-## Validation performed before packaging
+The installer accepts the verified independent Hilega session component and original live page from the supplied ZIP, as well as the exact previous unified-table patch. It refuses unknown local modifications and backs up modified existing files beneath `.hilega-bullish-status-backup/<timestamp>/`. Re-running it is safe.
 
-- Safe installer tested against a simulation of the documented independently
-  selectable historical component plus the uploaded Hilega live component.
-- Installer `--check`, `--apply`, and repeat `--check` passed.
-- Shared classification/P&L contract tests passed locally.
-- TypeScript TSX syntax transpilation succeeded for the new components and
-  changed integration points.
+This patch does not make a new broker-download historical replay endpoint. Load an existing Hilega historical capture (such as September 23 d4) from the Hilega selector. There is no guaranteed completed live session in the source ZIP: verify classifications against the actual VM dataset and external chart.
 
-**Not verified here:** VM production build, browser rendering, and actual d4
-or next-day live data display. Run `npm run build` on the VM and check both
-pages against their actual audit records. This is NOT proof of historical/live
-market-data parity or of trading profitability.
+### Local validation
 
-## Smoke-test acceptance
-
-1. Existing ALL3 Historical Replay still works.
-2. Hilega Historical Replay → select 2026-09-23 → d4 → Load existing replay.
-   Verify checkpoint count and audited times, including opening path, Route A/B,
-   entries and exits where supported by the capture.
-3. Click entry/exit Audit and compare candidate five CE rows and exact observed
-   entry/exit minute opens with JSON source evidence. Verify missing premiums
-   show unavailable rather than 0 or substituted values.
-4. Switch to candle-by-candle mode and verify the future rows and future exit
-   premium results are hidden until the corresponding candle completes.
-5. Hilega Shadow Live → inspect its decision table while leaving its existing
-   premium ledger and safety status intact. Check yellow detected, green entry,
-   red exit and expandable details on real audit events.
-6. Confirm the live-shadow PID and `.env` are unchanged.
+- Standalone shared-classification, continuation-route tracking and CE-premium tests passed against the bundled prior unified-table component, using the TypeScript transpiler.
+- Safe-installer check/apply/recheck passed with prior unified-table sources; dry-run passed with independent-session (pre-unified) source simulation.
+- A complete VM frontend production build and real data/browser verification must still be run on the VM.
