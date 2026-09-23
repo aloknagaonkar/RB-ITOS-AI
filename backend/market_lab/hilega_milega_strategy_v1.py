@@ -395,7 +395,16 @@ class HilegaMilegaBullishEngineV1:
             bar,
             "STRATEGY_DECISION",
             "EVALUATED",
-            {"state_before": decision_state_before, "time": t, **d},
+            {
+                "state_before": decision_state_before,
+                "time": t,
+                "bar_open": bar.open,
+                "bar_high": bar.high,
+                "bar_low": bar.low,
+                "bar_close": bar.close,
+                "bar_volume": bar.volume,
+                **d,
+            },
         )
 
         # Hard cutoff is evaluated before every other strategy transition.

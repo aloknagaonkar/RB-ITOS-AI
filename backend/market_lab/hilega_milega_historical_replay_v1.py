@@ -308,6 +308,11 @@ def _decision_reason_rows(audit_rows: Sequence[dict[str, Any]]) -> list[dict[str
                 "ema_gt_wma": p.get("ema_gt_wma"),
                 "rsi_rising": p.get("rsi_rising"),
                 "ema_rising": p.get("ema_rising"),
+                "bar_open": p.get("bar_open"),
+                "bar_high": p.get("bar_high"),
+                "bar_low": p.get("bar_low"),
+                "bar_close": p.get("bar_close"),
+                "bar_volume": p.get("bar_volume"),
                 "full_alignment": p.get("full_alignment"),
                 "route_a_eligible": rp.get("route_a_eligible"),
                 "route_a_pass": rp.get("route_a_pass"),
@@ -319,6 +324,171 @@ def _decision_reason_rows(audit_rows: Sequence[dict[str, Any]]) -> list[dict[str
         )
     return out
 
+
+
+def _yn(value: Any) -> str:
+    if value is None:
+        return "NA"
+    return "YES" if bool(value) else "NO"
+
+
+def _fmt_num(value: Any, digits: int = 2) -> str:
+    if value is None:
+        return "NA"
+    try:
+        return f"{float(value):.{digits}f}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _human_interpretation(row: dict[str, Any]) -> str:
+    d = row.get("final_decision")
+    if d == "ENTRY_ROUTE_A":
+        return "Fresh RSI upward cross of EMA3 confirmed immediately: RSI was above 50 and above WMA21."
+    if d == "ENTRY_ROUTE_B":
+        return "Path1 was armed and Route B confirmed because RSI or EMA3 was above WMA21 while both RSI and EMA3 were rising."
+    if d == "ENTRY_OPENING":
+        return "Opening path completed: 09:15 full alignment survived the 09:20 and 09:25 RSI-above-WMA21 holds."
+    if d == "STRUCTURAL_EXIT":
+        return "Active bullish structure ended on the first closed candle where RSI crossed below WMA21."
+    if d == "SESSION_CUTOFF_EXIT":
+        return "Active shadow position was closed at the 14:55 candle open because the hard session cutoff was reached."
+    if d == "ARM_CANCELLED_1455":
+        return "Armed Path1 setup was cancelled at 14:55; no new entries are allowed after the cutoff."
+    if d == "ARMED_WAITING":
+        return "Fresh RSI-upward-EMA3 cross armed Path1, but immediate entry conditions were incomplete; Route B remains eligible on later candles."
+    if d == "WAIT_ROUTE_B":
+        return "Path1 remains armed. Route B has not yet satisfied every structural/rising condition."
+    if d == "OPENING_PROGRESS":
+        return "Opening setup is still progressing through its required 09:15/09:20/09:25 confirmation sequence."
+    if d == "OPENING_REJECTED":
+        return "Opening setup was rejected at the current checkpoint; later Path1 signals remain allowed."
+    if row.get("state_before") == "BULLISH_ACTIVE":
+        return "Bullish position remains active; no structural exit condition was triggered on this candle."
+    return "No strategy transition occurred on this candle."
+
+
+def _all_decision_rows(audit_rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped = _audit_index(audit_rows)
+    out: list[dict[str, Any]] = []
+    for checkpoint, rows in sorted(grouped.items()):
+        evaluated = next((r for r in rows if r.get("stage") == "STRATEGY_DECISION" and r.get("status") == "EVALUATED"), None)
+        result = next((r for r in rows if r.get("stage") == "STRATEGY_DECISION_RESULT"), None)
+        transitions = [r for r in rows if r.get("stage") == "STRATEGY_TRANSITION"]
+        if evaluated is None:
+            continue
+        p = evaluated.get("payload", {})
+        rp = result.get("payload", {}) if result else {}
+        event_types = [str(r.get("status")) for r in transitions]
+        state_before = p.get("state_before")
+
+        final_decision = "NO_ACTION"
+        if "ENTRY_PATH1_ROUTE_A_CROSS_RSI50_ABOVE_WMA21" in event_types:
+            final_decision = "ENTRY_ROUTE_A"
+        elif "ENTRY_PATH1_ROUTE_B_STRUCTURAL" in event_types:
+            final_decision = "ENTRY_ROUTE_B"
+        elif "ENTRY_OPENING_BULLISH_CONFIRMED" in event_types:
+            final_decision = "ENTRY_OPENING"
+        elif "STRUCTURAL_EXIT_RSI_CROSS_BELOW_WMA21" in event_types:
+            final_decision = "STRUCTURAL_EXIT"
+        elif "SESSION_CUTOFF_EXIT_1455_OPEN" in event_types:
+            final_decision = "SESSION_CUTOFF_EXIT"
+        elif "SESSION_CUTOFF_ARM_CANCELLED" in event_types:
+            final_decision = "ARM_CANCELLED_1455"
+        elif "PATH1_ARMED_RSI_CROSS_EMA3_UP" in event_types:
+            final_decision = "ARMED_WAITING"
+        elif any(e.startswith("OPENING_REJECTED") for e in event_types):
+            final_decision = "OPENING_REJECTED"
+        elif any(e.startswith("OPENING_") for e in event_types):
+            final_decision = "OPENING_PROGRESS"
+        elif state_before == "PATH1_ARMED":
+            final_decision = "WAIT_ROUTE_B"
+        elif state_before == "BULLISH_ACTIVE":
+            final_decision = "HOLD_ACTIVE"
+
+        route_a_fail = rp.get("route_a_fail_reasons") or []
+        route_b_fail = rp.get("route_b_fail_reasons") or []
+        reasons: list[str] = []
+        if final_decision == "ENTRY_ROUTE_A":
+            reasons = ["FRESH_RSI_CROSS_EMA3_UP", "RSI_ABOVE_50", "RSI_ABOVE_WMA21"]
+        elif final_decision == "ENTRY_ROUTE_B":
+            reasons = ["PATH1_ARMED_OR_FRESH_CROSS", "RSI_OR_EMA_ABOVE_WMA21", "RSI_RISING", "EMA_RISING"]
+        elif final_decision == "STRUCTURAL_EXIT":
+            reasons = ["PREVIOUS_RSI_GTE_PREVIOUS_WMA21", "CURRENT_RSI_LT_WMA21"]
+        elif final_decision in {"SESSION_CUTOFF_EXIT", "ARM_CANCELLED_1455"}:
+            reasons = ["HARD_SESSION_CUTOFF_14_55"]
+        elif final_decision in {"ARMED_WAITING", "WAIT_ROUTE_B"}:
+            reasons = list(dict.fromkeys(route_a_fail + route_b_fail))
+        elif final_decision.startswith("OPENING"):
+            if p.get("full_alignment"):
+                reasons.append("FULL_ALIGNMENT")
+            if p.get("rsi_gt_wma"):
+                reasons.append("RSI_ABOVE_WMA21")
+
+        row = {
+            "checkpoint": checkpoint,
+            "time": checkpoint[11:16],
+            "bar_open": p.get("bar_open"),
+            "bar_high": p.get("bar_high"),
+            "bar_low": p.get("bar_low"),
+            "bar_close": p.get("bar_close"),
+            "bar_volume": p.get("bar_volume"),
+            "state_before": state_before,
+            "state_after": rp.get("state_after"),
+            "final_decision": final_decision,
+            "reasons": ",".join(reasons),
+            "events": ",".join(event_types),
+            "rsi9": p.get("rsi9"),
+            "ema3_rsi": p.get("ema3_rsi"),
+            "wma21_rsi": p.get("wma21_rsi"),
+            "previous_rsi9": p.get("previous_rsi9"),
+            "previous_ema3_rsi": p.get("previous_ema3_rsi"),
+            "previous_wma21_rsi": p.get("previous_wma21_rsi"),
+            "rsi_cross_ema_up": p.get("rsi_cross_ema_up"),
+            "rsi_cross_wma_down": p.get("rsi_cross_wma_down"),
+            "rsi_gt_50": p.get("rsi_gt_50"),
+            "rsi_gt_wma": p.get("rsi_gt_wma"),
+            "ema_gt_wma": p.get("ema_gt_wma"),
+            "rsi_rising": p.get("rsi_rising"),
+            "ema_rising": p.get("ema_rising"),
+            "full_alignment": p.get("full_alignment"),
+            "route_a_eligible": rp.get("route_a_eligible"),
+            "route_a_pass": rp.get("route_a_pass"),
+            "route_a_fail_reasons": ",".join(route_a_fail),
+            "route_b_eligible": rp.get("route_b_eligible"),
+            "route_b_pass": rp.get("route_b_pass"),
+            "route_b_fail_reasons": ",".join(route_b_fail),
+        }
+        row["interpretation"] = _human_interpretation(row)
+        out.append(row)
+    return out
+
+
+def _annotate_decisions_with_trade_outcome(
+    rows: Sequence[dict[str, Any]], trades: Sequence[TradeRow]
+) -> list[dict[str, Any]]:
+    by_entry = {(t.session_date, t.entry_time): t for t in trades}
+    out: list[dict[str, Any]] = []
+    for source in rows:
+        row = dict(source)
+        key = (row.get("session_date"), row.get("time"))
+        trade = by_entry.get(key)
+        if trade and str(row.get("final_decision", "")).startswith("ENTRY_"):
+            row.update({
+                "retrospective_outcome": trade.outcome,
+                "retrospective_exit_time": trade.exit_time,
+                "retrospective_exit_reason": trade.exit_reason,
+                "retrospective_points": trade.points,
+            })
+        else:
+            row.update({
+                "retrospective_outcome": "",
+                "retrospective_exit_time": "",
+                "retrospective_exit_reason": "",
+                "retrospective_points": "",
+            })
+        out.append(row)
+    return out
 
 def _pair_trades(events: Sequence[Any], session_date: date) -> list[TradeRow]:
     active: dict[str, Any] | None = None
@@ -366,23 +536,109 @@ def _write_csv(path: Path, rows: Sequence[dict[str, Any]]) -> None:
 
 def _write_decision_text(path: Path, session_date: date, rows: Sequence[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    lines = [f"HILEGA-MILEGA DECISION AUDIT — {session_date.isoformat()}", "=" * 88, ""]
+    lines = [
+        f"HILEGA-MILEGA DECISION AUDIT — SIGNAL DETAIL — {session_date.isoformat()}",
+        "=" * 100,
+        "Causal strategy evidence is shown separately from retrospective trade outcome.",
+        "",
+    ]
     for r in rows:
-        lines.extend(
-            [
-                f"{r['time']}  {r['final_decision']}  {r['state_before']} -> {r['state_after']}",
-                f"  RSI9={r['rsi9']}  EMA3={r['ema3_rsi']}  WMA21={r['wma21_rsi']}",
-                f"  Prev RSI={r['previous_rsi9']}  Prev EMA={r['previous_ema3_rsi']}  Prev WMA={r['previous_wma21_rsi']}",
-                f"  Cross RSI↑EMA={r['rsi_cross_ema_up']}  Cross RSI↓WMA={r['rsi_cross_wma_down']}",
-                f"  RSI>50={r['rsi_gt_50']}  RSI>WMA={r['rsi_gt_wma']}  EMA>WMA={r['ema_gt_wma']}",
-                f"  RSI rising={r['rsi_rising']}  EMA rising={r['ema_rising']}  FULL={r['full_alignment']}",
-                f"  Route A eligible/pass={r['route_a_eligible']}/{r['route_a_pass']}  fail={r['route_a_fail_reasons'] or '-'}",
-                f"  Route B eligible/pass={r['route_b_eligible']}/{r['route_b_pass']}  fail={r['route_b_fail_reasons'] or '-'}",
-                f"  WHY: {r['reasons'] or '-'}",
-                f"  Events: {r['events'] or '-'}",
+        lines.extend([
+            "=" * 100,
+            f"{r['time']}  {r['final_decision']}",
+            "=" * 100,
+            "",
+            "TIME / PRICE",
+            f"  Checkpoint        : {r['checkpoint']}",
+            f"  Open              : {_fmt_num(r.get('bar_open'))}",
+            f"  High              : {_fmt_num(r.get('bar_high'))}",
+            f"  Low               : {_fmt_num(r.get('bar_low'))}",
+            f"  Close             : {_fmt_num(r.get('bar_close'))}",
+            "",
+            "INDICATORS",
+            f"  RSI9              : {_fmt_num(r.get('rsi9'))}",
+            f"  EMA3(RSI)         : {_fmt_num(r.get('ema3_rsi'))}",
+            f"  WMA21(RSI)        : {_fmt_num(r.get('wma21_rsi'))}",
+            f"  Previous RSI9     : {_fmt_num(r.get('previous_rsi9'))}",
+            f"  Previous EMA3     : {_fmt_num(r.get('previous_ema3_rsi'))}",
+            f"  Previous WMA21    : {_fmt_num(r.get('previous_wma21_rsi'))}",
+            "",
+            "STRUCTURAL CHECKS",
+            f"  RSI crosses EMA up: {_yn(r.get('rsi_cross_ema_up'))}",
+            f"  RSI crosses WMA dn: {_yn(r.get('rsi_cross_wma_down'))}",
+            f"  RSI > 50          : {_yn(r.get('rsi_gt_50'))}",
+            f"  RSI > WMA21       : {_yn(r.get('rsi_gt_wma'))}",
+            f"  EMA3 > WMA21      : {_yn(r.get('ema_gt_wma'))}",
+            f"  RSI rising        : {_yn(r.get('rsi_rising'))}",
+            f"  EMA3 rising       : {_yn(r.get('ema_rising'))}",
+            f"  FULL alignment    : {_yn(r.get('full_alignment'))}",
+            "",
+            "ROUTE A",
+            f"  Eligible          : {_yn(r.get('route_a_eligible'))}",
+            f"  Passed            : {_yn(r.get('route_a_pass'))}",
+            f"  Failure reason(s) : {r.get('route_a_fail_reasons') or '-'}",
+            "",
+            "ROUTE B",
+            f"  Eligible          : {_yn(r.get('route_b_eligible'))}",
+            f"  Passed            : {_yn(r.get('route_b_pass'))}",
+            f"  Failure reason(s) : {r.get('route_b_fail_reasons') or '-'}",
+            "",
+            "STRATEGY DECISION",
+            f"  State before      : {r.get('state_before')}",
+            f"  State after       : {r.get('state_after')}",
+            f"  Decision          : {r.get('final_decision')}",
+            f"  Why               : {r.get('reasons') or '-'}",
+            f"  Events            : {r.get('events') or '-'}",
+            "",
+            "INTERPRETATION",
+            f"  {_human_interpretation(r)}",
+        ])
+        if r.get("retrospective_outcome"):
+            lines.extend([
                 "",
-            ]
+                "RETROSPECTIVE OUTCOME — NOT AN INPUT TO THE DECISION",
+                f"  Outcome           : {r.get('retrospective_outcome')}",
+                f"  Exit time         : {r.get('retrospective_exit_time')}",
+                f"  Exit reason       : {r.get('retrospective_exit_reason')}",
+                f"  Chart points      : {_fmt_num(r.get('retrospective_points'))}",
+            ])
+        lines.append("")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_candle_by_candle_text(path: Path, session_date: date, rows: Sequence[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        f"HILEGA-MILEGA CANDLE-BY-CANDLE STRATEGY AUDIT — {session_date.isoformat()}",
+        "=" * 132,
+        "Every completed 5-minute candle is a causal snapshot. Retrospective outcome is excluded from this report.",
+        "",
+        "TIME   CLOSE      RSI9    EMA3   WMA21  XUP XDN >50 >WMA E>W RUP EUP  STATE BEFORE -> AFTER             DECISION",
+        "-" * 132,
+    ]
+    for r in rows:
+        lines.append(
+            f"{r['time']:5} "
+            f"{_fmt_num(r.get('bar_close')):>9} "
+            f"{_fmt_num(r.get('rsi9')):>7} "
+            f"{_fmt_num(r.get('ema3_rsi')):>7} "
+            f"{_fmt_num(r.get('wma21_rsi')):>7}  "
+            f"{_yn(r.get('rsi_cross_ema_up'))[:1]:>3} "
+            f"{_yn(r.get('rsi_cross_wma_down'))[:1]:>3} "
+            f"{_yn(r.get('rsi_gt_50'))[:1]:>3} "
+            f"{_yn(r.get('rsi_gt_wma'))[:1]:>4} "
+            f"{_yn(r.get('ema_gt_wma'))[:1]:>3} "
+            f"{_yn(r.get('rsi_rising'))[:1]:>3} "
+            f"{_yn(r.get('ema_rising'))[:1]:>3}  "
+            f"{str(r.get('state_before')):12} -> {str(r.get('state_after')):12}  "
+            f"{r.get('final_decision')}"
         )
+        if r.get("reasons"):
+            lines.append(f"      WHY: {r['reasons']}")
+        if r.get("events"):
+            lines.append(f"      EVENTS: {r['events']}")
+        if r.get("final_decision") not in {"NO_ACTION", "HOLD_ACTIVE"}:
+            lines.append(f"      INTERPRETATION: {r.get('interpretation')}")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -410,6 +666,7 @@ def replay_sessions(
     session_summaries: list[SessionSummary] = []
     all_trades: list[TradeRow] = []
     all_decisions: list[dict[str, Any]] = []
+    all_candle_decisions: list[dict[str, Any]] = []
     data_availability: dict[str, int] = {}
 
     current = begin
@@ -458,12 +715,16 @@ def replay_sessions(
 
         audit_rows = store.read_all()
         decisions = _decision_reason_rows(audit_rows)
+        all_candle_decisions = _all_decision_rows(audit_rows)
         for row in decisions:
+            row["session_date"] = current.isoformat()
+        for row in all_candle_decisions:
             row["session_date"] = current.isoformat()
         trades = _pair_trades(events, current)
 
         trade_dicts = [asdict(t) for t in trades]
-        decision_dicts = list(decisions)
+        decision_dicts = _annotate_decisions_with_trade_outcome(decisions, trades)
+        all_candle_dicts = list(all_candle_decisions)
         _write_csv(session_dir / "trades.csv", trade_dicts)
         _write_csv(session_dir / "signal-decision-audit.csv", decision_dicts)
         (session_dir / "signal-decision-audit.json").write_text(
@@ -471,6 +732,14 @@ def replay_sessions(
             encoding="utf-8",
         )
         _write_decision_text(session_dir / "signal-decision-audit.txt", current, decision_dicts)
+        _write_csv(session_dir / "candle-by-candle-strategy-audit.csv", all_candle_dicts)
+        (session_dir / "candle-by-candle-strategy-audit.json").write_text(
+            json.dumps(all_candle_dicts, indent=2, default=str) + "\n",
+            encoding="utf-8",
+        )
+        _write_candle_by_candle_text(
+            session_dir / "candle-by-candle-strategy-audit.txt", current, all_candle_dicts
+        )
 
         pos = sum(t.outcome == "POSITIVE" for t in trades)
         neg = sum(t.outcome == "NEGATIVE" for t in trades)
@@ -493,7 +762,8 @@ def replay_sessions(
         )
         session_summaries.append(summary)
         all_trades.extend(trades)
-        all_decisions.extend(decisions)
+        all_decisions.extend(decision_dicts)
+        all_candle_decisions.extend(all_candle_dicts)
         current += timedelta(days=1)
 
     missing_targets = [s.session_date for s in session_summaries if s.status != "PASS"]
@@ -540,5 +810,9 @@ def replay_sessions(
     _write_csv(out_root / "multi-session-sessions.csv", [asdict(x) for x in session_summaries])
     _write_csv(out_root / "multi-session-trades.csv", [asdict(x) for x in all_trades])
     _write_csv(out_root / "multi-session-signal-decision-audit.csv", all_decisions)
+    _write_csv(
+        out_root / "multi-session-candle-by-candle-strategy-audit.csv",
+        all_candle_decisions,
+    )
 
     return payload

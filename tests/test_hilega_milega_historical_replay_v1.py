@@ -165,8 +165,17 @@ def test_replay_writes_hash_audit_and_human_decision_reports(tmp_path):
     assert (session_dir / "signal-decision-audit.csv").exists()
     assert (session_dir / "signal-decision-audit.json").exists()
     assert (session_dir / "signal-decision-audit.txt").exists()
+    assert (session_dir / "candle-by-candle-strategy-audit.csv").exists()
+    assert (session_dir / "candle-by-candle-strategy-audit.json").exists()
+    assert (session_dir / "candle-by-candle-strategy-audit.txt").exists()
     text = (session_dir / "signal-decision-audit.txt").read_text()
     assert "HILEGA-MILEGA DECISION AUDIT" in text
+    assert "STRUCTURAL CHECKS" in text
+    assert "ROUTE A" in text
+    assert "ROUTE B" in text
+    candle_text = (session_dir / "candle-by-candle-strategy-audit.txt").read_text()
+    assert "HILEGA-MILEGA CANDLE-BY-CANDLE STRATEGY AUDIT" in candle_text
+    assert (tmp_path / "out" / "multi-session-candle-by-candle-strategy-audit.csv").exists()
     summary = json.loads((tmp_path / "out" / "multi-session-summary.json").read_text())
     assert summary["execution_enabled"] is False
     assert summary["observation_only"] is True
