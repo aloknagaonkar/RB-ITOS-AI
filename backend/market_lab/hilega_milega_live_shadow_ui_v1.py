@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException
 
 from .hilega_milega_strategy_v1 import STRATEGY_ID, STRATEGY_VERSION
 from .live_shadow_step_audit_v1 import ShadowStepAuditStoreV1
+from .hilega_milega_audit_report_v1 import build_audit_index, build_detailed_audit_report
 
 MODEL = "HILEGA_MILEGA_LIVE_SHADOW_UI_V1"
 DATA_DIR = Path("data/live-observation/hilega-milega-v1")
@@ -91,3 +92,25 @@ def option_shadow(limit: int = 200):
     rows.reverse()
     chain_ok, chain_issue = _store().verify_chain() if STEP_AUDIT_PATH.exists() else (True, None)
     return {"chain_ok": chain_ok, "chain_issue": chain_issue, "rows": rows}
+
+
+@router.get("/audit-index")
+def audit_index(limit: int = 200):
+    if limit < 1 or limit > 2000:
+        raise HTTPException(422, "limit must be between 1 and 2000")
+    rows = _rows()
+    chain_ok, chain_issue = _store().verify_chain() if STEP_AUDIT_PATH.exists() else (True, None)
+    reports = build_audit_index(rows, mode="LIVE_SHADOW", chain_ok=chain_ok, chain_issue=chain_issue)
+    return reports[-limit:][::-1]
+
+
+@router.get("/audit-detail")
+def audit_detail(checkpoint: str):
+    rows = _rows()
+    if not any(x.get("checkpoint") == checkpoint for x in rows):
+        raise HTTPException(404, "checkpoint not found")
+    chain_ok, chain_issue = _store().verify_chain() if STEP_AUDIT_PATH.exists() else (True, None)
+    return build_detailed_audit_report(
+        rows, checkpoint=checkpoint, mode="LIVE_SHADOW",
+        chain_ok=chain_ok, chain_issue=chain_issue,
+    )

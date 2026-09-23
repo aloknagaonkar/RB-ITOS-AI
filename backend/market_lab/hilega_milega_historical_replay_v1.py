@@ -16,6 +16,7 @@ from .hilega_milega_strategy_v1 import (
     STRATEGY_VERSION,
 )
 from .live_shadow_step_audit_v1 import ShadowStepAuditStoreV1
+from .hilega_milega_audit_report_v1 import build_audit_index
 
 IST = ZoneInfo("Asia/Kolkata")
 UNDERLYING = "NSE_INDEX|Nifty 50"
@@ -739,6 +740,12 @@ def replay_sessions(
         )
         _write_candle_by_candle_text(
             session_dir / "candle-by-candle-strategy-audit.txt", current, all_candle_dicts
+        )
+        detailed_reports = build_audit_index(
+            audit_rows, mode="HISTORICAL_REPLAY", chain_ok=ok, chain_issue=error
+        )
+        (session_dir / "detailed-audit-report.json").write_text(
+            json.dumps(detailed_reports, indent=2, default=str) + "\n", encoding="utf-8"
         )
 
         pos = sum(t.outcome == "POSITIVE" for t in trades)
