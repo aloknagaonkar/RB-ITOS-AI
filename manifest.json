@@ -1,0 +1,20 @@
+{
+  "purpose": "Phase 7D.2 14:50 completed bar before 14:55 cutoff, no entry at cutoff; no post-cutoff updates",
+  "files": {
+    "backend/market_lab/hilega_milega_live_shadow_v1.py": {
+      "expected_before_sha256": "22b4d785cfa8ad625e005f43b4b03685263925aeb84298627d847aef6629a409",
+      "patched_sha256": "d614eecbe459af7899946cb4952ac6c1a59a0fa7ed74d4634816e2cbd64bbe86",
+      "mode": "replace"
+    },
+    "backend/market_lab/hilega_milega_strategy_v1.py": {
+      "expected_before_sha256": "e870f85b0a71c59a49bdd69994c84904e0d7fadb28151a5c877962cf8c841e21",
+      "patched_sha256": "1579301a0b7616195ecd2fa707b1138dd747ee3e6a81d3266c952b56fa804035",
+      "mode": "replace"
+    },
+    "tests/test_hilega_phase7d2_cutoff_order_v1.py": {
+      "expected_before_sha256": null,
+      "patched_sha256": "c945b08e0c3cc7d6a1861d25331f028ac1d1a9814b9fe8dda0aebfcc9619e08c",
+      "mode": "add"
+    }
+  }
+}
