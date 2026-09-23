@@ -220,6 +220,12 @@ class HilegaMilegaBullishEngineV1:
                 },
             )
         self.session = SessionState(session_date=session_date)
+        # Strategy comparisons never cross the overnight boundary. Indicator
+        # warmup continues across sessions, but RSI/EMA/WMA cross/rising checks
+        # start fresh from the first bar of each session, matching the validated
+        # per-session research replay.
+        self.previous_indicators = None
+        self.previous_bar = None
 
     def on_bar(self, bar: FiveMinuteBar) -> list[StrategyEvent]:
         self._reset_session(bar.ts.date(), bar)
@@ -315,6 +321,64 @@ class HilegaMilegaBullishEngineV1:
             "full_alignment": self._full_alignment(ind),
         }
 
+    @staticmethod
+    def _route_a_fail_reasons(d: dict[str, Any]) -> list[str]:
+        reasons: list[str] = []
+        if not d["rsi_gt_50"]:
+            reasons.append("RSI_NOT_ABOVE_50")
+        if not d["rsi_gt_wma"]:
+            reasons.append("RSI_NOT_ABOVE_WMA21")
+        return reasons
+
+    @staticmethod
+    def _route_b_fail_reasons(d: dict[str, Any]) -> list[str]:
+        reasons: list[str] = []
+        if not (d["rsi_gt_wma"] or d["ema_gt_wma"]):
+            reasons.append("NEITHER_RSI_NOR_EMA_ABOVE_WMA21")
+        if not d["rsi_rising"]:
+            reasons.append("RSI_NOT_RISING")
+        if not d["ema_rising"]:
+            reasons.append("EMA_NOT_RISING")
+        return reasons
+
+    def _audit_decision_result(
+        self,
+        bar: FiveMinuteBar,
+        *,
+        state_before: str,
+        d: dict[str, Any],
+        events: list[StrategyEvent],
+        note: str | None = None,
+    ) -> None:
+        event_types = [e.event_type for e in events]
+        fresh_cross = bool(d.get("rsi_cross_ema_up"))
+        route_a_eligible = fresh_cross and state_before != "BULLISH_ACTIVE"
+        route_b_eligible = (
+            (state_before == "PATH1_ARMED" or fresh_cross)
+            and state_before != "BULLISH_ACTIVE"
+        )
+        self._audit(
+            bar,
+            "STRATEGY_DECISION_RESULT",
+            "COMPLETE",
+            {
+                "time": bar.ts.strftime("%H:%M"),
+                "state_before": state_before,
+                "state_after": self.session.name,
+                "events_emitted": event_types,
+                "route_a_eligible": route_a_eligible,
+                "route_a_pass": route_a_eligible and not self._route_a_fail_reasons(d),
+                "route_a_fail_reasons": self._route_a_fail_reasons(d) if route_a_eligible else [],
+                "route_b_eligible": route_b_eligible,
+                "route_b_pass": route_b_eligible and not self._route_b_fail_reasons(d),
+                "route_b_fail_reasons": self._route_b_fail_reasons(d) if route_b_eligible else [],
+                "structural_exit_condition": bool(d.get("rsi_cross_wma_down")),
+                "new_entries_allowed": self.session.name != "SESSION_LOCKED",
+                "note": note,
+                **d,
+            },
+        )
+
     def _process_enriched_bar(
         self, bar: FiveMinuteBar, ind: IndicatorSnapshot
     ) -> list[StrategyEvent]:
@@ -326,11 +390,12 @@ class HilegaMilegaBullishEngineV1:
             return events
 
         d = self._decision_payload(ind)
+        decision_state_before = self.session.name
         self._audit(
             bar,
             "STRATEGY_DECISION",
             "EVALUATED",
-            {"state_before": self.session.name, "time": t, **d},
+            {"state_before": decision_state_before, "time": t, **d},
         )
 
         # Hard cutoff is evaluated before every other strategy transition.
@@ -387,6 +452,9 @@ class HilegaMilegaBullishEngineV1:
                     "NO_TRADE_AFTER_CUTOFF",
                     {"state": self.session.name, "new_entries_allowed": False},
                 )
+            self._audit_decision_result(
+                bar, state_before=decision_state_before, d=d, events=events, note="SESSION_CUTOFF"
+            )
             return events
 
         # Immediate structural exit first, preserving current validator ordering.
@@ -508,6 +576,9 @@ class HilegaMilegaBullishEngineV1:
                 )
             )
 
+        self._audit_decision_result(
+            bar, state_before=decision_state_before, d=d, events=events
+        )
         return events
 
     # Deliberately exposed only for deterministic state-machine unit tests.

@@ -230,3 +230,25 @@ def test_every_strategy_step_is_hash_chain_audited(tmp_path: Path):
     assert any(row["status"] == "ENTRY_PATH1_ROUTE_A_CROSS_RSI50_ABOVE_WMA21" for row in rows)
     ok, issue = store.verify_chain()
     assert ok is True and issue is None
+
+
+def test_decision_result_audit_contains_route_failure_reasons(tmp_path):
+    from market_lab.live_shadow_step_audit_v1 import ShadowStepAuditStoreV1
+
+    store = ShadowStepAuditStoreV1(tmp_path / "audit.jsonl")
+    engine = HilegaMilegaBullishEngineV1(audit_store=store)
+    # Seed previous enriched bar, then fresh cross where Route A and B fail.
+    engine.process_enriched_bar_for_test(
+        bar("10:00", 100), IndicatorSnapshot(45, 46, 50)
+    )
+    engine.process_enriched_bar_for_test(
+        bar("10:05", 101), IndicatorSnapshot(47, 46.5, 50)
+    )
+    rows = [x for x in store.read_all() if x["stage"] == "STRATEGY_DECISION_RESULT"]
+    assert rows
+    p = rows[-1]["payload"]
+    assert p["route_a_eligible"] is True
+    assert p["route_a_pass"] is False
+    assert "RSI_NOT_ABOVE_50" in p["route_a_fail_reasons"]
+    assert p["route_b_eligible"] is True
+    assert p["route_b_pass"] is False
