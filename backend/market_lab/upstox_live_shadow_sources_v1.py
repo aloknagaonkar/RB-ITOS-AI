@@ -1,7 +1,8 @@
 from __future__ import annotations
-from datetime import datetime,timedelta
+from datetime import date,datetime,timedelta
 from urllib.parse import quote
 from .domain import IST
+from .gateways import normalize_upstox_historical_candles
 from .live_nifty_futures_oi_producer_v1 import CompletedFuturesCandle,LiveNiftyFuturesOIProducerV1
 from .live_option_minute_source_v1 import CompletedOptionMinute
 from .upstox_live_futures_v1 import UpstoxLiveFuturesGatewayV1
@@ -30,3 +31,14 @@ class UpstoxLiveShadowSourcesV1:
         rows.sort(key=lambda x:x.timestamp)
         if len({x.timestamp for x in rows})!=len(rows):raise ValueError("Duplicate option minute timestamps")
         return rows
+    def historical_candles(self,instrument_key:str,session_date:date):
+        encoded=quote(instrument_key,safe="");d=session_date.isoformat()
+        body=self.gateway._get(f"/v3/historical-candle/{encoded}/minutes/1/{d}/{d}")
+        return normalize_upstox_historical_candles(instrument_key,session_date,body)
+
+    def nifty_intraday_1m(self,*,now:datetime|None=None):
+        local=(now or datetime.now(IST)).astimezone(IST);instrument_key="NSE_INDEX|Nifty 50"
+        encoded=quote(instrument_key,safe="")
+        body=self.gateway._get(f"/v3/historical-candle/intraday/{encoded}/minutes/1")
+        return normalize_upstox_historical_candles(instrument_key,local.date(),body)
+

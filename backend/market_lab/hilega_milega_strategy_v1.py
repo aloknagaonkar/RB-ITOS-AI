@@ -379,6 +379,44 @@ class HilegaMilegaBullishEngineV1:
             },
         )
 
+    def on_session_cutoff(self, cutoff_ts: datetime, open_price: float) -> list[StrategyEvent]:
+        """Apply the 14:55 hard cutoff without consuming a partial 5m candle.
+
+        Live shadow calls this at the start of the 14:55 interval. Historical
+        replay may continue to use the 14:55 FiveMinuteBar path; both produce
+        the same strategy transitions and open-price exit semantics.
+        """
+        self._reset_session(cutoff_ts.date(), FiveMinuteBar(cutoff_ts, open_price, open_price, open_price, open_price, None))
+        if cutoff_ts.strftime("%H:%M") < SESSION_CUTOFF:
+            raise ValueError("session cutoff cannot be applied before 14:55")
+        if self.session.session_locked:
+            return []
+        bar = FiveMinuteBar(cutoff_ts, open_price, open_price, open_price, open_price, None)
+        events: list[StrategyEvent] = []
+        if self.session.active:
+            before = self.session.name
+            source = self.session.source
+            entry_time = self.session.entry_time
+            entry_price = self.session.entry_price
+            points = None if entry_price is None else open_price - entry_price
+            self.session.active = False
+            self.session.source = None
+            self.session.entry_time = None
+            self.session.entry_price = None
+            events.append(self._emit(bar=bar,event_type="SESSION_CUTOFF_EXIT_1455_OPEN",before=before,source=source,price=open_price,exit_reason="SESSION_CUTOFF_14_55_OPEN",points=points,details={"original_entry_time": entry_time.isoformat() if entry_time else None,"live_open_time_cutoff": True}))
+        if self.session.armed:
+            before = self.session.name
+            self.session.armed = False
+            self.session.armed_time = None
+            events.append(self._emit(bar=bar,event_type="SESSION_CUTOFF_ARM_CANCELLED",before=before))
+        self.session.opening_candidate = False
+        self.session.opening_holding = False
+        before_lock = self.session.name
+        self.session.session_locked = True
+        events.append(self._emit(bar=bar,event_type="SESSION_LOCKED_1455",before=before_lock,details={"new_entries_allowed": False,"live_open_time_cutoff": True}))
+        self._audit(bar,"STRATEGY_DECISION_RESULT","COMPLETE",{"time":"14:55","state_before":before_lock,"state_after":self.session.name,"events_emitted":[e.event_type for e in events],"new_entries_allowed":False,"note":"SESSION_CUTOFF_OPEN_TIME"})
+        return events
+
     def _process_enriched_bar(
         self, bar: FiveMinuteBar, ind: IndicatorSnapshot
     ) -> list[StrategyEvent]:

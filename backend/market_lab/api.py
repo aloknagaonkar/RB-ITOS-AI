@@ -17,6 +17,7 @@ from .domain import ForwardLookupConfig, PCRChangeBucketConfig, PCRConfig, Patte
 from .multi_session_evidence import build_compatible_pattern_evidence, collect_compatible_session_analysis
 from .recorded_session_inventory import recorded_session_inventory
 from .live_shadow_ui_v1 import router as live_shadow_router
+from .hilega_milega_live_shadow_ui_v1 import router as hilega_milega_live_shadow_router
 from .pattern_statistics import calculate_pattern_statistics
 from .pattern_evidence import build_pattern_evidence
 from .storage import (
@@ -53,6 +54,7 @@ def create_app(engine=None, historical_gateway_factory=None):
 
     app = FastAPI(title="Market Strategy Lab", version="0.1.0", lifespan=lifespan)
     app.include_router(live_shadow_router)
+    app.include_router(hilega_milega_live_shadow_router)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "testserver", "34.100.218.115"])
     app.add_middleware(
         CORSMiddleware,
