@@ -18,9 +18,11 @@ const fmt=(x:any)=> x===null||x===undefined?'—':String(x)
 const time=(x:string)=>{const d=new Date(x); return Number.isNaN(d.getTime()) ? x.slice(11,16) : d.toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit',hour12:false})}
 const pretty=(x:any)=>JSON.stringify(x??{},null,2)
 
-// Existing Historical Replay owns date selection; this adapter never runs a broker job.
-export default function HilegaHistoricalReplay({selectedDate}:{selectedDate:string}){
+// Hilega has independent historical sessions; never rely on the legacy strategy's date.
+// This component is read-only: it reads previously captured evidence only.
+export default function HilegaHistoricalReplay(){
  const [captures,setCaptures]=useState<Capture[]>([])
+ const [selectedDate,setSelectedDate]=useState('')
  const [captureId,setCaptureId]=useState('')
  const [data,setData]=useState<Response|null>(null)
  const [index,setIndex]=useState(0)
@@ -28,15 +30,27 @@ export default function HilegaHistoricalReplay({selectedDate}:{selectedDate:stri
  const [error,setError]=useState('')
  const [note,setNote]=useState('')
  const [reviews,setReviews]=useState<Record<string,{label:string;note:string}>>({})
+ const dates=useMemo(()=>Array.from(new Set(captures.map(c=>c.session_date))).sort().reverse(),[captures])
  const available=useMemo(()=>captures.filter(c=>c.session_date===selectedDate),[captures,selectedDate])
  useEffect(()=>{
    let active=true
    fetch('/api/live-shadow/hilega-historical/sessions').then(async r=>{if(!r.ok)throw new Error(`Sessions HTTP ${r.status}`);return r.json()})
-     .then(v=>{if(active)setCaptures(v.sessions||[])})
+     .then(v=>{
+       if(!active)return
+       const rows:Capture[]=v.sessions||[]
+       setCaptures(rows)
+       const availableDates=Array.from(new Set(rows.map(c=>c.session_date))).sort().reverse()
+       setSelectedDate(current=>availableDates.includes(current)?current:(availableDates[0]||''))
+     })
      .catch(e=>{if(active)setError(String(e))})
    return()=>{active=false}
  },[])
- useEffect(()=>{setCaptureId(available[0]?.capture_id||'');setData(null);setIndex(0);setPlaying(false);setError('')},[selectedDate,captures])
+ useEffect(()=>{
+   // Prefer the latest complete capture when switching Hilega's own session.
+   // Never reuse a capture from a different date.
+   const preferred=available.find(c=>c.has_manifest)?.capture_id||available[0]?.capture_id||''
+   setCaptureId(preferred);setData(null);setIndex(0);setPlaying(false)
+ },[selectedDate,captures])
  useEffect(()=>{
    if(!captureId)return
    let active=true
@@ -65,7 +79,11 @@ export default function HilegaHistoricalReplay({selectedDate}:{selectedDate:stri
  return <section className="hime-replay" aria-label="Hilega historical replay">
    <h3>Hilega-Milega · Historical candle review</h3>
    <p>Uses the existing historical evidence and shared live coordinator audit. Read-only; never starts another replay worker.</p>
-   <label>Historical capture <select value={captureId} onChange={e=>setCaptureId(e.target.value)}>
+   <label>Hilega session <select aria-label="Hilega historical session" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)}>
+     {!dates.length&&<option value="">No Hilega historical sessions available</option>}
+     {dates.map(day=><option key={day} value={day}>{day}</option>)}
+   </select></label>
+   <label>Historical capture <select aria-label="Hilega historical capture" value={captureId} onChange={e=>setCaptureId(e.target.value)}>
      {!available.length&&<option value="">No Hilega capture for selected date</option>}
      {available.map(c=><option value={c.capture_id} key={c.capture_id}>{c.capture_id} · Expiry {fmt(c.expiry)}</option>)}
    </select></label>
