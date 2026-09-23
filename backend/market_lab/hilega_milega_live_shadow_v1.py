@@ -29,6 +29,22 @@ def latest_completed_5m_label(now: datetime) -> datetime:
     return floor_5m(now) - timedelta(minutes=5)
 
 
+def completed_intraday_1m_for_label(candles, completed_label: datetime):
+    """Return only 1m rows that belong to bars at or before completed_label.
+
+    The Upstox intraday endpoint may include the currently-forming 5m slot.
+    Historical aggregation is intentionally strict and rejects partial slots,
+    so live code must remove that causal tail before exact 5m aggregation.
+    """
+    cutoff = completed_label.astimezone(IST) + timedelta(minutes=5)
+    out = []
+    for candle in candles:
+        ts = candle.timestamp.astimezone(IST).replace(second=0, microsecond=0)
+        if ts < cutoff:
+            out.append(candle)
+    return out
+
+
 class HealthJournalV1:
     def __init__(self, path: str | Path):
         self.path = Path(path)
@@ -124,8 +140,9 @@ class HilegaMilegaLiveShadowCoordinatorV1:
             d += timedelta(days=1)
 
         current = self.sources.nifty_intraday_1m(now=now)
-        current_bars = aggregate_exact_5m(current, session_date)
         completed_label = latest_completed_5m_label(now)
+        completed_current = completed_intraday_1m_for_label(current, completed_label)
+        current_bars = aggregate_exact_5m(completed_current, session_date)
         for bar in current_bars:
             if bar.ts <= completed_label:
                 self.strategy.on_bar(bar)
@@ -188,7 +205,8 @@ class HilegaMilegaLiveShadowCoordinatorV1:
             return {"status": "NO_NEW_COMPLETED_BAR", "last_bar": self._last_bar_ts.isoformat(), "cutoff_events": [e.event_type for e in cutoff_events]}
 
         try:
-            bars = aggregate_exact_5m(intraday, now.date())
+            completed_intraday = completed_intraday_1m_for_label(intraday, target)
+            bars = aggregate_exact_5m(completed_intraday, now.date())
         except Exception as exc:
             self._audit_runtime(now, "UNDERLYING_5M_BUILD", "FAILED", {"error_type": type(exc).__name__, "error": str(exc)})
             self._health(now=now, status="UNDERLYING_5M_UNAVAILABLE", error=str(exc))

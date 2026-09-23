@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from market_lab.domain import HistoricalCandle
 from market_lab.hilega_milega_live_shadow_v1 import (
     HilegaMilegaLiveShadowCoordinatorV1,
+    completed_intraday_1m_for_label,
     latest_completed_5m_label,
 )
 from market_lab.hilega_milega_strategy_v1 import FiveMinuteBar, HilegaMilegaBullishEngineV1
@@ -91,4 +92,39 @@ def test_live_cutoff_uses_1455_minute_open(tmp_path):
     assert out[0].event_type=='SESSION_CUTOFF_EXIT_1455_OPEN'
     assert out[0].price==expected
     assert c.strategy.session.session_locked
+    assert c.step_audit.verify_chain()==(True,None)
+
+
+def test_live_bootstrap_ignores_current_partial_5m_tail(tmp_path):
+    d=date(2026,9,23)
+    # 09:15..09:37.  The 09:35 slot is still forming and must not be passed
+    # into strict exact-5m aggregation. At 09:37:30 latest completed=09:30.
+    rows=minute_rows(d,count=23)
+    src=FakeSources(d,rows)
+    audit=tmp_path/'step.jsonl';health=tmp_path/'health.jsonl'
+    c=HilegaMilegaLiveShadowCoordinatorV1(
+        market_sources=src,step_audit_path=audit,health_path=health,
+        cache_root=tmp_path/'cache',warmup_calendar_days=0,
+    )
+    now=datetime(2026,9,23,9,37,30,tzinfo=IST)
+    out=c.bootstrap(now)
+    assert out['status']=='PASS'
+    assert c._last_bar_ts.strftime('%H:%M')=='09:30'
+    assert out['bars_replayed']==4
+
+
+def test_live_process_ignores_partial_tail_after_bootstrap(tmp_path):
+    d=date(2026,9,23)
+    # Through 10:07 => complete 10:00 bar plus partial 10:05 slot.
+    rows=minute_rows(d,count=53)
+    src=FakeSources(d,rows)
+    audit=tmp_path/'step.jsonl';health=tmp_path/'health.jsonl'
+    c=HilegaMilegaLiveShadowCoordinatorV1(
+        market_sources=src,step_audit_path=audit,health_path=health,
+        cache_root=tmp_path/'cache',warmup_calendar_days=0,
+    )
+    now=datetime(2026,9,23,10,7,30,tzinfo=IST)
+    out=c.process(now)
+    assert out['status']=='NO_NEW_COMPLETED_BAR'
+    assert c._last_bar_ts.strftime('%H:%M')=='10:00'
     assert c.step_audit.verify_chain()==(True,None)
