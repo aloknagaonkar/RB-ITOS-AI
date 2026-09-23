@@ -197,3 +197,64 @@ def test_option_candidate_market_snapshot_is_exact_and_never_selects_or_orders(t
     assert len(snap['payload']['snapshots'])==5
     assert snap['payload']['selected_instrument_key'] is None
     assert snap['payload']['order_created'] is False
+
+
+def test_option_shadow_lifecycle_starts_all_five_and_updates_without_orders(tmp_path):
+    from datetime import date, datetime, timedelta
+    from market_lab.domain import IST
+    from market_lab.hilega_milega_live_shadow_v1 import HilegaMilegaLiveShadowCoordinatorV1
+    from market_lab.hilega_milega_strategy_v1 import FiveMinuteBar, IndicatorSnapshot
+    from market_lab.live_option_minute_source_v1 import CompletedOptionMinute
+
+    boundary = datetime(2026, 9, 23, 9, 45, tzinfo=IST)
+
+    class Sources:
+        def option_contracts(self, underlying, expiry):
+            return [
+                {"expiry": expiry.isoformat(), "strike_price": strike, "instrument_type": "CE", "instrument_key": f"CE-{strike}"}
+                for strike in [23250, 23300, 23350, 23400, 23450]
+            ]
+
+        def option_intraday_1m(self, instrument_key):
+            return [
+                CompletedOptionMinute(
+                    instrument_key,
+                    boundary + timedelta(minutes=i),
+                    100 + i,
+                    102 + i,
+                    99 + i,
+                    101 + i,
+                    1000 + i,
+                )
+                for i in range(10)
+            ]
+
+    path = tmp_path / "audit.jsonl"
+    c = HilegaMilegaLiveShadowCoordinatorV1(
+        market_sources=Sources(),
+        step_audit_path=path,
+        health_path=tmp_path / "h.jsonl",
+        option_expiry=date(2026, 9, 29),
+    )
+    c.strategy.audit_store = c.step_audit
+    c.strategy.previous_indicators = IndicatorSnapshot(51, 52, 50)
+    bar = FiveMinuteBar(datetime(2026, 9, 23, 9, 40, tzinfo=IST), 23370, 23382, 23368, 23355, None)
+    events = c.strategy._process_enriched_bar(bar, IndicatorSnapshot(55, 53, 51))
+    c._observe_option_candidates(datetime(2026, 9, 23, 9, 45, 30, tzinfo=IST), bar, events)
+
+    rows = c.step_audit.read_all()
+    start = [x for x in rows if x["stage"] == "OPTION_SHADOW_LIFECYCLE_START"][-1]
+    assert start["status"] == "PASS"
+    assert start["payload"]["selection_policy"] == "ALL_ATM_PLUS_MINUS_2_CE_SHADOW"
+    assert len(start["payload"]["shadow_selected_instrument_keys"]) == 5
+    assert start["payload"]["order_created"] is False
+    assert start["payload"]["quantity"] is None
+
+    c._update_option_shadow(datetime(2026, 9, 23, 9, 48, 30, tzinfo=IST))
+    rows = c.step_audit.read_all()
+    update = [x for x in rows if x["stage"] == "OPTION_SHADOW_LIFECYCLE_UPDATE"][-1]
+    assert update["status"] == "PASS"
+    assert update["payload"]["latest_completed_minute"].endswith("09:47:00+05:30")
+    assert len(update["payload"]["legs"]) == 5
+    assert update["payload"]["execution_enabled"] is False
+    assert update["payload"]["paper_order_enabled"] is False

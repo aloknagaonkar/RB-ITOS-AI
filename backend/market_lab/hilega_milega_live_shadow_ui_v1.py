@@ -32,6 +32,13 @@ def status():
     chain_ok, chain_issue = store.verify_chain() if STEP_AUDIT_PATH.exists() else (True, None)
     counts = Counter(x.get("status") for x in transitions)
     latest = decisions[-1] if decisions else None
+    option_shadow_rows = [x for x in rows if x.get("stage") in {
+        "OPTION_SHADOW_LIFECYCLE_START",
+        "OPTION_SHADOW_LIFECYCLE_RESTORE",
+        "OPTION_SHADOW_LIFECYCLE_UPDATE",
+        "OPTION_SHADOW_LIFECYCLE_EXIT",
+    }]
+    latest_option_shadow = option_shadow_rows[-1] if option_shadow_rows else None
     return {
         "model": MODEL,
         "strategy_id": STRATEGY_ID,
@@ -44,6 +51,7 @@ def status():
         "step_audit_chain_issue": chain_issue,
         "transition_counts": dict(counts),
         "latest_decision": latest,
+        "latest_option_shadow": latest_option_shadow,
     }
 
 
@@ -65,3 +73,21 @@ def transitions(limit: int = 100):
     rows = [x for x in _rows() if x.get("stage") == "STRATEGY_TRANSITION"][-limit:]
     rows.reverse()
     return rows
+
+
+@router.get("/option-shadow")
+def option_shadow(limit: int = 200):
+    if limit < 1 or limit > 2000:
+        raise HTTPException(422, "limit must be between 1 and 2000")
+    stages = {
+        "OPTION_CANDIDATE_SET",
+        "OPTION_CANDIDATE_MARKET_SNAPSHOT",
+        "OPTION_SHADOW_LIFECYCLE_START",
+        "OPTION_SHADOW_LIFECYCLE_RESTORE",
+        "OPTION_SHADOW_LIFECYCLE_UPDATE",
+        "OPTION_SHADOW_LIFECYCLE_EXIT",
+    }
+    rows = [x for x in _rows() if x.get("stage") in stages][-limit:]
+    rows.reverse()
+    chain_ok, chain_issue = _store().verify_chain() if STEP_AUDIT_PATH.exists() else (True, None)
+    return {"chain_ok": chain_ok, "chain_issue": chain_issue, "rows": rows}

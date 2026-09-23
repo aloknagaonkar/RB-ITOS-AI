@@ -15,6 +15,7 @@ from .hilega_milega_strategy_v1 import (
 from .live_shadow_step_audit_v1 import ShadowStepAuditStoreV1
 from .hilega_milega_option_candidate_v1 import build_bullish_ce_candidate_set
 from .hilega_milega_option_snapshot_v1 import observe_exact_candidate_market_snapshot
+from .hilega_milega_option_shadow_lifecycle_v1 import HilegaMilegaOptionShadowLifecycleV1
 
 MODEL = "HILEGA_MILEGA_LIVE_SHADOW_V1"
 OBSERVATION_ONLY = True
@@ -92,6 +93,8 @@ class HilegaMilegaLiveShadowCoordinatorV1:
         self._bootstrapped_date: date | None = None
         self._last_bar_ts: datetime | None = None
         self._cutoff_done_date: date | None = None
+        self.option_shadow = HilegaMilegaOptionShadowLifecycleV1()
+        self._option_shadow_last_update_minute: datetime | None = None
 
     def _health(self, *, now: datetime, status: str, **payload: Any) -> None:
         self.health.append({
@@ -160,6 +163,7 @@ class HilegaMilegaLiveShadowCoordinatorV1:
         # Bootstrap history is intentionally not written into the live audit.
         self.strategy.audit_store = self.step_audit
         self._bootstrapped_date = session_date
+        self._restore_option_shadow(now)
         if self.strategy.session.session_locked:
             self._cutoff_done_date = session_date
 
@@ -181,6 +185,128 @@ class HilegaMilegaLiveShadowCoordinatorV1:
             return None
         return float(matches[0].open)
 
+    def _build_candidate_set_for_signal(self, signal_spot: float):
+        if self.option_expiry is None:
+            return None
+        rows = self.sources.option_contracts(UNDERLYING, self.option_expiry)
+        return build_bullish_ce_candidate_set(
+            signal_spot=signal_spot,
+            expiry=self.option_expiry,
+            contracts=rows,
+            strike_step=self.option_strike_step,
+            wings=self.option_candidate_wings,
+        )
+
+    @staticmethod
+    def _latest_completed_option_minute(now: datetime) -> datetime:
+        local = now.astimezone(IST).replace(second=0, microsecond=0)
+        return local - timedelta(minutes=1)
+
+    def _restore_option_shadow(self, now: datetime) -> None:
+        if not self.strategy.session.active:
+            return
+        if self.option_expiry is None:
+            self._audit_runtime(now, "OPTION_SHADOW_LIFECYCLE_RESTORE", "NOT_CONFIGURED", {
+                "reason": "HILEGA_MILEGA_OPTION_EXPIRY_NOT_CONFIGURED",
+                "order_created": False,
+                "execution_enabled": False,
+                "paper_order_enabled": False,
+            })
+            return
+        if self.strategy.session.entry_time is None or self.strategy.session.entry_price is None:
+            self._audit_runtime(now, "OPTION_SHADOW_LIFECYCLE_RESTORE", "FAILED", {
+                "reason": "ACTIVE_STRATEGY_ENTRY_IDENTITY_MISSING",
+                "order_created": False,
+                "execution_enabled": False,
+                "paper_order_enabled": False,
+            })
+            return
+        try:
+            candidate_set = self._build_candidate_set_for_signal(self.strategy.session.entry_price)
+            if candidate_set is None:
+                return
+            snap = self.option_shadow.start(
+                signal_bar_ts=self.strategy.session.entry_time,
+                signal_spot=self.strategy.session.entry_price,
+                source=self.strategy.session.source,
+                candidate_set=candidate_set,
+                option_minutes=self.sources.option_intraday_1m,
+            )
+            status = "PASS" if snap.active else snap.status
+            if snap.active:
+                updated = self.option_shadow.update(
+                    through_completed_minute=self._latest_completed_option_minute(now),
+                    option_minutes=self.sources.option_intraday_1m,
+                )
+                if updated is not None and updated.status == "ACTIVE":
+                    snap = updated
+            self._option_shadow_last_update_minute = (
+                datetime.fromisoformat(snap.latest_completed_minute).astimezone(IST)
+                if snap.latest_completed_minute else None
+            )
+            self._audit_runtime(now, "OPTION_SHADOW_LIFECYCLE_RESTORE", status, snap.payload())
+        except Exception as exc:
+            self._audit_runtime(now, "OPTION_SHADOW_LIFECYCLE_RESTORE", "FAILED", {
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+                "order_created": False,
+                "execution_enabled": False,
+                "paper_order_enabled": False,
+            })
+
+    def _update_option_shadow(self, now: datetime) -> None:
+        if not self.option_shadow.active:
+            return
+        through = self._latest_completed_option_minute(now)
+        if self._option_shadow_last_update_minute is not None and through <= self._option_shadow_last_update_minute:
+            return
+        try:
+            snap = self.option_shadow.update(
+                through_completed_minute=through,
+                option_minutes=self.sources.option_intraday_1m,
+            )
+            if snap is None:
+                return
+            status = "PASS" if snap.status == "ACTIVE" else snap.status
+            self._audit_runtime(now, "OPTION_SHADOW_LIFECYCLE_UPDATE", status, snap.payload())
+            if snap.status == "ACTIVE":
+                self._option_shadow_last_update_minute = through
+        except Exception as exc:
+            self._audit_runtime(now, "OPTION_SHADOW_LIFECYCLE_UPDATE", "FAILED", {
+                "through_completed_minute": through.isoformat(),
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+                "order_created": False,
+                "execution_enabled": False,
+                "paper_order_enabled": False,
+            })
+            # Do not advance the success watermark on a failed fetch; a later
+            # poll may receive the missing exact minute and can retry causally.
+
+    def _close_option_shadow(self, now: datetime, *, exit_boundary: datetime, exit_reason: str) -> None:
+        if not self.option_shadow.active:
+            return
+        try:
+            snap = self.option_shadow.close(
+                exit_boundary=exit_boundary,
+                exit_reason=exit_reason,
+                option_minutes=self.sources.option_intraday_1m,
+            )
+            if snap is None:
+                return
+            status = "PASS" if snap.status == "CLOSED" else snap.status
+            self._audit_runtime(now, "OPTION_SHADOW_LIFECYCLE_EXIT", status, snap.payload())
+        except Exception as exc:
+            self._audit_runtime(now, "OPTION_SHADOW_LIFECYCLE_EXIT", "FAILED", {
+                "exit_boundary": exit_boundary.isoformat(),
+                "exit_reason": exit_reason,
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+                "order_created": False,
+                "execution_enabled": False,
+                "paper_order_enabled": False,
+            })
+
     def process_cutoff(self, now: datetime, *, intraday=None) -> list:
         now = now.astimezone(IST)
         if now.time() < time(14, 55) or self._cutoff_done_date == now.date():
@@ -192,6 +318,8 @@ class HilegaMilegaLiveShadowCoordinatorV1:
             self._audit_runtime(now, "SESSION_CUTOFF_SOURCE", "WAITING", {"expected_minute": cutoff_ts.isoformat()})
             return []
         events = self.strategy.on_session_cutoff(cutoff_ts, open_price)
+        if any(e.event_type == "SESSION_CUTOFF_EXIT_1455_OPEN" for e in events):
+            self._close_option_shadow(now, exit_boundary=cutoff_ts, exit_reason="SESSION_CUTOFF_14_55_OPEN")
         self._cutoff_done_date = now.date()
         self._audit_runtime(now, "SESSION_CUTOFF_SOURCE", "PROCESSED", {
             "cutoff_timestamp": cutoff_ts.isoformat(),
@@ -215,14 +343,9 @@ class HilegaMilegaLiveShadowCoordinatorV1:
             })
             return
         try:
-            rows = self.sources.option_contracts(UNDERLYING, self.option_expiry)
-            candidate_set = build_bullish_ce_candidate_set(
-                signal_spot=bar.close,
-                expiry=self.option_expiry,
-                contracts=rows,
-                strike_step=self.option_strike_step,
-                wings=self.option_candidate_wings,
-            )
+            candidate_set = self._build_candidate_set_for_signal(bar.close)
+            if candidate_set is None:
+                return
             status = "PASS" if candidate_set.status == "AVAILABLE" else "INCOMPLETE"
             payload = candidate_set.payload()
             payload.update({
@@ -261,6 +384,29 @@ class HilegaMilegaLiveShadowCoordinatorV1:
                         "execution_enabled": False,
                         "paper_order_enabled": False,
                     })
+                try:
+                    source = entry_events[0].source if entry_events else None
+                    lifecycle = self.option_shadow.start(
+                        signal_bar_ts=bar.ts,
+                        signal_spot=bar.close,
+                        source=source,
+                        candidate_set=candidate_set,
+                        option_minutes=self.sources.option_intraday_1m,
+                    )
+                    lifecycle_status = "PASS" if lifecycle.active else lifecycle.status
+                    self._audit_runtime(now, "OPTION_SHADOW_LIFECYCLE_START", lifecycle_status, lifecycle.payload())
+                    self._option_shadow_last_update_minute = None
+                except Exception as exc:
+                    self._audit_runtime(now, "OPTION_SHADOW_LIFECYCLE_START", "FAILED", {
+                        "signal_bar": bar.ts.isoformat(),
+                        "signal_spot": bar.close,
+                        "expiry": self.option_expiry.isoformat(),
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                        "order_created": False,
+                        "execution_enabled": False,
+                        "paper_order_enabled": False,
+                    })
         except Exception as exc:
             self._audit_runtime(now, "OPTION_CANDIDATE_SET", "FAILED", {
                 "signal_bar": bar.ts.isoformat(),
@@ -277,6 +423,7 @@ class HilegaMilegaLiveShadowCoordinatorV1:
         self.bootstrap(now)
         intraday = self.sources.nifty_intraday_1m(now=now)
         cutoff_events = self.process_cutoff(now, intraday=intraday)
+        self._update_option_shadow(now)
 
         target = latest_completed_5m_label(now)
         if target.date() != now.date() or target.time() < time(9, 15):
@@ -299,6 +446,13 @@ class HilegaMilegaLiveShadowCoordinatorV1:
 
         bar = matches[0]
         events = self.strategy.on_bar(bar)
+        for event in events:
+            if event.event_type == "STRUCTURAL_EXIT_RSI_CROSS_BELOW_WMA21":
+                self._close_option_shadow(
+                    now,
+                    exit_boundary=bar.ts + timedelta(minutes=5),
+                    exit_reason=event.exit_reason or "RSI_CROSS_BELOW_WMA21",
+                )
         self._observe_option_candidates(now, bar, events)
         self._last_bar_ts = bar.ts
         self._audit_runtime(now, "UNDERLYING_5M_BUILD", "PROCESSED", {
