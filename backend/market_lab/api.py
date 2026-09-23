@@ -53,7 +53,7 @@ def create_app(engine=None, historical_gateway_factory=None):
 
     app = FastAPI(title="Market Strategy Lab", version="0.1.0", lifespan=lifespan)
     app.include_router(live_shadow_router)
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "testserver", "34.93.78.135"])
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "testserver", "34.100.218.115"])
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],

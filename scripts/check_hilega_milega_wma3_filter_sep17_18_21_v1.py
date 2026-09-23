@@ -122,10 +122,18 @@ def main():
                 elif x["outcome"] == "POSITIVE":
                     removed_pos += 1
 
+            ema_wma = x.get("ema_wma_gap")
+            rsi_wma = x.get("rsi_wma_gap")
+            wma3 = x.get("wma_delta_3")
+
+            ema_wma_s = "NA" if ema_wma is None else f"{ema_wma:.2f}"
+            rsi_wma_s = "NA" if rsi_wma is None else f"{rsi_wma:.2f}"
+            wma3_s = "NA" if wma3 is None else f"{wma3:.2f}"
+
             print(
                 f"{x['entry_time']:5} {x['source']:7} {x['points']:8.2f} {x['outcome']:>9} "
-                f"{x['ema_wma_gap']:8.2f} {x['rsi_wma_gap']:8.2f} "
-                f"{x['wma_delta_3']:8.2f} {'YES' if ok else 'NO':>6}"
+                f"{ema_wma_s:>8} {rsi_wma_s:>8} "
+                f"{wma3_s:>8} {'YES' if ok else 'NO':>6}"
             )
 
         print(
