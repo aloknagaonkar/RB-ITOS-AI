@@ -111,3 +111,14 @@ NO same-candle reversal in v1
 - [ ] Live worker integration
 - [ ] Combined directional UI
 - [ ] CE/PE selection research
+
+
+## Directional metrics instrumentation fix
+- [x] Same-candle reversal counter requires an actual suppressed opposite entry
+- [x] Exit without opposite entry is labeled separately
+- [x] Rename opposite-ARMED duration counters to `*_armed_candles_*`
+- [x] Add unique accepted ARM event counters `*_arm_events_*`
+- [x] Strategy behavior unchanged
+- [x] Whipsaw mitigation remains DEFERRED
+- [ ] Re-run the 6 real combined sessions with corrected metrics
+- [ ] Manual transition validation on Sep-17 and Sep-15

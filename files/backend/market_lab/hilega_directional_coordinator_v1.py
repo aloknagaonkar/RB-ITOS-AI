@@ -143,7 +143,10 @@ class HilegaDirectionalCoordinatorV1:
 
             if b_exits:
                 self.trade_owner = "NONE"
-                note = "BULLISH_EXIT; SAME_CANDLE_BEARISH_ENTRY_BLOCKED; PRESERVE_BEARISH_ARMED"
+                if s_entries:
+                    note = "BULLISH_EXIT; SAME_CANDLE_BEARISH_ENTRY_BLOCKED; PRESERVE_BEARISH_ARMED"
+                else:
+                    note = "BULLISH_EXIT; NO_SAME_CANDLE_BEARISH_ENTRY"
             return self._decision(bar, owner_before, accepted, suppressed, note)
 
         if owner_before == "BEARISH":
@@ -158,7 +161,10 @@ class HilegaDirectionalCoordinatorV1:
 
             if s_exits:
                 self.trade_owner = "NONE"
-                note = "BEARISH_EXIT; SAME_CANDLE_BULLISH_ENTRY_BLOCKED; PRESERVE_BULLISH_ARMED"
+                if b_entries:
+                    note = "BEARISH_EXIT; SAME_CANDLE_BULLISH_ENTRY_BLOCKED; PRESERVE_BULLISH_ARMED"
+                else:
+                    note = "BEARISH_EXIT; NO_SAME_CANDLE_BULLISH_ENTRY"
             return self._decision(bar, owner_before, accepted, suppressed, note)
 
         # No active owner. If both sides somehow emit an entry on one candle,

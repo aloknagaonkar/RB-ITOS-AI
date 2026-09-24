@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from market_lab.hilega_directional_coordinator_v1 import HilegaDirectionalCoordinatorV1
+from market_lab.hilega_directional_coordinator_v1 import HilegaDirectionalCoordinatorV1, BEARISH_ENTRY_EVENTS
 from market_lab.hilega_milega_strategy_v1 import FiveMinuteBar, IndicatorSnapshot
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -63,7 +63,7 @@ def test_opposite_entry_is_blocked_and_preserved_as_armed():
     # Bullish is therefore still active, so bearish entry must be suppressed.
     d = c.process_enriched_bar_for_test(bar("10:15"), ind(48, 44, 46))
     assert c.trade_owner == "BULLISH"
-    assert "ENTRY_BEARISH_ROUTE_B_STRUCTURAL" in suppressed(d)
+    assert any(e in BEARISH_ENTRY_EVENTS for e in suppressed(d))
     assert c.bearish.session.active is False
     assert c.bearish.session.armed is True
 
@@ -115,3 +115,38 @@ def test_never_both_active():
     for t, i in seq:
         c.process_enriched_bar_for_test(bar(t), i)
         assert not (c.bullish.session.active and c.bearish.session.active)
+
+
+def test_exit_without_opposite_entry_does_not_claim_reversal_block():
+    c = HilegaDirectionalCoordinatorV1()
+    c.process_enriched_bar_for_test(bar("10:00"), ind(45, 47, 40))
+    c.process_enriched_bar_for_test(bar("10:05"), ind(55, 50, 45))
+    assert c.trade_owner == "BULLISH"
+
+    # Hold above WMA first, then create only the bullish structural exit.
+    c.process_enriched_bar_for_test(bar("10:10"), ind(52, 50, 45))
+    d = c.process_enriched_bar_for_test(bar("10:15"), ind(48, 46, 50))
+
+    assert c.trade_owner == "NONE"
+    assert "STRUCTURAL_EXIT_RSI_CROSS_BELOW_WMA21" in types(d)
+    assert not suppressed(d)
+    assert d.note == "BULLISH_EXIT; NO_SAME_CANDLE_BEARISH_ENTRY"
+
+
+def test_true_same_candle_opposite_entry_is_marked_as_reversal_block():
+    c = HilegaDirectionalCoordinatorV1()
+    c.process_enriched_bar_for_test(bar("10:00"), ind(45, 47, 40))
+    c.process_enriched_bar_for_test(bar("10:05"), ind(55, 50, 45))
+    assert c.trade_owner == "BULLISH"
+
+    # Arm bearish while bullish stays active.
+    c.process_enriched_bar_for_test(bar("10:10"), ind(53, 54, 45))
+    # Route B candidate is suppressed while bullish remains active.
+    c.process_enriched_bar_for_test(bar("10:15"), ind(48, 44, 46))
+    # On this candle bullish exits and bearish is still structurally eligible.
+    d = c.process_enriched_bar_for_test(bar("10:20"), ind(44, 45, 46))
+
+    assert c.trade_owner == "NONE"
+    assert "STRUCTURAL_EXIT_RSI_CROSS_BELOW_WMA21" in types(d)
+    assert any(e in BEARISH_ENTRY_EVENTS for e in suppressed(d))
+    assert d.note == "BULLISH_EXIT; SAME_CANDLE_BEARISH_ENTRY_BLOCKED; PRESERVE_BEARISH_ARMED"

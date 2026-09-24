@@ -109,3 +109,40 @@ def test_directional_points_sign_is_direction_aware(tmp_path):
         else:
             expected = t["entry_price"] - t["exit_price"]
         assert abs(t["points"] - expected) < 1e-9
+
+
+def test_metric_names_distinguish_armed_candles_from_arm_events(tmp_path):
+    result = replay_directional_sessions(
+        gateway=OscillatingGateway(),
+        dates=[date(2026, 9, 24)],
+        warmup_calendar_days=0,
+        cache_root=tmp_path/"cache",
+        output_root=tmp_path/"out",
+    )
+    s = result["summary"]
+    assert "bullish_armed_candles_while_bearish_active" in s
+    assert "bearish_armed_candles_while_bullish_active" in s
+    assert "bullish_arm_events_while_bearish_active" in s
+    assert "bearish_arm_events_while_bullish_active" in s
+    assert "bullish_armed_while_bearish_active" not in s
+    assert "bearish_armed_while_bullish_active" not in s
+
+
+def test_reversal_block_counter_requires_actual_suppressed_entry(tmp_path):
+    result = replay_directional_sessions(
+        gateway=OscillatingGateway(),
+        dates=[date(2026, 9, 24)],
+        warmup_calendar_days=0,
+        cache_root=tmp_path/"cache",
+        output_root=tmp_path/"out",
+    )
+    rows = json.loads(
+        (tmp_path/"out"/"2026-09-24"/"directional-candle-by-candle.json").read_text()
+    )
+    expected = sum(
+        bool(r["suppressed_events"])
+        and bool(r["note"])
+        and "SAME_CANDLE" in str(r["note"])
+        for r in rows
+    )
+    assert result["summary"]["same_candle_reversal_blocks"] == expected

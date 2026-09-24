@@ -12,6 +12,8 @@ from .hilega_directional_coordinator_v1 import (
     BULLISH_EXIT_EVENTS,
     BEARISH_ENTRY_EVENTS,
     BEARISH_EXIT_EVENTS,
+    BULLISH_ARM_EVENTS,
+    BEARISH_ARM_EVENTS,
     DirectionalDecision,
     HilegaDirectionalCoordinatorV1,
 )
@@ -56,8 +58,10 @@ class DirectionalSessionSummary:
     bearish_points: float
     suppressed_bullish_entries: int
     suppressed_bearish_entries: int
-    bullish_armed_while_bearish_active: int
-    bearish_armed_while_bullish_active: int
+    bullish_armed_candles_while_bearish_active: int
+    bearish_armed_candles_while_bullish_active: int
+    bullish_arm_events_while_bearish_active: int
+    bearish_arm_events_while_bullish_active: int
     same_candle_reversal_blocks: int
     errors: str | None = None
 
@@ -275,7 +279,7 @@ def replay_directional_sessions(
                 session_summaries.append(
                     DirectionalSessionSummary(
                         current.isoformat(), "UNAVAILABLE", 0, 0, 0, 0, 0, 0, 0,
-                        0.0, 0.0, 0.0, 0, 0, 0, 0, 0,
+                        0.0, 0.0, 0.0, 0, 0, 0, 0, 0, 0, 0,
                         "No historical underlying candles returned.",
                     )
                 )
@@ -363,14 +367,27 @@ def replay_directional_sessions(
             any(x in BEARISH_ENTRY_EVENTS for x in (r["suppressed_events"] or "").split(",") if x)
             for r in rows
         )
-        bull_arm_while_bear = sum(
+        bull_arm_candles_while_bear = sum(
             r["owner_after"] == "BEARISH" and bool(r["bullish_armed"]) for r in rows
         )
-        bear_arm_while_bull = sum(
+        bear_arm_candles_while_bull = sum(
             r["owner_after"] == "BULLISH" and bool(r["bearish_armed"]) for r in rows
         )
+        bull_arm_events_while_bear = sum(
+            r["owner_after"] == "BEARISH"
+            and any(x in BULLISH_ARM_EVENTS for x in (r["accepted_events"] or "").split(",") if x)
+            for r in rows
+        )
+        bear_arm_events_while_bull = sum(
+            r["owner_after"] == "BULLISH"
+            and any(x in BEARISH_ARM_EVENTS for x in (r["accepted_events"] or "").split(",") if x)
+            for r in rows
+        )
         reversal_blocks = sum(
-            bool(r["note"]) and "SAME_CANDLE" in str(r["note"]) for r in rows
+            bool(r["suppressed_events"])
+            and bool(r["note"])
+            and "SAME_CANDLE" in str(r["note"])
+            for r in rows
         )
 
         bullish_points = sum(t.points for t in trades if t.direction == "BULLISH")
@@ -390,8 +407,10 @@ def replay_directional_sessions(
             bearish_points=bearish_points,
             suppressed_bullish_entries=suppressed_bull,
             suppressed_bearish_entries=suppressed_bear,
-            bullish_armed_while_bearish_active=bull_arm_while_bear,
-            bearish_armed_while_bullish_active=bear_arm_while_bull,
+            bullish_armed_candles_while_bearish_active=bull_arm_candles_while_bear,
+            bearish_armed_candles_while_bullish_active=bear_arm_candles_while_bull,
+            bullish_arm_events_while_bearish_active=bull_arm_events_while_bear,
+            bearish_arm_events_while_bullish_active=bear_arm_events_while_bull,
             same_candle_reversal_blocks=reversal_blocks,
         )
         session_summaries.append(summary)
@@ -435,8 +454,18 @@ def replay_directional_sessions(
             "bearish_points": sum(t.points for t in all_trades if t.direction == "BEARISH"),
             "suppressed_bullish_entries": sum(s.suppressed_bullish_entries for s in session_summaries),
             "suppressed_bearish_entries": sum(s.suppressed_bearish_entries for s in session_summaries),
-            "bullish_armed_while_bearish_active": sum(s.bullish_armed_while_bearish_active for s in session_summaries),
-            "bearish_armed_while_bullish_active": sum(s.bearish_armed_while_bullish_active for s in session_summaries),
+            "bullish_armed_candles_while_bearish_active": sum(
+                s.bullish_armed_candles_while_bearish_active for s in session_summaries
+            ),
+            "bearish_armed_candles_while_bullish_active": sum(
+                s.bearish_armed_candles_while_bullish_active for s in session_summaries
+            ),
+            "bullish_arm_events_while_bearish_active": sum(
+                s.bullish_arm_events_while_bearish_active for s in session_summaries
+            ),
+            "bearish_arm_events_while_bullish_active": sum(
+                s.bearish_arm_events_while_bullish_active for s in session_summaries
+            ),
             "same_candle_reversal_blocks": sum(s.same_candle_reversal_blocks for s in session_summaries),
         },
         "sessions": [asdict(x) for x in session_summaries],

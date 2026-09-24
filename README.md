@@ -1,33 +1,20 @@
-# Hilega Directional Phase D2 — Combined Historical Replay
+# Hilega Directional Metrics Instrumentation Fix v1
 
-Adds combined bullish+bearish historical replay through `HilegaDirectionalCoordinatorV1`.
+This patch changes reporting only. Strategy rules and coordinator behavior remain unchanged.
 
-Per-session outputs:
-- `directional-candle-by-candle.csv/json`
-- `directional-events.csv/json`
-- `directional-trades.csv`
-- `directional-manual-validation.txt`
-
-Multi-session outputs:
-- `multi-session-directional-summary.json`
-- `multi-session-directional-sessions.csv`
-- `multi-session-directional-trades.csv`
-- `multi-session-directional-events.csv`
-- `multi-session-directional-candle-by-candle.csv`
-
-The replay records:
-- active owner before/after each candle
-- bullish and bearish internal states
-- informational ARMED states
-- accepted events
-- suppressed opposite-side entries
-- same-candle reversal blocking notes
-- direction-aware Nifty points
-
-Whipsaw mitigation remains explicitly DEFERRED.
+Changes:
+- `same_candle_reversal_blocks` increments only when an opposite entry was actually emitted and suppressed on the same exit candle.
+- Exit candles with no opposite entry use `NO_SAME_CANDLE_*_ENTRY` notes.
+- Ambiguous armed counters are renamed:
+  - `bullish_armed_candles_while_bearish_active`
+  - `bearish_armed_candles_while_bullish_active`
+- Adds separate accepted arm-event counters:
+  - `bullish_arm_events_while_bearish_active`
+  - `bearish_arm_events_while_bullish_active`
+- Whipsaw mitigation remains DEFERRED.
 
 Validation against the current source snapshot:
-`32 passed`
-across bullish, bearish, bearish replay, coordinator, and combined directional replay tests.
+`36 passed`
+across bullish, bearish, bearish replay, directional coordinator, and combined directional replay tests.
 
 No API/worker restart is required.
