@@ -1,34 +1,19 @@
-# Hilega Directional Combined UI — Phase 6 v1
+# Hilega Directional UI Adjustment v1
 
-Read-only presentation/API layer for the already-active
-`HILEGA_DIRECTIONAL_SHADOW_V1` worker.
+Frontend-only correction for Phase 6.
 
-## Adds
-- `/api/live-shadow/hilega-directional/status`
-- `/api/live-shadow/hilega-directional/events`
-- `/api/live-shadow/hilega-directional/trade-dashboard`
-- Combined UI in the existing **Hilega shadow** tab:
-  - exclusive trade owner
-  - bullish and bearish state
-  - latest accepted/suppressed directional events
-  - active CE or PE ATM±2 lifecycle
-  - combined exited/non-active CE+PE ledger
-  - coordinator activity table
+This keeps the pre-Phase-6 Hilega page structure and styling, and only adapts
+existing sections for directional operation:
 
-## Safety
-No strategy rules are changed. No selection is introduced. No quantity, rupee
-P&L, paper orders, or execution. The UI gets direction from the coordinator
-audit and never infers it.
+- existing safety/header strip retained
+- existing summary cards retained, with Trade Owner / Bullish State / Bearish State added
+- existing Active Trade card retained; CE for bullish, PE for bearish
+- existing candle-by-candle bullish audit retained in its original location
+- existing Exited Trades cards retained; combined CE/PE lifecycle data
+- large Directional Coordinator Activity table removed from the main page
 
-The dashboard intentionally does not fabricate option lifecycles that are not
-present in the directional audit. Mid-session bootstrap can restore the current
-active lifecycle via its audited UPDATE payload, but earlier exited trades from
-before directional activation are not invented.
+No backend, strategy, coordinator, API, or live worker changes are included.
+No quantity, rupee P&L, execution, paper order, or option selector is introduced.
 
-## Validation performed while building this artifact
-- new projector tests: 3 passed
-- new Python modules: py_compile PASS
-- replacement TSX: TypeScript check PASS using local React type stubs
-
-Run the repository's existing directional regression suite on the VM after
-installation.
+For bearish trades, the legacy detailed bullish audit button is intentionally
+not shown; the PE lifecycle itself is shown in the normal trade card/table.
