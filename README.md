@@ -1,12 +1,7 @@
-# Bearish candidate preservation v5
+Fixes the direction-priority bug for informational ARMED rows.
 
-Corrects a presentation bug in the existing HilegaDecisionTable.
+Previously, if BULLISH owned the trade, a simultaneous BEARISH_PATH1_ARMED row
+was labeled BULLISH because owner_after was checked before bearish candidate evidence.
 
-The old lifecycle renderer had one `active` flag. Once a bullish trade was active,
-every later DETECTED row was forced to ACTIVE continuation. That hid informational
-bearish ARMED/candidate rows even though the directional replay recorded them.
-
-This patch tracks the active direction and preserves an opposite-direction
-DETECTED row as a candidate while the active owner remains unchanged.
-
-No UI redesign and no strategy/coordinator changes.
+This patch makes candidate evidence/armed flags take precedence over trade owner
+for DETECTED rows, while leaving ACTIVE ownership semantics unchanged.
