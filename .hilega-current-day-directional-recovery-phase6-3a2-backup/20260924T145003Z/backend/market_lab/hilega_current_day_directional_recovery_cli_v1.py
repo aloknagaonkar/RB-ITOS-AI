@@ -19,14 +19,6 @@ def main() -> None:
         default="data/live-observation/hilega-milega-v1/step-audit.jsonl",
     )
     p.add_argument(
-        "--supplemental-evidence",
-        default=None,
-        help=(
-            "Recorded market-evidence JSONL. Default: "
-            "data/live-observation/hilega-directional-market-evidence-v1/<date>.jsonl"
-        ),
-    )
-    p.add_argument(
         "--output-root",
         default="data/historical-evidence/hilega-directional-replay-v1",
     )
@@ -41,7 +33,6 @@ def main() -> None:
     result = recover_current_day_directional_timeline(
         session_date=a.date,
         source_audit=a.source_audit,
-        supplemental_evidence=a.supplemental_evidence,
         output_root=a.output_root,
         cache_root=a.cache_root,
         warmup_calendar_days=a.warmup_calendar_days,
