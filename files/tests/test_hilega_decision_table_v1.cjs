@@ -13,7 +13,7 @@ assert.deepEqual((out.diagnostics??[]).filter(d=>d.category===ts.DiagnosticCateg
 const moduleBox={exports:{}}
 const mockRequire=name=>name==='react'?{useMemo:()=>{},useState:()=>{},Fragment:Symbol('Fragment')}:name==='react/jsx-runtime'?{jsx:()=>{},jsxs:()=>{}}:name.endsWith('.css')?{}:require(name)
 new Function('require','module','exports',out.outputText)(mockRequire,moduleBox,moduleBox.exports)
-const {eventKind,pathText,computedPremiumPoints,decisionText,deriveDecisionRows,displayDecisionText,checkpointTransitions,shortRuleText,niftyPointsFromEntry,shortDateTime}=moduleBox.exports
+const {eventKind,pathText,computedPremiumPoints,decisionText,deriveDecisionRows,displayDecisionText,checkpointTransitions,shortRuleText,niftyPointsFromEntry,shortDateTime,reportedLegs}=moduleBox.exports
 const r=(over={})=>({checkpoint:'2026-09-23T09:35:00+05:30',transitions:[],strategy:{state_before:'PATH1_IDLE',state_after:'PATH1_IDLE',events_emitted:[]},route_a:{},route_b:{},...over})
 assert.equal(eventKind(r({transitions:[{event_type:'ENTRY_PATH1_ROUTE_A_CROSS_RSI50_ABOVE_WMA21'}]})),'ENTRY')
 assert.equal(eventKind(r({transitions:[{event_type:'STRUCTURAL_EXIT_RSI_CROSS_BELOW_WMA21'}]})),'EXIT')
@@ -116,4 +116,43 @@ assert.equal(pointTrail[0].niftyPoints,0)
 assert.equal(pointTrail[1].niftyPoints,12.5)
 assert.equal(pointTrail[2].niftyPoints,-8)
 
-console.log('PASS: Hilega rule labels + date/time + Nifty delta + lifecycle/CE assertions')
+
+// CE lifecycle must be progressive by strategy row. A completed immutable trade
+// attached to an entry audit must not leak its future exit/P&L into ENTRY or ACTIVE.
+const ceAudit=r({
+  checkpoint:'2026-09-23T10:15:00+05:30',
+  option_lifecycle:{
+    start:{legs:[
+      {strike:23350,entry_timestamp:'2026-09-23T10:21:00+05:30',entry_open:120,exit_timestamp:null,exit_open:null}
+    ]},
+    updates:[
+      {latest_completed_minute:'2026-09-23T10:25:00+05:30',legs:[
+        {strike:23350,entry_timestamp:'2026-09-23T10:21:00+05:30',entry_open:120,latest_open:124,mfe_points:5,mae_points:-2}
+      ]},
+      {latest_completed_minute:'2026-09-23T10:45:00+05:30',legs:[
+        {strike:23350,entry_timestamp:'2026-09-23T10:21:00+05:30',entry_open:120,latest_open:132,mfe_points:14,mae_points:-2}
+      ]}
+    ],
+    exit:{legs:[
+      {strike:23350,entry_timestamp:'2026-09-23T10:21:00+05:30',entry_open:120,exit_timestamp:'2026-09-23T11:20:00+05:30',exit_open:150,realized_points:30,mfe_points:35,mae_points:-2}
+    ]}
+  }
+})
+const ceEntry=reportedLegs(ceAudit,'2026-09-23T10:20:00+05:30','ENTRY')
+assert.equal(ceEntry.length,1)
+assert.equal(ceEntry[0].entry_open,120)
+assert.equal(ceEntry[0].exit_open,null)
+assert.equal(computedPremiumPoints(ceEntry[0]),null)
+
+const ceActive=reportedLegs(ceAudit,'2026-09-23T10:30:00+05:30','ACTIVE')
+assert.equal(ceActive.length,1)
+assert.equal(ceActive[0].latest_open,124)
+assert.equal(ceActive[0].exit_open,undefined)
+assert.equal(computedPremiumPoints(ceActive[0]),null)
+
+const ceExit=reportedLegs(ceAudit,'2026-09-23T11:20:00+05:30','EXIT')
+assert.equal(ceExit.length,1)
+assert.equal(ceExit[0].exit_open,150)
+assert.equal(computedPremiumPoints(ceExit[0]),30)
+
+console.log('PASS: Hilega rule labels + date/time + Nifty delta + progressive CE no-lookahead + lifecycle/CE assertions')

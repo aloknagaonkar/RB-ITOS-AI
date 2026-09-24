@@ -276,20 +276,50 @@ function candleBoundary(checkpoint?:string):string|undefined {
 }
 // Recorded legs are preferred to candidate data; chronological review uses
 // only snapshots provably available by the selected candle's completion.
-function reportedLegs(r:HilegaAudit,asOf?:string){
+export function reportedLegs(r:HilegaAudit,asOf?:string,phase?:DisplayKind){
   const l=r.option_lifecycle??{}
+  const start=list(l.start?.legs)
+  const updates=list(l.updates)
+  const final=list(l.exit?.legs)
+
+  // Entry rows may expose the exact causal CE entry once it is recorded, but
+  // never an eventual exit/P&L that happened later in the same trade.
+  if(phase==='ENTRY'){
+    if(start.length)return start
+    const firstWithEntry=updates.find((u:any)=>list(u?.legs).some((x:any)=>x?.entry_timestamp || number(x?.entry_open)!==null))
+    return list(firstWithEntry?.legs)
+  }
+
+  // Continuation rows are checkpoint-progressive. They can use only option
+  // updates that were available by the end of this 5-minute row. A linked
+  // terminal exit is intentionally ignored until the BULLISH_EXIT row.
+  if(phase==='ACTIVE'){
+    const visible=asOf===undefined?updates:updates.filter((u:any)=>reached(u.latest_completed_minute??u.event_time,asOf))
+    const candidate=visible.at(-1)
+    if(candidate&&list(candidate.legs).length)return list(candidate.legs)
+    return start
+  }
+
+  // Exit rows may show the exact terminal option observation associated with
+  // that strategy exit. If the exact exit is still pending, fall back to the
+  // latest non-terminal lifecycle state and leave realized P&L unavailable.
+  if(phase==='EXIT'){
+    if(final.length)return final
+    if(updates.length&&list(updates.at(-1)?.legs).length)return list(updates.at(-1).legs)
+    return start
+  }
+
+  // Neutral/backward-compatible behavior for callers that do not supply a
+  // lifecycle phase.
   if(asOf!==undefined){
-    const exit=checkpointTransitions(r).find(isExit)
-    const final=list(l.exit?.legs)
-    if(exit&&reached(exit.event_time??r.checkpoint,asOf)&&final.length&&final.every((x:any)=>reached(x.exit_timestamp,asOf)))return final
-    const updates=list(l.updates).filter((x:any)=>reached(x.latest_completed_minute,asOf))
-    const candidate=updates.at(-1)
-    if(candidate&&list(candidate.legs).length&&list(candidate.legs).every((x:any)=>reached(x.entry_timestamp,asOf)))return list(candidate.legs)
-    if(list(l.start?.legs).length&&list(l.start.legs).every((x:any)=>reached(x.entry_timestamp,asOf)))return list(l.start.legs)
+    const visible=updates.filter((u:any)=>reached(u.latest_completed_minute??u.event_time,asOf))
+    const candidate=visible.at(-1)
+    if(candidate&&list(candidate.legs).length)return list(candidate.legs)
+    if(start.length)return start
     return []
   }
-  return list(l.exit?.legs).length?list(l.exit.legs):list(l.updates).length&&list(l.updates.at(-1)?.legs).length
-    ?list(l.updates.at(-1).legs):list(l.start?.legs)
+  return final.length?final:updates.length&&list(updates.at(-1)?.legs).length
+    ?list(updates.at(-1).legs):start
 }
 function number(x:any):number|null {return x===null||x===undefined||x===''||!Number.isFinite(Number(x))?null:Number(x)}
 export function computedPremiumPoints(leg:any):number|null {
@@ -306,12 +336,12 @@ const relative=(r:any)=>Number(r)===0?'ATM':`ATM${Number(r)>0?'+':''}${val(r)}`
 const color=(n:number|null)=>n===null?'':n>0?'hd-positive':n<0?'hd-negative':''
 const eventAt=(t:any,r:HilegaAudit)=>clock(t?.event_time??r.checkpoint)
 
-function CeTable({r,allowedUntil}:{r:HilegaAudit;allowedUntil?:string}){
-  const raw=reportedLegs(r,allowedUntil)
-  // Progressive replay: never expose a future lifecycle result, even when the
-  // immutable entry audit contains linked future updates or exits.
-  const transitionExit=transitions(r).find(isExit)
-  const canShowFinal=allowedUntil===undefined || Boolean(transitionExit && reached(transitionExit.event_time??r.checkpoint,allowedUntil) && list(r.option_lifecycle?.exit?.legs).length && list(r.option_lifecycle?.exit?.legs).every((x:any)=>reached(x.exit_timestamp,allowedUntil)))
+function CeTable({r,allowedUntil,displayKind}:{r:HilegaAudit;allowedUntil?:string;displayKind:DisplayKind}){
+  const raw=reportedLegs(r,allowedUntil,displayKind)
+  // Realized option exit/P&L belongs only to the strategy's BULLISH_EXIT row.
+  // Entry and continuation rows deliberately suppress linked future exits even
+  // if the immutable audit report already contains the completed lifecycle.
+  const canShowFinal=displayKind==='EXIT'
   const legs=raw.length?raw:list(r.option_candidate?.contracts??r.option_candidate?.candidates).map((x:any)=>({
     relation_to_atm:x.relation_to_atm,strike:x.strike,instrument_key:x.instrument_key,
     entry_open:null,exit_open:null,entry_timestamp:null,exit_timestamp:null
@@ -333,14 +363,14 @@ function CeTable({r,allowedUntil}:{r:HilegaAudit;allowedUntil?:string}){
         <td className={color(pts)}>{pts===null?'—':money(pts)}{mismatch&&<span className="hd-warning"> Recorded result differs</span>}</td>
         <td className={color(pts)}>{calculated===null?'—':pct(calculated)}</td>
         <td>{money(x.mfe_points)}</td><td>{money(x.mae_points)}</td>
-        <td>{isFinal?'CLOSED':legStatus({...x,exit_timestamp:null,exit_open:null})}</td>
+        <td>{isFinal?'CLOSED':displayKind==='EXIT'?'PENDING EXACT EXIT':legStatus({...x,exit_timestamp:null,exit_open:null})}</td>
       </tr>
     })}
   </tbody></table><p className="hd-muted">Hypothetical premium points per independent CE contract; not executed account P&amp;L. No substitute premiums or assumed quantity/costs.</p></div>
 }
 function Detail({r,allowedUntil,origin,originRoute,displayKind,lifecycleIssue}:{r:HilegaAudit;allowedUntil?:string;origin?:string|null;originRoute?:string|null;displayKind:DisplayKind;lifecycleIssue?:string|null}){
   const cand=r.bar??{},ind=r.indicators??{},conditions=r.conditions??{}
-  const entry=transitions(r).find(isEntry),exit=transitions(r).find(isExit)
+  const entry=checkpointTransitions(r).find(isEntry),exit=checkpointTransitions(r).find(isExit)
   const reasons=[...list(r.route_a?.fail_reasons),...list(r.route_b?.fail_reasons)]
   const snapshotTime=r.option_market_snapshot?.signal_boundary
   const visibleSnapshot=allowedUntil===undefined || reached(snapshotTime,allowedUntil)
@@ -360,7 +390,7 @@ function Detail({r,allowedUntil,origin,originRoute,displayKind,lifecycleIssue}:{
     {reasons.length>0&&<p className="hd-muted">Recorded rejection reasons: {reasons.map(String).join(' · ')}</p>}
     <h4>Five independent CE contracts — exact historical/live observations</h4>
     <p>Expiry {val(r.option_candidate?.expiry)} · ATM {val(r.option_candidate?.atm)} · Candidate {val(r.option_candidate?.status)} · Market data {visibleSnapshot?val(r.option_market_snapshot?.status):'NOT YET AVAILABLE'}</p>
-    <CeTable r={r} allowedUntil={allowedUntil}/>
+    <CeTable r={r} allowedUntil={allowedUntil} displayKind={displayKind}/>
     <details><summary>Recorded candidate selection and option-market snapshot</summary><pre>{json({candidate:r.option_candidate,snapshot:visibleSnapshot?r.option_market_snapshot:'Not yet available at selected candle'})}</pre></details>
     <details><summary>Strategy transitions and recorded decision evidence</summary><pre>{json({strategy:r.strategy,route_a:r.route_a,route_b:r.route_b,transitions:r.transitions})}</pre></details>
     <details><summary>Audit integrity and recorded source events</summary><p>Full-capture hash-chain check: {r.audit_integrity?.chain_ok===true?'PASS':r.audit_integrity?.chain_ok===false?'FAIL':'NOT VERIFIED'}</p><pre>{json(allowedUntil===undefined?r.audit_integrity:{...r.audit_integrity,records:list(r.audit_integrity?.records).filter((x:any)=>reached(x.event_time??x.checkpoint,allowedUntil))})}</pre></details>
@@ -410,7 +440,7 @@ export default function HilegaDecisionTable({reports,mode,fetchDetail,visibleUnt
       {filtered.map(({report:r,origin,originRoute,niftyPoints,displayKind:k,lifecycleIssue})=>{const opened=open===r.checkpoint,report=details[r.checkpoint]??r
         const badge=k==='ENTRY'?'BULLISH_ENTRY':k==='EXIT'?'BULLISH_EXIT':k==='ACTIVE'?'BULLISH_CONTINUATION':k==='DETECTED'?'ARMED':k==='NONE'?'NO SIGNAL':k==='REVIEW'?'REVIEW REQUIRED':'REJECTED'
         return <Fragment key={r.checkpoint}><tr className={`hd-row hd-${k.toLowerCase()}`}><td>{shortDateTime(r.checkpoint)}</td><td><strong>{shortRuleText(r,k,lifecycleIssue)}</strong>{lifecycleIssue&&<small className="hd-lifecycle-issue">{lifecycleIssue}</small>}</td><td className={color(niftyPoints)}>{niftyPoints===null?'—':`${niftyPoints>0?'+':''}${money(niftyPoints)} pts`}</td><td>{pathText(r,originRoute??undefined)}</td><td><span className={`hd-badge hd-${k.toLowerCase()}`}>{badge}</span></td><td><button aria-expanded={opened} aria-label={`Audit ${r.checkpoint}`} onClick={()=>void toggle(r)}>{opened?'Hide audit':'View audit ▾'}</button></td></tr>
-        {opened&&<tr className="hd-expanded"><td colSpan={6}>{loading&&!details[r.checkpoint]&&<p>Loading complete audit…</p>}<Detail r={report} origin={origin} originRoute={originRoute} displayKind={k} lifecycleIssue={lifecycleIssue} allowedUntil={candleBoundary(visibleUntil)}/></td></tr>}
+        {opened&&<tr className="hd-expanded"><td colSpan={6}>{loading&&!details[r.checkpoint]&&<p>Loading complete audit…</p>}<Detail r={report} origin={origin} originRoute={originRoute} displayKind={k} lifecycleIssue={lifecycleIssue} allowedUntil={candleBoundary(r.checkpoint)}/></td></tr>}
         </Fragment>
       })}
       {!filtered.length&&<tr><td colSpan={6}>{emptyMessage??'No recorded checkpoints for this selection.'}</td></tr>}
