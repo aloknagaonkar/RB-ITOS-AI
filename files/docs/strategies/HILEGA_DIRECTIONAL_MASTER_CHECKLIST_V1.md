@@ -86,3 +86,26 @@ ENTRY = blocked while opposite direction owns ACTIVE trade
 AFTER EXIT = preserved opposite ARMED may continue on next completed candle
 NO same-candle reversal in v1
 ```
+
+
+## Current decision after manual bearish review
+- [x] 2026-09-15 complete bearish trade review
+- [x] Route A/Route B behavior manually inspected on selected sessions
+- [x] Bearish rules accepted to continue as current candidate baseline
+- [ ] Whipsaw mitigation research — DEFERRED (do not modify rules yet)
+
+## Directional Coordinator v1
+- [x] Isolated coordinator module created
+- [x] ACTIVE trade ownership is exclusive
+- [x] Opposite ARMED state may coexist informationally
+- [x] Opposite entry is blocked while current owner remains ACTIVE
+- [x] Suppressed opposite entry is preserved as ARMED
+- [x] Same-candle reversal is blocked
+- [x] After exit, preserved opposite ARMED may continue on next completed candle
+- [x] Coordinator unit regression suite
+- [ ] Historical combined bullish+bearish replay through coordinator
+- [ ] Manual combined-direction validation
+- [ ] PE ATM±2 shadow lifecycle
+- [ ] Live worker integration
+- [ ] Combined directional UI
+- [ ] CE/PE selection research
