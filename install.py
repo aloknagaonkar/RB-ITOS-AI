@@ -4,60 +4,54 @@ from pathlib import Path
 from datetime import datetime, timezone
 import argparse, shutil
 
-OLD = """const direction=(r:DirectionalCandleOverlayRow):'BULLISH'|'BEARISH'|null=>{
-  const a=String(r.action??'').toUpperCase()
-  if(a.startsWith('BEARISH_'))return 'BEARISH'
-  if(a.startsWith('BULLISH_'))return 'BULLISH'
-  if(r.owner_after==='BEARISH'||r.owner_before==='BEARISH')return 'BEARISH'
-  if(r.owner_after==='BULLISH'||r.owner_before==='BULLISH')return 'BULLISH'
-  const events=list(r.accepted_events).map(x=>x.toUpperCase())
-  if(events.some(x=>x.includes('BEARISH')))return 'BEARISH'
-  if(events.some(x=>x.startsWith('ENTRY_')||x.includes('RSI_CROSS_BELOW_WMA21')))return 'BULLISH'
-  if(r.bearish_armed===true||String(r.bearish_state??'').includes('BEARISH_ACTIVE'))return 'BEARISH'
-  if(r.bullish_armed===true||String(r.bullish_state??'').includes('BULLISH_ACTIVE'))return 'BULLISH'
-  return null
+OLD = """export function eventKind(r:HilegaAudit):Kind {
+  const t=checkpointTransitions(r)
+  const events=list(r.strategy?.events_emitted).map(String)
+  if(t.some(isEntry)||events.some(x=>x.startsWith('ENTRY_')))return 'ENTRY'
+  if(t.some(isExit)||events.some(x=>x.includes('EXIT')))return 'EXIT'
+  if(['BULLISH_ACTIVE','BEARISH_ACTIVE'].includes(String(r.strategy?.state_after??'').toUpperCase()))return 'ACTIVE'
+  if(events.some(x=>x.includes('REJECTED')))return 'REJECTED'
+  if(events.some(x=>/CANDIDATE|ARMED|DETECT|OPENING_HOLD/.test(x)) ||
+     ['PATH1_ARMED','BEARISH_PATH1_ARMED'].includes(String(r.strategy?.state_after??'').toUpperCase()))return 'DETECTED'
+  return 'NONE'
 }"""
 
-NEW = """const direction=(r:DirectionalCandleOverlayRow):'BULLISH'|'BEARISH'|null=>{
-  const a=String(r.action??'').toUpperCase()
-  const events=list(r.accepted_events).map(x=>x.toUpperCase())
+NEW = """export function eventKind(r:HilegaAudit):Kind {
+  const t=checkpointTransitions(r)
+  const events=list(r.strategy?.events_emitted).map(String)
+  const directionalAction=String(r.strategy?.directional_action??'').toUpperCase()
+  const bullishArmed=r.strategy?.bullish_armed===true
+  const bearishArmed=r.strategy?.bearish_armed===true
 
-  // Candidate/ARMED direction must come from the candidate evidence itself,
-  // not from the current trade owner. Opposite-side ARMED is informational
-  // and may coexist while the other side remains ACTIVE.
-  if(events.some(x=>x.includes('BEARISH')))return 'BEARISH'
-  if(events.some(x=>x.includes('PATH1_ARMED_RSI_CROSS_EMA3_UP')))return 'BULLISH'
-  if(a==='ARMED_INFORMATION'){
-    if(r.bearish_armed===true)return 'BEARISH'
-    if(r.bullish_armed===true)return 'BULLISH'
-  }
+  if(t.some(isEntry)||events.some(x=>x.startsWith('ENTRY_')))return 'ENTRY'
+  if(t.some(isExit)||events.some(x=>x.includes('EXIT')))return 'EXIT'
 
-  if(a.startsWith('BEARISH_'))return 'BEARISH'
-  if(a.startsWith('BULLISH_'))return 'BULLISH'
+  // Informational ARMED/candidate evidence may coexist with the opposite active
+  // trade owner. Detect it before ACTIVE so it is not flattened into a
+  // continuation row merely because state_after reflects the exclusive owner.
+  if(
+    directionalAction==='ARMED_INFORMATION' ||
+    events.some(x=>/CANDIDATE|ARMED|DETECT|OPENING_HOLD/.test(x)) ||
+    bullishArmed || bearishArmed ||
+    ['PATH1_ARMED','BEARISH_PATH1_ARMED'].includes(String(r.strategy?.state_after??'').toUpperCase())
+  )return 'DETECTED'
 
-  if(r.bearish_armed===true && r.bullish_armed!==true)return 'BEARISH'
-  if(r.bullish_armed===true && r.bearish_armed!==true)return 'BULLISH'
-
-  // Owner determines direction only after candidate-specific evidence has
-  // been considered.
-  if(r.owner_after==='BEARISH'||r.owner_before==='BEARISH')return 'BEARISH'
-  if(r.owner_after==='BULLISH'||r.owner_before==='BULLISH')return 'BULLISH'
-
-  if(String(r.bearish_state??'').includes('BEARISH_ACTIVE'))return 'BEARISH'
-  if(String(r.bullish_state??'').includes('BULLISH_ACTIVE'))return 'BULLISH'
-  return null
+  if(['BULLISH_ACTIVE','BEARISH_ACTIVE'].includes(String(r.strategy?.state_after??'').toUpperCase()))return 'ACTIVE'
+  if(events.some(x=>x.includes('REJECTED')))return 'REJECTED'
+  return 'NONE'
 }"""
+
 
 def main():
     ap=argparse.ArgumentParser()
-    ap.add_argument("--repo",required=True)
+    ap.add_argument("--repo", required=True)
     g=ap.add_mutually_exclusive_group(required=True)
-    g.add_argument("--check",action="store_true")
-    g.add_argument("--apply",action="store_true")
+    g.add_argument("--check", action="store_true")
+    g.add_argument("--apply", action="store_true")
     a=ap.parse_args()
 
     repo=Path(a.repo).resolve()
-    target=repo/"frontend/src/hilegaDirectionalAuditOverlay.ts"
+    target=repo/"frontend/src/hilegaDecisionTable.tsx"
     if not target.is_file():
         raise SystemExit(f"BLOCKED: missing {target}")
 
@@ -66,29 +60,32 @@ def main():
         print("ALREADY PATCHED")
         return
     if OLD not in text:
-        raise SystemExit("BLOCKED: expected direction() block not found; source differs from v5")
+        raise SystemExit("BLOCKED: expected eventKind block not found")
 
     print("READY")
-    print("  - fixes bearish candidate direction while bullish owner is active")
-    print("  - candidate ARMED evidence now takes priority over trade owner")
-    print("  - preserves existing Hilega UI")
-    print("  - frontend-only; no API/worker restart")
+    print("  - keeps existing Hilega UI unchanged")
+    print("  - candidate/ARMED classification now takes precedence over ACTIVE continuation")
+    print("  - preserves opposite-side candidate while owner remains exclusive")
+    print("  - no strategy/coordinator/backend/API changes")
+    print("  - frontend-only; no worker restart")
     if a.check:
         print("CHECK PASS")
         return
 
     stamp=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    backup=repo/".hilega-bearish-candidate-direction-fix-v6-backup"/stamp/target.relative_to(repo)
-    backup.parent.mkdir(parents=True,exist_ok=True)
-    shutil.copy2(target,backup)
+    backup=repo/".hilega-directional-eventkind-precedence-v7-backup"/stamp/target.relative_to(repo)
+    backup.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(target, backup)
 
-    target.write_text(text.replace(OLD,NEW,1))
+    target.write_text(text.replace(OLD, NEW, 1))
+
     print("APPLY PASS")
-    print("Backup:",backup)
+    print("Backup:", backup)
     print("Next: cd frontend && npm run build")
     print("Then hard refresh browser.")
     print("No API restart required.")
-    print("Do not restart Hilega worker.")
+    print("Do not restart Hilega live-shadow worker.")
+
 
 if __name__=="__main__":
     main()

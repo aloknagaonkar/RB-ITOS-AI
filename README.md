@@ -1,7 +1,11 @@
-Fixes the direction-priority bug for informational ARMED rows.
+# Directional event-kind precedence v7
 
-Previously, if BULLISH owned the trade, a simultaneous BEARISH_PATH1_ARMED row
-was labeled BULLISH because owner_after was checked before bearish candidate evidence.
+The directional replay already contains bearish candidate and bearish entry/exit
+evidence. The remaining UI issue was classification order.
 
-This patch makes candidate evidence/armed flags take precedence over trade owner
-for DETECTED rows, while leaving ACTIVE ownership semantics unchanged.
+`eventKind()` previously tested ACTIVE before DETECTED. When BULLISH owned the
+trade and BEARISH was simultaneously ARMED, `state_after=BULLISH_ACTIVE` caused
+the row to become BULLISH_CONTINUATION before the candidate evidence was checked.
+
+This patch checks explicit directional ARMED/candidate evidence before ACTIVE.
+The existing UI/CSS is unchanged.
