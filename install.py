@@ -3,64 +3,77 @@ from pathlib import Path
 import argparse, shutil
 from datetime import datetime, timezone
 
-REL = Path("frontend/src/hilegaDecisionTable.tsx")
-
-OLD_HEADER = """<th>Date / Time (IST)</th><th>Strategy rule / decision</th><th>NIFTY O → C / Δ from entry</th><th>Opening path / Route A / Route B</th>"""
-NEW_HEADER = """<th>Date / Time (IST)</th><th>Strategy rule / decision</th><th>Nifty Δ from entry</th><th>Opening path / Route A / Route B</th>"""
-
-OLD_RENDER = """<td><span>{timing.window}</span>{timing.processed&&<small>{timing.label==='recovered'?`recovered ${timing.processed}`:timing.processed}</small>}</td><td><strong>{shortRuleText(r,k,lifecycleIssue)}</strong>{lifecycleIssue&&<small className="hd-lifecycle-issue">{lifecycleIssue}</small>}</td><td><span>O {money(r.bar?.open)} → C {money(r.bar?.close)}</span><small className={color(niftyPoints)}>{niftyPoints===null?'—':`${niftyPoints>0?'+':''}${money(niftyPoints)} pts`}</small></td>"""
-
-NEW_RENDER = """<td><span style={{display:'block'}}>{timing.window}</span>{timing.processed&&<small style={{display:'block'}}>{timing.label==='recovered'?`recovered ${timing.processed}`:timing.processed}</small>}</td><td><strong>{shortRuleText(r,k,lifecycleIssue)}</strong>{lifecycleIssue&&<small className="hd-lifecycle-issue">{lifecycleIssue}</small>}</td><td><span className={color(niftyPoints)} style={{display:'block'}}>{niftyPoints===null?'—':`${niftyPoints>0?'+':''}${money(niftyPoints)} pts`}</span><small style={{display:'block'}}>O {money(r.bar?.open)} → C {money(r.bar?.close)}</small></td>"""
-
-def replace_once(text, old, new, label):
-    if new in text:
-        return text, False
-    if old not in text:
-        raise RuntimeError(f"BLOCKED: expected block not found: {label}")
-    return text.replace(old,new,1), True
+FILES = {
+    Path("backend/market_lab/hilega_milega_bearish_strategy_v1.py"):
+        Path("files/backend/market_lab/hilega_milega_bearish_strategy_v1.py"),
+    Path("tests/test_hilega_milega_bearish_strategy_v1.py"):
+        Path("files/tests/test_hilega_milega_bearish_strategy_v1.py"),
+    Path("docs/strategies/HILEGA_DIRECTIONAL_MASTER_CHECKLIST_V1.md"):
+        Path("files/docs/strategies/HILEGA_DIRECTIONAL_MASTER_CHECKLIST_V1.md"),
+}
 
 def main():
-    ap=argparse.ArgumentParser(description="Stack Hilega secondary timing/NIFTY data below primary values")
-    ap.add_argument("--repo",required=True)
-    g=ap.add_mutually_exclusive_group(required=True)
-    g.add_argument("--check",action="store_true")
-    g.add_argument("--apply",action="store_true")
-    a=ap.parse_args()
+    ap = argparse.ArgumentParser(description="Install Hilega bearish Phase B1/B2")
+    ap.add_argument("--repo", required=True)
+    g = ap.add_mutually_exclusive_group(required=True)
+    g.add_argument("--check", action="store_true")
+    g.add_argument("--apply", action="store_true")
+    a = ap.parse_args()
 
-    repo=Path(a.repo).resolve()
-    p=repo/REL
-    if not p.is_file():
-        print("BLOCKED: missing",REL)
+    repo = Path(a.repo).resolve()
+    patch_root = Path(__file__).resolve().parent
+
+    bullish = repo/"backend/market_lab/hilega_milega_strategy_v1.py"
+    if not bullish.is_file():
+        print("BLOCKED: current bullish strategy source is missing.")
         raise SystemExit(2)
 
-    text=p.read_text(encoding="utf-8")
-    try:
-        text,c1=replace_once(text,OLD_HEADER,NEW_HEADER,"Nifty column header")
-        text,c2=replace_once(text,OLD_RENDER,NEW_RENDER,"stacked row rendering")
-    except RuntimeError as e:
-        print(e); print("No files changed."); raise SystemExit(2)
+    expected_markers = [
+        "class HilegaMilegaBullishEngineV1",
+        'STRATEGY_ID = "HILEGA_MILEGA_BULLISH_SHADOW_V1"',
+        "class HilegaMilegaIndicatorEngineV1",
+    ]
+    text = bullish.read_text(encoding="utf-8")
+    missing = [x for x in expected_markers if x not in text]
+    if missing:
+        print("BLOCKED: bullish baseline does not match expected architecture:", missing)
+        raise SystemExit(2)
 
-    if not (c1 or c2):
-        print("ALREADY_PATCHED")
-        return
+    for dest, src_rel in FILES.items():
+        src = patch_root/src_rel
+        if not src.is_file():
+            print("BLOCKED: patch payload missing:", src_rel)
+            raise SystemExit(2)
 
-    print("READY:",REL)
-    print("  - restores primary column label: Nifty Δ from entry")
-    print("  - keeps Δ on the first line")
-    print("  - puts NIFTY Open → Close underneath")
-    print("  - puts processing/recovered time on its own line under candle window")
-    print("  - frontend only; no API or worker restart")
+    print("READY")
+    print("  - adds separate HilegaMilegaBearishEngineV1")
+    print("  - reuses canonical RSI9/EMA3/WMA21 indicator engine")
+    print("  - adds mirrored bearish Opening / Route A / Route B / exit / cutoff candidate rules")
+    print("  - adds bearish unit/audit tests")
+    print("  - adds updated directional master checklist")
+    print("  - DOES NOT modify the working bullish engine")
+    print("  - DOES NOT add live PE trading/shadow integration yet")
+    print("  - execution remains disabled")
     if a.check:
         print("CHECK PASS")
         return
 
-    stamp=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    backup=repo/".hilega-stack-secondary-ui-backup"/stamp/REL
-    backup.parent.mkdir(parents=True,exist_ok=True)
-    shutil.copy2(p,backup)
-    p.write_text(text,encoding="utf-8")
-    print("APPLY PASS")
-    print("Backup:",backup)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    backup_root = repo/".hilega-bearish-b1-b2-backup"/stamp
 
-if __name__=="__main__":
+    for dest, src_rel in FILES.items():
+        target = repo/dest
+        src = patch_root/src_rel
+        if target.exists():
+            backup = backup_root/dest
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(target, backup)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, target)
+
+    print("APPLY PASS")
+    print("Backup root:", backup_root)
+    print("Run the bearish + bullish strategy tests before any replay integration.")
+
+if __name__ == "__main__":
     main()
