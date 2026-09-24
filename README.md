@@ -1,14 +1,34 @@
-# Hilega Directional Live Shadow v1 patch
+# Hilega Directional Combined UI — Phase 6 v1
 
-Adds isolated observation-only directional live wiring.
+Read-only presentation/API layer for the already-active
+`HILEGA_DIRECTIONAL_SHADOW_V1` worker.
 
-Files:
-- `backend/market_lab/hilega_directional_live_shadow_v1.py` (new)
-- `backend/market_lab/hilega_directional_coordinator_v1.py` (adds exact 14:55 cutoff coordination)
-- `backend/market_lab/live_shadow_worker_v1.py` (adds `HILEGA_DIRECTIONAL_SHADOW_V1` selector)
-- `tests/test_hilega_directional_live_shadow_v1.py` (new)
-- documentation
+## Adds
+- `/api/live-shadow/hilega-directional/status`
+- `/api/live-shadow/hilega-directional/events`
+- `/api/live-shadow/hilega-directional/trade-dashboard`
+- Combined UI in the existing **Hilega shadow** tab:
+  - exclusive trade owner
+  - bullish and bearish state
+  - latest accepted/suppressed directional events
+  - active CE or PE ATM±2 lifecycle
+  - combined exited/non-active CE+PE ledger
+  - coordinator activity table
 
-Validated against the current source snapshot: 48 tests passed and worker import passed.
+## Safety
+No strategy rules are changed. No selection is introduced. No quantity, rupee
+P&L, paper orders, or execution. The UI gets direction from the coordinator
+audit and never infers it.
 
-No strategy-rule changes. No UI changes. No execution/paper-order capability.
+The dashboard intentionally does not fabricate option lifecycles that are not
+present in the directional audit. Mid-session bootstrap can restore the current
+active lifecycle via its audited UPDATE payload, but earlier exited trades from
+before directional activation are not invented.
+
+## Validation performed while building this artifact
+- new projector tests: 3 passed
+- new Python modules: py_compile PASS
+- replacement TSX: TypeScript check PASS using local React type stubs
+
+Run the repository's existing directional regression suite on the VM after
+installation.
