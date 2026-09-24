@@ -1,5 +1,7 @@
 import {useEffect,useMemo,useState} from 'react'
 import HilegaDecisionTable,{type HilegaAudit} from './hilegaDecisionTable'
+import {overlayDirectionalAuditReports} from './hilegaDirectionalAuditOverlay'
+import HilegaDirectionalReplayTrades from './hilegaDirectionalReplayTrades'
 import './hilegaHistoricalReplay.css'
 
 type Session={
@@ -77,9 +79,18 @@ export default function HilegaHistoricalReplay(){
     if(!selectedDate)return
     setBusy(true);setError('');setPlaying(false);setData(null);setCursor(0)
     try{
-      const r=await fetch(`/api/live-shadow/hilega-historical/session?session_date=${encodeURIComponent(selectedDate)}`)
+      const [r,dr]=await Promise.all([
+        fetch(`/api/live-shadow/hilega-historical/session?session_date=${encodeURIComponent(selectedDate)}`),
+        fetch(`/api/live-shadow/hilega-directional-candles/historical?session_date=${encodeURIComponent(selectedDate)}`),
+      ])
       if(!r.ok)throw new Error(`Session HTTP ${r.status}: ${await r.text()}`)
-      setData(await r.json() as Response)
+      const body=await r.json() as Response
+      if(dr.ok){
+        const directional=await dr.json()
+        body.reports=overlayDirectionalAuditReports(body.reports??[],directional.rows??[])
+        body.report_count=body.reports.length
+      }
+      setData(body)
     }catch(e){setError(String(e))}finally{setBusy(false)}
   }
 
@@ -162,6 +173,8 @@ export default function HilegaHistoricalReplay(){
           <strong>{cursor+1}/{reports.length} · {shortTime(reports[cursor].checkpoint)} IST</strong>
         </>}
       </div>
+
+      <HilegaDirectionalReplayTrades sessionDate={selectedDate} />
 
       <HilegaDecisionTable key={`${selectedDate}-${data.source}-${step?'step':'full'}`} reports={reports}
         mode="HISTORICAL" visibleUntil={until}
