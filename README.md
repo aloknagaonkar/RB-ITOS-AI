@@ -1,18 +1,18 @@
-# Hilega bootstrap recovered-checkpoints patch
+# Hilega Active/Exited Trade UI + Candle Timing
 
-Purpose:
-Prevent a live-shadow worker restart from silently hiding a completed current-day
-5-minute strategy checkpoint.
+This cumulative patch:
+- removes the old aggregate Shadow premium P&L dashboard
+- removes the old mixed CE entry/exit ledger
+- adds an Active CE shadow trade section that contains only ACTIVE trades
+- automatically removes a trade from Active when its status changes
+- adds Exited CE shadow trades at the bottom (including pending exact exits)
+- preserves independent ATM±2 shadow observations; no quantity or rupee P&L
+- displays candle windows like 10:35–10:40
+- shows actual runtime `processed HH:MM:SS` from UNDERLYING_5M_BUILD when recorded
+- shows `recovered HH:MM:SS` for bootstrap-recovered checkpoints
 
-Behavior:
-- Historical warmup sessions remain silent.
-- Current-day completed bars replay through the canonical strategy into an in-memory collector.
-- The patch checks the append-only step audit for already-recorded STRATEGY_DECISION checkpoints.
-- Only missing current-day checkpoints are appended to the real audit.
-- Recovered rows use the real replay-computed indicator/decision/transition payloads.
-- Each recovered checkpoint also receives `BOOTSTRAP_RECOVERED_CHECKPOINT`.
-- Existing rows are not rewritten or duplicated.
+The backend change is reporting-only: `_related_to_checkpoint()` additionally links
+`UNDERLYING_5M_BUILD.payload.bar_timestamp` to its strategy checkpoint so the UI can
+display the real processing timestamp.
 
-Operational note:
-This is coordinator/worker code. Do not restart the live-shadow worker during market hours
-just to install it. It can be applied to disk and activated at the next intentional worker restart.
+No strategy rules, option-entry/exit rules, execution settings, or worker behavior are changed.
