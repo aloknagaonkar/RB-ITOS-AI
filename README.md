@@ -1,20 +1,23 @@
-# Hilega Bearish Phase B1/B2
+# Hilega Bearish Phase B3 — Historical Replay
 
-Adds a separate candidate bearish Hilega engine without changing the working bullish engine.
+Adds a separate bearish historical replay path while preserving the current bullish engine/replay.
 
-Implemented candidate mirror rules:
-- Opening: 09:15 RSI<50, EMA<50, WMA<50, RSI<EMA<WMA; 09:20 RSI<WMA; 09:25 RSI<WMA
-- Arm: fresh RSI cross below EMA3
-- Route A: fresh cross + RSI<50 + RSI<WMA21
-- Route B: armed + (RSI<WMA21 or EMA3<WMA21) + RSI falling + EMA falling
-- Exit: fresh RSI cross above WMA21
-- Cutoff: 14:55 OPEN, lock session, no new entries
+Outputs per target session:
+- `step-audit.jsonl`
+- `bearish-trades.csv`
+- `bearish-signal-decision-audit.csv/json`
+- `bearish-candle-by-candle-audit.csv/json`
+- `bearish-manual-validation.txt`
 
-This phase is intentionally isolated:
-- no directional coordinator yet
-- no PE option lifecycle yet
-- no live worker wiring yet
-- no modification to bullish production behavior
+Multi-session outputs:
+- `multi-session-bearish-summary.json`
+- `multi-session-bearish-sessions.csv`
+- `multi-session-bearish-trades.csv`
+- `multi-session-bearish-signal-decision-audit.csv`
+- `multi-session-bearish-candle-by-candle-audit.csv`
 
-Validated against the uploaded source snapshot:
-`22 passed` across the existing bullish strategy tests and the new bearish strategy tests.
+The replay is observation/research only and explicitly marks the rules as:
+`CANDIDATE_MIRROR_UNDER_VALIDATION`.
+
+Validated against the uploaded code snapshot:
+`25 passed` across existing bullish strategy tests + bearish strategy + bearish historical replay tests.

@@ -27,8 +27,10 @@
 - [x] Observation-only / execution-disabled safety flags
 - [x] Hash-chain strategy audit coverage
 - [x] Unit tests for Route A, Route B, ARMED persistence, exit, opening, cutoff, reset, audit
-- [ ] Historical replay integration for bearish engine
-- [ ] Manual candle-by-candle validation on bearish sessions
+- [x] Historical replay integration for bearish engine
+- [x] Manual-validation report generation (`bearish-manual-validation.txt`)
+- [ ] Run replay on selected real bearish sessions
+- [ ] Manually validate candle-by-candle bearish entries/exits
 - [ ] Freeze or revise bearish rules based on evidence
 
 ## Directional orchestration — after bearish validation
