@@ -1,18 +1,11 @@
-# Hilega bootstrap reconstructed-entry projection patch
+# Hilega latest-first + Nifty points UI patch
 
-Fixes a restart boundary where the append-only journal may contain:
-- a pre-restart ARMED candle,
-- an option lifecycle restore/retry proving `signal_bar` + entry `source`,
-- later `BULLISH_ACTIVE` candles,
-but no canonical strategy-decision record for the signal bar itself.
+Frontend-only.
 
-The patch adds a read-only, explicitly marked `RECONSTRUCTED_ENTRY` projection.
-It does not modify or backfill `step-audit.jsonl`, and it does not fabricate
-indicator or OHLC values.
+What it does:
+- keeps lifecycle derivation chronological (required for correct ENTRY/CONTINUE/EXIT state)
+- reverses only the final rendered/filtered rows so the newest candle appears at the top
+- preserves Nifty delta as `current Nifty close - original entry Nifty`
+- works with the reconstructed-entry projection because its projected entry transition carries recorded `signal_spot`
 
-Files changed by installer:
-- backend/market_lab/hilega_milega_audit_report_v1.py
-- frontend/src/hilegaDecisionTable.tsx
-
-Added test payload:
-- files/tests/test_hilega_bootstrap_reconstructed_entry_projection_v1.py
+No strategy rules, backend evidence, option lifecycle logic, or workers are changed.
