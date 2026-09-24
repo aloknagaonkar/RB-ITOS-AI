@@ -35,13 +35,25 @@ const json=(v:unknown)=>JSON.stringify(v??{},null,2)
 const isEntry=(x:any)=>String(x?.event_type??'').startsWith('ENTRY_')
 const isExit=(x:any)=>String(x?.event_type??'').includes('EXIT')
 const transitions=(r:HilegaAudit)=>list(r.transitions)
-// Display classifications are derived from recorded transitions and state, not
-// independent entry/exit calculations. EXIT always has precedence over ENTRY.
+const sameInstant=(a:any,b:any):boolean=>{
+  if(!a||!b)return false
+  const ams=new Date(String(a)).getTime(),bms=new Date(String(b)).getTime()
+  if(Number.isFinite(ams)&&Number.isFinite(bms))return ams===bms
+  return String(a)===String(b)
+}
+// Canonical audit reports deliberately include linked lifecycle evidence so an
+// entry row can show the eventual CE exit. Those linked future transitions must
+// never classify the *current candle*. Only transitions whose event_time is the
+// current checkpoint are eligible for the row's decision label.
+export const checkpointTransitions=(r:HilegaAudit)=>transitions(r).filter(t=>sameInstant(t?.event_time,r.checkpoint))
+// Display classifications are derived from the current checkpoint's strategy
+// transition/result only. Explicit ENTRY is checked before EXIT so a linked
+// future exit attached to an entry audit can never overwrite BULLISH_ENTRY.
 export function eventKind(r:HilegaAudit):Kind {
-  const t=transitions(r)
+  const t=checkpointTransitions(r)
   const events=list(r.strategy?.events_emitted).map(String)
-  if(t.some(isExit)||events.some(x=>x.includes('EXIT')))return 'EXIT'
   if(t.some(isEntry)||events.some(x=>x.startsWith('ENTRY_')))return 'ENTRY'
+  if(t.some(isExit)||events.some(x=>x.includes('EXIT')))return 'EXIT'
   if(String(r.strategy?.state_after??'').toUpperCase()==='BULLISH_ACTIVE')return 'ACTIVE'
   if(events.some(x=>x.includes('REJECTED')))return 'REJECTED'
   if(events.some(x=>/CANDIDATE|ARMED|DETECT|OPENING_HOLD/.test(x)) ||
@@ -76,7 +88,7 @@ export function pathText(r:HilegaAudit,carriedRoute?:string):string {
   const route=r.strategy?.selected_route
   if(route)return String(route).replaceAll('_',' ')
   const events=list(r.strategy?.events_emitted).map(String)
-  const origin=transitions(r).find(isEntry)
+  const origin=checkpointTransitions(r).find(isEntry)
   const source=origin?.source
   if(source)return String(source).replaceAll('_',' ')
   if(events.some(x=>x.startsWith('OPENING_')) || [r.strategy?.state_before,r.strategy?.state_after].some(x=>String(x??'').startsWith('OPENING_')))return 'Opening path'
@@ -99,7 +111,7 @@ export type DecisionRow = {
 const explicitOrigin=(r:HilegaAudit):string|null=>{
   const direct=r.linked_signal_bar
   if(direct)return String(direct)
-  const exit=transitions(r).find(isExit)
+  const exit=checkpointTransitions(r).find(isExit)
   const linked=exit?.details?.original_entry_time
   return linked?String(linked):null
 }
@@ -212,7 +224,7 @@ function candleBoundary(checkpoint?:string):string|undefined {
 function reportedLegs(r:HilegaAudit,asOf?:string){
   const l=r.option_lifecycle??{}
   if(asOf!==undefined){
-    const exit=transitions(r).find(isExit)
+    const exit=checkpointTransitions(r).find(isExit)
     const final=list(l.exit?.legs)
     if(exit&&reached(exit.event_time??r.checkpoint,asOf)&&final.length&&final.every((x:any)=>reached(x.exit_timestamp,asOf)))return final
     const updates=list(l.updates).filter((x:any)=>reached(x.latest_completed_minute,asOf))

@@ -1,11 +1,22 @@
-# Hilega lifecycle consistency UI patch
+# Hilega current-checkpoint classifier fix
 
-Fixes impossible display sequences such as BULLISH_EXIT or BULLISH_CONTINUATION without a preceding active BULLISH_ENTRY.
+Fixes Historical Replay / Hilega Shadow table classification when a canonical entry audit includes the *later linked exit transition* so the expanded audit can show the full CE lifecycle.
 
-Rules:
-- BULLISH_ENTRY opens the display lifecycle.
-- Every following completed candle is BULLISH_CONTINUATION until a valid exit.
-- BULLISH_EXIT requires an active entry, unless the audit explicitly links to an entry outside the loaded window.
-- Orphan exit/continuation events are shown as REVIEW_REQUIRED; raw audit evidence remains expandable.
-- Duplicate entry while active is REVIEW_REQUIRED.
-- No strategy, backend, market data, or execution logic is changed.
+The table now classifies a row only from strategy transitions whose `event_time` equals that row's checkpoint. This preserves the full linked audit while correctly rendering sequences such as:
+
+- 09:40 `BULLISH_ENTRY` / Route A
+- 09:45 `BULLISH_EXIT`
+- 09:55 `BULLISH_ENTRY` / Route A
+- 10:00 `BULLISH_CONTINUATION`
+- 10:05 `BULLISH_EXIT`
+
+No strategy or backend logic is changed.
+
+## Apply
+
+```bash
+python install.py --repo ~/RB-ITOS-AI --check
+python install.py --repo ~/RB-ITOS-AI --apply
+node tests/test_hilega_decision_table_v1.cjs
+cd frontend && npm run build
+```
