@@ -1,30 +1,22 @@
-# Hilega Directional PE ATM±2 Historical Shadow v1
+# Historical Option Sidecar Active-Expiry Fix v1
 
-Historical-only PE shadow for accepted BEARISH directional trades.
+This is an acquisition-layer fix only.
 
-It tracks all five PE contracts independently:
-- ATM-2
-- ATM-1
-- ATM
-- ATM+1
-- ATM+2
+Behavior:
+- If `expiry < provider_as_of`, use the existing expired-instruments contract/candle endpoints.
+- If `expiry >= provider_as_of`, use the existing active-option contract and active historical candle endpoints.
+- A zero-contract catalog is `UNAVAILABLE`, not `AVAILABLE`.
+- A zero-row option result is `UNAVAILABLE`, not `AVAILABLE`.
+- No nearest date, strike, minute, or alternate contract fallback is introduced.
 
-Semantics:
-- entry premium = exact 1m OPEN at the causal signal boundary (5m label + 5m)
-- exit premium = exact 1m OPEN at the causal exit boundary (5m label + 5m)
-- MFE/MAE measured on the exact minute path
-- no nearest-minute fallback
-- no nearest-strike fallback
-- no single-contract selection
-- no quantity
-- no rupee P&L
-- no paper or live order creation
-
-Real historical option data is read only from existing
-`historical-option-ohlc-cache*` files. Missing exact data remains unavailable
-or incomplete; it is never synthesized.
+The Sep-23 / Sep-29 case is the motivating example: on 2026-09-24 the
+2026-09-29 expiry is still active, so it must be acquired from active endpoints.
 
 Validation against the current source snapshot:
-`39 passed`
+`43 passed`
 
 No API/worker restart is required.
+
+Important after install:
+The existing Sep-23 cache was created by the old code with `AVAILABLE` + zero rows.
+Delete only that stale cache file (or use `--refresh`) before rebuilding Sep-23.
