@@ -1,11 +1,18 @@
-# Hilega latest-first + Nifty points UI patch
+# Hilega bootstrap recovered-checkpoints patch
 
-Frontend-only.
+Purpose:
+Prevent a live-shadow worker restart from silently hiding a completed current-day
+5-minute strategy checkpoint.
 
-What it does:
-- keeps lifecycle derivation chronological (required for correct ENTRY/CONTINUE/EXIT state)
-- reverses only the final rendered/filtered rows so the newest candle appears at the top
-- preserves Nifty delta as `current Nifty close - original entry Nifty`
-- works with the reconstructed-entry projection because its projected entry transition carries recorded `signal_spot`
+Behavior:
+- Historical warmup sessions remain silent.
+- Current-day completed bars replay through the canonical strategy into an in-memory collector.
+- The patch checks the append-only step audit for already-recorded STRATEGY_DECISION checkpoints.
+- Only missing current-day checkpoints are appended to the real audit.
+- Recovered rows use the real replay-computed indicator/decision/transition payloads.
+- Each recovered checkpoint also receives `BOOTSTRAP_RECOVERED_CHECKPOINT`.
+- Existing rows are not rewritten or duplicated.
 
-No strategy rules, backend evidence, option lifecycle logic, or workers are changed.
+Operational note:
+This is coordinator/worker code. Do not restart the live-shadow worker during market hours
+just to install it. It can be applied to disk and activated at the next intentional worker restart.
