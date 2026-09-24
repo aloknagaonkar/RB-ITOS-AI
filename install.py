@@ -4,12 +4,48 @@ from pathlib import Path
 from datetime import datetime, timezone
 import argparse, shutil
 
-OLD_BADGE = """        const badge=k==='ENTRY'?'BULLISH_ENTRY':k==='EXIT'?'BULLISH_EXIT':k==='ACTIVE'?'BULLISH_CONTINUATION':k==='DETECTED'?'ARMED':k==='NONE'?'NO SIGNAL':k==='REVIEW'?'REVIEW REQUIRED':'REJECTED'"""
-NEW_BADGE = """        const badge=k==='NONE'?'NO SIGNAL':k==='REVIEW'?'REVIEW REQUIRED':k==='REJECTED'?'REJECTED':displayDecisionText(k,reportDirection(r))"""
+OLD = """const reportDirection=(r:HilegaAudit):'BULLISH'|'BEARISH'=>{
+  const explicit=String(r.strategy?.direction??'').toUpperCase()
+  if(explicit==='BEARISH')return 'BEARISH'
+  const action=String(r.strategy?.directional_action??'').toUpperCase()
+  if(action.startsWith('BEARISH_'))return 'BEARISH'
+  const events=list(r.strategy?.events_emitted).map(x=>String(x).toUpperCase())
+  if(events.some(x=>x.includes('BEARISH')))return 'BEARISH'
+  const states=[r.strategy?.state_before,r.strategy?.state_after,r.strategy?.bearish_state].map(x=>String(x??'').toUpperCase())
+  if(states.some(x=>x.includes('BEARISH_ACTIVE')))return 'BEARISH'
+  return 'BULLISH'
+}"""
 
-OLD_FILTER = """{({ALL:'All candles',DETECTED:'Armed / candidates',ENTRY:'Bullish entries',EXIT:'Bullish exits',ACTIVE:'Bullish continuations',REJECTED:'Rejected setups',REVIEW:'Review required'} as Record<Filter,string>)[k]}"""
-NEW_FILTER = """{({ALL:'All candles',DETECTED:'Armed / candidates',ENTRY:'Directional entries',EXIT:'Directional exits',ACTIVE:'Directional continuations',REJECTED:'Rejected setups',REVIEW:'Review required'} as Record<Filter,string>)[k]}"""
+NEW = """const reportDirection=(r:HilegaAudit):'BULLISH'|'BEARISH'=>{
+  const ownerAfter=String(r.strategy?.owner_after??'').toUpperCase()
+  const ownerBefore=String(r.strategy?.owner_before??'').toUpperCase()
+  const stateAfter=String(r.strategy?.state_after??'').toUpperCase()
+  const action=String(r.strategy?.directional_action??'').toUpperCase()
 
+  // Visible decision direction follows the exclusive active owner first.
+  // Opposite-side ARMED state may remain preserved internally, but it must not
+  // replace the displayed active trade with an opposite candidate.
+  if(stateAfter==='BULLISH_ACTIVE'||ownerAfter==='BULLISH')return 'BULLISH'
+  if(stateAfter==='BEARISH_ACTIVE'||ownerAfter==='BEARISH')return 'BEARISH'
+
+  // On exit owner_after is NONE, so use the recorded exit action / prior owner.
+  if(action.startsWith('BULLISH_'))return 'BULLISH'
+  if(action.startsWith('BEARISH_'))return 'BEARISH'
+  if(ownerBefore==='BULLISH'&&action.includes('EXIT'))return 'BULLISH'
+  if(ownerBefore==='BEARISH'&&action.includes('EXIT'))return 'BEARISH'
+
+  // When no trade is active, candidate direction comes from the recorded
+  // directional evidence.
+  const explicit=String(r.strategy?.direction??'').toUpperCase()
+  if(explicit==='BEARISH')return 'BEARISH'
+  if(explicit==='BULLISH')return 'BULLISH'
+  const events=list(r.strategy?.events_emitted).map(x=>String(x).toUpperCase())
+  if(events.some(x=>x.includes('BEARISH')))return 'BEARISH'
+  if(events.some(x=>x.includes('BULLISH')||x.startsWith('ENTRY_PATH1_')))return 'BULLISH'
+  const bearishState=String(r.strategy?.bearish_state??'').toUpperCase()
+  if(bearishState.includes('BEARISH_ACTIVE')||bearishState.includes('BEARISH_PATH1_ARMED'))return 'BEARISH'
+  return 'BULLISH'
+}"""
 
 def main():
     ap=argparse.ArgumentParser()
@@ -25,34 +61,29 @@ def main():
         raise SystemExit(f"BLOCKED: missing {target}")
 
     text=target.read_text()
-    if "function displayDecisionText(kind:DisplayKind,direction:'BULLISH'|'BEARISH'" not in text:
-        raise SystemExit("BLOCKED: direction-aware displayDecisionText not found")
-
-    if NEW_BADGE in text:
+    if NEW in text:
         print("ALREADY PATCHED")
         return
-    if OLD_BADGE not in text:
-        raise SystemExit("BLOCKED: expected hard-coded badge line not found")
+    if OLD not in text:
+        raise SystemExit("BLOCKED: expected reportDirection block not found")
 
     print("READY")
-    print("  - fixes Signal detected badge to use actual row direction")
-    print("  - BEARISH_ENTRY / BEARISH_CONTINUATION / BEARISH_EXIT now render correctly")
-    print("  - candidate badge becomes direction-aware too")
-    print("  - existing table layout/CSS unchanged")
+    print("  - active owner has display priority over opposite ARMED state")
+    print("  - during BULLISH_ACTIVE, rows remain BULLISH_CONTINUATION")
+    print("  - during BEARISH_ACTIVE, rows remain BEARISH_CONTINUATION")
+    print("  - opposite candidate is shown only when there is no active owner")
+    print("  - internal ARMED evidence is not deleted")
     print("  - frontend-only; no API/worker restart")
     if a.check:
         print("CHECK PASS")
         return
 
     stamp=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    backup=repo/".hilega-directional-badge-label-fix-v8-backup"/stamp/target.relative_to(repo)
+    backup=repo/".hilega-active-owner-display-priority-v9-backup"/stamp/target.relative_to(repo)
     backup.parent.mkdir(parents=True,exist_ok=True)
     shutil.copy2(target,backup)
 
-    text=text.replace(OLD_BADGE,NEW_BADGE,1)
-    if OLD_FILTER in text:
-        text=text.replace(OLD_FILTER,NEW_FILTER,1)
-    target.write_text(text)
+    target.write_text(text.replace(OLD,NEW,1))
 
     print("APPLY PASS")
     print("Backup:",backup)

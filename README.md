@@ -1,10 +1,15 @@
-# Directional badge label fix v8
+# Active owner display priority v9
 
-The row semantics were already direction-aware, but the visible "Signal detected"
-badge in HilegaDecisionTable was still hard-coded to BULLISH_ENTRY,
-BULLISH_CONTINUATION and BULLISH_EXIT.
+UI semantic correction.
 
-This patch makes that badge call the existing direction-aware
-displayDecisionText(..., reportDirection(...)) function.
+While a trade owner is active, the visible row remains that owner's
+continuation. Opposite-side ARMED evidence stays preserved internally but is not
+shown as an opposite candidate until the active trade exits.
 
-No UI redesign and no strategy/backend changes.
+Expected replay:
+09:20 BEARISH_CANDIDATE / ARMED
+09:25 BULLISH_ENTRY
+09:30..10:15 BULLISH_CONTINUATION
+10:20 BULLISH_EXIT
+10:25 BEARISH_CANDIDATE / ARMED
+10:30 BEARISH_ENTRY
