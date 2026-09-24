@@ -14,7 +14,11 @@ const moduleBox={exports:{}}
 const mockRequire=name=>name==='react'?{useMemo:()=>{},useState:()=>{},Fragment:Symbol('Fragment')}:name==='react/jsx-runtime'?{jsx:()=>{},jsxs:()=>{}}:name.endsWith('.css')?{}:require(name)
 new Function('require','module','exports',out.outputText)(mockRequire,moduleBox,moduleBox.exports)
 const {eventKind,pathText,computedPremiumPoints,decisionText,deriveDecisionRows,displayDecisionText,checkpointTransitions,shortRuleText,niftyPointsFromEntry,shortDateTime,reportedLegs,mergeLifecycleEvidence}=moduleBox.exports
-const r=(over={})=>({checkpoint:'2026-09-23T09:35:00+05:30',transitions:[],strategy:{state_before:'PATH1_IDLE',state_after:'PATH1_IDLE',events_emitted:[]},route_a:{},route_b:{},...over})
+const r=(over={})=>{
+  const row={checkpoint:'2026-09-23T09:35:00+05:30',transitions:[],strategy:{state_before:'PATH1_IDLE',state_after:'PATH1_IDLE',events_emitted:[]},route_a:{},route_b:{},...over}
+  row.transitions=(row.transitions??[]).map(t=>({...t,event_time:t.event_time??row.checkpoint}))
+  return row
+}
 assert.equal(eventKind(r({transitions:[{event_type:'ENTRY_PATH1_ROUTE_A_CROSS_RSI50_ABOVE_WMA21'}]})),'ENTRY')
 assert.equal(eventKind(r({transitions:[{event_type:'STRUCTURAL_EXIT_RSI_CROSS_BELOW_WMA21'}]})),'EXIT')
 assert.equal(eventKind(r({strategy:{events_emitted:['PATH1_ARMED_RSI_CROSS_EMA3_UP']}})),'DETECTED')
