@@ -1,11 +1,10 @@
-# Directional event-kind precedence v7
+# Directional badge label fix v8
 
-The directional replay already contains bearish candidate and bearish entry/exit
-evidence. The remaining UI issue was classification order.
+The row semantics were already direction-aware, but the visible "Signal detected"
+badge in HilegaDecisionTable was still hard-coded to BULLISH_ENTRY,
+BULLISH_CONTINUATION and BULLISH_EXIT.
 
-`eventKind()` previously tested ACTIVE before DETECTED. When BULLISH owned the
-trade and BEARISH was simultaneously ARMED, `state_after=BULLISH_ACTIVE` caused
-the row to become BULLISH_CONTINUATION before the candidate evidence was checked.
+This patch makes that badge call the existing direction-aware
+displayDecisionText(..., reportDirection(...)) function.
 
-This patch checks explicit directional ARMED/candidate evidence before ACTIVE.
-The existing UI/CSS is unchanged.
+No UI redesign and no strategy/backend changes.
