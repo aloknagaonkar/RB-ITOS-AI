@@ -5,8 +5,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 EXPECTED = {
-    'frontend/src/hilegaDecisionTable.tsx': '835142eae1e96780cf401d8179d40570cdc7b3feaa5f9c3db9e10bd7ac12715a',
-    'tests/test_hilega_decision_table_v1.cjs': '6eda098546fcb76718caea58774898d698a83444cc8887439461137f80323032',
+    'frontend/src/hilegaDecisionTable.tsx': '0fd1b71c4d7754fd45c0b34f2b5c3529f28baaedb733f9e28e8a8927f53bd8e3',
+    'tests/test_hilega_decision_table_v1.cjs': 'c941eae008649e126b05b03d2f1406668663a4dfd35b63a51a941b8822131bc4',
 }
 
 def sha(path: Path) -> str:
@@ -35,16 +35,16 @@ def main() -> int:
         elif actual==expected:
             print(f'COMPATIBLE: {rel}')
         else:
-            problems.append(f'BLOCKED: {rel} differs from expected lifecycle-consistency version ({actual})')
+            problems.append(f'BLOCKED: {rel} differs from expected current-checkpoint classifier version ({actual})')
     if problems:
         print('\n'.join(problems))
-        print('No files modified.')
+        print('No files modified. Do not force overwrite; inspect current source first.')
         return 2
     if args.check:
         print('CHECK PASSED. No files modified.')
         return 0
     stamp=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-    backup=repo/'.hilega-current-checkpoint-classifier-backup'/stamp
+    backup=repo/'.hilega-rule-nifty-delta-backup'/stamp
     changed=0
     for rel in EXPECTED:
         target=repo/rel; source=srcroot/rel
@@ -60,7 +60,7 @@ def main() -> int:
         print(f'APPLIED. Backup: {backup}')
     else:
         print('ALREADY PATCHED. No changes required.')
-    print('No backend, strategy, historical evidence, or running process was changed.')
+    print('Frontend/test only. No backend, strategy, evidence, API, or worker process changed.')
     return 0
 
 if __name__=='__main__':

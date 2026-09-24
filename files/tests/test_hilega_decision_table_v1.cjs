@@ -13,7 +13,7 @@ assert.deepEqual((out.diagnostics??[]).filter(d=>d.category===ts.DiagnosticCateg
 const moduleBox={exports:{}}
 const mockRequire=name=>name==='react'?{useMemo:()=>{},useState:()=>{},Fragment:Symbol('Fragment')}:name==='react/jsx-runtime'?{jsx:()=>{},jsxs:()=>{}}:name.endsWith('.css')?{}:require(name)
 new Function('require','module','exports',out.outputText)(mockRequire,moduleBox,moduleBox.exports)
-const {eventKind,pathText,computedPremiumPoints,decisionText,deriveDecisionRows,displayDecisionText,checkpointTransitions}=moduleBox.exports
+const {eventKind,pathText,computedPremiumPoints,decisionText,deriveDecisionRows,displayDecisionText,checkpointTransitions,shortRuleText,niftyPointsFromEntry,shortDateTime}=moduleBox.exports
 const r=(over={})=>({checkpoint:'2026-09-23T09:35:00+05:30',transitions:[],strategy:{state_before:'PATH1_IDLE',state_after:'PATH1_IDLE',events_emitted:[]},route_a:{},route_b:{},...over})
 assert.equal(eventKind(r({transitions:[{event_type:'ENTRY_PATH1_ROUTE_A_CROSS_RSI50_ABOVE_WMA21'}]})),'ENTRY')
 assert.equal(eventKind(r({transitions:[{event_type:'STRUCTURAL_EXIT_RSI_CROSS_BELOW_WMA21'}]})),'EXIT')
@@ -100,4 +100,20 @@ assert.equal(realShape[0].originRoute,'ROUTE A')
 assert.equal(realShape[2].originRoute,'ROUTE A')
 assert.equal(realShape[3].originRoute,'ROUTE A')
 
-console.log('PASS: Hilega current-checkpoint lifecycle classifier + decision/CE assertions')
+
+assert.equal(shortDateTime('2026-09-24T09:15:00+05:30'),'9/24 09:15')
+assert.equal(niftyPointsFromEntry(23410.5,23390.0),20.5)
+assert.equal(niftyPointsFromEntry(23380.0,23390.0),-10)
+assert.equal(shortRuleText(r({checkpoint:'2026-09-23T09:40:00+05:30',transitions:[{event_type:'ENTRY_PATH1_ROUTE_A_CROSS_RSI50_ABOVE_WMA21',event_time:'2026-09-23T09:40:00+05:30'}],strategy:{state_before:'PATH1_IDLE',state_after:'BULLISH_ACTIVE',selected_route:'ROUTE_A',events_emitted:['ENTRY_PATH1_ROUTE_A_CROSS_RSI50_ABOVE_WMA21']}}),'ENTRY'),'ENTRY · RSI↑EMA + RSI>50 + RSI>WMA')
+assert.equal(shortRuleText(r({checkpoint:'2026-09-23T13:00:00+05:30',transitions:[{event_type:'ENTRY_PATH1_ROUTE_B_STRUCTURAL',event_time:'2026-09-23T13:00:00+05:30'}],strategy:{state_before:'PATH1_ARMED',state_after:'BULLISH_ACTIVE',selected_route:'ROUTE_B',events_emitted:['ENTRY_PATH1_ROUTE_B_STRUCTURAL']}}),'ENTRY'),'ENTRY · ARMED + (RSI>WMA OR EMA>WMA) + RSI↑ + EMA↑')
+assert.equal(shortRuleText(r({checkpoint:'2026-09-23T13:05:00+05:30',transitions:[{event_type:'STRUCTURAL_EXIT_RSI_CROSS_BELOW_WMA21',event_time:'2026-09-23T13:05:00+05:30'}],strategy:{state_before:'BULLISH_ACTIVE',state_after:'PATH1_IDLE',events_emitted:['STRUCTURAL_EXIT_RSI_CROSS_BELOW_WMA21']}}),'EXIT'),'EXIT · RSI↓WMA21')
+const pointTrail=deriveDecisionRows([
+  r({checkpoint:'2026-09-23T09:40:00+05:30',bar:{close:23378},transitions:[{event_type:'ENTRY_PATH1_ROUTE_A_CROSS_RSI50_ABOVE_WMA21',event_time:'2026-09-23T09:40:00+05:30',price:23378}],strategy:{state_before:'PATH1_IDLE',state_after:'BULLISH_ACTIVE',selected_route:'ROUTE_A',events_emitted:['ENTRY_PATH1_ROUTE_A_CROSS_RSI50_ABOVE_WMA21']}}),
+  r({checkpoint:'2026-09-23T09:45:00+05:30',bar:{close:23390.5},strategy:{state_before:'BULLISH_ACTIVE',state_after:'BULLISH_ACTIVE',events_emitted:[]}}),
+  r({checkpoint:'2026-09-23T09:50:00+05:30',bar:{close:23370},linked_signal_bar:'2026-09-23T09:40:00+05:30',transitions:[{event_type:'STRUCTURAL_EXIT_RSI_CROSS_BELOW_WMA21',event_time:'2026-09-23T09:50:00+05:30',details:{original_entry_time:'2026-09-23T09:40:00+05:30'}}],strategy:{state_before:'BULLISH_ACTIVE',state_after:'PATH1_IDLE',events_emitted:['STRUCTURAL_EXIT_RSI_CROSS_BELOW_WMA21']}})
+])
+assert.equal(pointTrail[0].niftyPoints,0)
+assert.equal(pointTrail[1].niftyPoints,12.5)
+assert.equal(pointTrail[2].niftyPoints,-8)
+
+console.log('PASS: Hilega rule labels + date/time + Nifty delta + lifecycle/CE assertions')

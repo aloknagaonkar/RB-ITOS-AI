@@ -31,6 +31,14 @@ const clock = (x:any) => {
   const d=new Date(String(x))
   return Number.isNaN(d.getTime())?String(x):d.toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata',hour12:false,hour:'2-digit',minute:'2-digit'})
 }
+export const shortDateTime = (x:any) => {
+  if(!x)return '—'
+  const d=new Date(String(x))
+  if(Number.isNaN(d.getTime()))return String(x)
+  const parts=new Intl.DateTimeFormat('en-IN',{timeZone:'Asia/Kolkata',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}).formatToParts(d)
+  const get=(t:string)=>parts.find(x=>x.type===t)?.value??''
+  return `${get('month')}/${get('day')} ${get('hour')}:${get('minute')}`
+}
 const json=(v:unknown)=>JSON.stringify(v??{},null,2)
 const isEntry=(x:any)=>String(x?.event_type??'').startsWith('ENTRY_')
 const isExit=(x:any)=>String(x?.event_type??'').includes('EXIT')
@@ -104,6 +112,8 @@ export type DecisionRow = {
   report:HilegaAudit
   origin:string|null
   originRoute:string|null
+  entryNifty:number|null
+  niftyPoints:number|null
   rawKind:Kind
   displayKind:DisplayKind
   lifecycleIssue:string|null
@@ -115,16 +125,55 @@ const explicitOrigin=(r:HilegaAudit):string|null=>{
   const linked=exit?.details?.original_entry_time
   return linked?String(linked):null
 }
+const finiteNumber=(x:any):number|null=>x===null||x===undefined||x===''||!Number.isFinite(Number(x))?null:Number(x)
+const currentNifty=(r:HilegaAudit):number|null=>finiteNumber(r.bar?.close)
+const entryNiftyAt=(r:HilegaAudit):number|null=>{
+  const entry=checkpointTransitions(r).find(isEntry)
+  return finiteNumber(entry?.price??entry?.entry_price??r.bar?.close)
+}
+export function niftyPointsFromEntry(current:any,entry:any):number|null {
+  const c=finiteNumber(current),e=finiteNumber(entry)
+  return c===null||e===null?null:c-e
+}
+export function shortRuleText(r:HilegaAudit,kind:DisplayKind,lifecycleIssue?:string|null):string {
+  const path=pathText(r).toUpperCase()
+  const at=clock(r.checkpoint)
+  if(kind==='ENTRY'){
+    if(path.includes('OPENING'))return 'ENTRY · OPEN 09:15 ALIGN → 09:20 RSI>WMA → 09:25 RSI>WMA'
+    if(path.includes('ROUTE A'))return 'ENTRY · RSI↑EMA + RSI>50 + RSI>WMA'
+    if(path.includes('ROUTE B'))return 'ENTRY · ARMED + (RSI>WMA OR EMA>WMA) + RSI↑ + EMA↑'
+    return 'ENTRY · RECORDED STRATEGY TRANSITION'
+  }
+  if(kind==='ACTIVE')return 'CONTINUE · BULLISH_ACTIVE'
+  if(kind==='EXIT'){
+    const ev=checkpointTransitions(r).find(isExit)
+    const label=String(ev?.event_type??list(r.strategy?.events_emitted).find((x:any)=>String(x).includes('EXIT'))??'')
+    if(label.includes('RSI_CROSS_BELOW_WMA21'))return 'EXIT · RSI↓WMA21'
+    if(label.includes('CUTOFF')||at==='14:55')return 'EXIT · 14:55 CUTOFF'
+    return 'EXIT · RECORDED EXIT RULE'
+  }
+  if(kind==='DETECTED'){
+    if(path.includes('OPENING')){
+      if(at==='09:15')return 'OPENING · RSI>50 + EMA>50 + WMA>50 + RSI>EMA>WMA'
+      return 'OPENING · RSI>WMA21'
+    }
+    return 'ARMED · RSI↑EMA'
+  }
+  if(kind==='REJECTED')return 'REJECTED · ENTRY CONDITIONS FAILED'
+  if(kind==='REVIEW')return `REVIEW · ${lifecycleIssue??'LIFECYCLE'}`
+  return 'NO_SIGNAL'
+}
+
 // Build the visible lifecycle strictly in chronological order. A recorded exit
 // cannot become BULLISH_EXIT unless a prior BULLISH_ENTRY is active (or the
 // audit explicitly links the row to an earlier entry outside the loaded
 // window). Likewise, continuation requires an active entry. This prevents raw
 // exit/active fragments from creating impossible UI sequences.
 export function deriveDecisionRows(reports:HilegaAudit[]):DecisionRow[] {
-  let active=false,origin:string|null=null,originRoute:string|null=null,sessionDate:string|null=null
+  let active=false,origin:string|null=null,originRoute:string|null=null,entryNifty:number|null=null,sessionDate:string|null=null
   return [...reports].sort((a,b)=>a.checkpoint.localeCompare(b.checkpoint)).map(report=>{
     const date=report.checkpoint.slice(0,10)
-    if(sessionDate!==date){active=false;origin=null;originRoute=null;sessionDate=date}
+    if(sessionDate!==date){active=false;origin=null;originRoute=null;entryNifty=null;sessionDate=date}
     const rawKind=eventKind(report)
     const linked=explicitOrigin(report)
     let displayKind:DisplayKind=rawKind
@@ -139,6 +188,7 @@ export function deriveDecisionRows(reports:HilegaAudit[]):DecisionRow[] {
         active=true
         origin=report.checkpoint
         originRoute=pathText(report)
+        entryNifty=entryNiftyAt(report)
       }
     }else if(rawKind==='EXIT'){
       if(active){
@@ -149,6 +199,7 @@ export function deriveDecisionRows(reports:HilegaAudit[]):DecisionRow[] {
         displayKind='EXIT'
         origin=linked
         originRoute=pathText(report,originRoute??undefined)
+        entryNifty=finiteNumber(checkpointTransitions(report).find(isExit)?.details?.original_entry_price)
       }else{
         displayKind='REVIEW'
         lifecycleIssue='EXIT_WITHOUT_BULLISH_ENTRY'
@@ -168,21 +219,25 @@ export function deriveDecisionRows(reports:HilegaAudit[]):DecisionRow[] {
         active=true
         origin=linked
         originRoute=pathText(report)
+        entryNifty=finiteNumber(report.strategy?.original_entry_price)
       }else{
         displayKind='REVIEW'
         lifecycleIssue='CONTINUATION_WITHOUT_BULLISH_ENTRY'
       }
     }
 
-    const result:DecisionRow={report,origin,originRoute,rawKind,displayKind,lifecycleIssue}
+    const niftyPoints=(displayKind==='ENTRY'||displayKind==='ACTIVE'||displayKind==='EXIT')?niftyPointsFromEntry(currentNifty(report),entryNifty):null
+    const result:DecisionRow={report,origin,originRoute,entryNifty,niftyPoints,rawKind,displayKind,lifecycleIssue}
     if(displayKind==='EXIT'){
       active=false
       origin=null
       originRoute=null
+      entryNifty=null
     }else if(displayKind==='REVIEW' && lifecycleIssue==='SESSION_LOCKED_WITHOUT_BULLISH_EXIT'){
       active=false
       origin=null
       originRoute=null
+      entryNifty=null
     }
     return result
   })
@@ -351,14 +406,14 @@ export default function HilegaDecisionTable({reports,mode,fetchDetail,visibleUnt
       </select></label>
     </div>
     {error&&<p role="alert" className="hd-warning">{error}</p>}
-    <div className="hd-scroll"><table className="hd-table hd-main"><thead><tr><th>Time (IST)</th><th>Strategy decision</th><th>Opening path / Route A / Route B</th><th>Signal detected</th><th>Audit</th></tr></thead><tbody>
-      {filtered.map(({report:r,origin,originRoute,displayKind:k,lifecycleIssue})=>{const opened=open===r.checkpoint,report=details[r.checkpoint]??r
+    <div className="hd-scroll"><table className="hd-table hd-main"><thead><tr><th>Date / Time (IST)</th><th>Strategy rule / decision</th><th>Nifty Δ from entry</th><th>Opening path / Route A / Route B</th><th>Signal detected</th><th>Audit</th></tr></thead><tbody>
+      {filtered.map(({report:r,origin,originRoute,niftyPoints,displayKind:k,lifecycleIssue})=>{const opened=open===r.checkpoint,report=details[r.checkpoint]??r
         const badge=k==='ENTRY'?'BULLISH_ENTRY':k==='EXIT'?'BULLISH_EXIT':k==='ACTIVE'?'BULLISH_CONTINUATION':k==='DETECTED'?'ARMED':k==='NONE'?'NO SIGNAL':k==='REVIEW'?'REVIEW REQUIRED':'REJECTED'
-        return <Fragment key={r.checkpoint}><tr className={`hd-row hd-${k.toLowerCase()}`}><td>{clock(r.checkpoint)}</td><td><strong>{displayDecisionText(k)}</strong>{lifecycleIssue&&<small className="hd-lifecycle-issue">{lifecycleIssue}</small>}</td><td>{pathText(r,originRoute??undefined)}</td><td><span className={`hd-badge hd-${k.toLowerCase()}`}>{badge}</span></td><td><button aria-expanded={opened} aria-label={`Audit ${r.checkpoint}`} onClick={()=>void toggle(r)}>{opened?'Hide audit':'View audit ▾'}</button></td></tr>
-        {opened&&<tr className="hd-expanded"><td colSpan={5}>{loading&&!details[r.checkpoint]&&<p>Loading complete audit…</p>}<Detail r={report} origin={origin} originRoute={originRoute} displayKind={k} lifecycleIssue={lifecycleIssue} allowedUntil={candleBoundary(visibleUntil)}/></td></tr>}
+        return <Fragment key={r.checkpoint}><tr className={`hd-row hd-${k.toLowerCase()}`}><td>{shortDateTime(r.checkpoint)}</td><td><strong>{shortRuleText(r,k,lifecycleIssue)}</strong>{lifecycleIssue&&<small className="hd-lifecycle-issue">{lifecycleIssue}</small>}</td><td className={color(niftyPoints)}>{niftyPoints===null?'—':`${niftyPoints>0?'+':''}${money(niftyPoints)} pts`}</td><td>{pathText(r,originRoute??undefined)}</td><td><span className={`hd-badge hd-${k.toLowerCase()}`}>{badge}</span></td><td><button aria-expanded={opened} aria-label={`Audit ${r.checkpoint}`} onClick={()=>void toggle(r)}>{opened?'Hide audit':'View audit ▾'}</button></td></tr>
+        {opened&&<tr className="hd-expanded"><td colSpan={6}>{loading&&!details[r.checkpoint]&&<p>Loading complete audit…</p>}<Detail r={report} origin={origin} originRoute={originRoute} displayKind={k} lifecycleIssue={lifecycleIssue} allowedUntil={candleBoundary(visibleUntil)}/></td></tr>}
         </Fragment>
       })}
-      {!filtered.length&&<tr><td colSpan={5}>{emptyMessage??'No recorded checkpoints for this selection.'}</td></tr>}
+      {!filtered.length&&<tr><td colSpan={6}>{emptyMessage??'No recorded checkpoints for this selection.'}</td></tr>}
     </tbody></table></div>
   </div>
 }
