@@ -122,3 +122,20 @@ NO same-candle reversal in v1
 - [x] Whipsaw mitigation remains DEFERRED
 - [ ] Re-run the 6 real combined sessions with corrected metrics
 - [ ] Manual transition validation on Sep-17 and Sep-15
+
+
+## PE ATM±2 historical shadow
+- [x] Exact bearish PE candidate builder (ATM-2..ATM+2)
+- [x] No single PE selection
+- [x] Exact 1m OPEN at causal signal boundary
+- [x] Exact 1m OPEN at causal exit boundary
+- [x] Independent five-leg points/% tracking
+- [x] MFE/MAE tracking per PE leg
+- [x] No nearest-minute fallback
+- [x] No nearest-strike fallback
+- [x] No quantity / rupee P&L / paper or real orders
+- [x] Historical option-cache adapter integration
+- [x] Missing exact data remains unavailable/incomplete
+- [ ] Run PE shadow on real combined bearish trades
+- [ ] Manual PE-leg validation
+- [ ] Live bearish/PE integration

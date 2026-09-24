@@ -1,20 +1,30 @@
-# Hilega Directional Metrics Instrumentation Fix v1
+# Hilega Directional PE ATM±2 Historical Shadow v1
 
-This patch changes reporting only. Strategy rules and coordinator behavior remain unchanged.
+Historical-only PE shadow for accepted BEARISH directional trades.
 
-Changes:
-- `same_candle_reversal_blocks` increments only when an opposite entry was actually emitted and suppressed on the same exit candle.
-- Exit candles with no opposite entry use `NO_SAME_CANDLE_*_ENTRY` notes.
-- Ambiguous armed counters are renamed:
-  - `bullish_armed_candles_while_bearish_active`
-  - `bearish_armed_candles_while_bullish_active`
-- Adds separate accepted arm-event counters:
-  - `bullish_arm_events_while_bearish_active`
-  - `bearish_arm_events_while_bullish_active`
-- Whipsaw mitigation remains DEFERRED.
+It tracks all five PE contracts independently:
+- ATM-2
+- ATM-1
+- ATM
+- ATM+1
+- ATM+2
+
+Semantics:
+- entry premium = exact 1m OPEN at the causal signal boundary (5m label + 5m)
+- exit premium = exact 1m OPEN at the causal exit boundary (5m label + 5m)
+- MFE/MAE measured on the exact minute path
+- no nearest-minute fallback
+- no nearest-strike fallback
+- no single-contract selection
+- no quantity
+- no rupee P&L
+- no paper or live order creation
+
+Real historical option data is read only from existing
+`historical-option-ohlc-cache*` files. Missing exact data remains unavailable
+or incomplete; it is never synthesized.
 
 Validation against the current source snapshot:
-`36 passed`
-across bullish, bearish, bearish replay, directional coordinator, and combined directional replay tests.
+`39 passed`
 
 No API/worker restart is required.
