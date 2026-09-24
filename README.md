@@ -1,8 +1,10 @@
-Corrective frontend-only patch for the exact current Phase 6.2 source.
+Phase 6.2.2 corrective frontend-only patch.
 
-Restores the original HilegaDecisionTable in Historical Replay and Live Shadow.
-Directional evidence is merged into those existing audit reports, so bearish
-signals appear without replacing the UI.
+Keeps the restored original HilegaDecisionTable UI.
 
-No backend, strategy, coordinator, CE/PE lifecycle, selector, quantity, or
-execution behavior is changed.
+Fixes missing live signals by:
+1. matching directional rows to audit checkpoints by absolute epoch-minute, and
+2. supplementing missing directional ENTRY/EXIT rows from the already-recorded
+   directional trade dashboard.
+
+No strategy signal is recalculated and no market data is synthesized.
