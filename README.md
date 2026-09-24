@@ -1,19 +1,25 @@
-# Hilega Directional UI Adjustment v1
+# Hilega directional historical UI v1
 
-Frontend-only correction for Phase 6.
+Adds a read-only directional trade dashboard to the existing Hilega historical
+replay page.
 
-This keeps the pre-Phase-6 Hilega page structure and styling, and only adapts
-existing sections for directional operation:
+It does not create a second replay screen and does not redesign the existing UI.
 
-- existing safety/header strip retained
-- existing summary cards retained, with Trade Owner / Bullish State / Bearish State added
-- existing Active Trade card retained; CE for bullish, PE for bearish
-- existing candle-by-candle bullish audit retained in its original location
-- existing Exited Trades cards retained; combined CE/PE lifecycle data
-- large Directional Coordinator Activity table removed from the main page
+Evidence sources:
+- accepted ownership/trades: `hilega-directional-replay-v1`
+- bullish CE lifecycle: existing canonical `hilega-milega-replay-v1` audit
+- bearish PE lifecycle: `hilega-directional-pe-shadow-v1`
 
-No backend, strategy, coordinator, API, or live worker changes are included.
-No quantity, rupee P&L, execution, paper order, or option selector is introduced.
+The frontend renders the same trade-card semantics as live:
+- BULLISH -> CE ATM±2
+- BEARISH -> PE ATM±2
+- same entry/exit premium, realized points/%, MFE/MAE presentation
 
-For bearish trades, the legacy detailed bullish audit button is intentionally
-not shown; the PE lifecycle itself is shown in the normal trade card/table.
+Safety:
+- read only
+- observation only
+- no quantity
+- no rupee P&L
+- no order execution
+- no selector
+- no broker calls
