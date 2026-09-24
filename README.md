@@ -1,12 +1,9 @@
-# Phase 6.2 — Common directional candle audit
+# Preserve Existing Hilega UI + Add Bearish Semantics
 
-Historical replay now reads the recorded directional candle-by-candle evidence, so
-both bullish and bearish state/action/event rows are visible.
+Corrective frontend-only patch.
 
-Live shadow keeps current-day candle/indicator rows from the existing Hilega audit
-and overlays directional ownership/state only for bars present in the directional
-audit. Earlier rows remain visible as candle-only evidence instead of fabricating
-directional state.
-
-No strategy, coordinator, option lifecycle, selector, quantity, rupee P&L or
-execution behavior is changed.
+- Restores the original `HilegaDecisionTable` in Historical Replay and Live Shadow.
+- Keeps the same filters, columns, cards, row expansion, audit detail, and CSS.
+- Uses the existing directional-candle API only as a data overlay.
+- Adds bearish decision labels/semantics inside the existing UI.
+- No strategy, coordinator, CE/PE lifecycle, selector, quantity, or execution changes.
