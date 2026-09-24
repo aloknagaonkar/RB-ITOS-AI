@@ -1,17 +1,12 @@
-# Hilega Directional CE Historical Shadow + Unified Replay UI v1
+# Phase 6.2 — Common directional candle audit
 
-Purpose: complete historical UI parity for both directional sides without changing
-the strategy/coordinator/live worker.
+Historical replay now reads the recorded directional candle-by-candle evidence, so
+both bullish and bearish state/action/event rows are visible.
 
-BULLISH -> existing frozen CE candidate builder + existing frozen CE lifecycle
-BEARISH -> existing PE historical shadow (unchanged)
+Live shadow keeps current-day candle/indicator rows from the existing Hilega audit
+and overlays directional ownership/state only for bars present in the directional
+audit. Earlier rows remain visible as candle-only evidence instead of fabricating
+directional state.
 
-New CE evidence root:
-`data/historical-evidence/hilega-directional-ce-shadow-v1`
-
-Historical UI then reads:
-- CE shadow for accepted bullish trades
-- PE shadow for accepted bearish trades
-
-Safety: observation-only, no execution, no paper orders, no quantity, no rupee P&L,
-no selector, no nearest-minute/strike fallback.
+No strategy, coordinator, option lifecycle, selector, quantity, rupee P&L or
+execution behavior is changed.
