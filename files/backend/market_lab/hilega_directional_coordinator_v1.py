@@ -233,6 +233,23 @@ class HilegaDirectionalCoordinatorV1:
             bearish_events=bearish_events,
         )
 
+
+    def on_session_cutoff(self, cutoff_ts, open_price: float) -> DirectionalDecision:
+        """Coordinate both engines at the exact 14:55 OPEN boundary.
+
+        The existing owner may exit; the opposite side may only emit informational
+        lock/cancel events. No new entry is accepted at cutoff.
+        """
+        bar = FiveMinuteBar(cutoff_ts, open_price, open_price, open_price, open_price, None)
+        self._reset_owner_if_new_session(bar)
+        bullish_events = self.bullish.on_session_cutoff(cutoff_ts, open_price)
+        bearish_events = self.bearish.on_session_cutoff(cutoff_ts, open_price)
+        return self._coordinate(
+            bar=bar,
+            bullish_events=bullish_events,
+            bearish_events=bearish_events,
+        )
+
     def process_enriched_bar_for_test(
         self, bar: FiveMinuteBar, indicators: IndicatorSnapshot
     ) -> DirectionalDecision:

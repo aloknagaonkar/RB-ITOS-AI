@@ -1,67 +1,69 @@
 #!/usr/bin/env python3
 from pathlib import Path
-import argparse, shutil
 from datetime import datetime, timezone
+import argparse, shutil
 
 FILES = [
-    Path("backend/market_lab/historical_option_ohlc_sidecar.py"),
-    Path("tests/test_historical_option_ohlc_sidecar.py"),
+    Path("backend/market_lab/hilega_directional_coordinator_v1.py"),
+    Path("backend/market_lab/hilega_directional_live_shadow_v1.py"),
+    Path("backend/market_lab/live_shadow_worker_v1.py"),
+    Path("tests/test_hilega_directional_live_shadow_v1.py"),
+    Path("docs/strategies/HILEGA_DIRECTIONAL_LIVE_SHADOW_V1.md"),
+]
+
+REQUIRED = [
+    Path("backend/market_lab/hilega_milega_strategy_v1.py"),
+    Path("backend/market_lab/hilega_milega_bearish_strategy_v1.py"),
+    Path("backend/market_lab/hilega_milega_option_shadow_lifecycle_v1.py"),
+    Path("backend/market_lab/hilega_milega_pe_option_shadow_lifecycle_v1.py"),
+    Path("backend/market_lab/hilega_milega_option_candidate_v1.py"),
+    Path("backend/market_lab/hilega_milega_pe_option_candidate_v1.py"),
 ]
 
 def main():
-    ap = argparse.ArgumentParser(description="Install source-aware historical option sidecar fix v1")
+    ap=argparse.ArgumentParser()
     ap.add_argument("--repo", required=True)
-    g = ap.add_mutually_exclusive_group(required=True)
+    g=ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--check", action="store_true")
     g.add_argument("--apply", action="store_true")
-    a = ap.parse_args()
-
-    repo = Path(a.repo).resolve()
-    root = Path(__file__).resolve().parent
-
-    required = [
-        repo/"backend/market_lab/historical_option_ohlc_sidecar.py",
-        repo/"backend/market_lab/gateways.py",
-        repo/"backend/market_lab/historical.py",
-    ]
-    missing = [str(x) for x in required if not x.is_file()]
+    a=ap.parse_args()
+    repo=Path(a.repo).resolve(); root=Path(__file__).resolve().parent
+    missing=[str(repo/x) for x in REQUIRED if not (repo/x).is_file()]
     if missing:
-        print("BLOCKED: required baseline files missing:")
-        for x in missing:
-            print(" ", x)
+        print("BLOCKED: required baseline files missing")
+        for x in missing: print("  -",x)
         raise SystemExit(2)
-
-    for rel in FILES:
-        if not (root/"files"/rel).is_file():
-            print("BLOCKED: patch payload missing:", rel)
-            raise SystemExit(2)
-
+    payload_missing=[str(root/'files'/x) for x in FILES if not (root/'files'/x).is_file()]
+    if payload_missing:
+        print("BLOCKED: patch payload incomplete")
+        for x in payload_missing: print("  -",x)
+        raise SystemExit(2)
     print("READY")
-    print("  - expired expiries use historical_option_contracts + historical_option_candles")
-    print("  - active/current expiries use active_option_contracts + active_option_historical_candles")
-    print("  - zero-contract or zero-row sessions become UNAVAILABLE with explicit issue")
-    print("  - no date/strike/contract fallback")
-    print("  - strategy/coordinator/PE lifecycle unchanged")
-    print("  - no API/worker restart required")
+    print("  - adds isolated HILEGA_DIRECTIONAL_SHADOW_V1 live coordinator")
+    print("  - frozen bullish rules unchanged")
+    print("  - bearish candidate rules unchanged")
+    print("  - exclusive directional owner; opposite ARMED may coexist")
+    print("  - accepted bullish entry -> CE ATM±2 shadow")
+    print("  - accepted bearish entry -> PE ATM±2 shadow")
+    print("  - suppressed entries never start option shadow")
+    print("  - no same-candle reversal")
+    print("  - exact 14:55 directional cutoff coordination")
+    print("  - observation only; no selector/quantity/orders/rupee P&L")
+    print("  - existing bullish live strategy remains selectable and untouched")
+    print("  - installation itself requires no restart")
+    print("  - activation requires intentional Hilega live-shadow worker restart")
     if a.check:
-        print("CHECK PASS")
-        return
-
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    backup_root = repo/".historical-option-sidecar-active-expiry-fix-v1-backup"/stamp
+        print("CHECK PASS"); return
+    stamp=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    backup=repo/'.hilega-directional-live-shadow-v1-backup'/stamp
     for rel in FILES:
-        src = root/"files"/rel
-        dst = repo/rel
+        src=root/'files'/rel; dst=repo/rel
         if dst.exists():
-            b = backup_root/rel
-            b.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(dst, b)
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dst)
-
+            b=backup/rel; b.parent.mkdir(parents=True,exist_ok=True); shutil.copy2(dst,b)
+        dst.parent.mkdir(parents=True,exist_ok=True); shutil.copy2(src,dst)
     print("APPLY PASS")
-    print("Backup root:", backup_root)
-    print("No API/worker restart required.")
+    print("Backup root:", backup)
+    print("No API/main-worker restart required.")
+    print("Do not restart the Hilega live-shadow worker until intentionally activating the new selector.")
 
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__': main()

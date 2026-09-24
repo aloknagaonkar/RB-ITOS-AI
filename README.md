@@ -1,22 +1,14 @@
-# Historical Option Sidecar Active-Expiry Fix v1
+# Hilega Directional Live Shadow v1 patch
 
-This is an acquisition-layer fix only.
+Adds isolated observation-only directional live wiring.
 
-Behavior:
-- If `expiry < provider_as_of`, use the existing expired-instruments contract/candle endpoints.
-- If `expiry >= provider_as_of`, use the existing active-option contract and active historical candle endpoints.
-- A zero-contract catalog is `UNAVAILABLE`, not `AVAILABLE`.
-- A zero-row option result is `UNAVAILABLE`, not `AVAILABLE`.
-- No nearest date, strike, minute, or alternate contract fallback is introduced.
+Files:
+- `backend/market_lab/hilega_directional_live_shadow_v1.py` (new)
+- `backend/market_lab/hilega_directional_coordinator_v1.py` (adds exact 14:55 cutoff coordination)
+- `backend/market_lab/live_shadow_worker_v1.py` (adds `HILEGA_DIRECTIONAL_SHADOW_V1` selector)
+- `tests/test_hilega_directional_live_shadow_v1.py` (new)
+- documentation
 
-The Sep-23 / Sep-29 case is the motivating example: on 2026-09-24 the
-2026-09-29 expiry is still active, so it must be acquired from active endpoints.
+Validated against the current source snapshot: 48 tests passed and worker import passed.
 
-Validation against the current source snapshot:
-`43 passed`
-
-No API/worker restart is required.
-
-Important after install:
-The existing Sep-23 cache was created by the old code with `AVAILABLE` + zero rows.
-Delete only that stale cache file (or use `--refresh`) before rebuilding Sep-23.
+No strategy-rule changes. No UI changes. No execution/paper-order capability.
