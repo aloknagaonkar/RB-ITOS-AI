@@ -368,6 +368,57 @@ function CeTable({r,allowedUntil,displayKind}:{r:HilegaAudit;allowedUntil?:strin
     })}
   </tbody></table><p className="hd-muted">Hypothetical premium points per independent CE contract; not executed account P&amp;L. No substitute premiums or assumed quantity/costs.</p></div>
 }
+
+function lifecycleHasData(l:any):boolean {
+  return Boolean(
+    list(l?.start?.legs).length ||
+    list(l?.updates).some((u:any)=>list(u?.legs).length) ||
+    list(l?.exit?.legs).length
+  )
+}
+
+function mergeUpdates(values:any[]):any[] {
+  const out:any[]=[]
+  const seen=new Set<string>()
+  for(const v of values){
+    for(const u of list(v)){
+      const key=JSON.stringify([
+        u?.event_time??u?.latest_completed_minute??'',
+        u?.status??'',
+        list(u?.legs).map((x:any)=>[
+          x?.instrument_key??'',x?.strike??'',x?.entry_timestamp??'',
+          x?.entry_open??null,x?.latest_completed_minute??'',x?.latest_open??null,
+          x?.exit_timestamp??'',x?.exit_open??null
+        ])
+      ])
+      if(!seen.has(key)){seen.add(key);out.push(u)}
+    }
+  }
+  return out.sort((a:any,b:any)=>String(a?.event_time??a?.latest_completed_minute??'').localeCompare(String(b?.event_time??b?.latest_completed_minute??'')))
+}
+
+export function mergeLifecycleEvidence(base:HilegaAudit, peers:HilegaAudit[]):HilegaAudit {
+  const all=[base,...peers.filter(x=>x!==base)]
+  const candidate=all.find(x=>x.option_candidate && (list(x.option_candidate?.contracts??x.option_candidate?.candidates).length || x.option_candidate?.status))
+  const snapshot=all.find(x=>x.option_market_snapshot && x.option_market_snapshot?.status)
+  const withStart=all.find(x=>list(x.option_lifecycle?.start?.legs).length)
+  const withExit=[...all].reverse().find(x=>list(x.option_lifecycle?.exit?.legs).length)
+  const updates=mergeUpdates(all.map(x=>x.option_lifecycle?.updates))
+  const mergedLifecycle:any={
+    ...(base.option_lifecycle??{}),
+    ...(withStart?.option_lifecycle??{}),
+    start: withStart?.option_lifecycle?.start ?? base.option_lifecycle?.start,
+    updates,
+    exit: withExit?.option_lifecycle?.exit ?? base.option_lifecycle?.exit,
+  }
+  return {
+    ...base,
+    option_candidate: candidate?.option_candidate ?? base.option_candidate,
+    option_market_snapshot: snapshot?.option_market_snapshot ?? base.option_market_snapshot,
+    option_lifecycle: lifecycleHasData(mergedLifecycle)?mergedLifecycle:base.option_lifecycle,
+  }
+}
+
 function Detail({r,allowedUntil,origin,originRoute,displayKind,lifecycleIssue}:{r:HilegaAudit;allowedUntil?:string;origin?:string|null;originRoute?:string|null;displayKind:DisplayKind;lifecycleIssue?:string|null}){
   const cand=r.bar??{},ind=r.indicators??{},conditions=r.conditions??{}
   const entry=checkpointTransitions(r).find(isEntry),exit=checkpointTransitions(r).find(isExit)
@@ -410,22 +461,36 @@ export default function HilegaDecisionTable({reports,mode,fetchDetail,visibleUnt
     .sort((a,b)=>a.checkpoint.localeCompare(b.checkpoint)),[reports,visibleUntil])
   const contextual=useMemo(()=>deriveDecisionRows(ordered),[ordered])
   const filtered=contextual.filter(row=>filter==='ALL'||row.displayKind===filter)
+  const lifecycleGroup=(origin:string|null|undefined,checkpoint:string)=>{
+    const key=origin??checkpoint
+    return contextual.filter(row=>(row.origin??row.report.checkpoint)===key)
+  }
   useEffect(()=>{
     if(mode!=='LIVE'||!open||!fetchDetail)return
     let active=true
-    const id=window.setInterval(()=>{
-      fetchDetail(open).then(value=>{if(active)setDetails(prev=>({...prev,[open]:value}))})
-        .catch(e=>{if(active)setError(`Live audit refresh failed: ${String(e)}`)})
-    },5000)
+    const refresh=async()=>{
+      const current=contextual.find(x=>x.report.checkpoint===open)
+      const group=current?lifecycleGroup(current.origin,open):[]
+      const checkpoints=[...new Set((group.length?group.map(x=>x.report.checkpoint):[open]))]
+      const values=await Promise.all(checkpoints.map(async cp=>[cp,await fetchDetail(cp)] as const))
+      if(active)setDetails(prev=>({...prev,...Object.fromEntries(values)}))
+    }
+    const id=window.setInterval(()=>{refresh().catch(e=>{if(active)setError(`Live audit refresh failed: ${String(e)}`)})},5000)
     return()=>{active=false;window.clearInterval(id)}
-  },[mode,open,fetchDetail])
-  async function toggle(r:HilegaAudit){
+  },[mode,open,fetchDetail,contextual])
+  async function toggle(row:DecisionRow){
+    const r=row.report
     onSelected?.(r.checkpoint)
     if(open===r.checkpoint){setOpen(null);return}
     setOpen(r.checkpoint);setError('')
     if(fetchDetail){
       setLoading(true)
-      try{const item=await fetchDetail(r.checkpoint);setDetails(prev=>({...prev,[r.checkpoint]:item}))}
+      try{
+        const group=lifecycleGroup(row.origin,r.checkpoint)
+        const checkpoints=[...new Set((group.length?group.map(x=>x.report.checkpoint):[r.checkpoint]))]
+        const values=await Promise.all(checkpoints.map(async cp=>[cp,await fetchDetail(cp)] as const))
+        setDetails(prev=>({...prev,...Object.fromEntries(values)}))
+      }
       catch(e){setError(String(e))}finally{setLoading(false)}
     }
   }
@@ -437,10 +502,13 @@ export default function HilegaDecisionTable({reports,mode,fetchDetail,visibleUnt
     </div>
     {error&&<p role="alert" className="hd-warning">{error}</p>}
     <div className="hd-scroll"><table className="hd-table hd-main"><thead><tr><th>Date / Time (IST)</th><th>Strategy rule / decision</th><th>Nifty Δ from entry</th><th>Opening path / Route A / Route B</th><th>Signal detected</th><th>Audit</th></tr></thead><tbody>
-      {filtered.map(({report:r,origin,originRoute,niftyPoints,displayKind:k,lifecycleIssue})=>{const opened=open===r.checkpoint,report=details[r.checkpoint]??r
+      {filtered.map((row)=>{const {report:r,origin,originRoute,niftyPoints,displayKind:k,lifecycleIssue}=row
+        const opened=open===r.checkpoint
+        const peers=lifecycleGroup(origin,r.checkpoint).map(x=>details[x.report.checkpoint]??x.report)
+        const report=mergeLifecycleEvidence(details[r.checkpoint]??r,peers)
         const badge=k==='ENTRY'?'BULLISH_ENTRY':k==='EXIT'?'BULLISH_EXIT':k==='ACTIVE'?'BULLISH_CONTINUATION':k==='DETECTED'?'ARMED':k==='NONE'?'NO SIGNAL':k==='REVIEW'?'REVIEW REQUIRED':'REJECTED'
-        return <Fragment key={r.checkpoint}><tr className={`hd-row hd-${k.toLowerCase()}`}><td>{shortDateTime(r.checkpoint)}</td><td><strong>{shortRuleText(r,k,lifecycleIssue)}</strong>{lifecycleIssue&&<small className="hd-lifecycle-issue">{lifecycleIssue}</small>}</td><td className={color(niftyPoints)}>{niftyPoints===null?'—':`${niftyPoints>0?'+':''}${money(niftyPoints)} pts`}</td><td>{pathText(r,originRoute??undefined)}</td><td><span className={`hd-badge hd-${k.toLowerCase()}`}>{badge}</span></td><td><button aria-expanded={opened} aria-label={`Audit ${r.checkpoint}`} onClick={()=>void toggle(r)}>{opened?'Hide audit':'View audit ▾'}</button></td></tr>
-        {opened&&<tr className="hd-expanded"><td colSpan={6}>{loading&&!details[r.checkpoint]&&<p>Loading complete audit…</p>}<Detail r={report} origin={origin} originRoute={originRoute} displayKind={k} lifecycleIssue={lifecycleIssue} allowedUntil={candleBoundary(r.checkpoint)}/></td></tr>}
+        return <Fragment key={r.checkpoint}><tr className={`hd-row hd-${k.toLowerCase()}`}><td>{shortDateTime(r.checkpoint)}</td><td><strong>{shortRuleText(r,k,lifecycleIssue)}</strong>{lifecycleIssue&&<small className="hd-lifecycle-issue">{lifecycleIssue}</small>}</td><td className={color(niftyPoints)}>{niftyPoints===null?'—':`${niftyPoints>0?'+':''}${money(niftyPoints)} pts`}</td><td>{pathText(r,originRoute??undefined)}</td><td><span className={`hd-badge hd-${k.toLowerCase()}`}>{badge}</span></td><td><button aria-expanded={opened} aria-label={`Audit ${r.checkpoint}`} onClick={()=>void toggle(row)}>{opened?'Hide audit':'View audit ▾'}</button></td></tr>
+        {opened&&<tr className="hd-expanded"><td colSpan={6}>{loading&&!details[r.checkpoint]&&<p>Loading linked CE lifecycle…</p>}<Detail r={report} origin={origin} originRoute={originRoute} displayKind={k} lifecycleIssue={lifecycleIssue} allowedUntil={candleBoundary(r.checkpoint)}/></td></tr>}
         </Fragment>
       })}
       {!filtered.length&&<tr><td colSpan={6}>{emptyMessage??'No recorded checkpoints for this selection.'}</td></tr>}

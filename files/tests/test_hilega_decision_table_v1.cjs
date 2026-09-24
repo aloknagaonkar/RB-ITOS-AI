@@ -13,7 +13,7 @@ assert.deepEqual((out.diagnostics??[]).filter(d=>d.category===ts.DiagnosticCateg
 const moduleBox={exports:{}}
 const mockRequire=name=>name==='react'?{useMemo:()=>{},useState:()=>{},Fragment:Symbol('Fragment')}:name==='react/jsx-runtime'?{jsx:()=>{},jsxs:()=>{}}:name.endsWith('.css')?{}:require(name)
 new Function('require','module','exports',out.outputText)(mockRequire,moduleBox,moduleBox.exports)
-const {eventKind,pathText,computedPremiumPoints,decisionText,deriveDecisionRows,displayDecisionText,checkpointTransitions,shortRuleText,niftyPointsFromEntry,shortDateTime,reportedLegs}=moduleBox.exports
+const {eventKind,pathText,computedPremiumPoints,decisionText,deriveDecisionRows,displayDecisionText,checkpointTransitions,shortRuleText,niftyPointsFromEntry,shortDateTime,reportedLegs,mergeLifecycleEvidence}=moduleBox.exports
 const r=(over={})=>({checkpoint:'2026-09-23T09:35:00+05:30',transitions:[],strategy:{state_before:'PATH1_IDLE',state_after:'PATH1_IDLE',events_emitted:[]},route_a:{},route_b:{},...over})
 assert.equal(eventKind(r({transitions:[{event_type:'ENTRY_PATH1_ROUTE_A_CROSS_RSI50_ABOVE_WMA21'}]})),'ENTRY')
 assert.equal(eventKind(r({transitions:[{event_type:'STRUCTURAL_EXIT_RSI_CROSS_BELOW_WMA21'}]})),'EXIT')
@@ -155,4 +155,32 @@ assert.equal(ceExit.length,1)
 assert.equal(ceExit[0].exit_open,150)
 assert.equal(computedPremiumPoints(ceExit[0]),30)
 
-console.log('PASS: Hilega rule labels + date/time + Nifty delta + progressive CE no-lookahead + lifecycle/CE assertions')
+
+// CE evidence may be recorded on a later checkpoint than the strategy entry.
+// The UI must join reports belonging to the same bullish lifecycle before
+// applying the no-lookahead display rules.
+const entryOnly=r({
+  checkpoint:'2026-09-23T10:15:00+05:30',
+  option_candidate:null,
+  option_lifecycle:null
+})
+const laterEvidence=r({
+  checkpoint:'2026-09-23T10:20:00+05:30',
+  option_candidate:{status:'PASS',expiry:'2026-09-29',atm:23400,contracts:[
+    {strike:23350,instrument_key:'CE23350'}
+  ]},
+  option_lifecycle:{
+    start:{legs:[
+      {strike:23350,instrument_key:'CE23350',entry_timestamp:'2026-09-23T10:21:00+05:30',entry_open:120}
+    ]},
+    updates:[]
+  }
+})
+const linked=mergeLifecycleEvidence(entryOnly,[laterEvidence])
+assert.equal(linked.option_candidate.atm,23400)
+assert.equal(linked.option_lifecycle.start.legs[0].entry_open,120)
+const linkedEntryLegs=reportedLegs(linked,'2026-09-23T10:20:00+05:30','ENTRY')
+assert.equal(linkedEntryLegs.length,1)
+assert.equal(linkedEntryLegs[0].entry_open,120)
+
+console.log('PASS: Hilega rule labels + date/time + Nifty delta + linked progressive CE no-lookahead + lifecycle/CE assertions')
