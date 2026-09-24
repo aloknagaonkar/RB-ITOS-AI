@@ -103,7 +103,9 @@ NO same-candle reversal in v1
 - [x] Same-candle reversal is blocked
 - [x] After exit, preserved opposite ARMED may continue on next completed candle
 - [x] Coordinator unit regression suite
-- [ ] Historical combined bullish+bearish replay through coordinator
+- [x] Historical combined bullish+bearish replay engine through coordinator
+- [x] Combined-direction manual-validation report generation
+- [ ] Run combined replay on selected real sessions
 - [ ] Manual combined-direction validation
 - [ ] PE ATM±2 shadow lifecycle
 - [ ] Live worker integration

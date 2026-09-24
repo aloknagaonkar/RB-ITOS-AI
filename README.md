@@ -1,19 +1,33 @@
-# Hilega Directional Coordinator v1 — isolated phase
+# Hilega Directional Phase D2 — Combined Historical Replay
 
-This patch does not change the bullish or bearish strategy rules.
+Adds combined bullish+bearish historical replay through `HilegaDirectionalCoordinatorV1`.
 
-It introduces the agreed orchestration semantics:
-- one ACTIVE owner only
-- opposite ARMED may coexist as information
-- opposite entry is suppressed while current owner is ACTIVE
-- suppressed opposite entry is preserved as ARMED
-- no same-candle reversal
-- after exit, preserved opposite ARMED may continue on the next completed candle
+Per-session outputs:
+- `directional-candle-by-candle.csv/json`
+- `directional-events.csv/json`
+- `directional-trades.csv`
+- `directional-manual-validation.txt`
 
-The module is deliberately not wired into the live worker/API/UI yet.
+Multi-session outputs:
+- `multi-session-directional-summary.json`
+- `multi-session-directional-sessions.csv`
+- `multi-session-directional-trades.csv`
+- `multi-session-directional-events.csv`
+- `multi-session-directional-candle-by-candle.csv`
+
+The replay records:
+- active owner before/after each candle
+- bullish and bearish internal states
+- informational ARMED states
+- accepted events
+- suppressed opposite-side entries
+- same-candle reversal blocking notes
+- direction-aware Nifty points
+
+Whipsaw mitigation remains explicitly DEFERRED.
 
 Validation against the current source snapshot:
-`29 passed`
-across bullish strategy, bearish strategy, bearish historical replay, and coordinator tests.
+`32 passed`
+across bullish, bearish, bearish replay, coordinator, and combined directional replay tests.
 
-Whipsaw mitigation is explicitly deferred.
+No API/worker restart is required.
