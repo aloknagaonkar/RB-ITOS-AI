@@ -1,13 +1,12 @@
-Live signal marker overlay v4
+# Bearish candidate preservation v5
 
-Frontend-only corrective patch.
+Corrects a presentation bug in the existing HilegaDecisionTable.
 
-It preserves the existing HilegaDecisionTable UI and injects already-recorded
-directional trade ENTRY/EXIT events directly into the canonical audit rows.
+The old lifecycle renderer had one `active` flag. Once a bullish trade was active,
+every later DETECTED row was forced to ACTIVE continuation. That hid informational
+bearish ARMED/candidate rows even though the directional replay recorded them.
 
-Matching:
-- entry: signal_bar, fallback signal_boundary - 5 minutes
-- structural exit: exact option exit boundary - 5 minutes
-- cutoff exit: exact 14:55 boundary
+This patch tracks the active direction and preserves an opposite-direction
+DETECTED row as a candidate while the active owner remains unchanged.
 
-No strategy signal is recalculated.
+No UI redesign and no strategy/coordinator changes.
