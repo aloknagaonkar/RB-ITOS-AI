@@ -1,12 +1,9 @@
-# Hilega NIFTY O→C / Δ + clean timing patch
+# Hilega stacked secondary data patch
 
-Frontend-only.
+Frontend-only refinement.
 
-Changes the live/historical decision table to:
-- show candle window in the first column
-- show the actual processing time below it without the word `processed`
-- retain `recovered HH:MM:SS` only for bootstrap-recovered provenance
-- change the NIFTY column to `NIFTY O → C / Δ from entry`
-- show candle Open → Close on line 1 and trade delta on line 2
-
-No backend, strategy, worker, option lifecycle, or evidence changes.
+- Keeps the existing `Nifty Δ from entry` value as the primary line.
+- Places `O <open> → C <close>` underneath it.
+- Keeps candle window as the primary Date/Time line.
+- Places actual processing time (or `recovered` provenance) underneath it.
+- No backend, strategy, worker, or evidence changes.
