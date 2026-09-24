@@ -1,23 +1,20 @@
-# Phase 6.3A — Current-Day Directional Timeline Recovery
+# Phase 6.3A2
 
-This patch adds a backend-only recovery path for a session whose historical
-broker candles are unavailable but whose live Hilega audit already contains
-completed `UNDERLYING_5M_BUILD` bars.
+Supplements the current-day directional recovery with exact recorded 1-minute
+Nifty candles from:
 
-It does not synthesize candles and does not recalculate from partial directional
-audit records. It replays the already-recorded 5m OHLC through the same
-`HilegaDirectionalCoordinatorV1`, after warming indicators from existing cache.
+`data/live-observation/hilega-directional-market-evidence-v1/<date>.jsonl`
 
-Primary use now:
+The journal contains warmup and repeated responses, so extraction is based on
+canonical candle identity rather than journal `kind`:
 
-```bash
-PYTHONPATH=backend python -m market_lab.hilega_current_day_directional_recovery_cli_v1 \
-  --date 2026-09-24
-```
+- exact target `session_date`
+- exact `NSE_INDEX|Nifty 50`
+- exact `interval_seconds == 60`
+- exact recorded OHLC
 
-The output goes to the standard historical directional replay location, so the
-existing Historical Replay UI can consume it without a UI redesign.
+Identical duplicates are deduplicated. Conflicting duplicate 1m candles or
+conflicting 5m overlaps fail closed.
 
-This is the recovery core. Automatic live-worker bootstrap wiring should be
-enabled only after the Sep 24 recovery output is validated against the captured
-live candle evidence.
+For Sep 24, rerun deliberately with `--force` because Phase 6.3A already wrote
+the 61-row partial reconstruction.

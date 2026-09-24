@@ -3,12 +3,12 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
-from dataclasses import asdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 from zoneinfo import ZoneInfo
 
+from .domain import HistoricalCandle
 from .hilega_directional_coordinator_v1 import HilegaDirectionalCoordinatorV1
 from .hilega_directional_historical_replay_v1 import _row_from_decision
 from .hilega_milega_historical_replay_v1 import (
@@ -20,7 +20,7 @@ from .hilega_milega_strategy_v1 import FiveMinuteBar
 
 IST = ZoneInfo("Asia/Kolkata")
 MODEL = "HILEGA_CURRENT_DAY_DIRECTIONAL_RECOVERY_V1"
-SOURCE_STAGE = "UNDERLYING_5M_BUILD"
+PRIMARY_SOURCE_STAGE = "UNDERLYING_5M_BUILD"
 
 
 class CacheOnlyHistoricalGateway:
@@ -50,15 +50,22 @@ def _to_dt(value: Any) -> datetime:
     return dt.astimezone(IST)
 
 
+def _same_bar(a: FiveMinuteBar, b: FiveMinuteBar) -> bool:
+    return (
+        a.ts == b.ts
+        and a.open == b.open
+        and a.high == b.high
+        and a.low == b.low
+        and a.close == b.close
+        and (a.volume == b.volume or a.volume is None or b.volume is None)
+    )
+
+
 def extract_underlying_5m_from_audit(
     audit_path: str | Path,
     session_date: date,
 ) -> list[FiveMinuteBar]:
-    """Read exact completed 5m OHLC rows already recorded by the live audit.
-
-    No OHLC is synthesized. Duplicate timestamps are accepted only when every
-    recorded OHLC value is identical.
-    """
+    """Read exact completed 5m OHLC rows already recorded by the original audit."""
 
     path = Path(audit_path)
     if not path.is_file():
@@ -77,7 +84,7 @@ def extract_underlying_5m_from_audit(
             except json.JSONDecodeError as exc:
                 raise ValueError(f"invalid JSONL at line {lineno}: {exc}") from exc
 
-            if str(record.get("stage")) != SOURCE_STAGE:
+            if str(record.get("stage")) != PRIMARY_SOURCE_STAGE:
                 continue
 
             payload = record.get("payload") or {}
@@ -92,7 +99,7 @@ def extract_underlying_5m_from_audit(
             required = ("open", "high", "low", "close")
             if any(payload.get(k) is None for k in required):
                 raise ValueError(
-                    f"incomplete {SOURCE_STAGE} OHLC at {ts.isoformat()}"
+                    f"incomplete {PRIMARY_SOURCE_STAGE} OHLC at {ts.isoformat()}"
                 )
 
             bar = FiveMinuteBar(
@@ -109,17 +116,166 @@ def extract_underlying_5m_from_audit(
             )
 
             old = by_ts.get(ts)
-            if old is not None and old != bar:
+            if old is not None and not _same_bar(old, bar):
                 conflicts.append(ts.isoformat())
                 continue
             by_ts[ts] = bar
 
     if conflicts:
         raise ValueError(
-            "conflicting duplicate live candle evidence: " + ",".join(conflicts)
+            "conflicting duplicate primary live candle evidence: "
+            + ",".join(conflicts)
         )
 
     return [by_ts[k] for k in sorted(by_ts)]
+
+
+def _walk_dicts(value: Any):
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            yield from _walk_dicts(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _walk_dicts(child)
+
+
+def extract_underlying_1m_from_market_evidence(
+    evidence_path: str | Path,
+    session_date: date,
+    *,
+    underlying: str = UNDERLYING,
+) -> list[HistoricalCandle]:
+    """Extract exact recorded Nifty 1m candles from an evidence journal.
+
+    The evidence journal contains warmup and repeated market-source responses.
+    We do not depend on a particular `kind`. Instead, only embedded objects with
+    the canonical HistoricalCandle identity are accepted:
+      session_date == target
+      instrument_key == underlying
+      interval_seconds == 60
+
+    Repeated identical minutes are deduplicated. Conflicting duplicates fail
+    closed; no latest-wins policy is allowed.
+    """
+
+    path = Path(evidence_path)
+    if not path.is_file():
+        return []
+
+    by_ts: dict[datetime, HistoricalCandle] = {}
+    conflicts: list[str] = []
+
+    with path.open("r", encoding="utf-8") as handle:
+        for lineno, raw in enumerate(handle, 1):
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                record = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    f"invalid market evidence JSONL at line {lineno}: {exc}"
+                ) from exc
+
+            for obj in _walk_dicts(record.get("response")):
+                if obj.get("session_date") != session_date.isoformat():
+                    continue
+                if obj.get("instrument_key") != underlying:
+                    continue
+                if int(obj.get("interval_seconds") or 0) != 60:
+                    continue
+
+                required = ("timestamp", "open", "high", "low", "close")
+                if any(obj.get(k) is None for k in required):
+                    raise ValueError(
+                        f"incomplete recorded 1m candle in {path} line {lineno}"
+                    )
+
+                candle = HistoricalCandle(
+                    provider=str(obj.get("provider") or "upstox"),
+                    instrument_key=underlying,
+                    session_date=session_date,
+                    interval_seconds=60,
+                    timestamp=_to_dt(obj["timestamp"]),
+                    open=float(obj["open"]),
+                    high=float(obj["high"]),
+                    low=float(obj["low"]),
+                    close=float(obj["close"]),
+                    volume=(
+                        int(obj["volume"])
+                        if obj.get("volume") is not None
+                        else None
+                    ),
+                    open_interest=(
+                        int(obj["open_interest"])
+                        if obj.get("open_interest") is not None
+                        else None
+                    ),
+                )
+
+                ts = candle.timestamp.astimezone(IST).replace(
+                    second=0, microsecond=0
+                )
+                old = by_ts.get(ts)
+                if old is not None:
+                    old_id = (
+                        old.open, old.high, old.low, old.close,
+                        old.volume, old.open_interest,
+                    )
+                    new_id = (
+                        candle.open, candle.high, candle.low, candle.close,
+                        candle.volume, candle.open_interest,
+                    )
+                    if old_id != new_id:
+                        conflicts.append(ts.isoformat())
+                        continue
+                by_ts[ts] = candle
+
+    if conflicts:
+        raise ValueError(
+            "conflicting duplicate 1m market evidence: "
+            + ",".join(sorted(set(conflicts)))
+        )
+
+    return [by_ts[k] for k in sorted(by_ts)]
+
+
+def merge_recorded_5m_sources(
+    primary_bars: list[FiveMinuteBar],
+    supplemental_bars: list[FiveMinuteBar],
+) -> tuple[list[FiveMinuteBar], dict[str, int]]:
+    """Merge exact recorded sources by timestamp; overlaps must agree."""
+
+    merged: dict[datetime, FiveMinuteBar] = {x.ts: x for x in primary_bars}
+    supplemented = 0
+    overlap = 0
+    conflicts: list[str] = []
+
+    for bar in supplemental_bars:
+        old = merged.get(bar.ts)
+        if old is None:
+            merged[bar.ts] = bar
+            supplemented += 1
+            continue
+        overlap += 1
+        if not _same_bar(old, bar):
+            conflicts.append(bar.ts.isoformat())
+
+    if conflicts:
+        raise ValueError(
+            "primary/supplemental 5m evidence conflict: "
+            + ",".join(conflicts)
+        )
+
+    rows = [merged[k] for k in sorted(merged)]
+    return rows, {
+        "primary_5m_bars": len(primary_bars),
+        "supplemental_5m_bars": len(supplemental_bars),
+        "supplemented_missing_5m_bars": supplemented,
+        "agreeing_overlap_5m_bars": overlap,
+        "merged_5m_bars": len(rows),
+    }
 
 
 def _warm_from_cache(
@@ -160,8 +316,6 @@ def _warm_from_cache(
             loaded_sessions += 1
             loaded_bars += len(bars)
 
-            # Match the historical replay warmup semantics: indicator history is
-            # retained, but session-to-session comparison state is not.
             coordinator.bullish.previous_indicators = None
             coordinator.bullish.previous_bar = None
             coordinator.bearish.previous_indicators = None
@@ -203,12 +357,20 @@ def recover_current_day_directional_timeline(
     *,
     session_date: date,
     source_audit: str | Path = "data/live-observation/hilega-milega-v1/step-audit.jsonl",
+    supplemental_evidence: str | Path | None = None,
     output_root: str | Path = "data/historical-evidence/hilega-directional-replay-v1",
     cache_root: str | Path = "data/historical-evidence/hilega-milega-underlying-cache-v1",
     warmup_calendar_days: int = 45,
     force: bool = False,
 ) -> dict[str, Any]:
     source_audit = Path(source_audit)
+    if supplemental_evidence is None:
+        supplemental_evidence = (
+            Path("data/live-observation/hilega-directional-market-evidence-v1")
+            / f"{session_date.isoformat()}.jsonl"
+        )
+    supplemental_evidence = Path(supplemental_evidence)
+
     output_root = Path(output_root)
     session_dir = output_root / session_date.isoformat()
     json_path = session_dir / "directional-candle-by-candle.json"
@@ -220,11 +382,25 @@ def recover_current_day_directional_timeline(
             f"{json_path} already exists; use --force only after deliberate review"
         )
 
-    bars = extract_underlying_5m_from_audit(source_audit, session_date)
-    if not bars:
+    primary_bars = extract_underlying_5m_from_audit(source_audit, session_date)
+    if not primary_bars:
         raise RuntimeError(
-            f"NO_RECORDED_{SOURCE_STAGE}_BARS_FOR_{session_date.isoformat()}"
+            f"NO_RECORDED_{PRIMARY_SOURCE_STAGE}_BARS_FOR_{session_date.isoformat()}"
         )
+
+    supplemental_1m = extract_underlying_1m_from_market_evidence(
+        supplemental_evidence,
+        session_date,
+    )
+    supplemental_5m = (
+        aggregate_exact_5m(supplemental_1m, session_date)
+        if supplemental_1m
+        else []
+    )
+
+    bars, source_counts = merge_recorded_5m_sources(
+        primary_bars, supplemental_5m
+    )
 
     coordinator = HilegaDirectionalCoordinatorV1()
     warmup = _warm_from_cache(
@@ -235,11 +411,19 @@ def recover_current_day_directional_timeline(
     )
 
     rows: list[dict[str, Any]] = []
+    primary_ts = {x.ts for x in primary_bars}
+    supplemental_ts = {x.ts for x in supplemental_5m}
+
     for bar in bars:
         decision = coordinator.on_bar(bar)
         row = _row_from_decision(bar, decision, coordinator)
         row["reconstructed"] = True
-        row["recovery_source"] = "RECORDED_LIVE_UNDERLYING_5M_BUILD"
+        if bar.ts in primary_ts and bar.ts in supplemental_ts:
+            row["recovery_source"] = "RECORDED_PRIMARY_AND_MARKET_EVIDENCE"
+        elif bar.ts in supplemental_ts:
+            row["recovery_source"] = "RECORDED_DIRECTIONAL_MARKET_EVIDENCE_1M"
+        else:
+            row["recovery_source"] = "RECORDED_LIVE_UNDERLYING_5M_BUILD"
         rows.append(row)
 
     session_dir.mkdir(parents=True, exist_ok=True)
@@ -259,8 +443,15 @@ def recover_current_day_directional_timeline(
         "option_selection_enabled": False,
         "source_audit": str(source_audit),
         "source_audit_sha256": _sha256(source_audit),
-        "source_stage": SOURCE_STAGE,
-        "source_5m_bars": len(bars),
+        "supplemental_evidence": str(supplemental_evidence),
+        "supplemental_evidence_present": supplemental_evidence.is_file(),
+        "supplemental_evidence_sha256": (
+            _sha256(supplemental_evidence)
+            if supplemental_evidence.is_file()
+            else None
+        ),
+        "supplemental_1m_candles": len(supplemental_1m),
+        **source_counts,
         "recovered_directional_rows": len(rows),
         "first_bar": rows[0]["bar_timestamp"] if rows else None,
         "last_bar": rows[-1]["bar_timestamp"] if rows else None,
