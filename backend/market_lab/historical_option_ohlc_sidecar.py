@@ -31,6 +31,8 @@ class HistoricalOptionOHLCGateway(Protocol):
     def historical_candles(self, instrument_key: str, session_date: date) -> list[HistoricalCandle]: ...
     def historical_option_contracts(self, underlying: str, expiry: date) -> list[HistoricalOptionContract]: ...
     def historical_option_candles(self, instrument_key: str, session_date: date) -> list[HistoricalCandle]: ...
+    def active_option_contracts(self, underlying: str, expiry: date) -> list[HistoricalOptionContract]: ...
+    def active_option_historical_candles(self, instrument_key: str, session_date: date) -> list[HistoricalCandle]: ...
 
 
 @dataclass(frozen=True)
@@ -94,6 +96,28 @@ def rows_from_series(
     return rows
 
 
+
+class _OptionCandleSourceAdapter:
+    """Expose one exact provider option-candle source through the historical loader interface."""
+
+    def __init__(self, gateway: HistoricalOptionOHLCGateway, *, active: bool):
+        self.gateway = gateway
+        self.active = active
+
+    def historical_option_candles(
+        self, instrument_key: str, session_date: date
+    ) -> list[HistoricalCandle]:
+        if self.active:
+            return self.gateway.active_option_historical_candles(instrument_key, session_date)
+        return self.gateway.historical_option_candles(instrument_key, session_date)
+
+
+def _provider_option_source(*, expiry: date, provider_as_of: date) -> str:
+    # Upstox serves unexpired/current contracts through the active-option endpoints
+    # and expired contracts through the expired-instruments endpoints.
+    return "ACTIVE" if expiry >= provider_as_of else "EXPIRED"
+
+
 def reconstruct_ohlc_session(
     gateway: HistoricalOptionOHLCGateway,
     underlying: str,
@@ -102,6 +126,7 @@ def reconstruct_ohlc_session(
     wings: int,
     strike_interval: int = 50,
     fixed_anchor_time: time = time(9, 20),
+    provider_as_of: date | None = None,
 ) -> HistoricalOptionOHLCSession:
     underlying_candles = sorted(gateway.historical_candles(underlying, session_date), key=lambda c: c.timestamp)
     if not underlying_candles:
@@ -120,7 +145,21 @@ def reconstruct_ohlc_session(
     if fixed_atm is not None:
         required_atms.add(fixed_atm)
 
-    catalog = gateway.historical_option_contracts(underlying, expiry)
+    as_of = provider_as_of or datetime.now(IST).date()
+    source = _provider_option_source(expiry=expiry, provider_as_of=as_of)
+    active = source == "ACTIVE"
+
+    if active:
+        catalog = gateway.active_option_contracts(underlying, expiry)
+    else:
+        catalog = gateway.historical_option_contracts(underlying, expiry)
+
+    if not catalog:
+        return HistoricalOptionOHLCSession(
+            SCHEMA_VERSION, "UNAVAILABLE", underlying, session_date, expiry, wings, strike_interval,
+            0, (), (f"option_contracts_unavailable:{source.lower()}",),
+        )
+
     selected_by_identity: dict[tuple[float, str], HistoricalOptionContract] = {}
     for atm in sorted(required_atms):
         for contract in resolve_historical_option_contracts(catalog, underlying, expiry, atm, wings, strike_interval):
@@ -131,8 +170,21 @@ def reconstruct_ohlc_session(
             selected_by_identity[identity] = contract
 
     selected = sorted(selected_by_identity.values(), key=lambda c: (c.strike, 0 if c.side == "CE" else 1))
-    option_series = load_historical_option_candles(gateway, selected, session_date)
+    if not selected:
+        return HistoricalOptionOHLCSession(
+            SCHEMA_VERSION, "UNAVAILABLE", underlying, session_date, expiry, wings, strike_interval,
+            0, (), (f"required_option_contracts_unavailable:{source.lower()}",),
+        )
+
+    loader = _OptionCandleSourceAdapter(gateway, active=active)
+    option_series = load_historical_option_candles(loader, selected, session_date)
     rows = rows_from_series(underlying=underlying, expiry=expiry, option_series=option_series)
+    if not rows:
+        return HistoricalOptionOHLCSession(
+            SCHEMA_VERSION, "UNAVAILABLE", underlying, session_date, expiry, wings, strike_interval,
+            0, (), (f"option_candle_rows_unavailable:{source.lower()}",),
+        )
+
     return HistoricalOptionOHLCSession(
         SCHEMA_VERSION, "AVAILABLE", underlying, session_date, expiry, wings, strike_interval,
         len(rows), tuple(rows), (),
