@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import asdict, dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from .live_shadow_step_audit_v1 import ShadowStepAuditStoreV1
@@ -382,7 +382,8 @@ class HilegaMilegaBullishEngineV1:
                 "route_b_pass": route_b_eligible and not self._route_b_fail_reasons(d),
                 "route_b_fail_reasons": self._route_b_fail_reasons(d) if route_b_eligible else [],
                 "structural_exit_condition": bool(d.get("rsi_cross_wma_down")),
-                "new_entries_allowed": self.session.name != "SESSION_LOCKED",
+                "new_entries_allowed": (self.session.name != "SESSION_LOCKED" and
+                                        (bar.ts + timedelta(minutes=5)).strftime("%H:%M") < SESSION_CUTOFF),
                 "note": note,
                 **d,
             },
@@ -576,13 +577,18 @@ class HilegaMilegaBullishEngineV1:
             self.session.opening_candidate = False
             self.session.opening_holding = False
 
+        # A 14:50 candle becomes actionable only at 14:55, the hard cutoff.
+        # It may establish an auditable armed setup for subsequent cancellation,
+        # but cannot create a new trade at an already-closed entry boundary.
+        entry_boundary_open = (bar.ts + timedelta(minutes=5)).strftime("%H:%M") < SESSION_CUTOFF
+
         # Path1 arming and Route A.
         if not self.session.active and d["rsi_cross_ema_up"]:
             before = self.session.name
             self.session.armed = True
             self.session.armed_time = bar.ts
 
-            if d["rsi_gt_50"] and d["rsi_gt_wma"]:
+            if entry_boundary_open and d["rsi_gt_50"] and d["rsi_gt_wma"]:
                 self.session.active = True
                 self.session.source = "PATH1_ROUTE_A_CROSS_RSI50_ABOVE_WMA21"
                 self.session.entry_time = bar.ts
@@ -614,6 +620,7 @@ class HilegaMilegaBullishEngineV1:
             and (d["rsi_gt_wma"] or d["ema_gt_wma"])
             and d["rsi_rising"]
             and d["ema_rising"]
+            and entry_boundary_open
         ):
             before = self.session.name
             self.session.active = True

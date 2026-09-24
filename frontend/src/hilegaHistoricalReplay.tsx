@@ -1,123 +1,182 @@
-import {useEffect, useMemo, useState} from 'react'
+import {useEffect,useMemo,useState} from 'react'
+import HilegaDecisionTable,{type HilegaAudit} from './hilegaDecisionTable'
 import './hilegaHistoricalReplay.css'
 
-type Capture = {session_date:string;capture_id:string;expiry:string|null;has_manifest:boolean}
-type Audit = {
- checkpoint:string;bar:Record<string,any>;indicators:Record<string,any>;
- conditions:Record<string,any>;strategy:Record<string,any>;
- route_a:Record<string,any>;route_b:Record<string,any>;
- transitions:Array<Record<string,any>>;
- option_candidate:Record<string,any>|null;
- option_market_snapshot:Record<string,any>|null;
- option_lifecycle:Record<string,any>;
- audit_integrity:Record<string,any>;
+type Session={
+  session_date:string
+  source:'PHASE7D'|'LIVE_SHADOW'|'SESSION_REPLAY'|'RESEARCH_120'|string
+  source_id:string
+  status:string
+  evidence_level:'FULL'|'STRATEGY'|'SUMMARY'|'PARTIAL'|string
+  ce_available:boolean
+  expiry:string|null
+  available_sources:string[]
 }
-type Response = {session_date:string;capture_id:string;reports:Audit[];report_count:number;
- audit_chain_ok:boolean;audit_chain_issue:string|null;manifest:Record<string,any>;warning:string}
-const fmt=(x:any)=> x===null||x===undefined?'—':String(x)
-const time=(x:string)=>{const d=new Date(x); return Number.isNaN(d.getTime()) ? x.slice(11,16) : d.toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit',hour12:false})}
-const pretty=(x:any)=>JSON.stringify(x??{},null,2)
+type Response={
+  session_date:string;source:string;source_id:string;evidence_level:string;ce_available:boolean
+  reports:HilegaAudit[];report_count:number;audit_chain_ok:boolean|null;audit_chain_issue:string|null
+  manifest:Record<string,any>;warning:string;available_sources:string[]
+}
+const shortTime=(v:string)=>{
+  const d=new Date(v)
+  return Number.isNaN(d.getTime())?v:d.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'Asia/Kolkata'})
+}
 
-// Hilega has independent historical sessions; never rely on the legacy strategy's date.
-// This component is read-only: it reads previously captured evidence only.
 export default function HilegaHistoricalReplay(){
- const [captures,setCaptures]=useState<Capture[]>([])
- const [selectedDate,setSelectedDate]=useState('')
- const [captureId,setCaptureId]=useState('')
- const [data,setData]=useState<Response|null>(null)
- const [index,setIndex]=useState(0)
- const [playing,setPlaying]=useState(false)
- const [error,setError]=useState('')
- const [note,setNote]=useState('')
- const [reviews,setReviews]=useState<Record<string,{label:string;note:string}>>({})
- const dates=useMemo(()=>Array.from(new Set(captures.map(c=>c.session_date))).sort().reverse(),[captures])
- const available=useMemo(()=>captures.filter(c=>c.session_date===selectedDate),[captures,selectedDate])
- useEffect(()=>{
-   let active=true
-   fetch('/api/live-shadow/hilega-historical/sessions').then(async r=>{if(!r.ok)throw new Error(`Sessions HTTP ${r.status}`);return r.json()})
-     .then(v=>{
-       if(!active)return
-       const rows:Capture[]=v.sessions||[]
-       setCaptures(rows)
-       const availableDates=Array.from(new Set(rows.map(c=>c.session_date))).sort().reverse()
-       setSelectedDate(current=>availableDates.includes(current)?current:(availableDates[0]||''))
-     })
-     .catch(e=>{if(active)setError(String(e))})
-   return()=>{active=false}
- },[])
- useEffect(()=>{
-   // Prefer the latest complete capture when switching Hilega's own session.
-   // Never reuse a capture from a different date.
-   const preferred=available.find(c=>c.has_manifest)?.capture_id||available[0]?.capture_id||''
-   setCaptureId(preferred);setData(null);setIndex(0);setPlaying(false)
- },[selectedDate,captures])
- useEffect(()=>{
-   if(!captureId)return
-   let active=true
-   setData(null);setError('');setPlaying(false)
-   fetch(`/api/live-shadow/hilega-historical/capture?capture_id=${encodeURIComponent(captureId)}`)
-     .then(async r=>{if(!r.ok)throw new Error(`Capture HTTP ${r.status}: ${await r.text()}`);return r.json()})
-     .then(v=>{if(active){setData(v);setIndex(0)}})
-     .catch(e=>{if(active)setError(String(e))})
-   return()=>{active=false}
- },[captureId])
- const reports=data?.reports||[]
- useEffect(()=>{if(!playing || !reports.length)return;const id=window.setInterval(()=>setIndex(i=>Math.min(i+1,reports.length-1)),1000);return()=>window.clearInterval(id)},[playing,reports.length])
- useEffect(()=>{if(index>=reports.length-1)setPlaying(false)},[index,reports.length])
- const reviewKey=`hime-review:${captureId}`
- useEffect(()=>{try{setReviews(JSON.parse(localStorage.getItem(reviewKey)||'{}'))}catch{setReviews({})}},[reviewKey])
- const current=reports[index]
- const key=current?.checkpoint||''
- useEffect(()=>setNote(reviews[key]?.note||''),[key,reviews])
- function mark(label:string){if(!current)return;const value={...reviews,[key]:{label,note}};setReviews(value);localStorage.setItem(reviewKey,JSON.stringify(value))}
- function exportReviews(){const value={capture_id:captureId,session_date:selectedDate,reviews};const blob=new Blob([JSON.stringify(value,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`${captureId}-manual-reviews.json`;a.click();URL.revokeObjectURL(url)}
- const bars=reports.slice(0,index+1).filter(r=>r.bar && r.bar.open!=null && r.bar.high!=null && r.bar.low!=null && r.bar.close!=null)
- const allMin=Math.min(...bars.map(r=>Number(r.bar.low))), allMax=Math.max(...bars.map(r=>Number(r.bar.high)))
- const range=Math.max(1,allMax-allMin)
- const width=Math.max(680,bars.length*11)
- const y=(v:number)=>18+(allMax-v)/range*180
- return <section className="hime-replay" aria-label="Hilega historical replay">
-   <h3>Hilega-Milega · Historical candle review</h3>
-   <p>Uses the existing historical evidence and shared live coordinator audit. Read-only; never starts another replay worker.</p>
-   <label>Hilega session <select aria-label="Hilega historical session" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)}>
-     {!dates.length&&<option value="">No Hilega historical sessions available</option>}
-     {dates.map(day=><option key={day} value={day}>{day}</option>)}
-   </select></label>
-   <label>Historical capture <select aria-label="Hilega historical capture" value={captureId} onChange={e=>setCaptureId(e.target.value)}>
-     {!available.length&&<option value="">No Hilega capture for selected date</option>}
-     {available.map(c=><option value={c.capture_id} key={c.capture_id}>{c.capture_id} · Expiry {fmt(c.expiry)}</option>)}
-   </select></label>
-   {error&&<p role="alert" className="hime-error">{error}</p>}
-   {data&&<><div className="hime-meta"><span>Session {data.session_date}</span><span>Expiry {fmt(data.manifest.expiry)}</span><span>Audit chain {data.audit_chain_ok?'PASS':'FAIL'}</span><span>Checkpoints {reports.length}</span></div>
-     <p className="hime-warning">{data.warning} {data.audit_chain_issue||''}</p>
-     {current?<>
-       <div className="hime-controls">
-         <button onClick={()=>{setPlaying(false);setIndex(0)}}>Reset</button>
-         <button disabled={index===0} onClick={()=>{setPlaying(false);setIndex(i=>i-1)}}>◀ Previous</button>
-         <button onClick={()=>setPlaying(v=>!v)} disabled={index===reports.length-1}>{playing?'Pause':'Play'}</button>
-         <button disabled={index===reports.length-1} onClick={()=>{setPlaying(false);setIndex(i=>i+1)}}>Next ▶</button>
-         <label>Candle <input aria-label="Select candle" type="range" min={0} max={Math.max(0,reports.length-1)} value={index} onChange={e=>{setPlaying(false);setIndex(Number(e.target.value))}} /></label>
-         <strong>{index+1}/{reports.length} · {time(current.checkpoint)} IST</strong>
-       </div>
-       {bars.length>0&&<div className="hime-chart-scroll"><svg role="img" aria-label="Historical Nifty candles, showing only candles through current replay time" width={width} height="225" viewBox={`0 0 ${width} 225`}>
-         {bars.map((r,i)=>{const b=r.bar;const x=15+i*11;const o=y(Number(b.open));const c=y(Number(b.close));const h=y(Number(b.high));const l=y(Number(b.low));const up=Number(b.close)>=Number(b.open);return <g key={r.checkpoint}><title>{time(r.checkpoint)} O {b.open} H {b.high} L {b.low} C {b.close}</title><line x1={x+3} x2={x+3} y1={h} y2={l} stroke={up?'#188554':'#c24b4b'}/><rect x={x} y={Math.min(o,c)} width="6" height={Math.max(1,Math.abs(o-c))} fill={up?'#188554':'#c24b4b'}/></g>})}
-       </svg><small>Audit-derived five-minute OHLC; future candles are hidden. Only checkpoints with recorded OHLC are charted.</small></div>}
-       <div className="hime-cards">
-         <div><b>Candle</b><p>O {fmt(current.bar.open)} · H {fmt(current.bar.high)} · L {fmt(current.bar.low)} · C {fmt(current.bar.close)}</p></div>
-         <div><b>Strategy</b><p>{fmt(current.strategy.state_before)} → {fmt(current.strategy.state_after)}</p><p>Route {fmt(current.strategy.selected_route)}</p></div>
-         <div><b>Indicators</b><p>RSI9 {fmt(current.indicators.rsi9)} · EMA3 {fmt(current.indicators.ema3_rsi)} · WMA21 {fmt(current.indicators.wma21_rsi)}</p></div>
-         <div><b>Options</b><p>Candidate {fmt(current.option_candidate?.status)} · ATM {fmt(current.option_candidate?.atm)}</p></div>
-       </div>
-       <details open><summary>Opening / Route A / Route B and conditions</summary><pre>{pretty({strategy:current.strategy,conditions:current.conditions,route_a:current.route_a,route_b:current.route_b})}</pre></details>
-       <details><summary>Entry / exit transitions</summary><pre>{pretty(current.transitions)}</pre></details>
-       <details><summary>ATM±2 CE candidates and option market snapshot</summary><pre>{pretty({option_candidate:current.option_candidate,market_snapshot:current.option_market_snapshot})}</pre></details>
-       <details><summary>Independent option lifecycle and premiums</summary><pre>{pretty(current.option_lifecycle)}</pre></details>
-       <details><summary>Detailed audit integrity</summary><pre>{pretty(current.audit_integrity)}</pre></details>
-       <div className="hime-review"><b>Manual review</b><textarea value={note} onChange={e=>setNote(e.target.value)} placeholder="Compare with the Nifty chart; record an observation"/>
-         <select aria-label="Review label" value={reviews[key]?.label||''} onChange={e=>mark(e.target.value)}><option value="">Unreviewed</option><option>Correct</option><option>Needs investigation</option><option>Possible missed opportunity</option><option>Possible incorrect entry or exit</option><option>Data discrepancy</option></select>
-         <button onClick={()=>mark(reviews[key]?.label||'Needs investigation')}>Save observation</button><button onClick={exportReviews}>Export reviews JSON</button>
-       </div>
-     </>:<p>Capture has no detailed strategy checkpoints.</p>}
-   </>}
- </section>
+  const [sessions,setSessions]=useState<Session[]>([])
+  const [selectedDate,setSelectedDate]=useState('')
+  const [data,setData]=useState<Response|null>(null)
+  const [error,setError]=useState('')
+  const [busy,setBusy]=useState(false)
+  const [refreshing,setRefreshing]=useState(false)
+  const [step,setStep]=useState(false)
+  const [cursor,setCursor]=useState(0)
+  const [playing,setPlaying]=useState(false)
+  const [reviewCheckpoint,setReviewCheckpoint]=useState('')
+  const [notes,setNotes]=useState<Record<string,{label:string;note:string}>>({})
+  const [note,setNote]=useState('')
+  const [label,setLabel]=useState('Unreviewed')
+
+  const reports=useMemo(()=>[...(data?.reports??[])].sort((a,b)=>a.checkpoint.localeCompare(b.checkpoint)),[data])
+  const selected=useMemo(()=>sessions.find(x=>x.session_date===selectedDate)??null,[sessions,selectedDate])
+
+  async function refreshSessions(silent=false){
+    if(!silent)setRefreshing(true)
+    try{
+      const r=await fetch('/api/live-shadow/hilega-historical/sessions')
+      if(!r.ok)throw new Error(`Sessions HTTP ${r.status}`)
+      const body=await r.json()
+      const rows:Session[]=body.sessions??[]
+      setSessions(rows)
+      setSelectedDate(prev=>rows.some(x=>x.session_date===prev)?prev:(rows[0]?.session_date??''))
+    }catch(e){if(!silent)setError(String(e))}
+    finally{if(!silent)setRefreshing(false)}
+  }
+
+  useEffect(()=>{
+    let active=true
+    const run=async()=>{
+      try{
+        const r=await fetch('/api/live-shadow/hilega-historical/sessions')
+        if(!r.ok)throw new Error(`Sessions HTTP ${r.status}`)
+        const body=await r.json()
+        if(!active)return
+        const rows:Session[]=body.sessions??[]
+        setSessions(rows)
+        setSelectedDate(prev=>rows.some(x=>x.session_date===prev)?prev:(rows[0]?.session_date??''))
+      }catch(e){if(active)setError(String(e))}
+    }
+    void run()
+    const id=window.setInterval(()=>void refreshSessions(true),60000)
+    return()=>{active=false;window.clearInterval(id)}
+  },[])
+
+  useEffect(()=>{setData(null);setPlaying(false);setCursor(0);setError('')},[selectedDate])
+
+  async function load(){
+    if(!selectedDate)return
+    setBusy(true);setError('');setPlaying(false);setData(null);setCursor(0)
+    try{
+      const r=await fetch(`/api/live-shadow/hilega-historical/session?session_date=${encodeURIComponent(selectedDate)}`)
+      if(!r.ok)throw new Error(`Session HTTP ${r.status}: ${await r.text()}`)
+      setData(await r.json() as Response)
+    }catch(e){setError(String(e))}finally{setBusy(false)}
+  }
+
+  useEffect(()=>{
+    if(!playing||!step||!reports.length)return
+    const handle=window.setInterval(()=>setCursor(i=>Math.min(i+1,reports.length-1)),1200)
+    return()=>clearInterval(handle)
+  },[playing,step,reports.length])
+  useEffect(()=>{if(cursor>=reports.length-1)setPlaying(false)},[cursor,reports.length])
+
+  const until=step ? reports[cursor]?.checkpoint??'' : undefined
+  const reviewKey=`hime-review:${selectedDate}`
+  useEffect(()=>{
+    try{setNotes(JSON.parse(localStorage.getItem(reviewKey)??'{}'))}catch{setNotes({})}
+    setReviewCheckpoint('')
+  },[reviewKey])
+  useEffect(()=>{
+    const saved=notes[reviewCheckpoint]
+    setNote(saved?.note??'');setLabel(saved?.label??'Unreviewed')
+  },[reviewCheckpoint,notes])
+  function save(){
+    if(!reviewCheckpoint)return
+    const next={...notes,[reviewCheckpoint]:{label,note}}
+    localStorage.setItem(reviewKey,JSON.stringify(next));setNotes(next)
+  }
+  function download(){
+    const blob=new Blob([JSON.stringify({session_date:selectedDate,source:data?.source,reviews:notes},null,2)],{type:'application/json'})
+    const href=URL.createObjectURL(blob)
+    const a=document.createElement('a');a.href=href;a.download=`hilega-${selectedDate}-manual-review.json`;a.click();URL.revokeObjectURL(href)
+  }
+
+  return <section className="hime-replay" aria-label="Hilega historical replay">
+    <h3>Hilega-Milega · Session Replay</h3>
+    <p>Choose one trading day. The registry uses the richest evidence already available and never starts a broker/replay worker.</p>
+
+    <div className="hime-controls">
+      <label>Session date <select aria-label="Hilega historical session" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)}>
+        {!sessions.length&&<option value="">No Hilega sessions available</option>}
+        {sessions.map(s=><option value={s.session_date} key={s.session_date}>
+          {s.session_date} · {s.evidence_level} · {s.source}{s.ce_available?' · CE':''}
+        </option>)}
+      </select></label>
+      <button onClick={()=>void load()} disabled={!selectedDate||busy}>{busy?'Loading…':'Load session'}</button>
+      <button onClick={()=>void refreshSessions()} disabled={refreshing}>{refreshing?'Refreshing…':'Refresh sessions'}</button>
+    </div>
+
+    {selected&&<div className="hime-meta">
+      <span>Available source: {selected.source}</span>
+      <span>Evidence: {selected.evidence_level}</span>
+      <span>CE: {selected.ce_available?'AVAILABLE':'NOT RECORDED'}</span>
+      <span>Status: {selected.status}</span>
+    </div>}
+
+    {error&&<p role="alert" className="hime-error">{error}</p>}
+
+    {data&&<>
+      <div className="hime-meta">
+        <span>Session: {data.session_date}</span>
+        <span>Loaded from: {data.source}</span>
+        <span>Evidence: {data.evidence_level}</span>
+        <span>CE: {data.ce_available?'AVAILABLE':'NOT RECORDED'}</span>
+        <span>Checkpoints: {reports.length}</span>
+        <span>Audit chain: {data.audit_chain_ok===null?'N/A':data.audit_chain_ok?'PASS':'FAIL'}</span>
+      </div>
+      <p className="hime-warning">{data.warning} {data.audit_chain_issue??''}</p>
+
+      {data.evidence_level==='SUMMARY'&&<p className="hime-warning">
+        This 120-session research day contains entry/exit summary evidence only. It is selectable now, but full five-minute conditions and exact CE lifecycle require a richer recorded replay for that date.
+      </p>}
+
+      <div className="hime-controls">
+        <button onClick={()=>{setStep(false);setPlaying(false)}} aria-pressed={!step}>Full-session table</button>
+        <button onClick={()=>{setStep(true);setCursor(0);setPlaying(false)}} aria-pressed={step} disabled={!reports.length}>Candle-by-candle mode</button>
+        {step&&reports.length>0&&<>
+          <button onClick={()=>{setCursor(0);setPlaying(false)}}>Reset</button>
+          <button disabled={cursor===0} onClick={()=>{setCursor(i=>i-1);setPlaying(false)}}>◀ Previous</button>
+          <button disabled={cursor>=reports.length-1} onClick={()=>setPlaying(p=>!p)}>{playing?'Pause':'Play'}</button>
+          <button disabled={cursor>=reports.length-1} onClick={()=>{setCursor(i=>i+1);setPlaying(false)}}>Next ▶</button>
+          <label>Checkpoint <input aria-label="Replay checkpoint" type="range" min={0} max={Math.max(0,reports.length-1)} value={cursor} onChange={e=>{setCursor(Number(e.target.value));setPlaying(false)}} /></label>
+          <strong>{cursor+1}/{reports.length} · {shortTime(reports[cursor].checkpoint)} IST</strong>
+        </>}
+      </div>
+
+      <HilegaDecisionTable key={`${selectedDate}-${data.source}-${step?'step':'full'}`} reports={reports}
+        mode="HISTORICAL" visibleUntil={until}
+        emptyMessage="No Hilega strategy rows were recorded for this session."
+        onSelected={setReviewCheckpoint}/>
+
+      <div className="hime-review"><h4>Manual review (separate from immutable audit)</h4>
+        <p>Selected checkpoint: {reviewCheckpoint?shortTime(reviewCheckpoint):'Select View audit on a row'}</p>
+        <label>Classification <select value={label} disabled={!reviewCheckpoint} onChange={e=>setLabel(e.target.value)}>
+          {['Unreviewed','Correct','Needs investigation','Possible missed opportunity','Possible incorrect entry or exit','Data discrepancy'].map(v=><option key={v}>{v}</option>)}
+        </select></label>
+        <textarea value={note} disabled={!reviewCheckpoint} onChange={e=>setNote(e.target.value)} placeholder="Compare the selected checkpoint with your external chart"/>
+        <button disabled={!reviewCheckpoint} onClick={save}>Save observation</button>
+        <button onClick={download}>Export reviews JSON</button>
+      </div>
+    </>}
+  </section>
 }

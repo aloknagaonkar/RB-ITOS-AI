@@ -139,13 +139,18 @@ class HilegaMilegaLiveShadowCoordinatorV1:
         start = session_date - timedelta(days=self.warmup_calendar_days)
         d = start
         while d < session_date:
-            candles = load_or_fetch_1m(
-                self.sources,
-                underlying=UNDERLYING,
-                session_date=d,
-                cache_root=self.cache_root,
-                refresh_cache=False,
-            )
+            if hasattr(self.sources, "warmup_candles"):
+                # Exact response actually consumed from cache or broker is
+                # captured once; playback supplies it without broker access.
+                candles = self.sources.warmup_candles(d, self.cache_root)
+            else:
+                candles = load_or_fetch_1m(
+                    self.sources,
+                    underlying=UNDERLYING,
+                    session_date=d,
+                    cache_root=self.cache_root,
+                    refresh_cache=False,
+                )
             if candles:
                 bars = aggregate_exact_5m(candles, d)
                 for bar in bars:
@@ -166,13 +171,79 @@ class HilegaMilegaLiveShadowCoordinatorV1:
         completed_label = latest_completed_5m_label(now)
         completed_current = completed_intraday_1m_for_label(current, completed_label)
         current_bars = aggregate_exact_5m(completed_current, session_date)
+
+        # Historical warmup remains silent, but current-session bootstrap bars
+        # are captured in-memory so a restart cannot silently remove an already
+        # completed 5m checkpoint from the append-only live audit.
+        class _BootstrapAuditCollector:
+            def __init__(self):
+                self.rows = []
+            def append(self, *, event_time, checkpoint, stage, status, payload):
+                self.rows.append({
+                    "event_time": event_time,
+                    "checkpoint": checkpoint,
+                    "stage": stage,
+                    "status": status,
+                    "payload": dict(payload or {}),
+                })
+
+        collector = _BootstrapAuditCollector()
+        self.strategy.audit_store = collector
         for bar in current_bars:
             if bar.ts <= completed_label:
                 self.strategy.on_bar(bar)
                 self._last_bar_ts = bar.ts
                 bars_replayed += 1
 
-        # Bootstrap history is intentionally not written into the live audit.
+        # Recover only checkpoints that are absent from the canonical audit.
+        # Existing checkpoints are never duplicated or rewritten.
+        existing_rows = self.step_audit.read_all()
+        existing_decision_checkpoints = {
+            str(r.get("checkpoint"))
+            for r in existing_rows
+            if r.get("stage") == "STRATEGY_DECISION"
+            and str(r.get("checkpoint") or "").startswith(session_date.isoformat())
+        }
+        recovered_checkpoints = []
+        by_checkpoint = {}
+        for row in collector.rows:
+            cp = row.get("checkpoint")
+            if cp is None:
+                continue
+            cp_iso = cp.isoformat() if hasattr(cp, "isoformat") else str(cp)
+            by_checkpoint.setdefault(cp_iso, []).append(row)
+
+        for cp_iso in sorted(by_checkpoint):
+            if cp_iso in existing_decision_checkpoints:
+                continue
+            recovered_checkpoints.append(cp_iso)
+            for row in by_checkpoint[cp_iso]:
+                payload = {
+                    **(row.get("payload") or {}),
+                    "bootstrap_recovered": True,
+                    "recovery_source": "CURRENT_SESSION_BOOTSTRAP_REPLAY",
+                    "recovered_at": now.isoformat(),
+                }
+                self.step_audit.append(
+                    event_time=row["event_time"],
+                    checkpoint=row["checkpoint"],
+                    stage=row["stage"],
+                    status=row["status"],
+                    payload=payload,
+                )
+            self.step_audit.append(
+                event_time=now,
+                checkpoint=datetime.fromisoformat(cp_iso),
+                stage="BOOTSTRAP_RECOVERED_CHECKPOINT",
+                status="RECOVERED",
+                payload={
+                    "checkpoint": cp_iso,
+                    "recovery_source": "CURRENT_SESSION_BOOTSTRAP_REPLAY",
+                    "recorded_live_checkpoint_present": False,
+                },
+            )
+
+        # Normal future live processing resumes on the real append-only audit.
         self.strategy.audit_store = self.step_audit
         self._bootstrapped_date = session_date
         self._restore_pending_option_exits(now)
@@ -187,6 +258,8 @@ class HilegaMilegaLiveShadowCoordinatorV1:
             "bars_replayed": bars_replayed,
             "last_completed_bar": self._last_bar_ts.isoformat() if self._last_bar_ts else None,
             "reconstructed_state": self.strategy.session.name,
+            "recovered_checkpoints": recovered_checkpoints,
+            "recovered_checkpoint_count": len(recovered_checkpoints),
         })
         self._health(now=now, status="BOOTSTRAPPED", bars_replayed=bars_replayed, reconstructed_state=self.strategy.session.name)
         return {"status": "PASS", "bars_replayed": bars_replayed, "state": self.strategy.session.name}
@@ -345,6 +418,12 @@ class HilegaMilegaLiveShadowCoordinatorV1:
         if not self.option_shadow.active:
             return
         through = self._latest_completed_option_minute(now)
+        # A delayed 14:55 cutoff OPEN must not permit later premium updates.
+        # Only minutes strictly before the contractual exit boundary can update
+        # an active shadow while that exact exit source remains unavailable.
+        if now.time() >= time(14, 55):
+            cutoff = datetime.combine(now.date(), time(14, 55), tzinfo=IST)
+            through = min(through, cutoff - timedelta(minutes=1))
         if self._option_shadow_last_update_minute is not None and through <= self._option_shadow_last_update_minute:
             return
         try:
@@ -509,19 +588,16 @@ class HilegaMilegaLiveShadowCoordinatorV1:
                 "order_created": False,
             })
 
-    def process(self, now: datetime) -> dict[str, Any]:
-        now = now.astimezone(IST)
-        self.bootstrap(now)
-        intraday = self.sources.nifty_intraday_1m(now=now)
-        cutoff_events = self.process_cutoff(now, intraday=intraday)
-        self._retry_pending_option_exits(now)
-        self._update_option_shadow(now)
+    def _process_completed_target(self, now: datetime, intraday, target: datetime) -> dict[str, Any]:
+        """Process one exact completed candle before any later cutoff event.
 
-        target = latest_completed_5m_label(now)
+        Never use the currently forming 14:55 bar to build the 14:50 bar.
+        The canonical strategy owns decisions; this method owns event ordering.
+        """
         if target.date() != now.date() or target.time() < time(9, 15):
-            return {"status": "WAITING_FOR_SESSION", "cutoff_events": [e.event_type for e in cutoff_events]}
+            return {"status": "WAITING_FOR_SESSION"}
         if self._last_bar_ts is not None and target <= self._last_bar_ts:
-            return {"status": "NO_NEW_COMPLETED_BAR", "last_bar": self._last_bar_ts.isoformat(), "cutoff_events": [e.event_type for e in cutoff_events]}
+            return {"status": "NO_NEW_COMPLETED_BAR", "last_bar": self._last_bar_ts.isoformat()}
 
         try:
             completed_intraday = completed_intraday_1m_for_label(intraday, target)
@@ -552,22 +628,44 @@ class HilegaMilegaLiveShadowCoordinatorV1:
                     exit_boundary=bar.ts + timedelta(minutes=5),
                     exit_reason=event.exit_reason or "RSI_CROSS_BELOW_WMA21",
                 )
-        self._observe_option_candidates(now, bar, events)
+        # The 14:50 bar's decision boundary is precisely 14:55; a newly
+        # emitted signal cannot create an executable option entry at cutoff.
+        if bar.ts.time() < time(14, 50):
+            self._observe_option_candidates(now, bar, events)
+        elif any(e.event_type.startswith("ENTRY_") for e in events):
+            self._audit_runtime(now, "OPTION_ENTRY_CUTOFF_GUARD", "BLOCKED", {
+                "signal_bar": bar.ts.isoformat(), "decision_boundary": (bar.ts + timedelta(minutes=5)).isoformat(),
+                "reason": "NO_NEW_OPTION_ENTRIES_AT_1455", "order_created": False,
+            })
         self._last_bar_ts = bar.ts
         self._audit_runtime(now, "UNDERLYING_5M_BUILD", "PROCESSED", {
             "bar_timestamp": bar.ts.isoformat(),
-            "open": bar.open,
-            "high": bar.high,
-            "low": bar.low,
-            "close": bar.close,
-            "events": [e.event_type for e in events],
-            "state": self.strategy.session.name,
+            "open": bar.open, "high": bar.high, "low": bar.low, "close": bar.close,
+            "events": [e.event_type for e in events], "state": self.strategy.session.name,
         })
         self._health(now=now, status="PROCESSED", bar_timestamp=bar.ts.isoformat(), state=self.strategy.session.name, events=[e.event_type for e in events])
-        return {
-            "status": "PROCESSED",
-            "bar_timestamp": bar.ts.isoformat(),
-            "state": self.strategy.session.name,
-            "events": [e.event_type for e in events],
-            "cutoff_events": [e.event_type for e in cutoff_events],
-        }
+        return {"status": "PROCESSED", "bar_timestamp": bar.ts.isoformat(), "state": self.strategy.session.name,
+                "events": [e.event_type for e in events]}
+
+    def process(self, now: datetime) -> dict[str, Any]:
+        now = now.astimezone(IST)
+        self.bootstrap(now)
+        intraday = self.sources.nifty_intraday_1m(now=now)
+        target = latest_completed_5m_label(now)
+        cutoff_boundary = datetime.combine(now.date(), time(14, 55), tzinfo=IST)
+        # At the 14:55 boundary a completed 14:50 candle causally precedes
+        # the 14:55 OPEN cutoff. Process it first when it is available, even
+        # when the cutoff minute itself is still delayed by the provider.
+        # If it is missing, do not hold the safety cutoff hostage to it.
+        if cutoff_boundary <= now < cutoff_boundary + timedelta(minutes=5) and target.time() == time(14, 50):
+            bar_result = self._process_completed_target(now, intraday, target)
+            cutoff_events = self.process_cutoff(now, intraday=intraday)
+            self._retry_pending_option_exits(now)
+            self._update_option_shadow(now)
+            return {**bar_result, "cutoff_events": [e.event_type for e in cutoff_events]}
+
+        cutoff_events = self.process_cutoff(now, intraday=intraday)
+        self._retry_pending_option_exits(now)
+        self._update_option_shadow(now)
+        bar_result = self._process_completed_target(now, intraday, target)
+        return {**bar_result, "cutoff_events": [e.event_type for e in cutoff_events]}

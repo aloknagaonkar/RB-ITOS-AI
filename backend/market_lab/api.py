@@ -38,6 +38,7 @@ from .storage import (
 
 
 from .historical_replay_ui_api_v1 import router as historical_replay_router
+from .hilega_historical_ui_api_v1 import router as hilega_historical_router
 
 from .historical_replay_operations_api_v1 import router as historical_replay_operations_router
 
@@ -368,6 +369,7 @@ def create_app(engine=None, historical_gateway_factory=None):
 
     app.include_router(historical_replay_data_router)
     app.include_router(historical_replay_router)
+    app.include_router(hilega_historical_router)
 
     app.include_router(historical_replay_operations_router)
     app.include_router(historical_oi_enrichment_router)
