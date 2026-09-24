@@ -1,43 +1,97 @@
 #!/usr/bin/env python3
 from pathlib import Path
-import argparse, hashlib, shutil
+import argparse, shutil
 from datetime import datetime, timezone
 
-REL="tests/test_hilega_decision_table_v1.cjs"
-BEFORE="bc3fc1a37c7838a4a78abc2e910fbe64efc8ee8abb8271fe754f2a3201c8d0ba"
-AFTER="39353bb452b89850bee5bf6d1cbe42bfbee78468b827d98595780f46e8ffbea2"
+REL = Path("backend/market_lab/hilega_historical_ui_api_v1.py")
 
-def sha(p): return hashlib.sha256(p.read_bytes()).hexdigest()
+OLD = r"""
+        complete = _live_is_complete(day_rows)
+        # Today's live session becomes historical automatically only after the
+        # strategy/session lock is actually recorded. Older incomplete evidence
+        # remains discoverable as PARTIAL rather than being silently lost.
+        if day == today and not complete:
+            continue
+        found.append({
+"""
+
+NEW = r"""
+        complete = _live_is_complete(day_rows)
+        is_today = day == today
+        # Keep the active trading day visible in the session registry so the
+        # historical/session UI can reuse the same canonical candle renderer.
+        # Active evidence is explicitly LIVE/PARTIAL; no evidence is rewritten.
+        found.append({
+"""
+
+OLD_STATUS = r"""
+            "evidence_level": "FULL" if complete else "PARTIAL",
+            "status": "COMPLETE" if complete else "PARTIAL",
+"""
+
+NEW_STATUS = r"""
+            "evidence_level": "FULL" if complete else "PARTIAL",
+            "status": "COMPLETE" if complete else ("LIVE" if is_today else "PARTIAL"),
+"""
 
 def main():
-    ap=argparse.ArgumentParser()
-    ap.add_argument("--repo",required=True)
-    g=ap.add_mutually_exclusive_group(required=True)
-    g.add_argument("--check",action="store_true")
-    g.add_argument("--apply",action="store_true")
-    a=ap.parse_args()
-    repo=Path(a.repo).resolve()
-    dst=repo/REL
-    if not dst.exists():
-        print("BLOCKED: test file missing"); raise SystemExit(2)
-    h=sha(dst)
-    if h==AFTER:
-        print("ALREADY_PATCHED",REL,h); return
-    if h!=BEFORE:
-        print("BLOCKED_UNKNOWN_HASH",REL,h); raise SystemExit(2)
-    print("READY",REL,h)
-    if a.check:
-        print("CHECK PASS: fixture-only correction is safe to apply."); return
-    stamp=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    backup=repo/".hilega-test-fixture-backup"/stamp/REL
-    backup.parent.mkdir(parents=True,exist_ok=True)
-    shutil.copy2(dst,backup)
-    src=Path(__file__).resolve().parent/"files"/REL
-    shutil.copy2(src,dst)
-    if sha(dst)!=AFTER: raise SystemExit("Post-write hash mismatch")
-    print("APPLY PASS: updated test fixture only.")
-    print("Production frontend/backend source was not changed.")
-    print("Backup:",backup)
+    ap = argparse.ArgumentParser(description="Expose active Hilega live day in session registry")
+    ap.add_argument("--repo", required=True)
+    g = ap.add_mutually_exclusive_group(required=True)
+    g.add_argument("--check", action="store_true")
+    g.add_argument("--apply", action="store_true")
+    args = ap.parse_args()
 
-if __name__=="__main__":
+    repo = Path(args.repo).resolve()
+    path = repo / REL
+    if not path.is_file():
+        print(f"BLOCKED: missing {REL}")
+        raise SystemExit(2)
+
+    text = path.read_text(encoding="utf-8")
+
+    already = (NEW in text and NEW_STATUS in text and OLD not in text and OLD_STATUS not in text)
+    if already:
+        print("ALREADY_PATCHED:", REL)
+        return
+
+    if OLD not in text:
+        print("BLOCKED: expected current-day skip block was not found exactly.")
+        print("No file changed.")
+        raise SystemExit(2)
+    if OLD_STATUS not in text:
+        print("BLOCKED: expected live status block was not found exactly.")
+        print("No file changed.")
+        raise SystemExit(2)
+
+    print("READY:", REL)
+    print("  - active current day will be retained")
+    print("  - active current day status will be LIVE")
+    print("  - evidence_level remains PARTIAL until existing completion logic says complete")
+    print("  - prior incomplete live days remain PARTIAL")
+    print("  - append-only evidence and strategy logic are untouched")
+
+    if args.check:
+        print("CHECK PASS")
+        return
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    backup = repo / ".hilega-live-session-visibility-backup" / stamp / REL
+    backup.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(path, backup)
+
+    patched = text.replace(OLD, NEW, 1).replace(OLD_STATUS, NEW_STATUS, 1)
+    path.write_text(patched, encoding="utf-8")
+
+    verify = path.read_text(encoding="utf-8")
+    if NEW not in verify or NEW_STATUS not in verify or OLD in verify or OLD_STATUS in verify:
+        shutil.copy2(backup, path)
+        print("BLOCKED: post-write verification failed; original restored.")
+        raise SystemExit(2)
+
+    print("APPLY PASS")
+    print("Backup:", backup)
+    print("Restart only the API process after tests. Do NOT restart the Hilega worker.")
+
+if __name__ == "__main__":
     main()
