@@ -13,7 +13,7 @@ assert.deepEqual((out.diagnostics??[]).filter(d=>d.category===ts.DiagnosticCateg
 const moduleBox={exports:{}}
 const mockRequire=name=>name==='react'?{useMemo:()=>{},useState:()=>{},Fragment:Symbol('Fragment')}:name==='react/jsx-runtime'?{jsx:()=>{},jsxs:()=>{}}:name.endsWith('.css')?{}:require(name)
 new Function('require','module','exports',out.outputText)(mockRequire,moduleBox,moduleBox.exports)
-const {eventKind,pathText,computedPremiumPoints,decisionText,deriveDecisionRows}=moduleBox.exports
+const {eventKind,pathText,computedPremiumPoints,decisionText,deriveDecisionRows,displayDecisionText}=moduleBox.exports
 const r=(over={})=>({checkpoint:'2026-09-23T09:35:00+05:30',transitions:[],strategy:{state_before:'PATH1_IDLE',state_after:'PATH1_IDLE',events_emitted:[]},route_a:{},route_b:{},...over})
 assert.equal(eventKind(r({transitions:[{event_type:'ENTRY_PATH1_ROUTE_A_CROSS_RSI50_ABOVE_WMA21'}]})),'ENTRY')
 assert.equal(eventKind(r({transitions:[{event_type:'STRUCTURAL_EXIT_RSI_CROSS_BELOW_WMA21'}]})),'EXIT')
@@ -34,10 +34,42 @@ const session=deriveDecisionRows([
   r({checkpoint:'2026-09-23T09:45:00+05:30',transitions:[{event_type:'STRUCTURAL_EXIT_RSI_CROSS_BELOW_WMA21',details:{original_entry_time:'2026-09-23T09:35:00+05:30'}}],strategy:{state_before:'BULLISH_ACTIVE',state_after:'PATH1_IDLE'}}),
   r({checkpoint:'2026-09-23T09:50:00+05:30',strategy:{state_before:'PATH1_IDLE',state_after:'PATH1_IDLE'}})
 ])
+assert.equal(session[0].displayKind,'ENTRY')
+assert.equal(session[1].displayKind,'ACTIVE')
 assert.equal(session[1].origin,session[0].report.checkpoint)
 assert.equal(session[1].originRoute,'ROUTE B')
+assert.equal(session[2].displayKind,'EXIT')
 assert.equal(session[2].origin,session[0].report.checkpoint)
+assert.equal(session[3].displayKind,'NONE')
 assert.equal(session[3].origin,null)
 assert.equal(session[3].originRoute,null)
-assert.equal(eventKind(r({strategy:{state_before:'BULLISH_ACTIVE',state_after:'BULLISH_ACTIVE',events_emitted:[]},transitions:[{event_type:'STRUCTURAL_EXIT_RSI_CROSS_BELOW_WMA21'}]})),'EXIT')
-console.log('PASS: Hilega shared decision/CE contract assertions')
+
+// Orphan raw exit/continuation records must not become valid bullish lifecycle labels.
+const orphan=deriveDecisionRows([
+  r({checkpoint:'2026-09-23T09:30:00+05:30'}),
+  r({checkpoint:'2026-09-23T09:40:00+05:30',transitions:[{event_type:'STRUCTURAL_EXIT_RSI_CROSS_BELOW_WMA21'}],strategy:{state_before:'PATH1_IDLE',state_after:'PATH1_IDLE',selected_route:'ROUTE_A'}}),
+  r({checkpoint:'2026-09-23T09:45:00+05:30',strategy:{state_before:'BULLISH_ACTIVE',state_after:'BULLISH_ACTIVE'}})
+])
+assert.equal(orphan[1].displayKind,'REVIEW')
+assert.equal(orphan[1].lifecycleIssue,'EXIT_WITHOUT_BULLISH_ENTRY')
+assert.equal(orphan[2].displayKind,'REVIEW')
+assert.equal(orphan[2].lifecycleIssue,'CONTINUATION_WITHOUT_BULLISH_ENTRY')
+assert.equal(displayDecisionText(orphan[1].displayKind),'REVIEW_REQUIRED')
+
+// Once entered, ordinary completed candles remain continuation until the exit.
+const carried=deriveDecisionRows([
+  r({checkpoint:'2026-09-23T10:00:00+05:30',transitions:[{event_type:'ENTRY_OPENING_BULLISH_CONFIRMED'}],strategy:{state_before:'OPENING_HOLD',state_after:'BULLISH_ACTIVE',selected_route:'OPENING_PATH'}}),
+  r({checkpoint:'2026-09-23T10:05:00+05:30',strategy:{state_before:'BULLISH_ACTIVE',state_after:'PATH1_IDLE',events_emitted:['OPENING_REJECTED_0920']}}),
+  r({checkpoint:'2026-09-23T10:10:00+05:30',transitions:[{event_type:'STRUCTURAL_EXIT_RSI_CROSS_BELOW_WMA21'}],strategy:{state_before:'BULLISH_ACTIVE',state_after:'PATH1_IDLE'}})
+])
+assert.equal(carried[1].displayKind,'ACTIVE')
+assert.equal(carried[1].originRoute,'OPENING PATH')
+assert.equal(carried[2].displayKind,'EXIT')
+
+// Explicit linkage can validate an exit when the loaded live window begins after entry.
+const linkedExit=deriveDecisionRows([
+  r({checkpoint:'2026-09-23T11:00:00+05:30',linked_signal_bar:'2026-09-23T10:30:00+05:30',transitions:[{event_type:'STRUCTURAL_EXIT_RSI_CROSS_BELOW_WMA21'}],strategy:{state_before:'BULLISH_ACTIVE',state_after:'PATH1_IDLE',selected_route:'ROUTE_B'}})
+])
+assert.equal(linkedExit[0].displayKind,'EXIT')
+assert.equal(linkedExit[0].origin,'2026-09-23T10:30:00+05:30')
+console.log('PASS: Hilega lifecycle-consistent decision/CE contract assertions')
