@@ -1,16 +1,18 @@
-# Hilega active live-session visibility patch
+# Hilega bootstrap reconstructed-entry projection patch
 
-Purpose:
-- expose the active current trading day in `/api/live-shadow/hilega-historical/sessions`
-- label it `LIVE` + `PARTIAL`
-- keep existing completion behavior for now
-- preserve source precedence, audit evidence, and strategy logic
+Fixes a restart boundary where the append-only journal may contain:
+- a pre-restart ARMED candle,
+- an option lifecycle restore/retry proving `signal_bar` + entry `source`,
+- later `BULLISH_ACTIVE` candles,
+but no canonical strategy-decision record for the signal bar itself.
 
-Files:
-- `install.py`
-- `files/tests/test_hilega_live_session_visibility_v1.py`
+The patch adds a read-only, explicitly marked `RECONSTRUCTED_ENTRY` projection.
+It does not modify or backfill `step-audit.jsonl`, and it does not fabricate
+indicator or OHLC values.
 
-The installer changes only:
-`backend/market_lab/hilega_historical_ui_api_v1.py`
+Files changed by installer:
+- backend/market_lab/hilega_milega_audit_report_v1.py
+- frontend/src/hilegaDecisionTable.tsx
 
-The added pytest is copied manually by the commands in ChatGPT's instructions or can be copied from the patch payload.
+Added test payload:
+- files/tests/test_hilega_bootstrap_reconstructed_entry_projection_v1.py
