@@ -1,9 +1,8 @@
-# Preserve Existing Hilega UI + Add Bearish Semantics
+Corrective frontend-only patch for the exact current Phase 6.2 source.
 
-Corrective frontend-only patch.
+Restores the original HilegaDecisionTable in Historical Replay and Live Shadow.
+Directional evidence is merged into those existing audit reports, so bearish
+signals appear without replacing the UI.
 
-- Restores the original `HilegaDecisionTable` in Historical Replay and Live Shadow.
-- Keeps the same filters, columns, cards, row expansion, audit detail, and CSS.
-- Uses the existing directional-candle API only as a data overlay.
-- Adds bearish decision labels/semantics inside the existing UI.
-- No strategy, coordinator, CE/PE lifecycle, selector, quantity, or execution changes.
+No backend, strategy, coordinator, CE/PE lifecycle, selector, quantity, or
+execution behavior is changed.

@@ -22,13 +22,13 @@ export type DirectionalCandleOverlayRow={
   note?:string|null
 }
 
-const items=(v:unknown):string[]=>{
+const list=(v:unknown):string[]=>{
   if(Array.isArray(v))return v.map(String).filter(Boolean)
   if(v==null||v==='')return []
   return String(v).split(',').map(x=>x.trim()).filter(Boolean)
 }
 
-const routeFromEvents=(events:string[]):string|null=>{
+const route=(events:string[]):string|null=>{
   const s=events.join('|')
   if(s.includes('ROUTE_A'))return 'ROUTE_A'
   if(s.includes('ROUTE_B'))return 'ROUTE_B'
@@ -36,24 +36,24 @@ const routeFromEvents=(events:string[]):string|null=>{
   return null
 }
 
-const directionFor=(r:DirectionalCandleOverlayRow):'BULLISH'|'BEARISH'|null=>{
-  const action=String(r.action??'').toUpperCase()
-  if(action.startsWith('BEARISH_'))return 'BEARISH'
-  if(action.startsWith('BULLISH_'))return 'BULLISH'
+const direction=(r:DirectionalCandleOverlayRow):'BULLISH'|'BEARISH'|null=>{
+  const a=String(r.action??'').toUpperCase()
+  if(a.startsWith('BEARISH_'))return 'BEARISH'
+  if(a.startsWith('BULLISH_'))return 'BULLISH'
   if(r.owner_after==='BEARISH'||r.owner_before==='BEARISH')return 'BEARISH'
   if(r.owner_after==='BULLISH'||r.owner_before==='BULLISH')return 'BULLISH'
-  if(String(r.bearish_state??'').includes('BEARISH_')&&(r.bearish_armed||String(r.bearish_state).includes('ACTIVE')))return 'BEARISH'
-  if(r.bullish_armed||String(r.bullish_state??'').includes('BULLISH_ACTIVE'))return 'BULLISH'
+  if(r.bearish_armed===true||String(r.bearish_state??'').includes('BEARISH_ACTIVE'))return 'BEARISH'
+  if(r.bullish_armed===true||String(r.bullish_state??'').includes('BULLISH_ACTIVE'))return 'BULLISH'
   return null
 }
 
-const stateAfter=(r:DirectionalCandleOverlayRow,direction:'BULLISH'|'BEARISH'|null):string|null=>{
+const stateAfter=(r:DirectionalCandleOverlayRow,d:'BULLISH'|'BEARISH'|null):string|null=>{
   if(r.owner_after==='BULLISH')return 'BULLISH_ACTIVE'
   if(r.owner_after==='BEARISH')return 'BEARISH_ACTIVE'
-  if(direction==='BEARISH')return r.bearish_state??null
-  if(direction==='BULLISH')return r.bullish_state??null
-  if(r.bearish_armed)return r.bearish_state??'BEARISH_PATH1_ARMED'
-  if(r.bullish_armed)return r.bullish_state??'PATH1_ARMED'
+  if(d==='BEARISH')return r.bearish_state??null
+  if(d==='BULLISH')return r.bullish_state??null
+  if(r.bearish_armed===true)return r.bearish_state??'BEARISH_PATH1_ARMED'
+  if(r.bullish_armed===true)return r.bullish_state??'PATH1_ARMED'
   return r.bullish_state??r.bearish_state??null
 }
 
@@ -66,11 +66,10 @@ export function overlayDirectionalAuditReports(
     const d=byTs.get(String(report.checkpoint))
     if(!d)return report
 
-    const accepted=items(d.accepted_events)
-    const suppressed=items(d.suppressed_events)
-    const direction=directionFor(d)
-    const selectedRoute=routeFromEvents(accepted)??report.strategy?.selected_route??null
-
+    const accepted=list(d.accepted_events)
+    const suppressed=list(d.suppressed_events)
+    const dir=direction(d)
+    const selectedRoute=route(accepted)??report.strategy?.selected_route??null
     const transitions=accepted.map(event=>({
       event_type:event,
       event_time:report.checkpoint,
@@ -78,7 +77,7 @@ export function overlayDirectionalAuditReports(
       price:d.close??report.bar?.close??null,
       entry_price:event.startsWith('ENTRY_')?(d.close??report.bar?.close??null):null,
       exit_reason:event.includes('EXIT')?event:null,
-      details:{directional_overlay:true,direction},
+      details:{directional_overlay:true,direction:dir},
     }))
 
     return {
@@ -99,10 +98,10 @@ export function overlayDirectionalAuditReports(
       },
       strategy:{
         ...(report.strategy??{}),
-        state_after:stateAfter(d,direction),
+        state_after:stateAfter(d,dir),
         selected_route:selectedRoute,
         events_emitted:accepted,
-        direction,
+        direction:dir,
         directional_action:d.action??null,
         owner_before:d.owner_before??null,
         owner_after:d.owner_after??null,
