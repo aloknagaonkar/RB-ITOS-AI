@@ -1,10 +1,13 @@
-Phase 6.2.2 corrective frontend-only patch.
+Live signal marker overlay v4
 
-Keeps the restored original HilegaDecisionTable UI.
+Frontend-only corrective patch.
 
-Fixes missing live signals by:
-1. matching directional rows to audit checkpoints by absolute epoch-minute, and
-2. supplementing missing directional ENTRY/EXIT rows from the already-recorded
-   directional trade dashboard.
+It preserves the existing HilegaDecisionTable UI and injects already-recorded
+directional trade ENTRY/EXIT events directly into the canonical audit rows.
 
-No strategy signal is recalculated and no market data is synthesized.
+Matching:
+- entry: signal_bar, fallback signal_boundary - 5 minutes
+- structural exit: exact option exit boundary - 5 minutes
+- cutoff exit: exact 14:55 boundary
+
+No strategy signal is recalculated.

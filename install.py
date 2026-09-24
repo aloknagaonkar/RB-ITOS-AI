@@ -4,22 +4,10 @@ from pathlib import Path
 from datetime import datetime, timezone
 import argparse, shutil
 
-IMPORT_OLD = "import {overlayDirectionalAuditReports} from './hilegaDirectionalAuditOverlay'"
-IMPORT_NEW = "import {augmentDirectionalRowsWithTrades,overlayDirectionalAuditReports} from './hilegaDirectionalAuditOverlay'"
+IMPORT = "import {overlayDirectionalTradeMarkers} from './hilegaDirectionalTradeMarkerOverlay'"
 
-LIVE_OLD = """    let merged=a as HilegaAudit[]
-    if(dr.ok){
-      const directional=await dr.json()
-      merged=overlayDirectionalAuditReports(a as HilegaAudit[],directional.rows??[])
-    }
-    setStatus(s);setRows(merged as AuditReport[]);setDashboard(d);setError('')"""
-
-LIVE_NEW = """    let merged=a as HilegaAudit[]
-    if(dr.ok){
-      const directional=await dr.json()
-      const directionalRows=augmentDirectionalRowsWithTrades(directional.rows??[],d.trades??[])
-      merged=overlayDirectionalAuditReports(a as HilegaAudit[],directionalRows)
-    }
+OLD_SET = "    setStatus(s);setRows(merged as AuditReport[]);setDashboard(d);setError('')"
+NEW_SET = """    merged=overlayDirectionalTradeMarkers(merged,d.trades??[])
     setStatus(s);setRows(merged as AuditReport[]);setDashboard(d);setError('')"""
 
 
@@ -33,48 +21,51 @@ def main():
 
     repo=Path(a.repo).resolve()
     live=repo/"frontend/src/hilegaMilegaShadow.tsx"
-    overlay_dst=repo/"frontend/src/hilegaDirectionalAuditOverlay.ts"
-    overlay_src=Path(__file__).resolve().parent/"files/frontend/src/hilegaDirectionalAuditOverlay.ts"
+    helper_src=Path(__file__).resolve().parent/"files/frontend/src/hilegaDirectionalTradeMarkerOverlay.ts"
+    helper_dst=repo/"frontend/src/hilegaDirectionalTradeMarkerOverlay.ts"
 
-    for p in (live,overlay_dst):
-        if not p.is_file():
-            raise SystemExit(f"BLOCKED: missing {p}")
+    if not live.is_file():
+        raise SystemExit(f"BLOCKED: missing {live}")
 
     text=live.read_text()
-    if IMPORT_OLD not in text and IMPORT_NEW not in text:
-        raise SystemExit("BLOCKED: directional overlay import not found")
-    if LIVE_OLD not in text and LIVE_NEW not in text:
-        raise SystemExit("BLOCKED: live directional overlay block not found")
+    if OLD_SET not in text and NEW_SET not in text:
+        raise SystemExit("BLOCKED: live merged-row set block not found")
 
     print("READY")
-    print("  - preserves existing HilegaDecisionTable UI")
-    print("  - normalizes timestamps to epoch-minute before overlay")
-    print("  - recovers missing live ENTRY/EXIT signals from directional trade dashboard")
-    print("  - uses recorded trade signal_bar/source/exit evidence only")
-    print("  - no backend/strategy/coordinator/option changes")
-    print("  - frontend-only; no API or worker restart")
+    print("  - keeps the existing HilegaDecisionTable UI unchanged")
+    print("  - injects recorded ENTRY/EXIT markers directly into existing audit reports")
+    print("  - uses trade signal_bar first, then signal_boundary-5m fallback")
+    print("  - does not infer/recalculate strategy signals")
+    print("  - no backend/API/worker restart")
     if a.check:
         print("CHECK PASS")
         return
 
     stamp=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    backup=repo/".hilega-directional-ui-signal-overlay-v3-backup"/stamp
-    for p in (live,overlay_dst):
+    backup=repo/".hilega-live-signal-marker-overlay-v4-backup"/stamp
+    for p in (live,):
         dst=backup/p.relative_to(repo)
         dst.parent.mkdir(parents=True,exist_ok=True)
         shutil.copy2(p,dst)
 
-    shutil.copy2(overlay_src,overlay_dst)
+    shutil.copy2(helper_src,helper_dst)
 
-    text=live.read_text().replace(IMPORT_OLD,IMPORT_NEW,1)
-    if LIVE_NEW not in text:
-        text=text.replace(LIVE_OLD,LIVE_NEW,1)
+    text=live.read_text()
+    if IMPORT not in text:
+        anchor="import HilegaDecisionTable,{type HilegaAudit} from './hilegaDecisionTable'"
+        if anchor not in text:
+            raise SystemExit("BLOCKED: HilegaDecisionTable import anchor not found")
+        text=text.replace(anchor,anchor+"\n"+IMPORT,1)
+
+    if NEW_SET not in text:
+        text=text.replace(OLD_SET,NEW_SET,1)
+
     live.write_text(text)
 
     print("APPLY PASS")
     print("Backup:",backup)
     print("Next: cd frontend && npm run build")
-    print("Then hard refresh.")
+    print("Then hard refresh browser.")
     print("No API restart required.")
     print("Do not restart Hilega live-shadow worker.")
 
