@@ -20,6 +20,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--expiry', required=True, type=date.fromisoformat)
     parser.add_argument('--output-root', required=True, type=Path)
     parser.add_argument('--warmup-calendar-days', default=45, type=int)
+    parser.add_argument('--record-input-evidence', action='store_true',
+                        help='Persist the exact broker responses consumed in this capture')
     args = parser.parse_args(argv)
     if args.expiry < args.session_date:
         parser.error('expiry cannot precede session date')
@@ -68,6 +70,27 @@ def main(argv: list[str] | None = None) -> int:
             'missing_data': [x for x in selected_baskets if x.get('status') != 'AVAILABLE'
                              or x.get('issue')],
         }
+        if args.record_input_evidence:
+            # These are subsequently retrieved broker observations; never label
+            # them as the unavailable original live 1m responses.
+            from .hilega_market_evidence_v1 import canonical, serial
+            blobs = {
+                'underlying-acquired-1m.json': replay.sources._underlying,
+                'option-acquired-1m.json': replay.sources._option_cache,
+            }
+            manifest['input_evidence'] = {}
+            for filename, rows in blobs.items():
+                content = canonical(serial(rows)) + b'\n'
+                path = args.output_root / filename
+                # Do not silently overwrite existing acquisition evidence.
+                with path.open('xb') as file:
+                    file.write(content)
+                    file.flush()
+                    os.fsync(file.fileno())
+                manifest['input_evidence'][filename] = {
+                    'sha256': hashlib.sha256(content).hexdigest(),
+                    'bytes': len(content), 'origin': 'BROKER_RETRIEVAL_AT_CAPTURE_TIME'
+                }
         (args.output_root/'source-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
         print(json.dumps({'status': 'CAPTURED', 'output_root': str(args.output_root),
                           'summary': summary}, indent=2))

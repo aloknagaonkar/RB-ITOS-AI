@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import './historicalReplay.css'
 import HistoricalReplayOperations from './historicalReplayOperations'
+import HilegaHistoricalReplay from './hilegaHistoricalReplay'
 import HistoricalOiResearch from './historicalOiResearch'
 import HistoricalReplayInventory from './historicalReplayInventory'
 
@@ -785,6 +786,8 @@ export default function HistoricalReplay(){
       selectedDate={selected}
       onSelectDate={setSelected}
     />
+
+    <HilegaHistoricalReplay />
 
     <HistoricalReplayOperations
       sessionDate={selected}
