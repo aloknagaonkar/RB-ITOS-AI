@@ -1,96 +1,70 @@
 #!/usr/bin/env python3
 from __future__ import annotations
+
 from pathlib import Path
 from datetime import datetime, timezone
-import argparse, shutil
+import argparse
+import shutil
 
-OLD = """const reportDirection=(r:HilegaAudit):'BULLISH'|'BEARISH'=>{
-  const explicit=String(r.strategy?.direction??'').toUpperCase()
-  if(explicit==='BEARISH')return 'BEARISH'
-  const action=String(r.strategy?.directional_action??'').toUpperCase()
-  if(action.startsWith('BEARISH_'))return 'BEARISH'
-  const events=list(r.strategy?.events_emitted).map(x=>String(x).toUpperCase())
-  if(events.some(x=>x.includes('BEARISH')))return 'BEARISH'
-  const states=[r.strategy?.state_before,r.strategy?.state_after,r.strategy?.bearish_state].map(x=>String(x??'').toUpperCase())
-  if(states.some(x=>x.includes('BEARISH_ACTIVE')))return 'BEARISH'
-  return 'BULLISH'
-}"""
 
-NEW = """const reportDirection=(r:HilegaAudit):'BULLISH'|'BEARISH'=>{
-  const ownerAfter=String(r.strategy?.owner_after??'').toUpperCase()
-  const ownerBefore=String(r.strategy?.owner_before??'').toUpperCase()
-  const stateAfter=String(r.strategy?.state_after??'').toUpperCase()
-  const action=String(r.strategy?.directional_action??'').toUpperCase()
+FILES = [
+    "backend/market_lab/hilega_current_day_directional_recovery_v1.py",
+    "backend/market_lab/hilega_current_day_directional_recovery_cli_v1.py",
+    "tests/test_hilega_current_day_directional_recovery_v1.py",
+]
 
-  // Visible decision direction follows the exclusive active owner first.
-  // Opposite-side ARMED state may remain preserved internally, but it must not
-  // replace the displayed active trade with an opposite candidate.
-  if(stateAfter==='BULLISH_ACTIVE'||ownerAfter==='BULLISH')return 'BULLISH'
-  if(stateAfter==='BEARISH_ACTIVE'||ownerAfter==='BEARISH')return 'BEARISH'
-
-  // On exit owner_after is NONE, so use the recorded exit action / prior owner.
-  if(action.startsWith('BULLISH_'))return 'BULLISH'
-  if(action.startsWith('BEARISH_'))return 'BEARISH'
-  if(ownerBefore==='BULLISH'&&action.includes('EXIT'))return 'BULLISH'
-  if(ownerBefore==='BEARISH'&&action.includes('EXIT'))return 'BEARISH'
-
-  // When no trade is active, candidate direction comes from the recorded
-  // directional evidence.
-  const explicit=String(r.strategy?.direction??'').toUpperCase()
-  if(explicit==='BEARISH')return 'BEARISH'
-  if(explicit==='BULLISH')return 'BULLISH'
-  const events=list(r.strategy?.events_emitted).map(x=>String(x).toUpperCase())
-  if(events.some(x=>x.includes('BEARISH')))return 'BEARISH'
-  if(events.some(x=>x.includes('BULLISH')||x.startsWith('ENTRY_PATH1_')))return 'BULLISH'
-  const bearishState=String(r.strategy?.bearish_state??'').toUpperCase()
-  if(bearishState.includes('BEARISH_ACTIVE')||bearishState.includes('BEARISH_PATH1_ARMED'))return 'BEARISH'
-  return 'BULLISH'
-}"""
 
 def main():
-    ap=argparse.ArgumentParser()
-    ap.add_argument("--repo",required=True)
-    g=ap.add_mutually_exclusive_group(required=True)
-    g.add_argument("--check",action="store_true")
-    g.add_argument("--apply",action="store_true")
-    a=ap.parse_args()
+    p = argparse.ArgumentParser()
+    p.add_argument("--repo", required=True)
+    g = p.add_mutually_exclusive_group(required=True)
+    g.add_argument("--check", action="store_true")
+    g.add_argument("--apply", action="store_true")
+    a = p.parse_args()
 
-    repo=Path(a.repo).resolve()
-    target=repo/"frontend/src/hilegaDecisionTable.tsx"
-    if not target.is_file():
-        raise SystemExit(f"BLOCKED: missing {target}")
+    repo = Path(a.repo).resolve()
+    payload = Path(__file__).resolve().parent / "files"
 
-    text=target.read_text()
-    if NEW in text:
-        print("ALREADY PATCHED")
-        return
-    if OLD not in text:
-        raise SystemExit("BLOCKED: expected reportDirection block not found")
+    required = [
+        repo / "backend/market_lab/hilega_directional_coordinator_v1.py",
+        repo / "backend/market_lab/hilega_directional_historical_replay_v1.py",
+        repo / "backend/market_lab/hilega_milega_historical_replay_v1.py",
+    ]
+    for path in required:
+        if not path.is_file():
+            raise SystemExit(f"BLOCKED: required source missing: {path}")
 
     print("READY")
-    print("  - active owner has display priority over opposite ARMED state")
-    print("  - during BULLISH_ACTIVE, rows remain BULLISH_CONTINUATION")
-    print("  - during BEARISH_ACTIVE, rows remain BEARISH_CONTINUATION")
-    print("  - opposite candidate is shown only when there is no active owner")
-    print("  - internal ARMED evidence is not deleted")
-    print("  - frontend-only; no API/worker restart")
+    print("  - adds Phase 6.3 current-day directional recovery core")
+    print("  - source is recorded UNDERLYING_5M_BUILD evidence only")
+    print("  - same HilegaDirectionalCoordinatorV1 is replayed")
+    print("  - warmup is cache-only; no broker historical fallback")
+    print("  - recovered rows are written to normal directional replay path")
+    print("  - no strategy rules, UI, options or execution behavior changed")
     if a.check:
         print("CHECK PASS")
         return
 
-    stamp=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    backup=repo/".hilega-active-owner-display-priority-v9-backup"/stamp/target.relative_to(repo)
-    backup.parent.mkdir(parents=True,exist_ok=True)
-    shutil.copy2(target,backup)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    backup_root = repo / ".hilega-current-day-directional-recovery-phase6-3a-backup" / stamp
 
-    target.write_text(text.replace(OLD,NEW,1))
+    for rel in FILES:
+        src = payload / rel
+        dst = repo / rel
+        if dst.exists():
+            backup = backup_root / rel
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(dst, backup)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
 
     print("APPLY PASS")
-    print("Backup:",backup)
-    print("Next: cd frontend && npm run build")
-    print("Then hard refresh browser.")
-    print("No API restart required.")
-    print("Do not restart Hilega live-shadow worker.")
+    print("Backup root:", backup_root)
+    print("Next:")
+    print("  PYTHONPATH=backend python -m pytest tests/test_hilega_current_day_directional_recovery_v1.py -q")
+    print("Then recover Sep 24 with the CLI.")
+    print("No API or Hilega worker restart is required for recovery generation.")
 
-if __name__=="__main__":
+
+if __name__ == "__main__":
     main()
