@@ -63,6 +63,16 @@ def test_live_merges_candle_and_directional_evidence(tmp_path, monkeypatch):
     directional.write_text("")
     monkeypatch.setattr(m, "LIVE_BULLISH_AUDIT", bullish)
     monkeypatch.setattr(m, "LIVE_DIRECTIONAL_AUDIT", directional)
+    monkeypatch.setattr(
+        m,
+        "LIVE_DIRECTIONAL_EVIDENCE_ROOT",
+        tmp_path / "directional-evidence",
+    )
+    monkeypatch.setattr(
+        m,
+        "UNDERLYING_CACHE_ROOT",
+        tmp_path / "underlying-cache",
+    )
     monkeypatch.setattr(m, "ShadowStepAuditStoreV1", Store)
 
     Store.rows_by_path[str(bullish)] = [
