@@ -81,6 +81,16 @@ class HilegaDirectionalLiveShadowCoordinatorV1:
         self.pe_shadow = HilegaMilegaPEOptionShadowLifecycleV1()
         self._pending_ce_exits: dict[str, HilegaMilegaOptionShadowLifecycleV1] = {}
         self._pending_pe_exits: dict[str, HilegaMilegaPEOptionShadowLifecycleV1] = {}
+
+        # Entry may be temporarily unavailable even though the directional
+        # strategy trade is valid. If the strategy exits before the exact
+        # option entry minute becomes available, preserve that frozen
+        # lifecycle here and remember its exact causal exit boundary.
+        self._pending_ce_entries: dict[str, HilegaMilegaOptionShadowLifecycleV1] = {}
+        self._pending_pe_entries: dict[str, HilegaMilegaPEOptionShadowLifecycleV1] = {}
+        self._pending_ce_entry_exits: dict[str, tuple[datetime, str]] = {}
+        self._pending_pe_entry_exits: dict[str, tuple[datetime, str]] = {}
+
         self._ce_last_update: datetime | None = None
         self._pe_last_update: datetime | None = None
         self._bootstrapped_date: date | None = None
@@ -180,6 +190,46 @@ class HilegaDirectionalLiveShadowCoordinatorV1:
 
     def _close_option(self, *, direction: str, now: datetime, exit_boundary: datetime, exit_reason: str, audit: bool) -> None:
         lifecycle = self.ce_shadow if direction == "BULLISH" else self.pe_shadow
+
+        # The directional strategy may exit before the exact causal option
+        # entry minute has become available. Preserve that frozen entry
+        # identity and its exact exit boundary for later evidence recovery.
+        if (
+            lifecycle.snapshot is not None
+            and lifecycle.snapshot.status == "INCOMPLETE"
+        ):
+            key = lifecycle.snapshot.signal_bar
+
+            if direction == "BULLISH":
+                self._pending_ce_entries[key] = lifecycle
+                self._pending_ce_entry_exits[key] = (
+                    exit_boundary,
+                    exit_reason,
+                )
+                self.ce_shadow = HilegaMilegaOptionShadowLifecycleV1()
+                self._ce_last_update = None
+            else:
+                self._pending_pe_entries[key] = lifecycle
+                self._pending_pe_entry_exits[key] = (
+                    exit_boundary,
+                    exit_reason,
+                )
+                self.pe_shadow = HilegaMilegaPEOptionShadowLifecycleV1()
+                self._pe_last_update = None
+
+            if audit:
+                self._audit(
+                    now,
+                    f"{direction}_OPTION_SHADOW_EXIT_WAITING_FOR_ENTRY",
+                    "PENDING_EXACT_ENTRY",
+                    {
+                        **lifecycle.snapshot.payload(),
+                        "deferred_exit_boundary": exit_boundary.isoformat(),
+                        "deferred_exit_reason": exit_reason,
+                    },
+                )
+            return
+
         if not lifecycle.active and not lifecycle.pending_exit:
             return
         try:
@@ -209,6 +259,147 @@ class HilegaDirectionalLiveShadowCoordinatorV1:
                 })
 
     def _retry_pending(self, now: datetime) -> None:
+        # Entry recovery:
+        # start() intentionally freezes the original candidate identity and
+        # signal boundary when exact option entry data is not yet available.
+        # Retry only that exact original boundary; never substitute a nearby
+        # minute and never rebuild the candidate universe.
+        for direction, lifecycle in (
+            ("BULLISH", self.ce_shadow),
+            ("BEARISH", self.pe_shadow),
+        ):
+            snap = lifecycle.snapshot
+            if snap is None or snap.status != "INCOMPLETE":
+                continue
+
+            try:
+                retried = lifecycle.retry_missing_entry(
+                    option_minutes=self.sources.option_intraday_1m
+                )
+                self._audit(
+                    now,
+                    f"{direction}_OPTION_SHADOW_ENTRY_RETRY",
+                    "PASS" if retried.active else retried.status,
+                    retried.payload(),
+                    checkpoint=datetime.fromisoformat(
+                        retried.signal_bar
+                    ),
+                )
+
+                if retried.active:
+                    if direction == "BULLISH":
+                        self._ce_last_update = None
+                    else:
+                        self._pe_last_update = None
+
+            except Exception as exc:
+                self._audit(
+                    now,
+                    f"{direction}_OPTION_SHADOW_ENTRY_RETRY",
+                    "FAILED",
+                    {
+                        "signal_bar": snap.signal_bar,
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    },
+                )
+
+        # Recover entries whose directional trade has already exited.
+        for direction, store, exits in (
+            (
+                "BULLISH",
+                self._pending_ce_entries,
+                self._pending_ce_entry_exits,
+            ),
+            (
+                "BEARISH",
+                self._pending_pe_entries,
+                self._pending_pe_entry_exits,
+            ),
+        ):
+            for key, lifecycle in list(store.items()):
+                try:
+                    retried = lifecycle.retry_missing_entry(
+                        option_minutes=self.sources.option_intraday_1m
+                    )
+
+                    self._audit(
+                        now,
+                        f"{direction}_OPTION_SHADOW_ENTRY_RETRY",
+                        "PASS" if retried.active else retried.status,
+                        retried.payload(),
+                        checkpoint=datetime.fromisoformat(
+                            retried.signal_bar
+                        ),
+                    )
+
+                    if not retried.active:
+                        continue
+
+                    exit_boundary, exit_reason = exits[key]
+
+                    # Reconstruct the exact completed option path before exit
+                    # so MFE/MAE/latest observations are based on real minutes.
+                    through = exit_boundary - timedelta(minutes=1)
+                    entry_boundary = datetime.fromisoformat(
+                        retried.signal_boundary
+                    )
+
+                    if through >= entry_boundary:
+                        updated = lifecycle.update(
+                            through_completed_minute=through,
+                            option_minutes=self.sources.option_intraday_1m,
+                        )
+                        if updated is not None:
+                            self._audit(
+                                now,
+                                f"{direction}_OPTION_SHADOW_UPDATE",
+                                updated.status,
+                                updated.payload(),
+                            )
+
+                    closed = lifecycle.close(
+                        exit_boundary=exit_boundary,
+                        exit_reason=exit_reason,
+                        option_minutes=self.sources.option_intraday_1m,
+                    )
+
+                    if closed is None:
+                        continue
+
+                    self._audit(
+                        now,
+                        f"{direction}_OPTION_SHADOW_EXIT_RETRY",
+                        "PASS" if closed.status == "CLOSED" else closed.status,
+                        closed.payload(),
+                    )
+
+                    if closed.status == "CLOSED":
+                        del store[key]
+                        del exits[key]
+
+                    elif closed.status == "PENDING_EXACT_EXIT":
+                        if direction == "BULLISH":
+                            self._pending_ce_exits[key] = lifecycle
+                        else:
+                            self._pending_pe_exits[key] = lifecycle
+
+                        del store[key]
+                        del exits[key]
+
+                except Exception as exc:
+                    self._audit(
+                        now,
+                        f"{direction}_OPTION_SHADOW_ENTRY_RETRY",
+                        "FAILED",
+                        {
+                            "signal_bar": key,
+                            "error_type": type(exc).__name__,
+                            "error": str(exc),
+                        },
+                    )
+
+        # Exact-exit recovery remains unchanged.
         for direction, store in (("BULLISH", self._pending_ce_exits), ("BEARISH", self._pending_pe_exits)):
             for key, lifecycle in list(store.items()):
                 try:
@@ -250,21 +441,59 @@ class HilegaDirectionalLiveShadowCoordinatorV1:
     def _accepted_types(self, decision: DirectionalDecision) -> set[str]:
         return {e.event_type for e in decision.accepted_events}
 
+    @staticmethod
+    def _directional_decision_payload(bar, decision: DirectionalDecision) -> dict[str, Any]:
+        return {
+            "bar_timestamp": bar.ts.isoformat(),
+            "trade_owner_before": decision.trade_owner_before,
+            "trade_owner_after": decision.trade_owner_after,
+            "bullish_state": decision.bullish_state,
+            "bearish_state": decision.bearish_state,
+            "bullish_armed": decision.bullish_armed,
+            "bearish_armed": decision.bearish_armed,
+            "accepted_events": [e.event_type for e in decision.accepted_events],
+            "suppressed_events": [e.event_type for e in decision.suppressed_events],
+            "note": decision.note,
+        }
+
+    def _audit_directional_decision(
+        self,
+        *,
+        now: datetime,
+        bar,
+        decision: DirectionalDecision,
+        status: str,
+        reconstructed: bool = False,
+        recovery_source: str | None = None,
+    ) -> None:
+        payload = self._directional_decision_payload(bar, decision)
+        if reconstructed:
+            payload["reconstructed"] = True
+            payload["recovery_source"] = recovery_source or "BOOTSTRAP_RECOVERY"
+        self._audit(now, "DIRECTIONAL_DECISION", status, payload, checkpoint=bar.ts)
+
+    def _existing_directional_decision_checkpoints(self, session_date: date) -> set[str]:
+        prefix = session_date.isoformat()
+        out: set[str] = set()
+        for record in self.step_audit.read_all():
+            if record.get("stage") != "DIRECTIONAL_DECISION":
+                continue
+            checkpoint = record.get("checkpoint")
+            payload = record.get("payload") or {}
+            candidate = checkpoint or payload.get("bar_timestamp")
+            if isinstance(candidate, str) and candidate.startswith(prefix):
+                out.add(candidate)
+        return out
+
     def _handle_decision(self, *, now: datetime, bar, decision: DirectionalDecision, audit: bool) -> None:
         accepted = self._accepted_types(decision)
         if audit:
-            self._audit(now, "DIRECTIONAL_DECISION", "PROCESSED", {
-                "bar_timestamp": bar.ts.isoformat(),
-                "trade_owner_before": decision.trade_owner_before,
-                "trade_owner_after": decision.trade_owner_after,
-                "bullish_state": decision.bullish_state,
-                "bearish_state": decision.bearish_state,
-                "bullish_armed": decision.bullish_armed,
-                "bearish_armed": decision.bearish_armed,
-                "accepted_events": [e.event_type for e in decision.accepted_events],
-                "suppressed_events": [e.event_type for e in decision.suppressed_events],
-                "note": decision.note,
-            }, checkpoint=bar.ts)
+            self._audit_directional_decision(
+                now=now,
+                bar=bar,
+                decision=decision,
+                status="PROCESSED",
+            )
 
         for e in decision.accepted_events:
             if e.event_type in BULLISH_EXIT_EVENTS:
@@ -298,6 +527,10 @@ class HilegaDirectionalLiveShadowCoordinatorV1:
         self.pe_shadow = HilegaMilegaPEOptionShadowLifecycleV1()
         self._pending_ce_exits.clear()
         self._pending_pe_exits.clear()
+        self._pending_ce_entries.clear()
+        self._pending_pe_entries.clear()
+        self._pending_ce_entry_exits.clear()
+        self._pending_pe_entry_exits.clear()
         self._ce_last_update = self._pe_last_update = None
         self._last_bar_ts = None
         self._cutoff_done_date = None
@@ -332,10 +565,27 @@ class HilegaDirectionalLiveShadowCoordinatorV1:
         completed_label = latest_completed_5m_label(now)
         completed_current = completed_intraday_1m_for_label(current, completed_label)
         current_bars = aggregate_exact_5m(completed_current, session_date)
+
+        existing_directional = self._existing_directional_decision_checkpoints(session_date)
+        recovered_checkpoints: list[str] = []
         for bar in current_bars:
             if bar.ts <= completed_label:
                 decision = self.directional.on_bar(bar)
                 self._handle_decision(now=now, bar=bar, decision=decision, audit=False)
+
+                checkpoint = bar.ts.isoformat()
+                if checkpoint not in existing_directional:
+                    self._audit_directional_decision(
+                        now=now,
+                        bar=bar,
+                        decision=decision,
+                        status="RECOVERED",
+                        reconstructed=True,
+                        recovery_source="BOOTSTRAP_RECOVERY",
+                    )
+                    existing_directional.add(checkpoint)
+                    recovered_checkpoints.append(checkpoint)
+
                 self._last_bar_ts = bar.ts
                 bars_replayed += 1
 
@@ -353,8 +603,17 @@ class HilegaDirectionalLiveShadowCoordinatorV1:
             "bearish_state": self.directional.bearish.session.name,
             "ce_shadow_status": self.ce_shadow.snapshot.status if self.ce_shadow.snapshot else None,
             "pe_shadow_status": self.pe_shadow.snapshot.status if self.pe_shadow.snapshot else None,
+            "recovery_source": "BOOTSTRAP_RECOVERY",
+            "reconstructed": True,
+            "recovered_checkpoint_count": len(recovered_checkpoints),
+            "recovered_checkpoints": recovered_checkpoints,
         })
-        return {"status": "BOOTSTRAPPED", "session_date": session_date.isoformat(), "trade_owner": self.directional.trade_owner}
+        return {
+            "status": "BOOTSTRAPPED",
+            "session_date": session_date.isoformat(),
+            "trade_owner": self.directional.trade_owner,
+            "recovered_checkpoint_count": len(recovered_checkpoints),
+        }
 
     def process_cutoff(self, now: datetime, *, intraday) -> DirectionalDecision | None:
         now = now.astimezone(IST)

@@ -30,7 +30,7 @@ def project_directional_shadow_dashboard(rows: Iterable[dict[str, Any]]) -> dict
 
     for index, row in enumerate(records):
         direction, kind = _stage_info(row.get("stage"))
-        if direction is None or kind not in {"START", "UPDATE", "EXIT", "EXIT_RETRY"}:
+        if direction is None or kind not in {"START", "ENTRY_RETRY", "UPDATE", "EXIT", "EXIT_RETRY"}:
             continue
         payload = row.get("payload") or {}
         signal_bar = payload.get("signal_bar")
@@ -44,7 +44,7 @@ def project_directional_shadow_dashboard(rows: Iterable[dict[str, Any]]) -> dict
     for (direction, signal_bar), events in sorted(by_trade.items(), key=lambda x: x[0][1]):
         active_events = [
             e for e in events
-            if e[3].get("status") == "ACTIVE" and e[1] in {"START", "UPDATE"}
+            if e[3].get("status") == "ACTIVE" and e[1] in {"START", "ENTRY_RETRY", "UPDATE"}
         ]
         closed_events = [
             e for e in events
