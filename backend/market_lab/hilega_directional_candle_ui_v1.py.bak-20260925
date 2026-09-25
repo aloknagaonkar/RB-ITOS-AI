@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -9,14 +9,6 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, HTTPException, Query
 
 from .live_shadow_step_audit_v1 import ShadowStepAuditStoreV1
-from .domain import HistoricalCandle
-from .hilega_market_evidence_v1 import verify_journal
-from .hilega_milega_historical_replay_v1 import aggregate_exact_5m
-from .hilega_milega_live_shadow_v1 import (
-    completed_intraday_1m_for_label,
-    latest_completed_5m_label,
-)
-from .hilega_milega_strategy_v1 import HilegaMilegaIndicatorEngineV1
 
 router = APIRouter(
     prefix="/api/live-shadow/hilega-directional-candles",
@@ -27,18 +19,6 @@ IST = ZoneInfo("Asia/Kolkata")
 HIST_ROOT = Path("data/historical-evidence/hilega-directional-replay-v1")
 LIVE_BULLISH_AUDIT = Path("data/live-observation/hilega-milega-v1/step-audit.jsonl")
 LIVE_DIRECTIONAL_AUDIT = Path("data/live-observation/hilega-directional-v1/step-audit.jsonl")
-
-LIVE_DIRECTIONAL_EVIDENCE_ROOT = Path(
-    "data/live-observation/"
-    "hilega-directional-market-evidence-v1"
-)
-
-UNDERLYING_CACHE_ROOT = Path(
-    "data/historical-evidence/"
-    "hilega-milega-underlying-cache-v1"
-)
-
-LIVE_UI_WARMUP_CALENDAR_DAYS = 45
 
 
 def _iso_session(value: Any) -> str | None:
@@ -92,19 +72,9 @@ def _action_from_directional(payload: dict[str, Any]) -> str:
     before = str(payload.get("trade_owner_before") or payload.get("owner_before") or "NONE")
     after = str(payload.get("trade_owner_after") or payload.get("owner_after") or "NONE")
 
-    if any(
-        x.startswith("ENTRY_BEARISH")
-        or x == "ENTRY_OPENING_BEARISH_CONFIRMED"
-        for x in accepted
-    ):
+    if any(x.startswith("ENTRY_BEARISH") for x in accepted):
         return "BEARISH_ENTRY"
-
-    if any(
-        x.startswith("ENTRY_")
-        and not x.startswith("ENTRY_BEARISH")
-        and x != "ENTRY_OPENING_BEARISH_CONFIRMED"
-        for x in accepted
-    ):
+    if any(x.startswith("ENTRY_") and not x.startswith("ENTRY_BEARISH") for x in accepted):
         return "BULLISH_ENTRY"
     if "STRUCTURAL_EXIT_BEARISH" in joined or "BEARISH_SESSION_CUTOFF_EXIT" in joined:
         return "BEARISH_EXIT"
@@ -122,7 +92,7 @@ def _action_from_directional(payload: dict[str, Any]) -> str:
     return "NO_ACTION"
 
 
-def _base_live_rows_legacy(session_date: str) -> dict[str, dict[str, Any]]:
+def _base_live_rows(session_date: str) -> dict[str, dict[str, Any]]:
     merged: dict[str, dict[str, Any]] = {}
     for record in _read_audit(LIVE_BULLISH_AUDIT):
         ts = _timestamp(record)
@@ -158,321 +128,6 @@ def _base_live_rows_legacy(session_date: str) -> dict[str, dict[str, Any]]:
 
     return merged
 
-
-
-def _cache_rows_for_day(day: str) -> list[HistoricalCandle]:
-    """Read one canonical cached underlying 1m session.
-
-    Historical cache rows may omit provider/instrument/session metadata
-    because those values are stored once at the top level of the cache file.
-    Rehydrate them here for HistoricalCandle validation.
-
-    Read-only UI reconstruction; never calls the broker.
-    """
-    path = UNDERLYING_CACHE_ROOT / f"{day}.json"
-
-    if not path.is_file():
-        return []
-
-    raw = json.loads(
-        path.read_text(encoding="utf-8")
-    )
-
-    if isinstance(raw, list):
-        rows = raw
-        cache_session = day
-        cache_underlying = "NSE_INDEX|Nifty 50"
-
-    elif isinstance(raw, dict):
-        cache_session = str(
-            raw.get("session_date") or day
-        )
-
-        cache_underlying = str(
-            raw.get("underlying")
-            or "NSE_INDEX|Nifty 50"
-        )
-
-        rows = None
-
-        for key in (
-            "candles",
-            "rows",
-            "data",
-        ):
-            value = raw.get(key)
-
-            if isinstance(value, list):
-                rows = value
-                break
-
-        if rows is None:
-            raise ValueError(
-                f"UNSUPPORTED_UNDERLYING_CACHE_SHAPE:{path}"
-            )
-
-    else:
-        raise ValueError(
-            f"UNSUPPORTED_UNDERLYING_CACHE_TYPE:{path}"
-        )
-
-    out = []
-
-    for r in rows:
-        if not isinstance(r, dict):
-            raise ValueError(
-                f"INVALID_UNDERLYING_CACHE_ROW:{path}"
-            )
-
-        enriched = dict(r)
-
-        if enriched.get("provider") in (
-            None,
-            "",
-        ):
-            enriched["provider"] = "upstox"
-
-        if enriched.get("instrument_key") in (
-            None,
-            "",
-        ):
-            enriched["instrument_key"] = (
-                cache_underlying
-            )
-
-        if enriched.get("session_date") in (
-            None,
-            "",
-        ):
-            enriched["session_date"] = (
-                cache_session
-            )
-
-        out.append(
-            HistoricalCandle.model_validate(
-                enriched
-            )
-        )
-
-    return out
-
-def _latest_directional_underlying(
-    session_date: str,
-) -> tuple[datetime, list[HistoricalCandle]] | None:
-
-    path = (
-        LIVE_DIRECTIONAL_EVIDENCE_ROOT
-        / f"{session_date}.jsonl"
-    )
-
-    if not path.is_file():
-        return None
-
-    rows = verify_journal(path)
-
-    candidates = [
-        r
-        for r in rows
-        if (
-            r.get("kind") == "underlying"
-            and r.get("status") == "OK"
-            and isinstance(r.get("response"), list)
-        )
-    ]
-
-    if not candidates:
-        return None
-
-    latest = candidates[-1]
-
-    args = latest.get("args") or {}
-    now_value = args.get("now")
-
-    if not isinstance(now_value, str):
-        return None
-
-    acquired_now = datetime.fromisoformat(
-        now_value.replace("Z", "+00:00")
-    ).astimezone(IST)
-
-    candles = [
-        HistoricalCandle.model_validate(r)
-        for r in latest["response"]
-    ]
-
-    return acquired_now, candles
-
-
-def _directional_evidence_live_rows(
-    session_date: str,
-) -> dict[str, dict[str, Any]]:
-    """Reconstruct live OHLC + indicators from directional evidence.
-
-    This is read-only UI reconstruction. It does not mutate live strategy
-    state and never calls the broker.
-    """
-
-    source = _latest_directional_underlying(
-        session_date
-    )
-
-    if source is None:
-        return {}
-
-    acquired_now, intraday = source
-
-    day = datetime.strptime(
-        session_date,
-        "%Y-%m-%d",
-    ).date()
-
-    if acquired_now.date() != day:
-        return {}
-
-    # Match the live worker: only completed 5m bars.
-    target = latest_completed_5m_label(
-        acquired_now
-    )
-
-    completed = completed_intraday_1m_for_label(
-        intraday,
-        target,
-    )
-
-    current_bars = aggregate_exact_5m(
-        completed,
-        day,
-    )
-
-    # Match live bootstrap indicator warm-up:
-    # previous 45 calendar days, indicator history continuous.
-    indicators = HilegaMilegaIndicatorEngineV1()
-
-    d = day - timedelta(
-        days=LIVE_UI_WARMUP_CALENDAR_DAYS
-    )
-
-    while d < day:
-
-        cached = _cache_rows_for_day(
-            d.isoformat()
-        )
-
-        if cached:
-            for bar in aggregate_exact_5m(
-                cached,
-                d,
-            ):
-                indicators.update(
-                    bar.close
-                )
-
-        d += timedelta(days=1)
-
-    merged: dict[str, dict[str, Any]] = {}
-
-    for bar in current_bars:
-
-        ind = indicators.update(
-            bar.close
-        )
-
-        ts = bar.ts.isoformat()
-
-        merged[ts] = {
-            "session_date":
-                session_date,
-
-            "time":
-                bar.ts.astimezone(IST).strftime(
-                    "%H:%M"
-                ),
-
-            "bar_timestamp":
-                ts,
-
-            "open":
-                float(bar.open),
-
-            "high":
-                float(bar.high),
-
-            "low":
-                float(bar.low),
-
-            "close":
-                float(bar.close),
-
-            "volume":
-                int(bar.volume or 0),
-
-            "rsi9":
-                ind.rsi9,
-
-            "ema3_rsi":
-                ind.ema3_rsi,
-
-            "wma21_rsi":
-                ind.wma21_rsi,
-
-            "owner_before":
-                None,
-
-            "owner_after":
-                None,
-
-            "bullish_state":
-                None,
-
-            "bearish_state":
-                None,
-
-            "bullish_armed":
-                None,
-
-            "bearish_armed":
-                None,
-
-            "action":
-                "NO_DIRECTIONAL_AUDIT",
-
-            "accepted_events":
-                "",
-
-            "suppressed_events":
-                "",
-
-            "note":
-                "Directional state unavailable for this candle",
-
-            "directional_evidence":
-                False,
-        }
-
-    return merged
-
-
-def _base_live_rows(
-    session_date: str,
-) -> dict[str, dict[str, Any]]:
-    """Prefer directional evidence; retain legacy audit fallback."""
-
-    try:
-        rows = _directional_evidence_live_rows(
-            session_date
-        )
-
-        if rows:
-            return rows
-
-    except Exception:
-        # Preserve prior UI behavior if reconstruction evidence
-        # is temporarily unavailable. Never affect live strategy.
-        pass
-
-    return _base_live_rows_legacy(
-        session_date
-    )
 
 def _latest_live_session() -> str | None:
     sessions: list[str] = []

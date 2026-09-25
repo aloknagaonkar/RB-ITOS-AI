@@ -190,50 +190,6 @@ export function overlayDirectionalAuditReports(
 
   const used=new Set<string>()
 
-  // Read-only presentation evidence:
-  // map every directional candle to its immediately preceding
-  // directional candle in the same session. This does NOT
-  // generate or change strategy signals.
-  const previousByMinute=
-    new Map<string,DirectionalCandleOverlayRow>()
-
-  const chronological=[
-    ...rows
-  ].sort(
-    (a,b)=>
-      String(a.bar_timestamp)
-        .localeCompare(
-          String(b.bar_timestamp)
-        )
-  )
-
-  let previous:
-    DirectionalCandleOverlayRow
-    | null=null
-
-  for(const current of chronological){
-    const key=
-      minuteKey(
-        current.bar_timestamp
-      )
-
-    if(!key)
-      continue
-
-    if(
-      previous
-      && String(previous.bar_timestamp).slice(0,10)
-        === String(current.bar_timestamp).slice(0,10)
-    ){
-      previousByMinute.set(
-        key,
-        previous,
-      )
-    }
-
-    previous=current
-  }
-
   const applyOverlay=(
     report:HilegaAudit,
     d:DirectionalCandleOverlayRow,
@@ -460,22 +416,13 @@ export function overlayDirectionalAuditReports(
           d.wma21_rsi??null,
 
         previous_rsi9:
-          previousByMinute
-            .get(key)
-            ?.rsi9
-          ?? null,
+          null,
 
         previous_ema3_rsi:
-          previousByMinute
-            .get(key)
-            ?.ema3_rsi
-          ?? null,
+          null,
 
         previous_wma21_rsi:
-          previousByMinute
-            .get(key)
-            ?.wma21_rsi
-          ?? null,
+          null,
       },
 
       conditions:{},

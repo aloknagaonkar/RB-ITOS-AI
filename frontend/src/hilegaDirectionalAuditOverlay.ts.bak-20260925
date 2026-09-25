@@ -182,91 +182,33 @@ export function overlayDirectionalAuditReports(
   rows:DirectionalCandleOverlayRow[],
 ):HilegaAudit[]{
   const byMinute=new Map<string,DirectionalCandleOverlayRow>()
-
   for(const r of rows){
     const k=minuteKey(r.bar_timestamp)
     if(k)byMinute.set(k,r)
   }
 
-  const used=new Set<string>()
+  return base.map(report=>{
+    const key=minuteKey(report.checkpoint)
+    const d=key?byMinute.get(key):undefined
+    if(!d)return report
 
-  // Read-only presentation evidence:
-  // map every directional candle to its immediately preceding
-  // directional candle in the same session. This does NOT
-  // generate or change strategy signals.
-  const previousByMinute=
-    new Map<string,DirectionalCandleOverlayRow>()
-
-  const chronological=[
-    ...rows
-  ].sort(
-    (a,b)=>
-      String(a.bar_timestamp)
-        .localeCompare(
-          String(b.bar_timestamp)
-        )
-  )
-
-  let previous:
-    DirectionalCandleOverlayRow
-    | null=null
-
-  for(const current of chronological){
-    const key=
-      minuteKey(
-        current.bar_timestamp
-      )
-
-    if(!key)
-      continue
-
-    if(
-      previous
-      && String(previous.bar_timestamp).slice(0,10)
-        === String(current.bar_timestamp).slice(0,10)
-    ){
-      previousByMinute.set(
-        key,
-        previous,
-      )
-    }
-
-    previous=current
-  }
-
-  const applyOverlay=(
-    report:HilegaAudit,
-    d:DirectionalCandleOverlayRow,
-  ):HilegaAudit=>{
     const accepted=list(d.accepted_events)
     const suppressed=list(d.suppressed_events)
     const dir=direction(d)
-
-    const selectedRoute=
-      relation(accepted)
-      ?? report.strategy?.selected_route
-      ?? null
+    const selectedRoute=relation(accepted)??report.strategy?.selected_route??null
 
     const transitions=accepted.map(event=>({
       event_type:event,
       event_time:report.checkpoint,
       source:event,
       price:d.close??report.bar?.close??null,
-      entry_price:event.startsWith('ENTRY_')
-        ? (d.close??report.bar?.close??null)
-        : null,
-      exit_reason:event.includes('EXIT')
-        ? event
-        : null,
-      details:{
-        directional_overlay:true,
-        direction:dir,
-      },
+      entry_price:event.startsWith('ENTRY_')?(d.close??report.bar?.close??null):null,
+      exit_reason:event.includes('EXIT')?event:null,
+      details:{directional_overlay:true,direction:dir},
     }))
 
     return {
       ...report,
-
       bar:{
         ...(report.bar??{}),
         open:d.open??report.bar?.open??null,
@@ -275,283 +217,29 @@ export function overlayDirectionalAuditReports(
         close:d.close??report.bar?.close??null,
         volume:d.volume??report.bar?.volume??null,
       },
-
       indicators:{
         ...(report.indicators??{}),
         rsi9:d.rsi9??report.indicators?.rsi9??null,
-        ema3_rsi:
-          d.ema3_rsi
-          ?? report.indicators?.ema3_rsi
-          ?? null,
-        wma21_rsi:
-          d.wma21_rsi
-          ?? report.indicators?.wma21_rsi
-          ?? null,
+        ema3_rsi:d.ema3_rsi??report.indicators?.ema3_rsi??null,
+        wma21_rsi:d.wma21_rsi??report.indicators?.wma21_rsi??null,
       },
-
       strategy:{
         ...(report.strategy??{}),
-
-        state_after:
-          stateAfter(d,dir),
-
-        selected_route:
-          selectedRoute,
-
-        events_emitted:
-          accepted,
-
-        direction:
-          dir,
-
-        directional_action:
-          d.action??null,
-
-        owner_before:
-          d.owner_before??null,
-
-        owner_after:
-          d.owner_after??null,
-
-        bullish_state:
-          d.bullish_state??null,
-
-        bearish_state:
-          d.bearish_state??null,
-
-        bullish_armed:
-          d.bullish_armed??null,
-
-        bearish_armed:
-          d.bearish_armed??null,
-
-        suppressed_events:
-          suppressed,
-
-        directional_note:
-          d.note??null,
+        state_after:stateAfter(d,dir),
+        selected_route:selectedRoute,
+        events_emitted:accepted,
+        direction:dir,
+        directional_action:d.action??null,
+        owner_before:d.owner_before??null,
+        owner_after:d.owner_after??null,
+        bullish_state:d.bullish_state??null,
+        bearish_state:d.bearish_state??null,
+        bullish_armed:d.bullish_armed??null,
+        bearish_armed:d.bearish_armed??null,
+        suppressed_events:suppressed,
+        directional_note:d.note??null,
       },
-
       transitions,
     }
-  }
-
-
-  // First preserve every existing canonical Hilega audit row.
-  const merged:HilegaAudit[]=base.map(report=>{
-    const key=minuteKey(report.checkpoint)
-
-    if(!key)
-      return report
-
-    const d=byMinute.get(key)
-
-    if(!d)
-      return report
-
-    used.add(key)
-
-    return applyOverlay(
-      report,
-      d,
-    )
   })
-
-
-  // Then add directional checkpoints that do not exist in
-  // the legacy bullish audit. These are what today's live
-  // directional session needs.
-  for(const d of rows){
-    const key=minuteKey(
-      d.bar_timestamp
-    )
-
-    if(!key || used.has(key))
-      continue
-
-    used.add(key)
-
-    const accepted=
-      list(d.accepted_events)
-
-    const dir=
-      direction(d)
-
-    const synthetic={
-      checkpoint:
-        d.bar_timestamp,
-
-      mode:
-        'LIVE_DIRECTIONAL',
-
-      strategy:{
-        state_before:
-          d.owner_before
-          ?? null,
-
-        state_after:
-          stateAfter(d,dir),
-
-        selected_route:
-          relation(accepted),
-
-        route_b_suppressed_by_route_a_priority:
-          null,
-
-        events_emitted:
-          accepted,
-
-        direction:
-          dir,
-
-        directional_action:
-          d.action??null,
-
-        owner_before:
-          d.owner_before??null,
-
-        owner_after:
-          d.owner_after??null,
-
-        bullish_state:
-          d.bullish_state??null,
-
-        bearish_state:
-          d.bearish_state??null,
-
-        bullish_armed:
-          d.bullish_armed??null,
-
-        bearish_armed:
-          d.bearish_armed??null,
-
-        suppressed_events:
-          list(d.suppressed_events),
-
-        directional_note:
-          d.note??null,
-      },
-
-      bar:{
-        open:
-          d.open??null,
-
-        high:
-          d.high??null,
-
-        low:
-          d.low??null,
-
-        close:
-          d.close??null,
-
-        volume:
-          d.volume??null,
-      },
-
-      indicators:{
-        rsi9:
-          d.rsi9??null,
-
-        ema3_rsi:
-          d.ema3_rsi??null,
-
-        wma21_rsi:
-          d.wma21_rsi??null,
-
-        previous_rsi9:
-          previousByMinute
-            .get(key)
-            ?.rsi9
-          ?? null,
-
-        previous_ema3_rsi:
-          previousByMinute
-            .get(key)
-            ?.ema3_rsi
-          ?? null,
-
-        previous_wma21_rsi:
-          previousByMinute
-            .get(key)
-            ?.wma21_rsi
-          ?? null,
-      },
-
-      conditions:{},
-
-      route_a:{
-        eligible:null,
-        pass:null,
-        fail_reasons:[],
-      },
-
-      route_b:{
-        eligible:null,
-        pass:null,
-        fail_reasons:[],
-      },
-
-      transitions:
-        accepted.map(event=>({
-          event_type:event,
-          event_time:
-            d.bar_timestamp,
-          source:event,
-          price:
-            d.close??null,
-          entry_price:
-            event.startsWith('ENTRY_')
-              ? d.close??null
-              : null,
-          exit_reason:
-            event.includes('EXIT')
-              ? event
-              : null,
-          details:{
-            directional_overlay:true,
-            directional_only:true,
-            direction:dir,
-          },
-        })),
-
-      option_candidate:null,
-
-      option_market_snapshot:null,
-
-      option_lifecycle:{
-        start:null,
-        updates:[],
-        exit:null,
-      },
-
-      audit_integrity:{
-        chain_ok:null,
-        chain_issue:null,
-        records:[],
-      },
-
-      safety:{
-        observation_only:true,
-        execution_enabled:false,
-        paper_order_enabled:false,
-      },
-    } as unknown as HilegaAudit
-
-    merged.push(
-      synthetic
-    )
-  }
-
-
-  // Existing Hilega screen convention expects latest
-  // checkpoints first.
-  return merged.sort(
-    (a,b)=>
-      String(b.checkpoint)
-        .localeCompare(
-          String(a.checkpoint)
-        )
-  )
 }
-
