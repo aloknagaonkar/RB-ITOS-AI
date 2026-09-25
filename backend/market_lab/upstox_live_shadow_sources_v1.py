@@ -37,6 +37,66 @@ class UpstoxLiveShadowSourcesV1:
         if not isinstance(rows,list):raise ValueError("Option contract catalog unavailable")
         return rows
 
+    def resolve_option_expiry(self, underlying: str, *, today: date | None = None) -> date:
+        """Resolve the nearest currently valid NIFTY option expiry."""
+        today = today or datetime.now(IST).date()
+
+        if underlying != "NSE_INDEX|Nifty 50":
+            raise ValueError("AUTO_EXPIRY_UNSUPPORTED_UNDERLYING")
+
+        expiries = set()
+
+        # Match the provider-search pattern already used by the futures
+        # resolver: query each expiry bucket independently.
+        for expiry_filter in (
+            "current_week",
+            "next_week",
+            "current_month",
+            "next_month",
+        ):
+            body = self.gateway._get(
+                "/v2/instruments/search",
+                params={
+                    "query": "NIFTY",
+                    "exchanges": "NSE",
+                    "segments": "FO",
+                    "instrument_types": "CE,PE",
+                    "expiry": expiry_filter,
+                    "atm_offset": 0,
+                    "page_number": 1,
+                    "records": 30,
+                },
+            )
+
+            rows = body.get("data")
+            if not isinstance(rows, list):
+                raise ValueError("OPTION_EXPIRY_SEARCH_UNAVAILABLE")
+
+            for row in rows:
+                if str(row.get("segment") or "") != "NSE_FO":
+                    continue
+                if str(row.get("underlying_key") or "") != underlying:
+                    continue
+                if str(row.get("underlying_symbol") or "").upper() != "NIFTY":
+                    continue
+                if str(row.get("instrument_type") or "").upper() not in {"CE", "PE"}:
+                    continue
+
+                try:
+                    expiry = date.fromisoformat(
+                        str(row["expiry"])[:10]
+                    )
+                except (KeyError, TypeError, ValueError):
+                    continue
+
+                if expiry >= today:
+                    expiries.add(expiry)
+
+        if not expiries:
+            raise ValueError("NO_VALID_NIFTY_OPTION_EXPIRY")
+
+        return min(expiries)
+
     def historical_candles(self,instrument_key:str,session_date:date):
         encoded=quote(instrument_key,safe="");d=session_date.isoformat()
         body=self.gateway._get(f"/v3/historical-candle/{encoded}/minutes/1/{d}/{d}")
