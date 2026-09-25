@@ -70,7 +70,21 @@ def test_live_coordinator_bootstrap_is_not_live_audited_and_processes_only_compl
     assert out['status']=='NO_NEW_COMPLETED_BAR'
     rows_audit=c.step_audit.read_all()
     assert [r['stage'] for r in rows_audit].count('LIVE_BOOTSTRAP')==1
-    assert not any(r['stage']=='INDICATOR_CALCULATION' for r in rows_audit)
+
+    recovered_indicator_rows = [
+        r for r in rows_audit
+        if r['stage'] == 'INDICATOR_CALCULATION'
+    ]
+    assert recovered_indicator_rows
+    assert all(
+        (r.get('payload') or {}).get('bootstrap_recovered') is True
+        for r in recovered_indicator_rows
+    )
+    assert all(
+        (r.get('payload') or {}).get('recovery_source')
+        == 'CURRENT_SESSION_BOOTSTRAP_REPLAY'
+        for r in recovered_indicator_rows
+    )
 
 
 def test_live_cutoff_uses_1455_minute_open(tmp_path):
