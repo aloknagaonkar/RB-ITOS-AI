@@ -48,3 +48,60 @@ def test_functional_normalizer_removes_runtime_hash_identity_not_semantics():
           {"sequence":2,"stage":"STRATEGY_TRANSITION","status":"ENTRY","checkpoint":"c","payload":{"price":100},"record_hash":"abc"}]
     out=normalize_functional_audit(rows)
     assert out==[{"checkpoint":"c","stage":"STRATEGY_TRANSITION","status":"ENTRY","payload":{"price":100}}]
+
+
+def test_historical_parity_source_accepts_pe_contracts():
+    from datetime import date
+    from market_lab.domain import HistoricalOptionContract
+
+    class GatewayPE(Gateway):
+        def active_option_contracts(self, underlying, expiry):
+            return [
+                HistoricalOptionContract(
+                    underlying=underlying,
+                    instrument_key="PE-23000",
+                    expiry=expiry,
+                    strike=23000.0,
+                    side="PE",
+                    lot_size=75,
+                )
+            ]
+
+    d = date(2026, 9, 23)
+
+    src = HistoricalParityMarketSourcesV1(
+        GatewayPE(),
+        d,
+        acquisition_today=d,
+    )
+
+    rows = src.option_contracts(
+        "NSE_INDEX|Nifty 50",
+        d,
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["instrument_type"] == "PE"
+    assert (
+        src.option_contract_coverage[0]["side"]
+        == "PE"
+    )
+
+
+def test_historical_parity_warmup_never_exposes_target_session():
+    from datetime import date
+
+    d = date(2026, 9, 23)
+
+    src = HistoricalParityMarketSourcesV1(
+        Gateway(),
+        d,
+        acquisition_today=d,
+    )
+
+    rows = src.historical_candles(
+        "NSE_INDEX|Nifty 50",
+        d,
+    )
+
+    assert rows == []

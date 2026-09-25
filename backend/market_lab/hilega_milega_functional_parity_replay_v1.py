@@ -63,6 +63,14 @@ class HistoricalParityMarketSourcesV1:
 
     def historical_candles(self, instrument_key: str, session_date: date):
         # This method is called for warmup only by the live coordinator.
+        #
+        # Never expose the target replay session through the historical
+        # warmup interface. Doing so would leak the completed target day's
+        # candles into indicator state before the simulated 09:15 open.
+        # The target session is exposed exclusively through
+        # nifty_intraday_1m() according to simulated time.
+        if session_date == self.session_date:
+            return []
         return self.gateway.historical_candles(instrument_key, session_date)
 
     def nifty_intraday_1m(self, *, now: datetime | None = None):
@@ -94,8 +102,14 @@ class HistoricalParityMarketSourcesV1:
             if c.underlying != underlying or c.expiry != expiry:
                 raise ValueError('OPTION_CONTRACT_IDENTITY_MISMATCH')
         self.option_contract_coverage = [
-            {'instrument_key': c.instrument_key, 'expiry': c.expiry.isoformat(),
-             'strike': c.strike, 'side': c.side} for c in contracts if c.side == 'CE'
+            {
+                'instrument_key': c.instrument_key,
+                'expiry': c.expiry.isoformat(),
+                'strike': c.strike,
+                'side': c.side,
+            }
+            for c in contracts
+            if c.side in {'CE', 'PE'}
         ]
         return [
             {'instrument_key': c.instrument_key, 'expiry': c.expiry.isoformat(),
