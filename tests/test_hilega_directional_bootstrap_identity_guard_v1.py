@@ -545,3 +545,410 @@ def test_incomplete_identity_fails_closed_on_restart(tmp_path):
         coordinator._pending_pe_entries
         == {}
     )
+
+
+def test_active_restart_continues_exact_audited_lifecycle_without_contract_lookup(
+    tmp_path,
+):
+    from datetime import timedelta
+
+    from market_lab.live_option_minute_source_v1 import (
+        CompletedOptionMinute,
+    )
+
+    first = _coordinator(
+        tmp_path,
+        owner="BULLISH",
+    )
+
+    payload = _payload(
+        direction="BULLISH",
+        status="ACTIVE",
+    )
+
+    _append(
+        first,
+        direction="BULLISH",
+        stage="START",
+        payload=payload,
+    )
+
+    class Source:
+        def __init__(self):
+            self.contract_calls = 0
+
+        def option_contracts(self, *args, **kwargs):
+            self.contract_calls += 1
+            raise AssertionError(
+                "restart continuation must not resolve contracts"
+            )
+
+        def option_intraday_1m(self, key):
+            leg = next(
+                x
+                for x in payload["legs"]
+                if x["instrument_key"] == key
+            )
+
+            base = datetime(
+                2026,
+                9,
+                25,
+                12,
+                45,
+                tzinfo=IST,
+            )
+
+            rows = []
+
+            for i in range(6):
+                px = float(leg["entry_open"]) + i
+
+                rows.append(
+                    CompletedOptionMinute(
+                        instrument_key=key,
+                        timestamp=base + timedelta(minutes=i),
+                        open=px,
+                        high=px + 1.0,
+                        low=px - 1.0,
+                        close=px + 0.5,
+                        volume=100.0,
+                    )
+                )
+
+            return rows
+
+    restarted = _coordinator(
+        tmp_path,
+        owner="BULLISH",
+    )
+
+    source = Source()
+    restarted.sources = source
+
+    result = restarted._restore_audited_option_state(
+        now=datetime(
+            2026,
+            9,
+            25,
+            12,
+            50,
+            30,
+            tzinfo=IST,
+        ),
+        session_date=date(
+            2026,
+            9,
+            25,
+        ),
+    )
+
+    assert result["restored_active_count"] == 1
+    assert result["restored_pending_exit_count"] == 0
+    assert source.contract_calls == 0
+
+    before_keys = list(
+        restarted.ce_shadow.snapshot
+        .shadow_selected_instrument_keys
+    )
+
+    assert before_keys == payload[
+        "shadow_selected_instrument_keys"
+    ]
+
+    # At 12:51 the latest completed option minute is exactly 12:50.
+    restarted._update_options(
+        datetime(
+            2026,
+            9,
+            25,
+            12,
+            51,
+            0,
+            tzinfo=IST,
+        )
+    )
+
+    snap = restarted.ce_shadow.snapshot
+
+    assert snap is not None
+    assert snap.status == "ACTIVE"
+    assert snap.latest_completed_minute == (
+        "2026-09-25T12:50:00+05:30"
+    )
+
+    assert list(
+        snap.shadow_selected_instrument_keys
+    ) == before_keys
+
+    assert source.contract_calls == 0
+
+    rows = restarted.step_audit.read_all()
+
+    restore_rows = [
+        x for x in rows
+        if x.get("stage")
+        == "BULLISH_OPTION_SHADOW_BOOTSTRAP_RESTORE"
+    ]
+
+    assert restore_rows
+
+    restore_payload = (
+        restore_rows[-1].get("payload") or {}
+    )
+
+    assert (
+        restore_payload["identity_source"]
+        == "AUDITED_OPTION_SNAPSHOT"
+    )
+    assert restore_payload["reconstructed"] is True
+    assert (
+        restore_payload["contract_master_lookup"]
+        is False
+    )
+
+    starts = [
+        x for x in rows
+        if x.get("stage")
+        == "BULLISH_OPTION_SHADOW_START"
+    ]
+
+    # Only the original audited START exists.
+    assert len(starts) == 1
+
+    updates = [
+        x for x in rows
+        if x.get("stage")
+        == "BULLISH_OPTION_SHADOW_UPDATE"
+    ]
+
+    assert updates
+    assert (
+        updates[-1]["payload"][
+            "latest_completed_minute"
+        ]
+        == "2026-09-25T12:50:00+05:30"
+    )
+
+    assert (
+        restarted.step_audit.verify_chain()
+        == (True, None)
+    )
+
+
+def test_pending_exit_restart_waits_then_closes_exact_boundary_without_contract_lookup(
+    tmp_path,
+):
+    from market_lab.live_option_minute_source_v1 import (
+        CompletedOptionMinute,
+    )
+
+    first = _coordinator(
+        tmp_path,
+        owner="NONE",
+    )
+
+    payload = _payload(
+        direction="BEARISH",
+        status="PENDING_EXACT_EXIT",
+    )
+
+    _append(
+        first,
+        direction="BEARISH",
+        stage="EXIT",
+        payload=payload,
+    )
+
+    exit_boundary = datetime.fromisoformat(
+        payload["pending_exit_boundary"]
+    )
+
+    class Source:
+        def __init__(self):
+            self.exact_available = False
+            self.contract_calls = 0
+
+        def option_contracts(self, *args, **kwargs):
+            self.contract_calls += 1
+            raise AssertionError(
+                "pending-exit restart must not resolve contracts"
+            )
+
+        def option_intraday_1m(self, key):
+            if not self.exact_available:
+                return []
+
+            leg = next(
+                x
+                for x in payload["legs"]
+                if x["instrument_key"] == key
+            )
+
+            px = float(leg["entry_open"]) + 25.0
+
+            return [
+                CompletedOptionMinute(
+                    instrument_key=key,
+                    timestamp=exit_boundary,
+                    open=px,
+                    high=px + 1.0,
+                    low=px - 1.0,
+                    close=px + 0.5,
+                    volume=100.0,
+                )
+            ]
+
+    restarted = _coordinator(
+        tmp_path,
+        owner="NONE",
+    )
+
+    source = Source()
+    restarted.sources = source
+
+    result = restarted._restore_audited_option_state(
+        now=datetime(
+            2026,
+            9,
+            25,
+            13,
+            11,
+            0,
+            tzinfo=IST,
+        ),
+        session_date=date(
+            2026,
+            9,
+            25,
+        ),
+    )
+
+    key = payload["signal_bar"]
+
+    assert result["restored_active_count"] == 0
+    assert result["restored_pending_exit_count"] == 1
+    assert key in restarted._pending_pe_exits
+    assert source.contract_calls == 0
+
+    frozen_keys = list(
+        restarted._pending_pe_exits[key]
+        .snapshot
+        .shadow_selected_instrument_keys
+    )
+
+    assert frozen_keys == payload[
+        "shadow_selected_instrument_keys"
+    ]
+
+    # Exact 13:10 minute still unavailable.
+    restarted._retry_pending(
+        datetime(
+            2026,
+            9,
+            25,
+            13,
+            11,
+            0,
+            tzinfo=IST,
+        )
+    )
+
+    assert key in restarted._pending_pe_exits
+
+    pending = (
+        restarted._pending_pe_exits[key]
+        .snapshot
+    )
+
+    assert pending.status == "PENDING_EXACT_EXIT"
+    assert all(
+        leg.exit_open is None
+        for leg in pending.legs
+    )
+
+    # Exact original exit minute appears later.
+    source.exact_available = True
+
+    restarted._retry_pending(
+        datetime(
+            2026,
+            9,
+            25,
+            13,
+            12,
+            0,
+            tzinfo=IST,
+        )
+    )
+
+    assert key not in restarted._pending_pe_exits
+    assert source.contract_calls == 0
+
+    rows = restarted.step_audit.read_all()
+
+    restore_rows = [
+        x for x in rows
+        if x.get("stage")
+        == "BEARISH_OPTION_SHADOW_BOOTSTRAP_RESTORE"
+    ]
+
+    assert restore_rows
+
+    restore_payload = (
+        restore_rows[-1].get("payload") or {}
+    )
+
+    assert (
+        restore_payload["identity_source"]
+        == "AUDITED_OPTION_SNAPSHOT"
+    )
+    assert restore_payload["reconstructed"] is True
+    assert (
+        restore_payload["contract_master_lookup"]
+        is False
+    )
+
+    retries = [
+        x for x in rows
+        if x.get("stage")
+        == "BEARISH_OPTION_SHADOW_EXIT_RETRY"
+    ]
+
+    assert len(retries) >= 2
+
+    closed = retries[-1]["payload"]
+
+    assert closed["status"] == "CLOSED"
+    assert (
+        closed["pending_exit_boundary"]
+        is None
+    )
+
+    assert all(
+        leg["exit_timestamp"]
+        == "2026-09-25T13:10:00+05:30"
+        for leg in closed["legs"]
+    )
+
+    expected_by_key = {
+        leg["instrument_key"]:
+        float(leg["entry_open"]) + 25.0
+        for leg in payload["legs"]
+    }
+
+    assert all(
+        leg["exit_open"]
+        == expected_by_key[leg["instrument_key"]]
+        for leg in closed["legs"]
+    )
+
+    assert [
+        leg["instrument_key"]
+        for leg in closed["legs"]
+    ] == frozen_keys
+
+    assert (
+        restarted.step_audit.verify_chain()
+        == (True, None)
+    )
