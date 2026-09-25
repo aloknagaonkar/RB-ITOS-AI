@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import HilegaDecisionTable,{type HilegaAudit} from './hilegaDecisionTable'
 import {overlayDirectionalTradeMarkers} from './hilegaDirectionalTradeMarkerOverlay'
 import {augmentDirectionalRowsWithTrades,overlayDirectionalAuditReports} from './hilegaDirectionalAuditOverlay'
+import HilegaDirectionalCandleTable from './hilegaDirectionalCandleTable'
 
 type Direction='BULLISH'|'BEARISH'|'NONE'|string
 
@@ -161,81 +162,6 @@ const latestAccepted=(s:DirectionalStatus|null)=>{
   return a.length?a.map(words).join(', '):'—'
 }
 
-
-function sameCheckpoint(a:string|null|undefined,b:string|null|undefined){
-  if(!a||!b)return false
-  const ams=new Date(a).getTime()
-  const bms=new Date(b).getTime()
-  if(Number.isFinite(ams)&&Number.isFinite(bms))return ams===bms
-  return a===b
-}
-
-function attachDirectionalTradeAuditMetadata(
-  reports:HilegaAudit[],
-  trades:Trade[],
-):HilegaAudit[]{
-  return reports.map(report=>{
-    const trade=(trades??[]).find(t=>sameCheckpoint(t.signal_bar,report.checkpoint))
-    if(!trade)return report
-
-    const lifecycleStart={
-      model:'DIRECTIONAL_TRADE_DASHBOARD_OVERLAY',
-      direction:trade.direction,
-      option_side:trade.option_side,
-      signal_bar:trade.signal_bar,
-      signal_boundary:trade.signal_boundary??null,
-      signal_spot:trade.signal_spot??null,
-      source:trade.source,
-      expiry:trade.expiry,
-      atm:trade.atm,
-      status:trade.status,
-      issue:trade.issue??null,
-      active:String(trade.status).toUpperCase()==='ACTIVE',
-      latest_completed_minute:trade.legs.map(x=>x.latest_completed_minute).filter(Boolean).at(-1)??null,
-      pending_exit_boundary:trade.pending_exit_boundary??null,
-      exit_reason:trade.exit_reason??null,
-      legs:trade.legs??[],
-    }
-
-    const lifecycleExit=trade.exit_reason
-      ? {...lifecycleStart,status:trade.status,exit_reason:trade.exit_reason}
-      : null
-
-    return {
-      ...report,
-      strategy:{...(report.strategy??{}),option_side:trade.option_side},
-      option_candidate:{
-        ...(report.option_candidate??{}),
-        model:'DIRECTIONAL_TRADE_DASHBOARD_METADATA',
-        direction:trade.direction,
-        side:trade.option_side,
-        expiry:trade.expiry,
-        atm:trade.atm,
-        signal_spot:trade.signal_spot??null,
-        signal_boundary:trade.signal_boundary??null,
-        source:trade.source,
-        status:trade.status,
-        issue:trade.issue??null,
-      },
-      option_market_snapshot:{
-        ...(report.option_market_snapshot??{}),
-        model:'DIRECTIONAL_TRADE_DASHBOARD_METADATA',
-        status:trade.status,
-        direction:trade.direction,
-        side:trade.option_side,
-        signal_boundary:trade.signal_boundary??null,
-        issue:trade.issue??null,
-      },
-      option_lifecycle:{
-        ...(report.option_lifecycle??{}),
-        start:lifecycleStart,
-        updates:report.option_lifecycle?.updates??[],
-        exit:lifecycleExit,
-      },
-    } as HilegaAudit
-  })
-}
-
 export default function HilegaMilegaShadow(){
   const [status,setStatus]=useState<DirectionalStatus|null>(null)
   const [rows,setRows]=useState<AuditReport[]>([])
@@ -259,7 +185,6 @@ export default function HilegaMilegaShadow(){
       merged=overlayDirectionalAuditReports(a as HilegaAudit[],directionalRows)
     }
     merged=overlayDirectionalTradeMarkers(merged,d.trades??[])
-    merged=attachDirectionalTradeAuditMetadata(merged,d.trades??[])
     setStatus(s);setRows(merged as AuditReport[]);setDashboard(d);setError('')
   }
 
@@ -323,19 +248,16 @@ export default function HilegaMilegaShadow(){
     </section>
 
     <section className="panel shadow-panel">
+      <div className="panel-heading"><div><h2>Live directional candle audit</h2><p>Current completed 5-minute candles with canonical RSI9 / EMA3(RSI) / WMA21(RSI) and directional state.</p></div></div>
+      <HilegaDirectionalCandleTable mode="LIVE" />
+    </section>
+
+    <section className="panel shadow-panel">
       <div className="panel-heading"><div><h2>Hilega candle-by-candle decision audit</h2>
         <p>Existing bullish audit view preserved. Directional owner/state is added above; this section is not redesigned.</p></div>
         <span className="pill teal">LIVE · OBSERVATION ONLY</span></div>
       <HilegaDecisionTable reports={rows as HilegaAudit[]} mode="LIVE"
-        fetchDetail={async checkpoint=>{
-          const local=rows.find(r=>r.checkpoint===checkpoint)
-
-          if(local?.mode==='LIVE_DIRECTIONAL'){
-            return local as HilegaAudit
-          }
-
-          return detailedAudit(checkpoint)
-        }}
+        fetchDetail={detailedAudit}
         emptyMessage="No completed live strategy checkpoints available yet." />
     </section>
 
