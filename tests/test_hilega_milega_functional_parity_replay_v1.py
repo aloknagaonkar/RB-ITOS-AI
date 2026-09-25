@@ -27,6 +27,9 @@ class Gateway:
         start=datetime(2026,9,23,9,15,tzinfo=IST)
         return [HistoricalCandle(provider="upstox",instrument_key=instrument_key,session_date=self.d,timestamp=start+timedelta(minutes=i),open=100+i,high=102+i,low=99+i,close=101+i,volume=1000,open_interest=None) for i in range(10)]
 
+    def active_option_historical_candles(self,instrument_key,session_date):
+        return self.historical_option_candles(instrument_key,session_date)
+
 
 def test_historical_parity_source_matches_live_source_contract_shape_and_exact_minutes():
     src=HistoricalParityMarketSourcesV1(Gateway(),date(2026,9,23))
