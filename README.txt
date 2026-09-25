@@ -1,18 +1,21 @@
-Hilega Option Metadata Audit Patch
+Hilega Directional Option Recovery V1
 
-Purpose:
-- Attach directional trade-dashboard metadata to the primary candle-by-candle audit.
-- Show expiry, ATM, lifecycle status, entry boundary, and the exact missing option-data issue.
-- Preserve exact option prices as unavailable when the causal minute is missing; no synthetic/fallback price is created.
-- Frontend-only. No strategy/API/worker logic is changed.
+Contains:
+  backend/market_lab/hilega_directional_option_recovery_v1.py
 
-Run from repo root:
+From the RB-ITOS-AI repository root:
+  unzip -o hilega_directional_option_recovery_patch.zip -d ~/RB-ITOS-AI
   cd ~/RB-ITOS-AI
   source .venv/bin/activate
-  python scripts/apply_option_metadata_audit_fix.py
+  export PYTHONPATH=backend
 
-Then:
-  cd frontend
-  npm run build
+Compile:
+  python -m py_compile backend/market_lab/hilega_directional_option_recovery_v1.py
 
-No API or worker restart is required.
+Dry-run only:
+  python -m market_lab.hilega_directional_option_recovery_v1 \
+    --session 2026-09-25 \
+    --dry-run \
+    --json-output data/historical-evidence/hilega-directional-option-recovery-2026-09-25-v1.json
+
+This patch does NOT modify step-audit.jsonl, does NOT place orders, and does NOT restart workers.
