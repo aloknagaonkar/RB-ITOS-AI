@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
+import os
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -36,16 +38,26 @@ class ShadowStepAuditStoreV1:
             data, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str
         ).encode("utf-8")
 
+    @staticmethod
+    def _read_all_from_handle(handle) -> list[dict[str, Any]]:
+        handle.seek(0)
+        rows = []
+        for line in handle:
+            line = line.strip()
+            if line:
+                rows.append(json.loads(line))
+        return rows
+
     def read_all(self) -> list[dict[str, Any]]:
         if not self.path.exists():
             return []
-        rows = []
-        with self.path.open() as handle:
-            for line in handle:
-                line = line.strip()
-                if line:
-                    rows.append(json.loads(line))
-        return rows
+
+        with self.path.open("r", encoding="utf-8") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_SH)
+            try:
+                return self._read_all_from_handle(handle)
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
     def append(
         self,
@@ -57,23 +69,49 @@ class ShadowStepAuditStoreV1:
         payload: dict[str, Any] | None = None,
         observation_id: str | None = None,
     ) -> StepAuditRecord:
-        rows = self.read_all()
-        previous_hash = rows[-1]["record_hash"] if rows else None
-        core = {
-            "model": MODEL,
-            "sequence": len(rows) + 1,
-            "event_time": event_time.isoformat(),
-            "checkpoint": checkpoint.isoformat() if checkpoint else None,
-            "observation_id": observation_id,
-            "stage": stage,
-            "status": status,
-            "payload": payload or {},
-            "previous_hash": previous_hash,
-        }
-        record_hash = hashlib.sha256(self._canonical(core)).hexdigest()
-        record = {**core, "record_hash": record_hash}
-        with self.path.open("a") as handle:
-            handle.write(json.dumps(record, sort_keys=True, default=str) + "\n")
+        # Sequence allocation, previous-hash lookup, hash calculation and
+        # append must happen under one inter-process exclusive lock.
+        with self.path.open("a+", encoding="utf-8") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                rows = self._read_all_from_handle(handle)
+                previous_hash = rows[-1]["record_hash"] if rows else None
+
+                core = {
+                    "model": MODEL,
+                    "sequence": len(rows) + 1,
+                    "event_time": event_time.isoformat(),
+                    "checkpoint": checkpoint.isoformat() if checkpoint else None,
+                    "observation_id": observation_id,
+                    "stage": stage,
+                    "status": status,
+                    "payload": payload or {},
+                    "previous_hash": previous_hash,
+                }
+
+                record_hash = hashlib.sha256(
+                    self._canonical(core)
+                ).hexdigest()
+
+                record = {
+                    **core,
+                    "record_hash": record_hash,
+                }
+
+                handle.seek(0, os.SEEK_END)
+                handle.write(
+                    json.dumps(
+                        record,
+                        sort_keys=True,
+                        default=str,
+                    )
+                    + "\n"
+                )
+                handle.flush()
+                os.fsync(handle.fileno())
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
         return StepAuditRecord(
             sequence=record["sequence"],
             event_time=record["event_time"],
