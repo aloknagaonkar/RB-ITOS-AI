@@ -1,83 +1,113 @@
-# Hilega + OI/PCR True Interval Sequence Research v2
+# Hilega / OI / Red-Midpoint + VWAP Overlay Research v1
 
-This package corrects an important issue in Temporal Sequence Research v1.
+This package overlays **Nifty futures VWAP** on the existing Hilega, OI/PCR, true-interval-sequence, and opening-red-midpoint research.
 
-## What was wrong with v1?
+It does not modify Hilega logic and does not enable execution.
 
-V1 displayed sequences such as:
+## Existing VWAP source
 
-```text
-15m -> 10m -> 5m
-```
-
-but those states actually represented cumulative comparisons:
+The script uses:
 
 ```text
-T vs T-15
-T vs T-10
-T vs T-5
+data/historical-evidence/
+midpoint-v2-nifty-futures-vwap-v1-all180.csv
 ```
 
-Those are useful multi-horizon features, but they are **not true chronological interval transitions**.
-
-The v1 PCR trend had the same issue: `h15_pcr_current`, `h10_pcr_current`, and `h5_pcr_current` all represented PCR at the same signal-time snapshot `T`, which explains why the report showed every trade as `MIXED`.
-
-## What v2 computes
-
-Using the same signal-time moving-ATM physical strike panel:
+This dataset already contains:
 
 ```text
-Interval 1: T-15 -> T-10
-Interval 2: T-10 -> T-5
-Interval 3: T-5  -> T
+timestamp
+open
+high
+low
+close
+volume
+session_cumulative_volume
+session_vwap
 ```
 
-The exact same physical strikes must exist at all four snapshots.
+## VWAP features
 
-PCR is calculated separately at:
+At each Hilega entry or joinable red-break event:
 
 ```text
-T-15
-T-10
-T-5
-T
+futures close
+session VWAP
+price - VWAP in points
+price - VWAP in %
+VWAP 5m slope
+VWAP 10m slope
+VWAP 15m slope
 ```
 
-and classified as:
+The event is then classified:
 
 ```text
-STEADY_RISE
-STEADY_FALL
-MOSTLY_RISING
-MOSTLY_FALLING
-MIXED
+ALIGNED_STRONG
+ALIGNED_PRICE
+NEAR_VWAP
+OPPOSED_PRICE
+OPPOSED_STRONG
 ```
+
+Directional interpretation:
+
+```text
+Bullish:
+  close > VWAP + VWAP rising = ALIGNED_STRONG
+
+Bearish:
+  close < VWAP + VWAP falling = ALIGNED_STRONG
+```
+
+`NEAR_VWAP` currently means within ±5 futures points. This is descriptive research only, not a frozen threshold.
+
+## Included analyses
+
+- all Hilega trades vs VWAP alignment
+- bullish and bearish separately
+- 5m OI relation + VWAP
+- previous 3–5% intensity / no-13h candidate + VWAP
+- true OI interval sequence + VWAP
+- opening-red midpoint / low-break outcomes + VWAP where exact event timestamps are joinable
 
 ## Run
 
-The 180 Hilega replays already exist, so use:
+Copy:
+
+```text
+hilega_vwap_overlay_research.py
+```
+
+to:
+
+```text
+~/RB-ITOS-AI/scripts/
+```
+
+Then:
 
 ```bash
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/hilega_oi_true_interval_sequence_research.py \
-  --skip-replay \
-  | tee /tmp/hilega-oi-true-interval-sequence.txt
+python scripts/hilega_vwap_overlay_research.py \
+  | tee /tmp/hilega-vwap-overlay.txt
 ```
 
 ## Outputs
 
 ```text
-data/historical-evidence/hilega-pcr-oi-support-research-v1/
-true-interval-sequence-v2/
+data/historical-evidence/
+hilega-pcr-oi-support-research-v1/
+vwap-overlay-research-v1/
 ```
 
 Files:
 
-- `hilega-180-true-interval-sequence-features-v2.csv`
-- `hilega-180-true-interval-sequence-summary-v2.csv`
-- `hilega-180-true-interval-sequence-report-v2.txt`
+- `hilega-vwap-overlay-trades-v1.csv`
+- `opening-red-vwap-overlay-v1.csv` when red-event joins are available
+- `vwap-overlay-summary-v1.txt`
 
-Research only. Hilega logic and execution settings are unchanged.
+Research only. No production filter is frozen by this script.
