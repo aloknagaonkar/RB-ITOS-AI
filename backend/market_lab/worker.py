@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from .domain import IST, Snapshot, in_session
 from .gateways import DemoGateway, GatewayError, UpstoxGateway
+from .pcr_expiry_rollover_v1 import ensure_current_pcr_expiry
 from .storage import Observation, active_config, initialize, make_engine, record, update_health
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,58 @@ def run():
             while True:
                 with Session(engine) as session:
                     config_id, config, enabled = active_config(session)
+
+                if (
+                    enabled
+                    and config.provider == "upstox"
+                    and config.expiry < datetime.now(IST).date()
+                ):
+                    try:
+                        rollover = ensure_current_pcr_expiry(engine)
+                        update_health(
+                            engine,
+                            state="expiry_rolled_over",
+                            config_id=rollover["config_id"],
+                            failures=0,
+                            last_error=None,
+                            expiry=rollover["expiry"],
+                            expiry_source=rollover["expiry_source"],
+                            previous_config_id=rollover.get(
+                                "previous_config_id"
+                            ),
+                            previous_expiry=rollover.get(
+                                "previous_expiry"
+                            ),
+                        )
+                        # Reload the newly active immutable configuration
+                        # on the next worker iteration.
+                        continue
+                    except (GatewayError, ValueError) as exc:
+                        failures += 1
+                        update_health(
+                            engine,
+                            state="expiry_rollover_backoff",
+                            config_id=config_id,
+                            failures=failures,
+                            last_error=str(exc),
+                            expiry=config.expiry.isoformat(),
+                        )
+                        time.sleep(
+                            max(
+                                30,
+                                min(
+                                    300,
+                                    30
+                                    * 2
+                                    ** min(
+                                        failures - 1,
+                                        4,
+                                    ),
+                                ),
+                            )
+                        )
+                        continue
+
                 if config_id != last_config:
                     failures, next_due, last_config = 0, 0.0, config_id
                     update_health(
