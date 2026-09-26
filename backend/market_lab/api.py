@@ -167,7 +167,17 @@ def create_app(engine=None, historical_gateway_factory=None):
                 "observation_count": count,
                 "receipt_age_seconds": round(receipt_age, 1) if receipt_age is not None else None,
                 "collection_overdue": bool(
-                    enabled and (receipt_age is None or receipt_age > config.interval_seconds * 2)
+                    enabled
+                    and worker_data.get("state") not in {
+                        "paused",
+                        "outside_session",
+                        "not_started",
+                        "stopped",
+                    }
+                    and (
+                        receipt_age is None
+                        or receipt_age > config.interval_seconds * 2
+                    )
                 ),
                 "execution_enabled": False,
             }

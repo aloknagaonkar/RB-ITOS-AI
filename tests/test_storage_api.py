@@ -210,3 +210,89 @@ def test_positioning_api_optional_strike_window_and_validation(engine):
         assert client.get("/api/strike-positioning?config_id=1&wings=5").status_code == 422
         assert client.get("/api/strike-positioning?config_id=1&center_strike=25025&wings=5").status_code == 422
         assert client.get("/api/strike-positioning?config_id=1&center_strike=25000&wings=-1").status_code == 422
+
+
+def _set_worker_state(engine, state):
+    from market_lab.storage import Health
+
+    with Session(engine) as session, session.begin():
+        row = session.get(Health, 1)
+        payload = {
+            "state": state,
+            "heartbeat_at": datetime.now(IST).isoformat(),
+            "failures": 0,
+            "last_error": None,
+        }
+
+        if row is None:
+            session.add(Health(id=1, payload=payload))
+        else:
+            row.payload = payload
+
+
+def test_collection_not_overdue_outside_session(engine):
+    with Session(engine) as session, session.begin():
+        session.get(Control, 1).enabled = True
+
+    _set_worker_state(engine, "outside_session")
+
+    with TestClient(create_app(engine)) as client:
+        state = client.get("/api/state").json()
+
+    assert state["enabled"] is True
+    assert state["worker"]["state"] == "outside_session"
+    assert state["collection_overdue"] is False
+
+
+def test_collection_not_overdue_when_paused(engine):
+    with Session(engine) as session, session.begin():
+        session.get(Control, 1).enabled = False
+
+    _set_worker_state(engine, "paused")
+
+    with TestClient(create_app(engine)) as client:
+        state = client.get("/api/state").json()
+
+    assert state["enabled"] is False
+    assert state["worker"]["state"] == "paused"
+    assert state["collection_overdue"] is False
+
+
+def test_collection_overdue_when_active_without_receipt(engine):
+    with Session(engine) as session, session.begin():
+        session.get(Control, 1).enabled = True
+
+    _set_worker_state(engine, "collecting")
+
+    with TestClient(create_app(engine)) as client:
+        state = client.get("/api/state").json()
+
+    assert state["enabled"] is True
+    assert state["worker"]["state"] == "collecting"
+    assert state["receipt_age_seconds"] is None
+    assert state["collection_overdue"] is True
+
+
+def test_collection_not_overdue_with_recent_receipt(engine):
+    config = seed(engine)
+
+    with Session(engine) as session, session.begin():
+        session.get(Control, 1).enabled = True
+
+        latest = session.scalar(
+            select(Observation)
+            .order_by(Observation.id.desc())
+            .limit(1)
+        )
+        latest.recorded_at = datetime.now(IST).isoformat()
+
+    _set_worker_state(engine, "receiving")
+
+    with TestClient(create_app(engine)) as client:
+        state = client.get("/api/state").json()
+
+    assert state["enabled"] is True
+    assert state["worker"]["state"] == "receiving"
+    assert state["receipt_age_seconds"] is not None
+    assert state["receipt_age_seconds"] < config.interval_seconds * 2
+    assert state["collection_overdue"] is False
