@@ -1,45 +1,60 @@
-# Hilega 30-session OI research
+# Hilega Model C MATCH failure analysis
 
-## Copy to repo
+This script analyzes the existing 30-session research CSV and asks:
 
-Extract the zip, then copy `hilega_oi_30_session_research.py` into the repo root:
+> When OI matches Hilega direction, what distinguishes winners from losers?
 
-```bash
-cd ~/RB-ITOS-AI
-source .venv/bin/activate
-export PYTHONPATH=backend
+It does not change strategy logic and does not enable execution.
+
+## Install
+
+Copy `hilega_match_failure_analysis.py` into:
+
+```text
+~/RB-ITOS-AI/scripts/
 ```
 
 ## Run
 
 ```bash
-python hilega_oi_30_session_research.py
+cd ~/RB-ITOS-AI
+source .venv/bin/activate
+export PYTHONPATH=backend
+
+python scripts/hilega_match_failure_analysis.py \
+  | tee /tmp/hilega-match-failure-analysis.txt
 ```
 
-## Optional: save terminal output
-
-```bash
-python hilega_oi_30_session_research.py | tee /tmp/hilega-oi-30-session.txt
-```
-
-## Result CSV
-
-The script writes:
+## Required input
 
 ```text
-data/historical-evidence/hilega-pcr-oi-support-research-v1/hilega-moving-atm-expiry-width-30-session-v1.csv
+data/historical-evidence/hilega-pcr-oi-support-research-v1/
+hilega-moving-atm-expiry-width-30-session-v1.csv
 ```
 
-## Research models
+## Outputs
 
-- MODEL_A_FIXED_5: ATM ±5 every day
-- MODEL_C_EXPIRY_AWARE:
-  - Monday ±3
-  - Tuesday ±2
-  - Wednesday ±5
-  - Thursday ±5
-  - Friday ±4
+```text
+data/historical-evidence/hilega-pcr-oi-support-research-v1/
+match-failure-analysis-v1/
+```
 
-The script uses moving ATM at signal time T and the same exact physical strikes at T and T-5 minutes.
+Files:
+- `model-c-match-winner-loser-features-v1.csv`
+- `model-c-match-winner-loser-summary-v1.txt`
 
-It does not enable execution, paper orders, or option selection.
+The analysis covers:
+- direction
+- Hilega entry route
+- time of day
+- weekday
+- days to expiry
+- OI intensity
+- PCR level
+- absolute PCR change
+- dominant OI leg
+- winner/loss numeric comparisons
+- descriptive two-feature slices
+- per-session concentration
+
+All results are descriptive research only.
