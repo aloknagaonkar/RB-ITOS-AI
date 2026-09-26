@@ -11,8 +11,8 @@ def test_trade_ui_sections_and_timing_contract():
     t=Path("frontend/src/hilegaDecisionTable.tsx").read_text(encoding="utf-8")
     assert "Shadow premium P&amp;L dashboard" not in s
     assert "CE entry / exit trade ledger" not in s
-    assert "Active CE shadow trade" in s
-    assert "Exited CE shadow trades" in s
+    assert "Active option shadow trade" in s
+    assert "Exited option shadow trades" in s
     assert "activeTrades" in s and "exitedTrades" in s
     assert "candleTiming" in t
     assert "UNDERLYING_5M_BUILD" in t

@@ -30,7 +30,7 @@ def project_directional_shadow_dashboard(rows: Iterable[dict[str, Any]]) -> dict
 
     for index, row in enumerate(records):
         direction, kind = _stage_info(row.get("stage"))
-        if direction is None or kind not in {"START", "ENTRY_RETRY", "UPDATE", "EXIT", "EXIT_RETRY"}:
+        if direction is None or kind not in {"START", "ENTRY_RETRY", "UPDATE", "EXIT", "EXIT_RETRY", "RECOVERY"}:
             continue
         payload = row.get("payload") or {}
         signal_bar = payload.get("signal_bar")
@@ -46,9 +46,13 @@ def project_directional_shadow_dashboard(rows: Iterable[dict[str, Any]]) -> dict
             e for e in events
             if e[3].get("status") == "ACTIVE" and e[1] in {"START", "ENTRY_RETRY", "UPDATE"}
         ]
+        recovery_events = [
+            e for e in events
+            if e[3].get("status") == "CLOSED" and e[1] == "RECOVERY"
+        ]
         closed_events = [
             e for e in events
-            if e[3].get("status") == "CLOSED" and e[1] in {"EXIT", "EXIT_RETRY"}
+            if e[3].get("status") == "CLOSED" and e[1] in {"EXIT", "EXIT_RETRY", "RECOVERY"}
         ]
         pending_events = [
             e for e in events
@@ -59,7 +63,13 @@ def project_directional_shadow_dashboard(rows: Iterable[dict[str, Any]]) -> dict
             if e[3].get("status") not in {"ACTIVE", "CLOSED", "PENDING_EXACT_EXIT"}
         ]
 
-        entry = active_events[0][3] if active_events else None
+        entry = (
+            active_events[0][3]
+            if active_events
+            else recovery_events[-1][3]
+            if recovery_events
+            else None
+        )
         if entry is None:
             # Preserve explicit failed/incomplete lifecycle attempts.
             payload = failure_events[-1][3] if failure_events else {}

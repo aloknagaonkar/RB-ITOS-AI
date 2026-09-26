@@ -14,6 +14,21 @@ from .hilega_directional_live_shadow_v1 import (
     HilegaDirectionalLiveShadowCoordinatorV1,
 )
 
+HILEGA_UNDERLYING = "NSE_INDEX|Nifty 50"
+
+
+def _resolve_hilega_option_expiry(sources, *, session_date: date, configured_raw: str):
+    configured_raw = configured_raw.strip()
+
+    if configured_raw:
+        return date.fromisoformat(configured_raw), "CONFIGURED_ENV"
+
+    expiry = sources.resolve_option_expiry(
+        HILEGA_UNDERLYING,
+        today=session_date,
+    )
+    return expiry, "AUTO_UPSTOX_INSTRUMENT_SEARCH"
+
 def run():
     load_dotenv('.env');engine=make_engine();initialize(engine)
     with Session(engine) as s:config_id,config,enabled=active_config(s)
@@ -23,7 +38,11 @@ def run():
     try:
         if selected==HILEGA_STRATEGY_ID:
             expiry_raw=os.getenv("HILEGA_MILEGA_OPTION_EXPIRY","").strip()
-            option_expiry=date.fromisoformat(expiry_raw) if expiry_raw else None
+            option_expiry, option_expiry_source = _resolve_hilega_option_expiry(
+                sources,
+                session_date=datetime.now(IST).date(),
+                configured_raw=expiry_raw,
+            )
             evidence=None
             evidence_day=None
             active_sources=sources
@@ -39,6 +58,7 @@ def run():
                 from . import hilega_milega_live_shadow_v1 as coordinator_module
                 journal.append("process_start", {"session_date":datetime.now(IST).date().isoformat()}, {
                     "expiry":option_expiry.isoformat() if option_expiry else None,
+                    "expiry_source":option_expiry_source,
                     "strategy_source_sha256":hashlib.sha256(Path(strategy_module.__file__).read_bytes()).hexdigest(),
                     "coordinator_source_sha256":hashlib.sha256(Path(coordinator_module.__file__).read_bytes()).hexdigest(),
                 })
@@ -55,8 +75,14 @@ def run():
                         journal=EvidenceJournalV1(evidence_root/(now.date().isoformat()+".jsonl"))
                         evidence=RecordingHilegaSourcesV1(sources,journal)
                         evidence_day=now.date()
+                        option_expiry, option_expiry_source = _resolve_hilega_option_expiry(
+                            sources,
+                            session_date=now.date(),
+                            configured_raw=expiry_raw,
+                        )
                         journal.append("process_start", {"session_date":now.date().isoformat()}, {
                             "expiry":option_expiry.isoformat() if option_expiry else None,
+                    "expiry_source":option_expiry_source,
                             "strategy_source_sha256":hashlib.sha256(Path(strategy_module.__file__).read_bytes()).hexdigest(),
                             "coordinator_source_sha256":hashlib.sha256(Path(coordinator_module.__file__).read_bytes()).hexdigest(),
                         })
@@ -71,7 +97,11 @@ def run():
                     evidence.close()
         elif selected==HILEGA_DIRECTIONAL_STRATEGY_ID:
             expiry_raw=os.getenv("HILEGA_MILEGA_OPTION_EXPIRY","").strip()
-            option_expiry=date.fromisoformat(expiry_raw) if expiry_raw else None
+            option_expiry, option_expiry_source = _resolve_hilega_option_expiry(
+                sources,
+                session_date=datetime.now(IST).date(),
+                configured_raw=expiry_raw,
+            )
             evidence=None
             evidence_day=None
             active_sources=sources
@@ -87,6 +117,7 @@ def run():
                 evidence_day=datetime.now(IST).date()
                 journal.append("process_start", {"session_date":datetime.now(IST).date().isoformat()}, {
                     "expiry":option_expiry.isoformat() if option_expiry else None,
+                    "expiry_source":option_expiry_source,
                     "directional_source_sha256":hashlib.sha256(Path(directional_module.__file__).read_bytes()).hexdigest(),
                     "live_directional_source_sha256":hashlib.sha256(Path(live_directional_module.__file__).read_bytes()).hexdigest(),
                 })
@@ -101,8 +132,14 @@ def run():
                         journal=EvidenceJournalV1(evidence_root/(now.date().isoformat()+".jsonl"))
                         evidence=RecordingHilegaSourcesV1(sources,journal)
                         evidence_day=now.date()
+                        option_expiry, option_expiry_source = _resolve_hilega_option_expiry(
+                            sources,
+                            session_date=now.date(),
+                            configured_raw=expiry_raw,
+                        )
                         journal.append("process_start", {"session_date":now.date().isoformat()}, {
                             "expiry":option_expiry.isoformat() if option_expiry else None,
+                    "expiry_source":option_expiry_source,
                             "directional_source_sha256":hashlib.sha256(Path(directional_module.__file__).read_bytes()).hexdigest(),
                             "live_directional_source_sha256":hashlib.sha256(Path(live_directional_module.__file__).read_bytes()).hexdigest(),
                         })

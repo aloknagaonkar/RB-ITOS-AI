@@ -27,6 +27,9 @@ class Gateway:
         start=datetime(2026,9,23,9,15,tzinfo=IST)
         return [HistoricalCandle(provider="upstox",instrument_key=instrument_key,session_date=self.d,timestamp=start+timedelta(minutes=i),open=100+i,high=102+i,low=99+i,close=101+i,volume=1000,open_interest=None) for i in range(10)]
 
+    def active_option_historical_candles(self,instrument_key,session_date):
+        return self.historical_option_candles(instrument_key,session_date)
+
 
 def test_historical_parity_source_matches_live_source_contract_shape_and_exact_minutes():
     src=HistoricalParityMarketSourcesV1(Gateway(),date(2026,9,23))
@@ -45,3 +48,60 @@ def test_functional_normalizer_removes_runtime_hash_identity_not_semantics():
           {"sequence":2,"stage":"STRATEGY_TRANSITION","status":"ENTRY","checkpoint":"c","payload":{"price":100},"record_hash":"abc"}]
     out=normalize_functional_audit(rows)
     assert out==[{"checkpoint":"c","stage":"STRATEGY_TRANSITION","status":"ENTRY","payload":{"price":100}}]
+
+
+def test_historical_parity_source_accepts_pe_contracts():
+    from datetime import date
+    from market_lab.domain import HistoricalOptionContract
+
+    class GatewayPE(Gateway):
+        def active_option_contracts(self, underlying, expiry):
+            return [
+                HistoricalOptionContract(
+                    underlying=underlying,
+                    instrument_key="PE-23000",
+                    expiry=expiry,
+                    strike=23000.0,
+                    side="PE",
+                    lot_size=75,
+                )
+            ]
+
+    d = date(2026, 9, 23)
+
+    src = HistoricalParityMarketSourcesV1(
+        GatewayPE(),
+        d,
+        acquisition_today=d,
+    )
+
+    rows = src.option_contracts(
+        "NSE_INDEX|Nifty 50",
+        d,
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["instrument_type"] == "PE"
+    assert (
+        src.option_contract_coverage[0]["side"]
+        == "PE"
+    )
+
+
+def test_historical_parity_warmup_never_exposes_target_session():
+    from datetime import date
+
+    d = date(2026, 9, 23)
+
+    src = HistoricalParityMarketSourcesV1(
+        Gateway(),
+        d,
+        acquisition_today=d,
+    )
+
+    rows = src.historical_candles(
+        "NSE_INDEX|Nifty 50",
+        d,
+    )
+
+    assert rows == []

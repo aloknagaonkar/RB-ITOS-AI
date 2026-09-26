@@ -188,6 +188,36 @@ class HilegaDirectionalLiveShadowCoordinatorV1:
                     "signal_bar": bar.ts.isoformat(), "error_type": type(exc).__name__, "error": str(exc)
                 }, checkpoint=bar.ts)
 
+    @staticmethod
+    def _retryable_missing_entry(snapshot) -> bool:
+        """Only exact missing-entry-minute gaps are transient/retryable.
+
+        INCOMPLETE can also represent permanent integrity failures such as
+        duplicate timestamps, invalid option-minute health, instrument
+        mismatch or non-positive entry premiums. Those must never be retried
+        as if broker history were merely late.
+        """
+        if snapshot is None or snapshot.status != "INCOMPLETE":
+            return False
+
+        issue = str(snapshot.issue or "").strip()
+        if not issue:
+            return False
+
+        parts = [
+            part.strip()
+            for part in issue.split(";")
+            if part.strip()
+        ]
+
+        if not parts:
+            return False
+
+        return all(
+            ":MISSING_ENTRY_MINUTE:" in part
+            for part in parts
+        )
+
     def _close_option(self, *, direction: str, now: datetime, exit_boundary: datetime, exit_reason: str, audit: bool) -> None:
         lifecycle = self.ce_shadow if direction == "BULLISH" else self.pe_shadow
 
@@ -198,7 +228,37 @@ class HilegaDirectionalLiveShadowCoordinatorV1:
             lifecycle.snapshot is not None
             and lifecycle.snapshot.status == "INCOMPLETE"
         ):
-            key = lifecycle.snapshot.signal_bar
+            incomplete = lifecycle.snapshot
+
+            # Only late exact entry-minute evidence is transient. Permanent
+            # integrity failures must not enter the retry ledger.
+            if not self._retryable_missing_entry(incomplete):
+                if audit:
+                    self._audit(
+                        now,
+                        f"{direction}_OPTION_SHADOW_EXIT_WAITING_FOR_ENTRY",
+                        "BLOCKED_NON_RETRYABLE_ENTRY",
+                        {
+                            **incomplete.payload(),
+                            "deferred_exit_boundary": exit_boundary.isoformat(),
+                            "deferred_exit_reason": exit_reason,
+                            "retryable": False,
+                        },
+                    )
+
+                # Directional ownership has ended. Release the active slot so
+                # a later valid strategy entry is not blocked, while the
+                # original audited INCOMPLETE record remains immutable.
+                if direction == "BULLISH":
+                    self.ce_shadow = HilegaMilegaOptionShadowLifecycleV1()
+                    self._ce_last_update = None
+                else:
+                    self.pe_shadow = HilegaMilegaPEOptionShadowLifecycleV1()
+                    self._pe_last_update = None
+
+                return
+
+            key = incomplete.signal_bar
 
             if direction == "BULLISH":
                 self._pending_ce_entries[key] = lifecycle
@@ -272,6 +332,21 @@ class HilegaDirectionalLiveShadowCoordinatorV1:
             if snap is None or snap.status != "INCOMPLETE":
                 continue
 
+            if not self._retryable_missing_entry(snap):
+                self._audit(
+                    now,
+                    f"{direction}_OPTION_SHADOW_ENTRY_RETRY",
+                    "BLOCKED_NON_RETRYABLE_ENTRY",
+                    {
+                        **snap.payload(),
+                        "retryable": False,
+                    },
+                    checkpoint=datetime.fromisoformat(
+                        snap.signal_bar
+                    ),
+                )
+                continue
+
             try:
                 retried = lifecycle.retry_missing_entry(
                     option_minutes=self.sources.option_intraday_1m
@@ -319,27 +394,76 @@ class HilegaDirectionalLiveShadowCoordinatorV1:
         ):
             for key, lifecycle in list(store.items()):
                 try:
-                    retried = lifecycle.retry_missing_entry(
-                        option_minutes=self.sources.option_intraday_1m
-                    )
+                    # Pending-entry recovery has two valid states:
+                    #
+                    # 1. INCOMPLETE:
+                    #    exact original entry minute has not recovered yet.
+                    #
+                    # 2. ACTIVE:
+                    #    entry has recovered, but a later exact path minute
+                    #    may still be unavailable. Resume path reconstruction
+                    #    without retrying/rebuilding the entry identity.
+                    current = lifecycle.snapshot
 
-                    self._audit(
-                        now,
-                        f"{direction}_OPTION_SHADOW_ENTRY_RETRY",
-                        "PASS" if retried.active else retried.status,
-                        retried.payload(),
-                        checkpoint=datetime.fromisoformat(
-                            retried.signal_bar
-                        ),
-                    )
+                    if current is None:
+                        continue
 
-                    if not retried.active:
+                    if current.status == "INCOMPLETE":
+                        if not self._retryable_missing_entry(current):
+                            self._audit(
+                                now,
+                                f"{direction}_OPTION_SHADOW_ENTRY_RETRY",
+                                "BLOCKED_NON_RETRYABLE_ENTRY",
+                                {
+                                    **current.payload(),
+                                    "retryable": False,
+                                },
+                                checkpoint=datetime.fromisoformat(
+                                    current.signal_bar
+                                ),
+                            )
+                            continue
+
+                        retried = lifecycle.retry_missing_entry(
+                            option_minutes=self.sources.option_intraday_1m
+                        )
+
+                        self._audit(
+                            now,
+                            f"{direction}_OPTION_SHADOW_ENTRY_RETRY",
+                            "PASS" if retried.active else retried.status,
+                            retried.payload(),
+                            checkpoint=datetime.fromisoformat(
+                                retried.signal_bar
+                            ),
+                        )
+
+                        if not retried.active:
+                            continue
+
+                    elif lifecycle.active:
+                        retried = current
+
+                    else:
+                        self._audit(
+                            now,
+                            f"{direction}_OPTION_SHADOW_ENTRY_RETRY",
+                            "BLOCKED",
+                            {
+                                "signal_bar": key,
+                                "status": current.status,
+                                "issue": (
+                                    "PENDING_ENTRY_LIFECYCLE_"
+                                    "NOT_INCOMPLETE_OR_ACTIVE"
+                                ),
+                            },
+                        )
                         continue
 
                     exit_boundary, exit_reason = exits[key]
 
-                    # Reconstruct the exact completed option path before exit
-                    # so MFE/MAE/latest observations are based on real minutes.
+                    # Reconstruct every exact completed option minute before
+                    # allowing the deferred exact exit.
                     through = exit_boundary - timedelta(minutes=1)
                     entry_boundary = datetime.fromisoformat(
                         retried.signal_boundary
@@ -350,6 +474,7 @@ class HilegaDirectionalLiveShadowCoordinatorV1:
                             through_completed_minute=through,
                             option_minutes=self.sources.option_intraday_1m,
                         )
+
                         if updated is not None:
                             self._audit(
                                 now,
@@ -357,6 +482,20 @@ class HilegaDirectionalLiveShadowCoordinatorV1:
                                 updated.status,
                                 updated.payload(),
                             )
+
+                        # Never close when any exact minute in the path is
+                        # unavailable/invalid. update() intentionally leaves
+                        # the internal ACTIVE snapshot unchanged on an
+                        # INCOMPLETE_UPDATE, so explicitly gate close here.
+                        if (
+                            updated is None
+                            or updated.status != "ACTIVE"
+                            or not updated.active
+                            or updated.issue is not None
+                            or updated.latest_completed_minute
+                            != through.isoformat()
+                        ):
+                            continue
 
                     closed = lifecycle.close(
                         exit_boundary=exit_boundary,
@@ -472,6 +611,418 @@ class HilegaDirectionalLiveShadowCoordinatorV1:
             payload["recovery_source"] = recovery_source or "BOOTSTRAP_RECOVERY"
         self._audit(now, "DIRECTIONAL_DECISION", status, payload, checkpoint=bar.ts)
 
+    @staticmethod
+    def _option_audit_stage_info(
+        stage: str | None,
+    ) -> tuple[str | None, str | None]:
+        if not stage:
+            return None, None
+
+        for direction in ("BULLISH", "BEARISH"):
+            prefix = f"{direction}_OPTION_SHADOW_"
+
+            if stage.startswith(prefix):
+                return (
+                    direction,
+                    stage[len(prefix):],
+                )
+
+        return None, None
+
+    def _audited_option_restore_plan(
+        self,
+        session_date: date,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Build restart state only from frozen audited option identities.
+
+        Historical bar replay is not allowed to rebuild option candidates from
+        the current contract master. Only audited ACTIVE or
+        PENDING_EXACT_EXIT five-leg snapshots are restorable.
+
+        An INCOMPLETE entry without a complete audited five-leg identity is
+        deliberately fail-closed on restart; reconstructing it from today's
+        contract master would violate option identity integrity.
+        """
+        prefix = session_date.isoformat()
+
+        by_trade: dict[
+            tuple[str, str],
+            list[tuple[int, str, dict[str, Any], dict[str, Any]]],
+        ] = {}
+
+        for index, record in enumerate(
+            self.step_audit.read_all()
+        ):
+            direction, kind = (
+                self._option_audit_stage_info(
+                    record.get("stage")
+                )
+            )
+
+            if direction is None:
+                continue
+
+            # Bootstrap restore audit rows are diagnostics only and must never
+            # become restore input themselves.
+            if kind == "BOOTSTRAP_RESTORE":
+                continue
+
+            if kind not in {
+                "START",
+                "ENTRY_RETRY",
+                "UPDATE",
+                "EXIT",
+                "EXIT_RETRY",
+                "RECOVERY",
+            }:
+                continue
+
+            payload = record.get("payload") or {}
+            signal_bar = payload.get("signal_bar")
+
+            if (
+                not isinstance(signal_bar, str)
+                or not signal_bar.startswith(prefix)
+            ):
+                continue
+
+            by_trade.setdefault(
+                (
+                    direction,
+                    signal_bar,
+                ),
+                [],
+            ).append(
+                (
+                    index,
+                    kind,
+                    record,
+                    payload,
+                )
+            )
+
+        restorable: list[dict[str, Any]] = []
+        blocked: list[dict[str, Any]] = []
+
+        for (
+            direction,
+            signal_bar,
+        ), events in by_trade.items():
+            events.sort(
+                key=lambda x: x[0]
+            )
+
+            # A CLOSED snapshot is terminal. Recovery records therefore
+            # supersede the original historical INCOMPLETE attempt.
+            terminal = any(
+                str(
+                    payload.get("status")
+                    or ""
+                ).upper()
+                == "CLOSED"
+                for _, _, _, payload in events
+            )
+
+            if terminal:
+                continue
+
+            latest_restorable = None
+
+            for item in events:
+                payload = item[3]
+                status = str(
+                    payload.get("status")
+                    or ""
+                ).upper()
+
+                if status in {
+                    "ACTIVE",
+                    "PENDING_EXACT_EXIT",
+                }:
+                    latest_restorable = item
+
+            if latest_restorable is not None:
+                _, kind, record, payload = (
+                    latest_restorable
+                )
+
+                restorable.append(
+                    {
+                        "direction": direction,
+                        "signal_bar": signal_bar,
+                        "kind": kind,
+                        "record": record,
+                        "payload": payload,
+                    }
+                )
+
+                continue
+
+            latest_payload = (
+                events[-1][3]
+                if events
+                else {}
+            )
+
+            latest_status = str(
+                latest_payload.get("status")
+                or ""
+            ).upper()
+
+            if latest_status == "INCOMPLETE":
+                blocked.append(
+                    {
+                        "direction": direction,
+                        "signal_bar": signal_bar,
+                        "payload": latest_payload,
+                        "reason": (
+                            "INCOMPLETE_OPTION_IDENTITY_"
+                            "NOT_SAFE_TO_REBUILD_ON_RESTART"
+                        ),
+                    }
+                )
+
+        restorable.sort(
+            key=lambda x: x["signal_bar"]
+        )
+
+        blocked.sort(
+            key=lambda x: x["signal_bar"]
+        )
+
+        return {
+            "restorable": restorable,
+            "blocked": blocked,
+        }
+
+    def _restore_audited_option_state(
+        self,
+        *,
+        now: datetime,
+        session_date: date,
+    ) -> dict[str, Any]:
+        """Restore unresolved option state from audit, never contract master."""
+        plan = self._audited_option_restore_plan(
+            session_date
+        )
+
+        restored_active = 0
+        restored_pending_exit = 0
+        blocked = 0
+        restored_keys: list[str] = []
+
+        active_direction = None
+
+        for item in plan["restorable"]:
+            direction = item["direction"]
+            payload = item["payload"]
+            signal_bar = item["signal_bar"]
+
+            status = str(
+                payload.get("status")
+                or ""
+            ).upper()
+
+            if (
+                status == "ACTIVE"
+                and direction
+                != self.directional.trade_owner
+            ):
+                blocked += 1
+
+                self._audit(
+                    now,
+                    (
+                        f"{direction}_OPTION_SHADOW_"
+                        "BOOTSTRAP_RESTORE"
+                    ),
+                    "BLOCKED_OWNER_MISMATCH",
+                    {
+                        "signal_bar": signal_bar,
+                        "audited_status": status,
+                        "directional_trade_owner": (
+                            self.directional.trade_owner
+                        ),
+                        "identity_source": (
+                            "AUDITED_OPTION_SNAPSHOT"
+                        ),
+                        "reconstructed": False,
+                    },
+                    checkpoint=datetime.fromisoformat(
+                        signal_bar
+                    ),
+                )
+
+                continue
+
+            if status == "ACTIVE":
+                if active_direction is not None:
+                    blocked += 1
+
+                    self._audit(
+                        now,
+                        (
+                            f"{direction}_OPTION_SHADOW_"
+                            "BOOTSTRAP_RESTORE"
+                        ),
+                        "BLOCKED_MULTIPLE_ACTIVE_OPTIONS",
+                        {
+                            "signal_bar": signal_bar,
+                            "existing_active_direction": (
+                                active_direction
+                            ),
+                            "identity_source": (
+                                "AUDITED_OPTION_SNAPSHOT"
+                            ),
+                            "reconstructed": False,
+                        },
+                        checkpoint=datetime.fromisoformat(
+                            signal_bar
+                        ),
+                    )
+
+                    continue
+
+            lifecycle_cls = (
+                HilegaMilegaOptionShadowLifecycleV1
+                if direction == "BULLISH"
+                else HilegaMilegaPEOptionShadowLifecycleV1
+            )
+
+            try:
+                lifecycle = (
+                    lifecycle_cls
+                    .from_audited_active_snapshot(
+                        payload
+                    )
+                )
+            except Exception as exc:
+                blocked += 1
+
+                self._audit(
+                    now,
+                    (
+                        f"{direction}_OPTION_SHADOW_"
+                        "BOOTSTRAP_RESTORE"
+                    ),
+                    "BLOCKED_INVALID_AUDITED_SNAPSHOT",
+                    {
+                        "signal_bar": signal_bar,
+                        "error_type": (
+                            type(exc).__name__
+                        ),
+                        "error": str(exc),
+                        "identity_source": (
+                            "AUDITED_OPTION_SNAPSHOT"
+                        ),
+                        "reconstructed": False,
+                    },
+                    checkpoint=datetime.fromisoformat(
+                        signal_bar
+                    ),
+                )
+
+                continue
+
+            keys = list(
+                lifecycle.snapshot
+                .shadow_selected_instrument_keys
+            )
+
+            if status == "ACTIVE":
+                active_direction = direction
+
+                if direction == "BULLISH":
+                    self.ce_shadow = lifecycle
+                    self._ce_last_update = None
+                else:
+                    self.pe_shadow = lifecycle
+                    self._pe_last_update = None
+
+                restored_active += 1
+
+            elif status == "PENDING_EXACT_EXIT":
+                if direction == "BULLISH":
+                    self._pending_ce_exits[
+                        signal_bar
+                    ] = lifecycle
+                else:
+                    self._pending_pe_exits[
+                        signal_bar
+                    ] = lifecycle
+
+                restored_pending_exit += 1
+
+            restored_keys.extend(keys)
+
+            self._audit(
+                now,
+                (
+                    f"{direction}_OPTION_SHADOW_"
+                    "BOOTSTRAP_RESTORE"
+                ),
+                (
+                    "RESTORED_ACTIVE"
+                    if status == "ACTIVE"
+                    else "RESTORED_PENDING_EXACT_EXIT"
+                ),
+                {
+                    **lifecycle.snapshot.payload(),
+                    "identity_source": (
+                        "AUDITED_OPTION_SNAPSHOT"
+                    ),
+                    "reconstructed": True,
+                    "contract_master_lookup": False,
+                },
+                checkpoint=datetime.fromisoformat(
+                    signal_bar
+                ),
+            )
+
+        for item in plan["blocked"]:
+            blocked += 1
+
+            self._audit(
+                now,
+                (
+                    f"{item['direction']}_"
+                    "OPTION_SHADOW_BOOTSTRAP_RESTORE"
+                ),
+                "BLOCKED_UNSAFE_INCOMPLETE_IDENTITY",
+                {
+                    "signal_bar": item[
+                        "signal_bar"
+                    ],
+                    "issue": (
+                        item["payload"].get(
+                            "issue"
+                        )
+                    ),
+                    "reason": item["reason"],
+                    "identity_source": (
+                        "AUDITED_OPTION_SNAPSHOT"
+                    ),
+                    "contract_master_lookup": False,
+                    "reconstructed": False,
+                },
+                checkpoint=datetime.fromisoformat(
+                    item["signal_bar"]
+                ),
+            )
+
+        return {
+            "restored_active_count": (
+                restored_active
+            ),
+            "restored_pending_exit_count": (
+                restored_pending_exit
+            ),
+            "blocked_restore_count": blocked,
+            "restored_instrument_keys": (
+                restored_keys
+            ),
+        }
+
     def _existing_directional_decision_checkpoints(self, session_date: date) -> set[str]:
         prefix = session_date.isoformat()
         out: set[str] = set()
@@ -571,8 +1122,13 @@ class HilegaDirectionalLiveShadowCoordinatorV1:
         for bar in current_bars:
             if bar.ts <= completed_label:
                 decision = self.directional.on_bar(bar)
-                self._handle_decision(now=now, bar=bar, decision=decision, audit=False)
 
+                # Bootstrap replays directional strategy state only.
+                #
+                # DO NOT call _handle_decision() here: that path can invoke
+                # _start_option(), which resolves candidates from the current
+                # contract master. Restart recovery must never reconstruct
+                # historical option identity that way.
                 checkpoint = bar.ts.isoformat()
                 if checkpoint not in existing_directional:
                     self._audit_directional_decision(
@@ -589,8 +1145,18 @@ class HilegaDirectionalLiveShadowCoordinatorV1:
                 self._last_bar_ts = bar.ts
                 bars_replayed += 1
 
+        option_restore = self._restore_audited_option_state(
+            now=now,
+            session_date=session_date,
+        )
+
         self._bootstrapped_date = session_date
+
+        # Safe after audited restore: update() uses the frozen audited
+        # candidate set reconstructed by from_audited_active_snapshot().
+        # It does not resolve a new contract universe.
         self._update_options(now)
+
         if self.directional.bullish.session.session_locked or self.directional.bearish.session.session_locked:
             self._cutoff_done_date = session_date
         self._audit(now, "DIRECTIONAL_LIVE_BOOTSTRAP", "PASS", {
@@ -607,12 +1173,14 @@ class HilegaDirectionalLiveShadowCoordinatorV1:
             "reconstructed": True,
             "recovered_checkpoint_count": len(recovered_checkpoints),
             "recovered_checkpoints": recovered_checkpoints,
+            "option_restore": option_restore,
         })
         return {
             "status": "BOOTSTRAPPED",
             "session_date": session_date.isoformat(),
             "trade_owner": self.directional.trade_owner,
             "recovered_checkpoint_count": len(recovered_checkpoints),
+            "option_restore": option_restore,
         }
 
     def process_cutoff(self, now: datetime, *, intraday) -> DirectionalDecision | None:
