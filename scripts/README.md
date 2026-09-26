@@ -1,82 +1,69 @@
-# Hilega / OI / Red-Midpoint + VWAP Overlay Research v1
+# Opening Red + VWAP Validation v1
 
-This package overlays **Nifty futures VWAP** on the existing Hilega, OI/PCR, true-interval-sequence, and opening-red-midpoint research.
+This is a dedicated follow-up to the VWAP overlay result where the opening-red structure showed better continuation/reclaim separation under bearish VWAP context.
 
-It does not modify Hilega logic and does not enable execution.
+## Input
 
-## Existing VWAP source
+The script consumes the output from the prior VWAP overlay:
 
-The script uses:
+```text
+data/historical-evidence/
+hilega-pcr-oi-support-research-v1/
+vwap-overlay-research-v1/
+opening-red-vwap-overlay-v1.csv
+```
+
+and the existing 180-session Nifty futures VWAP file:
 
 ```text
 data/historical-evidence/
 midpoint-v2-nifty-futures-vwap-v1-all180.csv
 ```
 
-This dataset already contains:
+## What it tests
+
+For each red midpoint/boundary-break event:
+
+- below VWAP
+- below VWAP + VWAP falling over 5m
+- below VWAP + VWAP falling over 10m
+- below VWAP + VWAP falling over 15m
+- persistent below VWAP for 3m
+- persistent below VWAP for 5m
+- moving farther below VWAP over 5m
+- recent downward VWAP cross/rejection
+- below + falling + moving farther below
+- distance below VWAP buckets
+
+Outcomes remain:
 
 ```text
-timestamp
-open
-high
-low
-close
-volume
-session_cumulative_volume
-session_vwap
+CONTINUATION
+  BREAK_AND_GO
+  BREAK_AND_BASE_THEN_GO
+
+RECLAIM
+  FALSE_BREAK_RECLAIM
 ```
 
-## VWAP features
+## Chronological validation
 
-At each Hilega entry or joinable red-break event:
+The available red-event sessions are split chronologically:
 
 ```text
-futures close
-session VWAP
-price - VWAP in points
-price - VWAP in %
-VWAP 5m slope
-VWAP 10m slope
-VWAP 15m slope
+first 40 session dates  -> TRAIN
+next 30                 -> VALIDATION
+remaining dates         -> EVALUATION
 ```
 
-The event is then classified:
-
-```text
-ALIGNED_STRONG
-ALIGNED_PRICE
-NEAR_VWAP
-OPPOSED_PRICE
-OPPOSED_STRONG
-```
-
-Directional interpretation:
-
-```text
-Bullish:
-  close > VWAP + VWAP rising = ALIGNED_STRONG
-
-Bearish:
-  close < VWAP + VWAP falling = ALIGNED_STRONG
-```
-
-`NEAR_VWAP` currently means within ±5 futures points. This is descriptive research only, not a frozen threshold.
-
-## Included analyses
-
-- all Hilega trades vs VWAP alignment
-- bullish and bearish separately
-- 5m OI relation + VWAP
-- previous 3–5% intensity / no-13h candidate + VWAP
-- true OI interval sequence + VWAP
-- opening-red midpoint / low-break outcomes + VWAP where exact event timestamps are joinable
+This is descriptive validation, not a new trading rule.
 
 ## Run
 
 Copy:
 
 ```text
-hilega_vwap_overlay_research.py
+opening_red_vwap_validation.py
 ```
 
 to:
@@ -92,8 +79,8 @@ cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/hilega_vwap_overlay_research.py \
-  | tee /tmp/hilega-vwap-overlay.txt
+python scripts/opening_red_vwap_validation.py \
+  | tee /tmp/opening-red-vwap-validation.txt
 ```
 
 ## Outputs
@@ -101,13 +88,13 @@ python scripts/hilega_vwap_overlay_research.py \
 ```text
 data/historical-evidence/
 hilega-pcr-oi-support-research-v1/
-vwap-overlay-research-v1/
+opening-red-vwap-validation-v1/
 ```
 
 Files:
 
-- `hilega-vwap-overlay-trades-v1.csv`
-- `opening-red-vwap-overlay-v1.csv` when red-event joins are available
-- `vwap-overlay-summary-v1.txt`
+- `opening-red-vwap-validation-events-v1.csv`
+- `opening-red-vwap-validation-candidates-v1.csv`
+- `opening-red-vwap-validation-summary-v1.txt`
 
-Research only. No production filter is frozen by this script.
+Research only. No production rule, Hilega logic, or execution setting is changed.
