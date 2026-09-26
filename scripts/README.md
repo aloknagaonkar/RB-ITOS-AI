@@ -1,14 +1,18 @@
-# Hilega Model C MATCH failure analysis
+# Hilega MATCH robustness analysis
 
-This script analyzes the existing 30-session research CSV and asks:
+This is the next step after the 30-session winner-vs-loser analysis.
 
-> When OI matches Hilega direction, what distinguishes winners from losers?
+It does **not** search hundreds of combinations. It deliberately tests only a small set of broad candidate slices found in the prior analysis and checks whether they survive basic robustness tests.
 
-It does not change strategy logic and does not enable execution.
+## Copy
 
-## Install
+Copy:
 
-Copy `hilega_match_failure_analysis.py` into:
+```text
+hilega_match_robustness_analysis.py
+```
+
+to:
 
 ```text
 ~/RB-ITOS-AI/scripts/
@@ -21,40 +25,36 @@ cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/hilega_match_failure_analysis.py \
-  | tee /tmp/hilega-match-failure-analysis.txt
+python scripts/hilega_match_robustness_analysis.py \
+  | tee /tmp/hilega-match-robustness.txt
 ```
 
-## Required input
-
-```text
-data/historical-evidence/hilega-pcr-oi-support-research-v1/
-hilega-moving-atm-expiry-width-30-session-v1.csv
-```
-
-## Outputs
+## Input
 
 ```text
 data/historical-evidence/hilega-pcr-oi-support-research-v1/
 match-failure-analysis-v1/
+model-c-match-winner-loser-features-v1.csv
 ```
 
-Files:
-- `model-c-match-winner-loser-features-v1.csv`
-- `model-c-match-winner-loser-summary-v1.txt`
+## What it checks
 
-The analysis covers:
-- direction
-- Hilega entry route
-- time of day
-- weekday
-- days to expiry
-- OI intensity
-- PCR level
-- absolute PCR change
-- dominant OI leg
-- winner/loss numeric comparisons
-- descriptive two-feature slices
-- per-session concentration
+- baseline MATCH
+- exclusion of 13:00–13:59
+- intensity 3–5%
+- exclusion of CE_BUILD-dominant matches
+- PCR-level 1.10–1.29
+- absolute PCR change 0.02–0.04
+- two limited combined slices
 
-All results are descriptive research only.
+For each candidate it reports:
+
+- sample size
+- win rate
+- average and median points
+- total points
+- points capped at ±20 to reduce outlier influence
+- result after removing the single best winner
+- leave-one-session-out robustness
+
+No production rule is frozen by this script.
