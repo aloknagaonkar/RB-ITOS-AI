@@ -1,43 +1,80 @@
-# Hilega 60-session + 18 bullish + 18 bearish validation
+# Hilega + PCR/OI 180-session chronological walk-forward
 
-This package validates the previously discovered candidate **without retuning it**.
+This package implements the next research phase using all 180 real-OI sessions already discovered in the repository.
 
-Frozen candidate:
+## Important methodological note
+
+The split is chronological:
 
 ```text
-OI relation = MATCH
-3.0% <= SUMABS < 5.0%
-exclude 13:00–13:59
+oldest 60  -> TRAIN
+middle 60  -> VALIDATION
+newest 60  -> EVALUATION
 ```
 
-The analysis includes:
+However, the newest sessions have already been inspected in earlier research. Therefore the newest 60 are a **retrospective evaluation**, not a pristine never-seen holdout.
 
-- latest 60 sessions with real per-strike historical OI
-- Hilega historical replay for those sessions
-- exact same-physical-strike T vs T-5 moving-ATM calculation
-- Model C widths:
-  - Monday ±3
-  - Tuesday ±2
-  - Wednesday ±5
-  - Thursday ±5
-  - Friday ±4
-- bullish-only and bearish-only candidate performance
-- dominant-leg breakdown
-- frozen 18 bullish directional sessions
-- frozen 18 bearish directional sessions
-- leave-one-session-out checks
-- remove-best-winner check
-- median points
-- capped ±20-point total
+A future/live forward sample is still required before any OI rule is considered for production.
 
-The script does **not** modify Hilega logic and does not enable execution.
+## Features
+
+For every Hilega entry the script calculates, using the signal-time moving ATM and exact same physical strikes:
+
+- 5-minute CE/PE OI delta and percentage
+- 10-minute CE/PE OI delta and percentage
+- 15-minute CE/PE OI delta and percentage
+- 5m/10m/15m PCR before/current/change
+- 5m/10m/15m OI state
+- 5m/10m/15m MATCH / OPPOSITE / AMBIGUOUS relation
+- 5m dominant OI leg
+- Hilega direction
+- Hilega route
+- time bucket
+- weekday
+- actual days to expiry
+- outcome points
+
+No nearest-strike substitution or interpolation is performed.
+
+## Train-only candidate discovery
+
+The search family is intentionally limited and declared in the script before validation:
+
+- 5m relation must be MATCH
+- broad 5m intensity bands:
+  - any
+  - 0-2%
+  - 2-3%
+  - 3-5%
+  - 5-8%
+- direction:
+  - any
+  - bullish
+  - bearish
+- time:
+  - all
+  - exclude 13:00-13:59
+- 10m:
+  - any
+  - MATCH
+  - not OPPOSITE
+- 15m:
+  - any
+  - MATCH
+  - not OPPOSITE
+
+Minimum TRAIN sample size is 15.
+
+The script ranks only TRAIN candidates. A maximum of 10 TRAIN-eligible candidates are carried to VALIDATION. Only validation survivors are reported on EVALUATION.
+
+The previously discovered `MATCH + 3-5% + exclude 13h` candidate is reported separately as a **contaminated benchmark** and is not treated as clean train discovery.
 
 ## Install
 
 Copy:
 
 ```text
-hilega_60_session_directional_validation.py
+hilega_180_walkforward_research.py
 ```
 
 to:
@@ -46,42 +83,51 @@ to:
 ~/RB-ITOS-AI/scripts/
 ```
 
-## First run: build all required historical replay + analyze
+## First run
+
+This may take time because it builds Hilega replay across all 180 dates:
 
 ```bash
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/hilega_60_session_directional_validation.py \
+python scripts/hilega_180_walkforward_research.py \
   --run-replay \
-  | tee /tmp/hilega-60-directional-validation.txt
+  | tee /tmp/hilega-180-walkforward.txt
 ```
 
-The replay CLI's large JSON output is captured into a file rather than dumped to the terminal.
+The large replay CLI JSON is captured in:
 
-## Later analysis-only runs
+```text
+data/historical-evidence/hilega-pcr-oi-support-research-v1/
+180-session-walkforward-v1/
+historical-replay-build-v1.log
+```
+
+## Later reruns
 
 ```bash
-python scripts/hilega_60_session_directional_validation.py \
+python scripts/hilega_180_walkforward_research.py \
   --skip-replay \
-  | tee /tmp/hilega-60-directional-validation.txt
+  | tee /tmp/hilega-180-walkforward.txt
 ```
 
 ## Outputs
 
 ```text
 data/historical-evidence/hilega-pcr-oi-support-research-v1/
-60-session-directional-validation-v1/
+180-session-walkforward-v1/
 ```
 
-Files:
+Outputs:
 
-- `hilega-60-session-model-c-joined-v1.csv`
-- `hilega-directional-36-model-c-joined-v1.csv`
-- `hilega-60-session-directional-validation-summary-v1.txt`
-- `historical-replay-build-v1.log` when `--run-replay` is used
+- `hilega-180-session-features-v1.csv`
+- `train-oldest-60-v1.csv`
+- `validation-middle-60-v1.csv`
+- `evaluation-newest-60-v1.csv`
+- `train-discovered-candidates-v1.csv`
+- `walkforward-summary-v1.txt`
+- `historical-replay-build-v1.log`
 
-## Frozen directional sets
-
-The script contains the exact 18 bullish and exact 18 bearish session dates supplied for this validation. They are kept separate from the main 60-session result.
+Research only. No Hilega logic or execution settings are modified.
