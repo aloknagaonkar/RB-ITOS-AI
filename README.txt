@@ -1,21 +1,14 @@
-Hilega Directional Option Recovery V1
+Hilega P11 Operational UI package
 
 Contains:
-  backend/market_lab/hilega_directional_option_recovery_v1.py
+- backend/market_lab/hilega_directional_live_shadow_ui_v1.py
+- tests/test_hilega_directional_live_shadow_ui_v1.py
 
-From the RB-ITOS-AI repository root:
-  unzip -o hilega_directional_option_recovery_patch.zip -d ~/RB-ITOS-AI
-  cd ~/RB-ITOS-AI
-  source .venv/bin/activate
+Purpose:
+Adds read-only operational visibility for session, expiry/source, option lifecycle,
+restart restoration, cutoff, and market-evidence health while preserving observation-only safety.
+
+Validation:
   export PYTHONPATH=backend
-
-Compile:
-  python -m py_compile backend/market_lab/hilega_directional_option_recovery_v1.py
-
-Dry-run only:
-  python -m market_lab.hilega_directional_option_recovery_v1 \
-    --session 2026-09-25 \
-    --dry-run \
-    --json-output data/historical-evidence/hilega-directional-option-recovery-2026-09-25-v1.json
-
-This patch does NOT modify step-audit.jsonl, does NOT place orders, and does NOT restart workers.
+  python -m py_compile backend/market_lab/hilega_directional_live_shadow_ui_v1.py
+  python -m pytest -q tests/test_hilega_directional_live_shadow_ui_v1.py
