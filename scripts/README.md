@@ -1,69 +1,73 @@
-# Opening Red + VWAP Validation v1
+# Opening Red + VWAP Frozen Candidate OOS-H Validation v1
 
-This is a dedicated follow-up to the VWAP overlay result where the opening-red structure showed better continuation/reclaim separation under bearish VWAP context.
+This is the first clean follow-up after the 100-session development study.
 
-## Input
+It does **not** search for a new VWAP threshold.
 
-The script consumes the output from the prior VWAP overlay:
+It evaluates exactly the three candidates selected before looking at OOS_H:
+
+```text
+Candidate A
+recent_down_cross_or_rejection_5m
+
+Candidate B
+moving_farther_below_vwap_5m
+
+Candidate C
+A AND B
+```
+
+## Frozen definitions
+
+Candidate A:
+
+```text
+At the red boundary/midpoint event:
+price is >5 futures points below VWAP
+
+AND
+
+at least one futures observation during the prior 5 minutes
+was within 5 points of VWAP or above VWAP.
+```
+
+Candidate B:
+
+```text
+At the event:
+price is below VWAP
+
+AND
+
+price - VWAP is more negative than it was 5 minutes earlier.
+```
+
+Candidate C is simply A AND B.
+
+No thresholds are changed after seeing OOS_H.
+
+## Sources
+
+Red structural events:
 
 ```text
 data/historical-evidence/
-hilega-pcr-oi-support-research-v1/
-vwap-overlay-research-v1/
-opening-red-vwap-overlay-v1.csv
+opening-candle-midpoint-framework-v1-1-oos-h.json
 ```
 
-and the existing 180-session Nifty futures VWAP file:
+VWAP:
 
 ```text
 data/historical-evidence/
 midpoint-v2-nifty-futures-vwap-v1-all180.csv
 ```
 
-## What it tests
-
-For each red midpoint/boundary-break event:
-
-- below VWAP
-- below VWAP + VWAP falling over 5m
-- below VWAP + VWAP falling over 10m
-- below VWAP + VWAP falling over 15m
-- persistent below VWAP for 3m
-- persistent below VWAP for 5m
-- moving farther below VWAP over 5m
-- recent downward VWAP cross/rejection
-- below + falling + moving farther below
-- distance below VWAP buckets
-
-Outcomes remain:
-
-```text
-CONTINUATION
-  BREAK_AND_GO
-  BREAK_AND_BASE_THEN_GO
-
-RECLAIM
-  FALSE_BREAK_RECLAIM
-```
-
-## Chronological validation
-
-The available red-event sessions are split chronologically:
-
-```text
-first 40 session dates  -> TRAIN
-next 30                 -> VALIDATION
-remaining dates         -> EVALUATION
-```
-
-This is descriptive validation, not a new trading rule.
-
 ## Run
 
 Copy:
 
 ```text
-opening_red_vwap_validation.py
+opening_red_vwap_oos_h_validation.py
 ```
 
 to:
@@ -79,22 +83,12 @@ cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/opening_red_vwap_validation.py \
-  | tee /tmp/opening-red-vwap-validation.txt
+python scripts/opening_red_vwap_oos_h_validation.py \
+  | tee /tmp/opening-red-vwap-oos-h.txt
 ```
 
-## Outputs
+## Important
 
-```text
-data/historical-evidence/
-hilega-pcr-oi-support-research-v1/
-opening-red-vwap-validation-v1/
-```
+This OOS-H block has been used previously in other midpoint research, but these specific red+VWAP candidate definitions were selected from the earlier 100-session red/VWAP study before this OOS-H validation. Therefore this run is useful as a fresh test of these exact candidate definitions, while still not being a permanently pristine future/live holdout.
 
-Files:
-
-- `opening-red-vwap-validation-events-v1.csv`
-- `opening-red-vwap-validation-candidates-v1.csv`
-- `opening-red-vwap-validation-summary-v1.txt`
-
-Research only. No production rule, Hilega logic, or execution setting is changed.
+No strategy execution or Hilega rule is changed.
