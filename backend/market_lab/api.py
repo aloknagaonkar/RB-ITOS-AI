@@ -60,7 +60,7 @@ def create_app(engine=None, historical_gateway_factory=None):
     app.include_router(live_shadow_router)
     app.include_router(hilega_milega_live_shadow_router)
     app.include_router(hilega_directional_live_shadow_router)
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "testserver", "34.100.143.245"])
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "testserver", "8.234.104.101"])
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
