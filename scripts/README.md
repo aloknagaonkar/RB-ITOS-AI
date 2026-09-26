@@ -1,80 +1,77 @@
-# Hilega + PCR/OI 180-session chronological walk-forward
+# Hilega + OI/PCR Temporal Sequence Research v1
 
-This package implements the next research phase using all 180 real-OI sessions already discovered in the repository.
+This is the next research phase after the 180-session walk-forward showed that no simple 5m/10m/15m OI MATCH filter survived the conservative train criteria.
 
-## Important methodological note
+## Purpose
 
-The split is chronological:
+Instead of asking only:
 
 ```text
-oldest 60  -> TRAIN
-middle 60  -> VALIDATION
-newest 60  -> EVALUATION
+Does OI MATCH the Hilega direction at 5 minutes?
 ```
 
-However, the newest sessions have already been inspected in earlier research. Therefore the newest 60 are a **retrospective evaluation**, not a pristine never-seen holdout.
+this study asks:
 
-A future/live forward sample is still required before any OI rule is considered for production.
+```text
+What happened across 15m -> 10m -> 5m before the Hilega entry?
+```
 
-## Features
+Examples:
 
-For every Hilega entry the script calculates, using the signal-time moving ATM and exact same physical strikes:
+```text
+BUILD -> BUILD -> BULLISH
+BEARISH -> UNWIND -> BULLISH
+BULLISH -> BULLISH -> BULLISH
+AMBIGUOUS relation -> MATCH -> MATCH
+```
 
-- 5-minute CE/PE OI delta and percentage
-- 10-minute CE/PE OI delta and percentage
-- 15-minute CE/PE OI delta and percentage
-- 5m/10m/15m PCR before/current/change
-- 5m/10m/15m OI state
-- 5m/10m/15m MATCH / OPPOSITE / AMBIGUOUS relation
-- 5m dominant OI leg
-- Hilega direction
-- Hilega route
-- time bucket
-- weekday
-- actual days to expiry
-- outcome points
+## Exact market-data method
 
-No nearest-strike substitution or interpolation is performed.
+The script keeps the same methodology used in the previous research:
 
-## Train-only candidate discovery
+- moving ATM at Hilega signal time `T`
+- expiry-aware panel:
+  - Monday ±3
+  - Tuesday ±2
+  - Wednesday ±5
+  - Thursday ±5
+  - Friday ±4
+- compare the **same physical signal-time strikes** at:
+  - T vs T-5
+  - T vs T-10
+  - T vs T-15
+- no interpolation
+- no nearest-strike substitution
+- no synthetic OI
+- missing physical strike => that horizon is unavailable
 
-The search family is intentionally limited and declared in the script before validation:
+OI state:
 
-- 5m relation must be MATCH
-- broad 5m intensity bands:
-  - any
-  - 0-2%
-  - 2-3%
-  - 3-5%
-  - 5-8%
-- direction:
-  - any
-  - bullish
-  - bearish
-- time:
-  - all
-  - exclude 13:00-13:59
-- 10m:
-  - any
-  - MATCH
-  - not OPPOSITE
-- 15m:
-  - any
-  - MATCH
-  - not OPPOSITE
+```text
+CE ΔOI < 0, PE ΔOI > 0 => BULLISH
+CE ΔOI > 0, PE ΔOI < 0 => BEARISH
+CE ΔOI > 0, PE ΔOI > 0 => BUILD
+CE ΔOI < 0, PE ΔOI < 0 => UNWIND
+```
 
-Minimum TRAIN sample size is 15.
+## Outputs
 
-The script ranks only TRAIN candidates. A maximum of 10 TRAIN-eligible candidates are carried to VALIDATION. Only validation survivors are reported on EVALUATION.
+For all 180 sessions:
 
-The previously discovered `MATCH + 3-5% + exclude 13h` candidate is reported separately as a **contaminated benchmark** and is not treated as clean train discovery.
+- detailed trade-level temporal features
+- 15m -> 10m -> 5m OI state sequence
+- 15m -> 10m -> 5m MATCH/OPPOSITE/AMBIGUOUS sequence
+- PCR trend across horizons
+- bullish/bearish breakdown
+- Hilega Route A/B/opening breakdown
+- minimum-n sequence ranking using capped ±20 points, median, win rate, and raw points
 
 ## Install
 
 Copy:
 
 ```text
-hilega_180_walkforward_research.py
+hilega_oi_temporal_sequence_research.py
 ```
 
 to:
@@ -83,51 +80,40 @@ to:
 ~/RB-ITOS-AI/scripts/
 ```
 
-## First run
+## Run
 
-This may take time because it builds Hilega replay across all 180 dates:
+Since the 180 replay files should already exist after the previous run:
 
 ```bash
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/hilega_180_walkforward_research.py \
-  --run-replay \
-  | tee /tmp/hilega-180-walkforward.txt
+python scripts/hilega_oi_temporal_sequence_research.py \
+  --skip-replay \
+  | tee /tmp/hilega-oi-temporal-sequence.txt
 ```
 
-The large replay CLI JSON is captured in:
-
-```text
-data/historical-evidence/hilega-pcr-oi-support-research-v1/
-180-session-walkforward-v1/
-historical-replay-build-v1.log
-```
-
-## Later reruns
+If replay is missing for any date:
 
 ```bash
-python scripts/hilega_180_walkforward_research.py \
-  --skip-replay \
-  | tee /tmp/hilega-180-walkforward.txt
+python scripts/hilega_oi_temporal_sequence_research.py \
+  --run-replay \
+  | tee /tmp/hilega-oi-temporal-sequence.txt
 ```
 
-## Outputs
+## Output directory
 
 ```text
 data/historical-evidence/hilega-pcr-oi-support-research-v1/
-180-session-walkforward-v1/
+temporal-sequence-v1/
 ```
 
-Outputs:
+Files:
 
-- `hilega-180-session-features-v1.csv`
-- `train-oldest-60-v1.csv`
-- `validation-middle-60-v1.csv`
-- `evaluation-newest-60-v1.csv`
-- `train-discovered-candidates-v1.csv`
-- `walkforward-summary-v1.txt`
-- `historical-replay-build-v1.log`
+- `hilega-180-temporal-sequence-features-v1.csv`
+- `hilega-180-temporal-sequence-summary-v1.csv`
+- `hilega-180-temporal-sequence-report-v1.txt`
+- `historical-replay-build-v1.log` when replay is rebuilt
 
-Research only. No Hilega logic or execution settings are modified.
+Research only. Hilega logic and execution settings are unchanged.
