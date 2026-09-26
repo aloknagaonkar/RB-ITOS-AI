@@ -1,73 +1,48 @@
-# Opening Red + VWAP Frozen Candidate OOS-H Validation v1
+# Midpoint + VWAP Symmetric 180-Session Validation v1
 
-This is the first clean follow-up after the 100-session development study.
-
-It does **not** search for a new VWAP threshold.
-
-It evaluates exactly the three candidates selected before looking at OOS_H:
+This validates the frozen VWAP Candidate A symmetrically:
 
 ```text
-Candidate A
-recent_down_cross_or_rejection_5m
+Bearish RED:
+event >5 futures points below VWAP
+AND prior 5m touched/approached VWAP within 5 points or above.
 
-Candidate B
-moving_farther_below_vwap_5m
-
-Candidate C
-A AND B
+Bullish GREEN mirror:
+event >5 futures points above VWAP
+AND prior 5m touched/approached VWAP within 5 points or below.
 ```
 
-## Frozen definitions
+It also reports the already-frozen **18 bullish + 18 bearish directional sessions** separately.
 
-Candidate A:
+## Important methodology
+
+The 36 directional sessions are **not assumed to produce 100%**. The script measures the actual result. If they do produce 100%, that will be reported; if not, the exceptions are important evidence rather than something to tune away.
+
+The script uses only existing exact `OPENING_CANDLE_MIDPOINT_REVERSAL_FRAMEWORK_V1_1` event artifacts. It will automatically discover:
 
 ```text
-At the red boundary/midpoint event:
-price is >5 futures points below VWAP
-
-AND
-
-at least one futures observation during the prior 5 minutes
-was within 5 points of VWAP or above VWAP.
+data/historical-evidence/opening-candle-midpoint-framework-v1-1*.json
 ```
 
-Candidate B:
+It intentionally refuses to invent missing midpoint events from futures VWAP.
+
+This matters because the original framework semantics are:
 
 ```text
-At the event:
-price is below VWAP
-
-AND
-
-price - VWAP is more negative than it was 5 minutes earlier.
+ignore 09:15–09:19
+first valid later RED / GREEN structure
+1-minute CLOSE midpoint crossing
+1-minute CLOSE boundary crossing
 ```
 
-Candidate C is simply A AND B.
-
-No thresholds are changed after seeing OOS_H.
-
-## Sources
-
-Red structural events:
-
-```text
-data/historical-evidence/
-opening-candle-midpoint-framework-v1-1-oos-h.json
-```
-
-VWAP:
-
-```text
-data/historical-evidence/
-midpoint-v2-nifty-futures-vwap-v1-all180.csv
-```
+The VWAP overlay is joined only after those original structural events exist.
 
 ## Run
 
 Copy:
 
 ```text
-opening_red_vwap_oos_h_validation.py
+midpoint_vwap_symmetric_180_validation.py
 ```
 
 to:
@@ -76,19 +51,32 @@ to:
 ~/RB-ITOS-AI/scripts/
 ```
 
-Then:
+Then run:
 
 ```bash
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/opening_red_vwap_oos_h_validation.py \
-  | tee /tmp/opening-red-vwap-oos-h.txt
+python scripts/midpoint_vwap_symmetric_180_validation.py \
+  | tee /tmp/midpoint-vwap-symmetric-180.txt
 ```
 
-## Important
+## Outputs
 
-This OOS-H block has been used previously in other midpoint research, but these specific red+VWAP candidate definitions were selected from the earlier 100-session red/VWAP study before this OOS-H validation. Therefore this run is useful as a fresh test of these exact candidate definitions, while still not being a permanently pristine future/live holdout.
+```text
+data/historical-evidence/
+hilega-pcr-oi-support-research-v1/
+midpoint-vwap-symmetric-180-validation-v1/
+```
 
-No strategy execution or Hilega rule is changed.
+The script reports:
+
+- bearish Candidate A vs NOT A
+- bullish mirrored Candidate A vs NOT A
+- combined
+- frozen 36 expected-direction events
+- frozen 36 counter-direction control
+- exact framework session coverage
+
+If framework coverage is currently below 180, the output says exactly how many sessions are covered and does not silently substitute a different event-generation method.
