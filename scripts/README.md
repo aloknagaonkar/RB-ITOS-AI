@@ -1,59 +1,30 @@
-# Candidate A Failure Diagnostics V1
+# Candidate A Block Stability V1
 
-Purpose: explain why frozen VWAP Candidate A succeeds or fails on the full 180-session midpoint framework.
+This uses the **full 180-session Candidate A dataset** and then slices those same sessions into the existing 20-session blocks only to test temporal stability.
 
-This is **not** another threshold search.
+It does **not** reduce the analysis to 20 sessions.
 
-It keeps Candidate A unchanged and compares continuation vs reclaim separately for:
+Primary result remains all 180 sessions. Block results answer: does the same behavior repeat across time?
 
-- bearish Candidate A
-- bullish mirrored Candidate A
+It reports:
 
-Diagnostics include:
+- full 180 bearish / bullish / combined Candidate A
+- Candidate A performance in TRAIN + OOS_A ... OOS_H
+- distance buckets within every block
+- recent VWAP touch-age buckets within every block
+- simple cross-block consistency counts
 
-- directional distance from VWAP
-- event time bucket
-- age of most recent VWAP touch/cross condition
-- directional VWAP movement over 5/10/15 minutes
-- midpoint-to-boundary delay
-- reference candle range
-- complete reclaim/failure case listing
-
-The buckets are fixed descriptive buckets; the script does not optimize them.
+No threshold search and no Candidate A change.
 
 ## Run
 
-Copy `midpoint_vwap_candidate_a_failure_diagnostics.py` to `~/RB-ITOS-AI/scripts/`, then:
+Copy `midpoint_vwap_candidate_a_block_stability.py` into `~/RB-ITOS-AI/scripts/`.
 
 ```bash
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/midpoint_vwap_candidate_a_failure_diagnostics.py \
-  | tee /tmp/midpoint-vwap-candidate-a-failure-diagnostics.txt
+python scripts/midpoint_vwap_candidate_a_block_stability.py \
+  | tee /tmp/midpoint-vwap-candidate-a-block-stability.txt
 ```
-
-## Inputs
-
-```text
-data/historical-evidence/hilega-pcr-oi-support-research-v1/
-midpoint-vwap-symmetric-180-validation-v1/
-midpoint-vwap-symmetric-events-v1.csv
-
-data/historical-evidence/
-midpoint-v2-nifty-futures-vwap-v1-all180.csv
-```
-
-## Outputs
-
-```text
-data/historical-evidence/hilega-pcr-oi-support-research-v1/
-midpoint-vwap-candidate-a-failure-diagnostics-v1/
-```
-
-Files:
-
-- `candidate-a-event-diagnostics-v1.csv`
-- `candidate-a-failures-v1.csv`
-- `candidate-a-failure-diagnostics-summary-v1.txt`
