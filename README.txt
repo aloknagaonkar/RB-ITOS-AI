@@ -1,28 +1,25 @@
-B FAMILY — 60-SESSION WARNING / RECOVERY ANALYSIS V2
-======================================================
+B FAMILY — 60-SESSION RECOVERY-WINDOW VALIDATION V3
+=====================================================
 
-Run after V1:
+Tests 1m / 2m / 3m / 5m causal waiting windows after the first B warning.
 
+Run:
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/b_family_60_session_warning_recovery_v2.py \
-  | tee /tmp/b-family-60-session-warning-recovery-v2.txt
+python scripts/b_family_60_session_recovery_window_v3.py \
+  | tee /tmp/b-family-60-session-recovery-window-v3.txt
+
+Requires:
+- V2 warning/recovery CSV already generated.
 
 Outputs:
 data/historical-evidence/hilega-pcr-oi-support-research-v1/
-  b-family-60-session-warning-recovery-v2/
-    b-family-warning-recovery-events-v2.csv
-    b-family-warning-recovery-summary-v2.txt
+  b-family-60-session-recovery-window-v3/
+    b-family-recovery-window-events-v3.csv
+    b-family-recovery-window-summary-v3.txt
 
-Measures:
-- entry -> warning time
-- warning -> recovery time
-- warning -> invalidation time
-- points at warning/recovery/invalidation
-- post-warning MFE / MAE
-- post-recovery MFE
-- whether recovery creates a new favorable extreme
-
-Research only. Frozen B entry definition remains unchanged.
+Research only.
+Frozen B entry logic is unchanged.
+No execution/runtime changes.
