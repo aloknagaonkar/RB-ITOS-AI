@@ -1,12 +1,28 @@
-B FAMILY 60-SESSION HEALTH VALIDATION V1
+B FAMILY — 60-SESSION WARNING / RECOVERY ANALYSIS V2
+======================================================
 
-Tests the current post-entry B health hypothesis across the existing 60-session B sample.
+Run after V1:
 
-Run:
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/b_family_60_session_health_validation_v1.py | tee /tmp/b-family-60-session-health-validation-v1.txt
+python scripts/b_family_60_session_warning_recovery_v2.py \
+  | tee /tmp/b-family-60-session-warning-recovery-v2.txt
 
-This does not change the frozen B entry definition or runtime/execution.
+Outputs:
+data/historical-evidence/hilega-pcr-oi-support-research-v1/
+  b-family-60-session-warning-recovery-v2/
+    b-family-warning-recovery-events-v2.csv
+    b-family-warning-recovery-summary-v2.txt
+
+Measures:
+- entry -> warning time
+- warning -> recovery time
+- warning -> invalidation time
+- points at warning/recovery/invalidation
+- post-warning MFE / MAE
+- post-recovery MFE
+- whether recovery creates a new favorable extreme
+
+Research only. Frozen B entry definition remains unchanged.
