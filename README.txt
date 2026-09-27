@@ -1,28 +1,37 @@
-B FAMILY — RUNNER TEMPO DIAGNOSTIC V17
-========================================
+B FAMILY — POST-PROOF EXPANSION DIAGNOSTIC V18
+================================================
 
 Purpose
 -------
-Test whether the 12 canonical >=75-point Family-B runners naturally show
-different expansion tempos.
+Compare causal behavior shortly after +20 proof between:
 
+- B events that later become >=75-point canonical runners
+- B events that reach +20 but never reach +75
+
+Fixed observation windows:
+- +3 minutes
+- +5 minutes
+- +10 minutes
+
+Features
+--------
+additional favorable expansion after proof
+maximum pullback from +20 proof
+net move at window end
+advancing-close percentage
+confirmed 1m swing count
+supportive advancing swing count
+directional futures-VWAP distance and change
+ATR-normalized expansion
+ATR-normalized pullback
+
+Important
+---------
+Future >=75 is only an outcome label. It is not used to create the features.
+
+No cutoff is selected.
+No exit is changed.
 No optimization is performed.
-
-Measured intervals
-------------------
-entry -> +20
-+20 -> +30
-+20 -> +50
-+20 -> +75
-+20 -> +100
-+50 -> +75
-+75 -> +100
-
-V17 also performs a descriptive median split on +20 -> +75:
-FASTER_HALF / SLOWER_HALF
-
-This median split is NOT a trading rule. It exists only to help diagnose whether
-the runner population visibly separates into faster and slower expansion paths.
 
 Run
 ---
@@ -30,7 +39,7 @@ cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/b_family_runner_tempo_diagnostic_v17.py \
-  | tee /tmp/b-family-runner-tempo-diagnostic-v17.txt
+python scripts/b_family_post_proof_expansion_diagnostic_v18.py \
+  | tee /tmp/b-family-post-proof-expansion-v18.txt
 
-Paste the full output back.
+Paste the complete output back.
