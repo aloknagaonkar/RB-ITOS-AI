@@ -1,35 +1,30 @@
-B FAMILY — POST-PROOF EXPANSION DIAGNOSTIC V18
-================================================
+B FAMILY — POST-PROOF TEMPORAL STABILITY DIAGNOSTIC V19
+=========================================================
 
 Purpose
 -------
-Compare causal behavior shortly after +20 proof between:
+Check whether the V18 post-+20 runner-vs-nonrunner differences keep the same
+direction through time.
 
-- B events that later become >=75-point canonical runners
-- B events that reach +20 but never reach +75
+Temporal views
+--------------
+1) First 60 / middle 60 / latest 60 framework sessions
+2) Older 120 / latest 60
 
-Fixed observation windows:
-- +3 minutes
-- +5 minutes
-- +10 minutes
+Fixed windows
+-------------
++3m
++5m
++10m
 
-Features
---------
-additional favorable expansion after proof
-maximum pullback from +20 proof
-net move at window end
-advancing-close percentage
-confirmed 1m swing count
-supportive advancing swing count
-directional futures-VWAP distance and change
-ATR-normalized expansion
-ATR-normalized pullback
+Primary V18 features
+--------------------
+additional favorable expansion
+net move from +20 at window end
+directional VWAP change
+ATR-normalized favorable expansion
 
-Important
----------
-Future >=75 is only an outcome label. It is not used to create the features.
-
-No cutoff is selected.
+No thresholds are selected.
 No exit is changed.
 No optimization is performed.
 
@@ -39,7 +34,7 @@ cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/b_family_post_proof_expansion_diagnostic_v18.py \
-  | tee /tmp/b-family-post-proof-expansion-v18.txt
+python scripts/b_family_post_proof_temporal_stability_v19.py \
+  | tee /tmp/b-family-post-proof-temporal-stability-v19.txt
 
 Paste the complete output back.
