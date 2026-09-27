@@ -1,28 +1,15 @@
-Hilega Directional Audit UI Patch
+Copy the script to ~/RB-ITOS-AI/scripts/ and run:
 
-Purpose:
-- Direction-aware bullish/bearish audit labels
-- PE labels for bearish, CE labels for bullish
-- Previous RSI/EMA/WMA values for directional-only rows
-- Route-aware audit wording/validation
-- Frontend-only: no strategy, API, worker, entry or exit logic changes
+cd ~/RB-ITOS-AI
+source .venv/bin/activate
+export PYTHONPATH=backend
+python scripts/midpoint_vwap_delayed_and_rebreak_research.py \
+  | tee /tmp/midpoint-vwap-delayed-and-rebreak-research.txt
 
-Usage from repo root:
+Research only. Candidate A/Hilega/runtime/execution remain unchanged.
 
-  cd ~/RB-ITOS-AI
-  source .venv/bin/activate
-  python /path/to/apply_directional_audit_fix.py
+25 Aug Study A RED sanity target:
+T0 09:39, Candidate A=False, delayed bearish VWAP confirmation around 09:42,
+delay=3m, confirmation VWAP distance about -8.31.
 
-Then:
-
-  cd ~/RB-ITOS-AI/frontend
-  npm run build
-
-Verify bundle:
-
-  grep -oE '/assets/[^\"]+\.(js|css)' dist/index.html
-  curl -sS http://127.0.0.1:8123/ | grep -oE '/assets/[^\"]+\.(js|css)'
-
-Then hard refresh browser with Ctrl+Shift+R.
-
-No API or worker restart is required.
+Study B should expose the later midpoint/reclaim/rebreak sequence for manual review.
