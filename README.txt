@@ -1,29 +1,52 @@
-B FAMILY — 180-SESSION DATA HEALTH AUDIT V14.1
-==================================================
+B FAMILY — TRAILING-SL 180-SESSION CHARACTERIZATION V15
+===========================================================
 
-This fixes V14's incorrect assumption of one combined framework JSON.
+Prerequisite
+------------
+V14.1 data-health audit must PASS:
+- 180/180 framework, underlying and futures/VWAP sessions
+- 0 duplicate conflicts
+- canonical B parity 45 = 27 older + 18 latest60
 
-V14.1 imports the canonical Family-B validator and directly reuses:
-- FRAMEWORK_FILES
-- load_framework()
-- load_underlying()
-- FUTURES_CSV
-- is_trusted()
-- family_b_for_event()
+Purpose
+-------
+Compare whether causal structural trailing can preserve B's large runners
+better than the current V8.2 breakeven-after-+20 behavior.
 
-Expected PASS parity:
-- framework sessions = 180
-- underlying sessions = 180
-- futures/VWAP sessions = 180
-- duplicate conflicts = 0
-- B total = 45
-- B older = 27
-- B latest60 = 18
+Models
+------
+STRUCTURAL
+HYBRID_MIN15_ATR1_BE20   (imported unchanged from V8.2)
+TRAIL_T1_SWING1
+TRAIL_T2_SWING2
 
-Run:
+T1:
+- initial risk min(15, causal ATR14)
+- +20 proof
+- confirmed 1m pivot with 1 left / 1 right bar
+- new trail applies next bar
+- never widens
+- no forced breakeven
+
+T2:
+- same
+- 2 left / 2 right bars (slower)
+- next-bar only
+- never widens
+- no forced breakeven
+
+Run
+---
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/b_family_180_data_health_audit_v14_1.py \
-  | tee /tmp/b-family-180-data-health-v14-1.txt
+python scripts/b_family_trailing_sl_180_v15.py \
+  | tee /tmp/b-family-trailing-sl-180-v15.txt
+
+Paste the full output back.
+
+Interpretation
+--------------
+This is characterization on the same historical 180-session research universe.
+It is NOT independent validation and cannot by itself freeze a production exit.
