@@ -1,14 +1,35 @@
-PACKAGE CONTENTS
-================
+PM T1/T2/T3 + FUTURES VWAP CONTEXT — 60 SESSIONS — V1
+========================================================
 
-1) docs/MIDPOINT_VWAP_BCD_RESEARCH_FREEZE_V1.md
-   Formal research-definition freeze note for:
-   - B
-   - C V1.1
-   - D
+This is the next PM / Family-E research step.
 
-2) scripts/afternoon_pm_false_break_reversal_60_session_v1.py
-   New PM false-break -> midpoint recross -> opposite-boundary-break study.
+Reference:
+  12:45–13:14 fixed 30-minute range
+
+T1:
+  first full boundary close-break
+
+T2:
+  midpoint recross in the opposite direction
+
+T3:
+  opposite full-boundary close-break
+
+At T1/T2/T3 record:
+  NIFTY futures close
+  session VWAP
+  futures close - VWAP
+  5-minute change in close - VWAP
+  whether VWAP direction agrees with the event direction
+
+Then compare:
+  T2 entry-style measurement
+  versus
+  T3 entry-style measurement
+
+No VWAP filter is applied.
+Candidate A/B remain unchanged.
+B, C V1.1, D remain frozen.
 
 RUN
 ---
@@ -16,13 +37,13 @@ cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/afternoon_pm_false_break_reversal_60_session_v1.py \
-  | tee /tmp/afternoon-pm-false-break-reversal-60-v1.txt
+python scripts/afternoon_pm_t1_t2_t3_vwap_context_60_session_v1.py \
+  | tee /tmp/afternoon-pm-t1-t2-t3-vwap-context-60-v1.txt
 
 Expected 25 Aug:
-- first BEAR break around 13:24
-- bullish midpoint recross around 13:52
-- bullish opposite-boundary break around 13:53
+  T1 ~13:24 bearish
+  T2 ~13:52 bullish midpoint recross
+  T3 ~13:53 bullish opposite-boundary break
 
-No B/C/D changes.
-No runtime/order/execution changes.
+15:15 onward excluded.
+Research only.
