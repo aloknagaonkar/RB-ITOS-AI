@@ -1,27 +1,19 @@
-B FAMILY FIVE-DAY VALIDATION V1
+B FAMILY FIVE-DAY VALIDATION V2
 
-Days:
-2026-06-17
-2026-06-22
-2026-06-30
-2026-07-13
-2026-07-14
+Adds to V1:
+- exact B entry time
+- timestamp where maximum favorable NIFTY excursion was achieved
+- best favorable NIFTY level
+- structural invalidation time
+- points from entry to invalidation
 
 Run:
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/b_family_five_day_validation_v1.py \
-  | tee /tmp/b-family-five-day-validation-v1.txt
+python scripts/b_family_five_day_validation_v2.py \
+  | tee /tmp/b-family-five-day-validation-v2.txt
 
-Report includes:
-- total B cases per day
-- entry time and price
-- FUT-VWAP
-- +1/+3/+5/+10/+15m underlying NIFTY points
-- MFE / MAE
-- invalidation
-- entry-to-invalidation points when exact invalidation close is available
-
-Research only. No runtime/execution changes.
+Important:
+"Best exit time" is the hindsight MFE timestamp. It is NOT a frozen live exit rule.
