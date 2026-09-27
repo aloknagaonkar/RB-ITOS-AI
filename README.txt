@@ -1,25 +1,19 @@
-B FAMILY — BIG-RUNNER EXIT DIAGNOSTIC V16
-===========================================
+B FAMILY — BIG-RUNNER EXIT DIAGNOSTIC V16.1
+=============================================
 
-Purpose
--------
-Diagnose why V15 T1/T2 structural trails cut some >=75-point B runners early.
+Fix vs V16
+----------
+V16 incorrectly expected 10 canonical >=75-point B runners.
 
-This is NOT another optimization pass.
+The canonical 45-event geometry actually contains:
+- >=75-point runners: 12
+- >=100-point runners: 10
 
-V16 selects the 10 canonical B events whose structural-lifecycle MFE >= +75
-points and prints:
+The V15 table showed 10 >=75 opportunities only inside the COMMON_ATR_ELIGIBLE
+subset. Two >=75 runners are ATR-ineligible, so the full canonical diagnostic
+must retain all 12 rather than silently dropping them.
 
-- entry/origin/delay
-- ATR and initial risk
-- +20/+30/+50/+75/+100 first-reach timestamps
-- V8.2 hybrid exit
-- T1 proof, pivot confirmations, stop updates, exit
-- T2 proof, pivot confirmations, stop updates, exit
-- post-exit best favorable movement
-- missed extension
-
-Detailed stop/pivot lifecycle is written to runner-timeline-v16.csv.
+No strategy, trail, risk, entry, VWAP, or lifecycle logic changed.
 
 Run
 ---
@@ -27,9 +21,7 @@ cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/b_family_big_runner_exit_diagnostic_v16.py \
-  | tee /tmp/b-family-big-runner-exit-diagnostic-v16.txt
+python scripts/b_family_big_runner_exit_diagnostic_v16_1.py \
+  | tee /tmp/b-family-big-runner-exit-diagnostic-v16-1.txt
 
 Paste the full output back.
-
-Research only. No production/runtime/execution changes.
