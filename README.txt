@@ -1,41 +1,35 @@
-B FAMILY — INDEPENDENT HISTORICAL VALIDATION V6
-=================================================
+B FAMILY — CANONICAL INDEPENDENT VALIDATION V6.1
+===================================================
 
-Goal
-----
-Validate the frozen B detector and current warning/recovery research on sessions
-before the latest 60-session B/C/D development sample.
+This replaces the failed hand-reconstructed V6 detector.
 
-SAFETY / METHODOLOGY
---------------------
-The script first performs a PARITY GATE:
-- reconstruct B from raw 1m + futures VWAP;
-- compare date/direction/timestamp against the known frozen 60-session B events;
-- ABORT if parity is not exact.
+It imports the repository's canonical:
+  scripts/midpoint_vwap_60_session_setup_family_validation_v1_1.py
 
-Only after parity passes does it evaluate older sessions (< 2026-06-16).
+and directly reuses:
+  family_b_for_event()
+  measure_event()
 
-Run
----
+Run:
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/b_family_independent_historical_validation_v6.py \
-  | tee /tmp/b-family-independent-historical-validation-v6.txt
+python scripts/b_family_canonical_independent_validation_v6_1.py \
+  | tee /tmp/b-family-canonical-independent-validation-v6-1.txt
 
-Outputs
--------
+Required parity:
+  latest60 canonical B = 18
+  known frozen B = 18
+  exact date/direction/entry timestamp match
+
+Only then are older events reported.
+
+Outputs:
 data/historical-evidence/hilega-pcr-oi-support-research-v1/
-  b-family-independent-historical-validation-v6/
-    b-family-parity-v6.csv
-    b-family-independent-events-v6.csv
-    b-family-independent-summary-v6.txt
+  b-family-canonical-independent-validation-v6-1/
+    b-family-canonical-parity-v6-1.csv
+    b-family-canonical-older-events-v6-1.csv
+    b-family-canonical-independent-summary-v6-1.txt
 
-Important
----------
-- Do not bypass a failed parity gate.
-- No runtime/execution changes.
-- No new threshold tuning.
-- 3-minute recovery candidate is evaluated unchanged.
-- Underlying NIFTY points are not option premium P&L.
+Research only. No runtime/execution changes.
