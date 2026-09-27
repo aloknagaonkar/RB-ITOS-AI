@@ -1,19 +1,28 @@
-B FAMILY — BIG-RUNNER EXIT DIAGNOSTIC V16.1
-=============================================
+B FAMILY — RUNNER TEMPO DIAGNOSTIC V17
+========================================
 
-Fix vs V16
-----------
-V16 incorrectly expected 10 canonical >=75-point B runners.
+Purpose
+-------
+Test whether the 12 canonical >=75-point Family-B runners naturally show
+different expansion tempos.
 
-The canonical 45-event geometry actually contains:
-- >=75-point runners: 12
-- >=100-point runners: 10
+No optimization is performed.
 
-The V15 table showed 10 >=75 opportunities only inside the COMMON_ATR_ELIGIBLE
-subset. Two >=75 runners are ATR-ineligible, so the full canonical diagnostic
-must retain all 12 rather than silently dropping them.
+Measured intervals
+------------------
+entry -> +20
++20 -> +30
++20 -> +50
++20 -> +75
++20 -> +100
++50 -> +75
++75 -> +100
 
-No strategy, trail, risk, entry, VWAP, or lifecycle logic changed.
+V17 also performs a descriptive median split on +20 -> +75:
+FASTER_HALF / SLOWER_HALF
+
+This median split is NOT a trading rule. It exists only to help diagnose whether
+the runner population visibly separates into faster and slower expansion paths.
 
 Run
 ---
@@ -21,7 +30,7 @@ cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/b_family_big_runner_exit_diagnostic_v16_1.py \
-  | tee /tmp/b-family-big-runner-exit-diagnostic-v16-1.txt
+python scripts/b_family_runner_tempo_diagnostic_v17.py \
+  | tee /tmp/b-family-runner-tempo-diagnostic-v17.txt
 
 Paste the full output back.
