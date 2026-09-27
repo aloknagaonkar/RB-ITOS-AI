@@ -1,40 +1,66 @@
-B FAMILY — POST-PROOF TEMPORAL STABILITY DIAGNOSTIC V19
-=========================================================
+B FAMILY — FROZEN POST-PROOF RUNNER FORWARD VALIDATOR V20
+============================================================
 
-Purpose
--------
-Check whether the V18 post-+20 runner-vs-nonrunner differences keep the same
-direction through time.
+Frozen on
+---------
+2026-09-28
 
-Temporal views
---------------
-1) First 60 / middle 60 / latest 60 framework sessions
-2) Older 120 / latest 60
-
-Fixed windows
+Forward start
 -------------
-+3m
-+5m
-+10m
+2026-09-29
 
-Primary V18 features
---------------------
-additional favorable expansion
-net move from +20 at window end
-directional VWAP change
-ATR-normalized favorable expansion
+Minimum horizon
+---------------
+20 distinct trading sessions.
 
-No thresholds are selected.
-No exit is changed.
-No optimization is performed.
+ALL supplied sessions count, including zero-B sessions.
 
-Run
----
+Frozen classifier
+-----------------
+For a canonical Family-B event:
+
+1. It must reach +20 before structural invalidation.
+2. Observe exactly 10 additional minutes.
+3. At the +10m boundary:
+
+RUNNER_STRENGTHENING when BOTH:
+- net directional progress from +20 > 0
+- directional futures-VWAP change > 0
+
+Otherwise:
+- NORMAL_B
+
+No exit behavior is attached.
+
+Input
+-----
+V20 deliberately requires explicit normalized session files so it does not
+guess or silently substitute market data.
+
+Repeat --session for one or more days:
+
+DATE|UNDERLYING_CSV|FUTURES_CSV
+
+Underlying CSV must be compatible with the frozen opening midpoint framework.
+
+Futures CSV must contain timestamp plus either:
+- diff / vwap_diff / futures_vwap_diff
+OR
+- close plus session_vwap/vwap.
+
+Example
+-------
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/b_family_post_proof_temporal_stability_v19.py \
-  | tee /tmp/b-family-post-proof-temporal-stability-v19.txt
+python scripts/b_family_runner_forward_validator_v20.py \
+  --session '2026-09-29|data/.../underlying-2026-09-29.csv|data/.../futures-vwap-2026-09-29.csv' \
+  | tee /tmp/b-family-runner-forward-v20.txt
 
-Paste the complete output back.
+The script appends/replaces session records deterministically in:
+data/historical-evidence/hilega-pcr-oi-support-research-v1/
+b-family-runner-forward-v20/
+
+Do not change the classifier during the first 20 sessions.
+Do not attach an exit rule based on interim results.
