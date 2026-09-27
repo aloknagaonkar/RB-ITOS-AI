@@ -1,63 +1,48 @@
-60-SESSION SETUP-FAMILY TAXONOMY V1.1
-========================================
+FAMILY C REJECTION AUDIT — 60 SESSIONS — V1
+============================================
 
-This package reruns the SAME latest 60 sessions.
+This audit compares the previous Family C population against the corrected V1.1
+population.
 
-Only one research definition changes:
+Expected input files already produced by the prior runs:
 
-Family C lifecycle termination
-------------------------------
-BULLISH C (GREEN-origin):
-  terminate the stale C lifecycle if price closes below the RED low
-  before the bullish C rebreak.
+OLD:
+data/historical-evidence/hilega-pcr-oi-support-research-v1/
+midpoint-vwap-setup-family-60-session-validation-v1/
+setup-family-events-v1.csv
 
-BEARISH C (RED-origin):
-  terminate the stale C lifecycle if price closes above the GREEN high
-  before the bearish C rebreak.
+NEW:
+data/historical-evidence/hilega-pcr-oi-support-research-v1/
+midpoint-vwap-setup-family-60-session-validation-v1-1/
+setup-family-events-v1-1.csv
 
-Why:
-A continuation/re-entry lifecycle should not survive a decisive break of the
-opposite opening structure and later reappear as the same trade after a regime
-reversal. This is a structural/symmetric rule, not a time threshold.
+For each rejected former-C event it records:
+- original direction
+- original boundary-break timestamp
+- midpoint retest/reclaim/failure fields already present in old research output
+- first opposite-structure termination timestamp
+- would-be old C rebreak timestamp
+- minutes from termination to would-be rebreak
+- old causal MFE/MAE and +1/+3/+5/+10/+15 behavior
+- whether a same-direction Family D subsequently appeared
+- time from termination to that D event
 
-Unchanged:
-- Family B
-- Family D
-- Candidate A
-- VWAP threshold
-- +1/+3/+5/+10/+15 measurements
-- causal MFE/MAE
-- 15:15 onward excluded
-- no production/runtime/order/execution changes
+It also compares retained C vs rejected former-C descriptively.
 
-RUN 1 — rerun 60 sessions
--------------------------
+RUN
+---
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/midpoint_vwap_60_session_setup_family_validation_v1_1.py \
-  | tee /tmp/midpoint-vwap-60-session-validation-v1-1.txt
+python scripts/midpoint_vwap_60_session_family_c_rejection_audit.py \
+  | tee /tmp/midpoint-vwap-60-session-family-c-rejection-audit-v1.txt
 
-RUN 2 — overlap audit on corrected output
------------------------------------------
-python scripts/midpoint_vwap_60_session_overlap_lifecycle_audit_v1_1.py \
-  | tee /tmp/midpoint-vwap-60-session-overlap-lifecycle-audit-v1-1.txt
+Do not move to 120 sessions until this output is reviewed.
 
-CHECK BEFORE 120 SESSIONS
--------------------------
-1. 25 Aug should retain:
-   - 09:42 BEAR Family B
-   - 12:00 BEAR Family C
-   - 14:31 BULL Family D
-
-2. 25 Aug 14:31 should no longer also appear as Family C.
-
-3. Compare:
-   - Family C event count before/after
-   - exact C+D overlap count before/after
-   - ±1/±3/±5m C+D overlap counts
-   - chronological block counts
-   - the unmeasured event count
-
-Do not expand to 120 until this rerun is reviewed.
+Research only:
+- no Hilega change
+- no Candidate A change
+- no B/D change
+- no runtime/execution/order change
+- no threshold search
