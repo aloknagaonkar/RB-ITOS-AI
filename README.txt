@@ -1,22 +1,37 @@
-B FAMILY — 15 SEP 2026 UNSEEN VALIDATION V10.1
+B FAMILY — FIVE-SESSION POST-08-SEP UNSEEN BATCH VALIDATION V11
+================================================================
 
-Fixes V10 input-schema mismatch.
+Sessions:
+- 2026-09-10
+- 2026-09-11
+- 2026-09-15
+- 2026-09-17
+- 2026-09-18
 
-Problem:
-data/historical-evidence/intraday-validation/underlying-2026-09-15.csv
-has timestamp/open/high/low/close/volume but no session_date column.
+Inputs are the repository's existing 1-minute underlying and futures caches.
 
-Fix:
-V10.1 derives session_date strictly from each row's timestamp before handing
-the rows to the frozen underlying_by_session() parser.
+V11 imports the repo's frozen prospective session-VWAP implementation:
+market_lab.midpoint_v2_nifty_futures_vwap_v1.add_session_vwap()
 
-No strategy logic, Family-B logic, midpoint logic, risk parameters, runtime,
-or execution settings are changed.
+That implementation uses cumulative:
+  ((high + low + close) / 3) * volume
+divided by cumulative volume.
+
+It also imports:
+- frozen midpoint structural functions
+- frozen Family-B detector and measurement
+- unchanged V8.2 risk functions
+
+15 Sep is retained even though V10.1 found NO_B_EVENT.
 
 Run:
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/b_family_unseen_2026_09_15_validation_v10_1.py \
-  | tee /tmp/b-family-unseen-2026-09-15-v10-1.txt
+python scripts/b_family_unseen_batch_validation_v11.py \
+  | tee /tmp/b-family-unseen-batch-v11.txt
+
+Paste the full output back.
+
+Research only. No strategy/runtime/execution changes.
