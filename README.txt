@@ -1,35 +1,45 @@
-B FAMILY — CANONICAL INDEPENDENT VALIDATION V6.1
-===================================================
+B FAMILY — RISK GEOMETRY V7
+=============================
 
-This replaces the failed hand-reconstructed V6 detector.
+Purpose
+-------
+Before choosing a small SL, measure how much adverse excursion genuine B
+winners actually require.
 
-It imports the repository's canonical:
-  scripts/midpoint_vwap_60_session_setup_family_validation_v1_1.py
+Uses all 45 canonical B events:
+- 18 development
+- 27 older validation
 
-and directly reuses:
-  family_b_for_event()
-  measure_event()
+The script directly imports the canonical V1.1 B detector and measurement code.
 
-Run:
+Run
+---
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/b_family_canonical_independent_validation_v6_1.py \
-  | tee /tmp/b-family-canonical-independent-validation-v6-1.txt
+python scripts/b_family_risk_geometry_v7.py \
+  | tee /tmp/b-family-risk-geometry-v7.txt
 
-Required parity:
-  latest60 canonical B = 18
-  known frozen B = 18
-  exact date/direction/entry timestamp match
-
-Only then are older events reported.
-
-Outputs:
+Outputs
+-------
 data/historical-evidence/hilega-pcr-oi-support-research-v1/
-  b-family-canonical-independent-validation-v6-1/
-    b-family-canonical-parity-v6-1.csv
-    b-family-canonical-older-events-v6-1.csv
-    b-family-canonical-independent-summary-v6-1.txt
+  b-family-risk-geometry-v7/
+    b-family-risk-geometry-events-v7.csv
+    b-family-risk-geometry-milestones-v7.csv
+    b-family-risk-geometry-weak-events-v7.csv
+    b-family-risk-geometry-summary-v7.txt
 
-Research only. No runtime/execution changes.
+What to inspect
+---------------
+For winners that reach +20/+30/+50/+75/+100:
+- how much adverse excursion occurred BEFORE reaching the milestone?
+- would 5/10/15/20/25/30-point stops already have been hit?
+- did stop and target occur in the same 1m candle (ambiguous)?
+
+For weak B events (MFE <20):
+- how quickly do -5/-10/-15/-20/-25/-30 adverse moves appear?
+
+Research only.
+No stop or target is frozen by this script.
+Underlying NIFTY points are not option-premium P&L.
