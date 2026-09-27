@@ -1,48 +1,44 @@
-FAMILY C REJECTION AUDIT — 60 SESSIONS — V1
-============================================
+PACKAGE: TWO RESEARCH TESTS
+===========================
 
-This audit compares the previous Family C population against the corrected V1.1
-population.
+1) Rejected-C mechanism decomposition
+-------------------------------------
+Classifies the 57 rejected former-C events by:
+- structural-age bucket
+- exact / near / later same-direction Family-D relationship
 
-Expected input files already produced by the prior runs:
+Run:
+python scripts/midpoint_vwap_60_session_rejected_c_mechanism_decomposition.py \
+  | tee /tmp/rejected-c-mechanism-decomposition-v1.txt
 
-OLD:
-data/historical-evidence/hilega-pcr-oi-support-research-v1/
-midpoint-vwap-setup-family-60-session-validation-v1/
-setup-family-events-v1.csv
 
-NEW:
-data/historical-evidence/hilega-pcr-oi-support-research-v1/
-midpoint-vwap-setup-family-60-session-validation-v1-1/
-setup-family-events-v1-1.csv
+2) Afternoon 12:45–13:15 midpoint/boundary break study
+-------------------------------------------------------
+Interpretation used for "median of 30 min candle":
+  midpoint = (HIGH + LOW) / 2
 
-For each rejected former-C event it records:
-- original direction
-- original boundary-break timestamp
-- midpoint retest/reclaim/failure fields already present in old research output
-- first opposite-structure termination timestamp
-- would-be old C rebreak timestamp
-- minutes from termination to would-be rebreak
-- old causal MFE/MAE and +1/+3/+5/+10/+15 behavior
-- whether a same-direction Family D subsequently appeared
-- time from termination to that D event
+Reference period:
+  12:45:00 through 13:14:59 = exactly 30 completed 1m bars
 
-It also compares retained C vs rejected former-C descriptively.
+Observation:
+  starts 13:15
+  wick-only break does NOT count
+  close above HIGH => bullish boundary break
+  close below LOW  => bearish boundary break
 
-RUN
----
-cd ~/RB-ITOS-AI
-source .venv/bin/activate
-export PYTHONPATH=backend
+Measures:
+  first midpoint close above/below
+  first full boundary break
+  +1/+3/+5/+10/+15/+30/+60 minute directional movement
+  causal MFE/MAE through 15:14
+  whether the opposite boundary later breaks
+  reference candle direction vs breakout direction
+  exact 25-Aug result
 
-python scripts/midpoint_vwap_60_session_family_c_rejection_audit.py \
-  | tee /tmp/midpoint-vwap-60-session-family-c-rejection-audit-v1.txt
+Run:
+python scripts/afternoon_1245_1315_midpoint_boundary_break_60_session.py \
+  | tee /tmp/afternoon-1245-1315-break-study-v1.txt
 
-Do not move to 120 sessions until this output is reviewed.
-
-Research only:
-- no Hilega change
-- no Candidate A change
-- no B/D change
-- no runtime/execution/order change
-- no threshold search
+Research only.
+No production/runtime/Hilega/Candidate-A changes.
+No 15:15+ data.
