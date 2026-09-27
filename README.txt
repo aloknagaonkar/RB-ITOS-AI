@@ -1,40 +1,41 @@
-MIDPOINT + VWAP SETUP-FAMILY VALIDATION — 60 SESSIONS — V1
+60-SESSION OVERLAP / LIFECYCLE AUDIT V1
+========================================
 
-Purpose
--------
-Validate the three newly identified research families over the latest 60
-opening-framework sessions before expanding to 120/180:
+This audit does NOT change the B/C/D definitions.
 
-B) Delayed full Candidate A
-C) Failed midpoint reclaim + fresh boundary rebreak
-D) Full-range opposite-direction recovery/rebreak
+It reads the existing 60-session validation event CSV and reports:
 
-Important
----------
-- 15:15 onward excluded.
-- Original Candidate A unchanged.
-- No threshold search.
-- No production changes.
-- MFE/MAE is causal and starts after the completed entry candle.
-- MFE/MAE stops before midpoint structural invalidation.
+Exact overlaps:
+- B+C
+- B+D
+- C+D
+- B+C+D
 
-Family D deliberately does NOT require the exact 25-Aug midpoint pullback.
-The pullback is recorded as a feature only; requiring it would overfit that day.
+Near overlaps:
+- within ±1 minute
+- within ±3 minutes
+- within ±5 minutes
 
-Run
+It also prints:
+- B-only / C-only / D-only exact clusters
+- every exact multi-family event
+- unmeasured events
+- the complete 25-Aug B/C/D list
+
+RUN
 ---
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/midpoint_vwap_60_session_setup_family_validation.py \
-  | tee /tmp/midpoint-vwap-60-session-setup-family-validation-v1.txt
+python scripts/midpoint_vwap_60_session_overlap_lifecycle_audit.py \
+  | tee /tmp/midpoint-vwap-60-session-overlap-lifecycle-audit-v1.txt
 
-Sanity check
-------------
-The 25-Aug section should approximately show:
-- Family B BEAR around 09:42
-- Family C BEAR around 12:00
-- Family D BULL around 14:31
-
-If those do not appear, stop and inspect before interpreting aggregate results.
+STOP CONDITION
+--------------
+Do not expand to 120 sessions yet.
+First inspect:
+1. exact C+D overlap frequency
+2. near C+D overlap frequency
+3. whether 25-Aug 14:31 is an isolated or common overlap
+4. the unmeasured Family C event
