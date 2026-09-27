@@ -1,38 +1,36 @@
-B FAMILY — LIFECYCLE-CONSISTENT RISK COMPARISON V8.2
-======================================================
+B FAMILY — POST-08-SEP UNSEEN VALIDATION READINESS AUDIT V9
+===============================================================
 
-V8.2 fixes the key V8.1 methodology problem:
-fixed/ATR models are no longer allowed to hold past canonical B structural
-invalidation.
+Why this step exists
+--------------------
+The frozen canonical B research universe ends on 2026-09-08.
 
-Models:
-1. FIXED_15_LIFECYCLE
-2. ATR_1.00_LIFECYCLE
-3. STRUCTURAL
-4. HYBRID_FIXED15_BE20
-5. HYBRID_MIN15_ATR1_BE20
+Before validating V8.2 on genuinely unseen sessions, we must know whether the
+repo already contains all three required post-cutoff artifacts:
 
-Hybrid logic:
-- before +20: emergency risk
-- after +20: breakeven floor + canonical structural exit
-- no post-invalidation profit is allowed
+1. Underlying NIFTY 1m OHLC
+2. Opening-candle midpoint framework events
+3. NIFTY futures / session VWAP data
 
-The report also includes COMMON_ATR_ELIGIBLE comparisons so all models are
-measured on the exact same ATR-available event set.
+We must NOT hand-reconstruct B again.
 
-Run:
+Run
+---
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/b_family_risk_model_comparison_v8_2.py \
-  | tee /tmp/b-family-risk-model-comparison-v8-2.txt
+python scripts/b_family_post_08sep_readiness_audit_v9.py \
+  | tee /tmp/b-family-post-08sep-readiness-audit-v9.txt
 
-Outputs:
-data/historical-evidence/hilega-pcr-oi-support-research-v1/
-  b-family-risk-model-comparison-v8-2/
-    b-family-risk-model-events-v8-2.csv
-    b-family-risk-model-summary-v8-2.txt
+What to send back
+-----------------
+Paste the complete output.
 
-Research only.
-Underlying NIFTY points are not CE/PE option-premium P&L.
+If the audit shows common post-cutoff coverage, the next script will run the
+frozen canonical B detector and the unchanged V8.2 risk models only on those
+new sessions.
+
+If one artifact is missing, the audit also lists the existing repository
+generator scripts so we can produce it using frozen code rather than inventing
+new semantics.
