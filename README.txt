@@ -1,33 +1,32 @@
-MIDPOINT + VWAP DELAYED / REBREAK RESEARCH V1.1
-=================================================
+25 AUG 2026 FULL-DAY AUDIT V1
+================================
 
-WHAT CHANGED
-------------
-1. Study A now re-evaluates the FULL frozen Candidate A rule at T+1..T+10.
-   It no longer treats "still > +5" or "still < -5" by itself as a new
-   delayed Candidate A confirmation.
+This is intentionally a single-session research audit.
 
-2. Study B now records duration fields:
-   - T0 -> retest
-   - retest -> temporary reclaim
-   - temporary reclaim -> failed reclaim
-   - retest -> failed reclaim
-   - failed reclaim -> rebreak
-   - retest -> rebreak
-   - T0 -> rebreak
+Trusted window:
+  09:15–15:14
 
-3. Coverage now explicitly reports:
-   - all framework events
-   - boundary-break events
-   - no-boundary-break events
-   - study-eligible events
+Explicitly excluded:
+  15:15 onward
+
+The script validates the three current trade candidates:
+  09:42 BEARISH — delayed full Candidate A
+  12:00 BEARISH — failed RED-midpoint reclaim + RED-low rebreak
+  14:31 BULLISH — structural recovery + GREEN-high / RED-high rebreak
+
+It measures:
+  +1/+3/+5/+10/+15 minute directional movement
+  MFE through 15:14
+  MAE through 15:14
+  structural invalidation timestamps
+  full minute-level structural/VWAP audit
 
 INSTALL
 -------
 Copy:
-  scripts/midpoint_vwap_delayed_and_rebreak_research.py
+  scripts/midpoint_vwap_2026_08_25_full_day_audit.py
 
-into:
+to:
   ~/RB-ITOS-AI/scripts/
 
 RUN
@@ -36,34 +35,11 @@ cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/midpoint_vwap_delayed_and_rebreak_research.py \
-  | tee /tmp/midpoint-vwap-delayed-and-rebreak-research-v1-1.txt
+python scripts/midpoint_vwap_2026_08_25_full_day_audit.py \
+  | tee /tmp/midpoint-vwap-2026-08-25-full-day-audit.txt
 
-EXPECTED 25 AUG SANITY CHECK
-----------------------------
-BEARISH:
-- T0 = 09:39
-- Candidate A at T0 = False
-- delayed full Candidate A should be around 09:42
-- delay = 3m
-- confirmation VWAP distance about -8.31
-
-BULLISH:
-- 09:32 must NOT be accepted merely because VWAP distance remains > +5.
-- The script must re-check the complete 5-minute causal interaction.
-
-BEARISH REBREAK:
-- retest around 11:58
-- failed reclaim around 11:59
-- rebreak around 12:00
-- failed->rebreak should be about 1 minute
-
-SAFETY
-------
-Research-only.
-Candidate A unchanged.
-Hilega unchanged.
+Do not interpret this as a production strategy.
+No Hilega changes.
+No Candidate A changes.
 No runtime changes.
-No orders.
-No quantity.
-No execution.
+No execution/orders/quantity.
