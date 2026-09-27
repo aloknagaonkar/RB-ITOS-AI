@@ -1,37 +1,41 @@
-B FAMILY — WARNING AGE / PROFIT SEGMENTATION V4
-==================================================
+B FAMILY — INDEPENDENT HISTORICAL VALIDATION V6
+=================================================
 
-This V4 pass studies WHY the same fixed recovery window behaves differently for
-early weak warnings and late warnings after a B has already moved favorably.
+Goal
+----
+Validate the frozen B detector and current warning/recovery research on sessions
+before the latest 60-session B/C/D development sample.
 
-It does NOT change frozen B entry logic.
+SAFETY / METHODOLOGY
+--------------------
+The script first performs a PARITY GATE:
+- reconstruct B from raw 1m + futures VWAP;
+- compare date/direction/timestamp against the known frozen 60-session B events;
+- ABORT if parity is not exact.
 
-Run:
+Only after parity passes does it evaluate older sessions (< 2026-06-16).
+
+Run
+---
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/b_family_60_session_warning_age_profit_v4.py \
-  | tee /tmp/b-family-60-session-warning-age-profit-v4.txt
+python scripts/b_family_independent_historical_validation_v6.py \
+  | tee /tmp/b-family-independent-historical-validation-v6.txt
 
-Requires:
-- b-family-warning-recovery-events-v2.csv from V2.
-
-Outputs:
+Outputs
+-------
 data/historical-evidence/hilega-pcr-oi-support-research-v1/
-  b-family-60-session-warning-age-profit-v4/
-    b-family-warning-age-profit-events-v4.csv
-    b-family-warning-age-profit-summary-v4.txt
+  b-family-independent-historical-validation-v6/
+    b-family-parity-v6.csv
+    b-family-independent-events-v6.csv
+    b-family-independent-summary-v6.txt
 
-V4 reports:
-- entry -> warning minutes
-- warning points
-- pre-warning MFE
-- percent of source MFE already achieved before warning
-- recovery timing
-- post-warning MFE
-- whether recovery occurred within 3 minutes
-- data-derived warning-age quartiles
-- profitable vs nonprofitable warning state
-
-Research only.
+Important
+---------
+- Do not bypass a failed parity gate.
+- No runtime/execution changes.
+- No new threshold tuning.
+- 3-minute recovery candidate is evaluated unchanged.
+- Underlying NIFTY points are not option premium P&L.
