@@ -1,22 +1,26 @@
-B FAMILY — V38 PROFIT-AWARE SELECTIVE RESCUE OPTIMIZATION
-============================================================
+B FAMILY — V39 MILESTONE-AWARE RESCUE OPTIMIZATION
+=====================================================
 
-V37 improved total points by only +13.20 versus V35, but reduced runner chase:
-- +75: 92.3% -> 69.2%
-- +100: 90.0% -> 60.0%
+Current best raw-points result:
+V38_CAP50 = +1233.75
 
-V38 keeps:
-- V35_W1_AGE10 primary exit
-- V37 RB1/G10 post-recovery rebreak rescue
+But V38 preserves only:
++75  = 69.2%
++100 = 60.0%
 
-But adds a causal rescue gate:
-- only rescue if current captured directional points are <= cap
+V39 adds a runner lockout:
+once a trade has already reached +50 / +75 / +100 before the rescue signal,
+the rescue can be disabled and the trade continues.
 
-Caps tested:
-0 / 10 / 20 / 30 / 40 / 50 / 75 points
+Grid:
+caps:
+35 / 40 / 45 / 50 / 55 / 60
+
+lockout:
+NONE / +50 / +75 / +100
 
 Goal:
-improve total points versus V35 while restoring as much +75/+100 chase as possible.
+keep V38-level points while improving +75/+100 runner preservation.
 
 Run:
 
@@ -24,7 +28,7 @@ cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/b_family_profit_aware_selective_rescue_v38.py \
-  | tee /tmp/b-family-profit-aware-selective-rescue-v38.txt
+python scripts/b_family_milestone_aware_rescue_v39.py \
+  | tee /tmp/b-family-milestone-aware-rescue-v39.txt
 
 Paste the complete output back.
