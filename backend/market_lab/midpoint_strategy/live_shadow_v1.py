@@ -7,9 +7,10 @@ from typing import Any, Optional
 
 from market_lab.domain import IST
 
+from .boundary_classifier import MidpointBoundaryClassifierV55, OTHER_FRESH_A
 from .config import MidpointShadowConfig
 from .family_b_detector import FamilyBObservation
-from .models import MidpointShadowState
+from .models import MidpointFamily, MidpointShadowState
 from .runtime import AuditableFamilyBEngine, MidpointFamilyBRuntime
 from .structure import ReferenceStructure, boundary_broken, midpoint_broken
 
@@ -54,6 +55,7 @@ class MidpointLiveShadowCoordinatorV1:
             journal_path=audit_path,
             config=self.config,
         )
+        self.boundary_classifier = MidpointBoundaryClassifierV55()
         self.state: _SessionState | None = None
 
     @staticmethod
@@ -409,12 +411,86 @@ class MidpointLiveShadowCoordinatorV1:
                     reason="ONE_MINUTE_CLOSE_BEYOND_ORIGINAL_BOUNDARY",
                     observation=obs,
                 )
-                self.engine.start_b_watch(
-                    rr.runtime,
-                    obs,
-                    self.state.observations,
+
+                decision = self.boundary_classifier.classify(
+                    reference=rr.reference,
+                    boundary_observation=obs,
+                    history=self.state.observations,
                 )
-                continue
+
+                if decision.owner == MidpointFamily.E.value:
+                    rr.runtime.family = MidpointFamily.E
+                else:
+                    rr.runtime.family = MidpointFamily.B
+
+                self.engine._audit(
+                    runtime=rr.runtime,
+                    timestamp=obs.timestamp,
+                    event_type="BOUNDARY_CLASSIFIED",
+                    direction=rr.reference.direction,
+                    result=decision.owner,
+                    reason=decision.reason,
+                    observation=obs,
+                    evidence={
+                        "family_selected": decision.owner,
+                        "candidate_a_at_boundary": decision.candidate_a_at_boundary,
+                        "prior_window_crossed_threshold": decision.prior_window_crossed_threshold,
+                        "raw_futures_vwap_diff": decision.raw_futures_vwap_diff,
+                        "directional_vwap_diff": decision.directional_vwap_diff,
+                    },
+                )
+
+                if decision.owner == MidpointFamily.E.value:
+                    if not self.config.family_e_enabled:
+                        self.engine._audit(
+                            runtime=rr.runtime,
+                            timestamp=obs.timestamp,
+                            event_type="E_SELECTED_BUT_DISABLED",
+                            direction=rr.reference.direction,
+                            result="NO_ENTRY",
+                            reason="FAMILY_E_DISABLED",
+                            observation=obs,
+                        )
+                        continue
+
+                    if another_active:
+                        self.engine._audit(
+                            runtime=rr.runtime,
+                            timestamp=obs.timestamp,
+                            event_type="E_ENTRY_BLOCKED",
+                            direction=rr.reference.direction,
+                            result="NO_ENTRY",
+                            reason="ANOTHER_REFERENCE_ACTIVE",
+                            observation=obs,
+                        )
+                        continue
+
+                    self.engine.start_e_entry(rr.runtime, obs)
+                    self.state.active_reference_type = ref_type
+                    rr.running_close_mfe = 0.0
+                    continue
+
+                if decision.owner == MidpointFamily.B.value:
+                    self.engine.start_b_watch(
+                        rr.runtime,
+                        obs,
+                        self.state.observations,
+                    )
+                    continue
+
+                if decision.owner == OTHER_FRESH_A:
+                    self.engine._audit(
+                        runtime=rr.runtime,
+                        timestamp=obs.timestamp,
+                        event_type="BOUNDARY_OWNER_OTHER",
+                        direction=rr.reference.direction,
+                        result="NO_B_OR_E_ENTRY",
+                        reason="FRESH_CANDIDATE_A_AT_BOUNDARY",
+                        observation=obs,
+                    )
+                    continue
+
+                raise AssertionError(f"unsupported boundary owner: {decision.owner}")
 
             if (
                 rr.boundary_seen

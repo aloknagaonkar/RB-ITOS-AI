@@ -63,7 +63,7 @@ def test_shared_manager_emits_e_for_e_runtime():
 
 def test_e_entry_uses_same_lifecycle_and_is_observation_only(tmp_path: Path):
     cfg = MidpointShadowConfig()
-    assert cfg.family_e_enabled is False
+    assert cfg.family_e_enabled is True
     assert cfg.observation_only is True
     assert cfg.execution_enabled is False
     assert cfg.paper_order_enabled is False

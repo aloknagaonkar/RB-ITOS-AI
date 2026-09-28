@@ -13,6 +13,7 @@ def midpoint_workspace_status(config: MidpointShadowConfig | None = None) -> dic
         "mode": "SHADOW",
         "families": {
             "B": {"enabled": cfg.family_b_enabled},
+            "E": {"enabled": cfg.family_e_enabled},
             "C": {"enabled": cfg.family_c_enabled},
             "D": {"enabled": cfg.family_d_enabled},
             "PM_E": {"enabled": cfg.pm_e_enabled},
