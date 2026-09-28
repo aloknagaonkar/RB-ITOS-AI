@@ -1,25 +1,14 @@
-B FAMILY — V28 CAUSAL EPISODE CHECKPOINT DIAGNOSTIC
-====================================================
+B FAMILY — V28.1 CAUSAL EPISODE ROBUSTNESS / CORRECTION
+=========================================================
 
 Purpose
 -------
-Compare recovered vs non-recovered deterioration episodes at fixed causal
-checkpoints:
+Correct V28 same-episode persistence interpretation and add robustness checks.
 
-- episode start
-- +1 minute
-- +3 minutes
-- +5 minutes
-
-Features:
-- drawdown / running MFE
-- drawdown points
-- directional futures-VWAP diff
-- cumulative VWAP change from episode start
-- price recovery from worst directional close since episode start
-- whether joint deterioration is still active
-
-This is descriptive only.
+Adds:
+- correct SAME_EPISODE_ACTIVE accounting
+- runner-level equal-weight comparison
+- leave-one-runner-out stability
 
 No threshold search.
 No exit rule.
@@ -32,7 +21,7 @@ cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/b_family_causal_episode_checkpoint_diagnostic_v28.py \
-  | tee /tmp/b-family-causal-episode-checkpoint-v28.txt
+python scripts/b_family_causal_episode_robustness_v28_1.py \
+  | tee /tmp/b-family-causal-episode-robustness-v28_1.txt
 
-Paste the complete V28 output back.
+Paste the full output back.
