@@ -1,29 +1,21 @@
-MIDPOINT M2 — LIVE + HISTORICAL REPLAY UI
+MIDPOINT M2.1 — AUDIT PATH RUNTIME FIX
 
-Implements:
-- Midpoint live uses Hilega visual patterns as reference.
-- Live Midpoint shows latest two AVAILABLE trading sessions only.
-- Hilega Milega live backend also limits to latest two AVAILABLE session dates.
-- Midpoint replay uses the SAME renderer as live.
-- Replay sessions are materialized from parity-proven V57 data.
-- Audit detail is lazy-loaded on Inspect.
-- OTHER_FRESH_A displays as FRESH A with explanation.
+Cause:
+M2 defined `_all_rows(path: Path = AUDIT_PATH)`.
+Python evaluates default arguments at function-definition time, so tests that
+monkeypatch `ui.AUDIT_PATH` still read the original live audit file.
 
-Apply:
+Fix:
+Use `_all_rows(path: Path | None = None)` and resolve `AUDIT_PATH` inside the
+function at call time.
+
+Run:
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
-python scripts/apply_midpoint_m2_live_replay_ui.py
 
-Test:
-python -m pytest tests/test_midpoint_m2_live_replay_ui.py -v
+python scripts/apply_midpoint_m2_1_audit_path_runtime_fix.py
+
+python -m pytest   tests/test_midpoint_m3_1_query_defaults.py   tests/test_midpoint_m3_live_shadow_ui.py   tests/test_midpoint_m2_live_replay_ui.py -v
+
 python -m pytest tests -q -k 'midpoint' --disable-warnings
-
-Materialize 3-session sample:
-python scripts/midpoint_m2_materialize_historical_replay.py --limit 3
-
-Then after API/frontend normal restart/build, validate UI.
-If sample is good, materialize all tested sessions:
-python scripts/midpoint_m2_materialize_historical_replay.py
-
-Do NOT restart live_shadow_worker_v1 for this UI change.
