@@ -1,16 +1,20 @@
-B FAMILY — V46 CAP20 RESCUE CROSS-BLOCK DIAGNOSTIC
+B FAMILY — V47 POST-CAP20 RECOVERY / RE-ENTRY DIAGNOSTIC
 
 Purpose:
-Study the 5 CAP20 rescues across V43/V44/V45 before any more tuning.
+Study what happens after the five CAP20 rescue exits from V43/V44/V45.
 
-It reports:
-- each rescue's point delta vs baseline
-- whether it later made a new MFE
-- which milestones were cut
-- total rescue contribution across all three blocks
-
-No rule changes.
 No tuning.
+No rule changes.
+No re-entry rule yet.
+
+Measures:
+- retake of degraded target
+- rescue-price retake
+- VWAP recovery
+- +1/+3/+5/+10 minute checkpoints
+- time to next new MFE
+- post-rescue adverse excursion
+- three descriptive causal re-entry markers
 
 Run:
 
@@ -18,7 +22,7 @@ cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/b_family_cap20_rescue_diagnostic_v46.py \
-  | tee /tmp/b-family-cap20-rescue-diagnostic-v46.txt
+python scripts/b_family_post_cap20_reentry_diagnostic_v47.py \
+  | tee /tmp/b-family-post-cap20-reentry-diagnostic-v47.txt
 
 Paste the complete output back.
