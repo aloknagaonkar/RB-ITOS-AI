@@ -1,31 +1,25 @@
-B FAMILY — V34 RECOVERY-ATTEMPT DETERIORATION + POINTS SCORECARD
-=================================================================
+B FAMILY — V34.1 COMPLETE POINT-ACCOUNTING BASELINE
+=====================================================
 
 Purpose
 -------
-Study what happens after the BEST recovery attempt inside the DEGRADED state.
+Complete point accounting for all 18 V32 degraded-state events using raw
+underlying candles.
 
-Also introduces a permanent point-accounting convention for future testing.
+Reconstruct:
+- lifecycle MFE
+- structural invalidation exit points
+- structural giveback
+- degraded-trigger points
+- rejected V29 exit points
+- V29 later-new-MFE
+- +50/+75/+100 preservation
 
-V34 measures:
-- best recovery attempt
-- subsequent gap expansion
-- weakening after best attempt
-- time from best attempt to recovery/invalidation
-- recovered counterexamples
+Outputs a baseline scorecard for:
+- STRUCTURAL_INVALIDATION
+- V29_REJECTED_EXIT
 
-POINT ACCOUNTING
-----------------
-From V34 onward, every actual exit candidate should report:
-- directional NIFTY points at exit
-- total / mean / median
-- improvement vs structural invalidation baseline
-- improvement vs previous candidate
-- runner preservation (+50/+75/+100)
-- max drawdown where meaningful
-
-This script itself does NOT create an exit rule, so recovered state transitions
-are NOT counted as realized P&L.
+From here onward every actual exit candidate should be compared against these.
 
 Run:
 
@@ -33,7 +27,7 @@ cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/b_family_recovery_deterioration_points_v34.py \
-  | tee /tmp/b-family-recovery-deterioration-points-v34.txt
+python scripts/b_family_complete_points_baseline_v34_1.py \
+  | tee /tmp/b-family-complete-points-baseline-v34_1.txt
 
-Paste the complete V34 output back.
+Paste the complete output back.
