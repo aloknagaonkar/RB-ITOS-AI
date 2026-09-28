@@ -1,55 +1,29 @@
-V29.1 DATA-INTEGRITY REPAIR
-============================
+B FAMILY — V30 POST-V29 RECOVERY PATH DIAGNOSTIC
+==================================================
 
-Why
----
-V29 preparation accepted 2024-11-29 because NIFTY underlying had 375 bars.
-The canonical futures collector returned no 1-minute candles for that session,
-so the V29 validator correctly stopped.
+Purpose
+-------
+Study why 6/7 frozen V29 OOS exits were false exits.
 
-Do NOT tune V29 and do NOT bypass the missing futures session.
+For every V29-triggered runner, measure after the V29 exit:
+- time to next new MFE
+- further adverse excursion before that recovery
+- directional futures-VWAP recovery
+- time to VWAP recovery
+- price retake of the V29 episode-start level
+- time to price retake
+- additional joint-deterioration episodes before next new MFE
 
-V29.1 rebuilds the 100-session universe requiring BOTH:
-- underlying = exactly 375 rows
-- futures = exactly 375 rows using the canonical futures collector
+V29 remains REJECTED.
+V30 is descriptive only.
 
-The V29 exit hypothesis itself is unchanged.
+Run:
 
-1. Run dual-validity repair
----------------------------
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
-set -a
-source .env
-set +a
 
-python scripts/b_family_repair_dual_valid_100_v29_1.py \
-  | tee /tmp/b-family-v29_1-dual-valid.txt
+python scripts/b_family_post_v29_recovery_path_diagnostic_v30.py \
+  | tee /tmp/b-family-post-v29-recovery-v30.txt
 
-2. Regenerate underlying using repaired manifest
-------------------------------------------------
-python -m market_lab.historical_underlying_ohlc_sidecar \
-  --underlying "NSE_INDEX|Nifty 50" \
-  --manifest data/historical-validation/manifest-b-v29-pre-v23-100.json \
-  --output data/historical-evidence/b-v29-pre-v23-100-underlying.json \
-  --csv-output data/historical-evidence/b-v29-pre-v23-100-underlying.csv \
-  | tee /tmp/b-family-v29-underlying-repaired.txt
-
-Expected: 100 / 100, 37500 rows.
-
-3. Regenerate futures
----------------------
-rm -f data/historical-evidence/b-v29-pre-v23-100-futures-vwap.csv
-
-python -m market_lab.midpoint_v2_nifty_futures_vwap_v1 \
-  --session-dates-file data/historical-validation/session-dates-b-v29-pre-v23-100.txt \
-  --output data/historical-evidence/b-v29-pre-v23-100-futures-vwap.csv \
-  | tee /tmp/b-family-v29-futures-repaired.txt
-
-Expected: 37500 rows.
-
-4. Only then run the frozen V29 validator
------------------------------------------
-python scripts/b_family_runner_exit_oos_100_v29.py \
-  | tee /tmp/b-family-runner-exit-oos-v29.txt
+Paste the complete V30 output back.
