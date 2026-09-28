@@ -12,6 +12,7 @@ from market_lab.midpoint_strategy.live_shadow_v1 import MidpointLiveShadowCoordi
 V55 = Path('scripts/midpoint_v55_boundary_selection_replay.py')
 V52 = Path('scripts/midpoint_mature_boundary_robustness_v52_1.py')
 CANON = Path('scripts/midpoint_vwap_60_session_setup_family_validation_v1_1.py')
+V57 = Path('scripts/midpoint_v57_full_historical_be_lifecycle_replay.py')
 OUTDIR = Path('data/historical-evidence/hilega-pcr-oi-support-research-v1/midpoint-v58-480-session-be-accounting')
 TRADE_CSV = OUTDIR / 'trade-accounting-v58.csv'
 FAMILY_CSV = OUTDIR / 'family-summary-v58.csv'
@@ -49,15 +50,10 @@ def first(seg, types):
     return next((r for r in seg if r.get('event_type') in types), None)
 
 def replay(day,u,fut):
-    with tempfile.TemporaryDirectory(prefix='v58-') as td:
-        ap=Path(td)/'audit.jsonl'
-        c=MidpointLiveShadowCoordinatorV1(market_sources=DummySources(), audit_path=ap)
-        c._reset_session(dt(day+'T09:15:00+05:30').date())
-        ub={dt(ts):candle(ts,r) for ts,r in u.items()}
-        for ts_s in sorted(set(u).intersection(fut), key=dt):
-            ts=dt(ts_s); fr=fut[ts_s]
-            c._process_minute(ts=ts, underlying=ub[ts], futures_close=float(fr['close']), futures_vwap=float(fr['vwap']), underlying_by_ts=ub)
-        return [json.loads(x) for x in ap.read_text().splitlines() if x.strip()] if ap.exists() else []
+    """Reuse V57 parity-proven replay path exactly."""
+    v57=load_module(V57,'v57_replay_v58')
+    rows, open_active, active_family = v57.replay_session(day,u,fut)
+    return rows
 
 def bars(u,start,end=None):
     s=dt(start); e=dt(end) if end else None
