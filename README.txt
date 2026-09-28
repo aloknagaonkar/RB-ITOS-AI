@@ -1,26 +1,28 @@
-B FAMILY — V25 RUNNER EXIT DIAGNOSTIC
-=======================================
+B FAMILY — V26 RUNNER DETERIORATION DIAGNOSTIC
+================================================
 
 Purpose
 -------
-Study the 11 frozen RUNNER_STRENGTHENING events from V24 before defining any
-runner exit rule.
+Candle-by-candle descriptive analysis of the 11 frozen
+RUNNER_STRENGTHENING events.
 
-V25 measures:
-- time from classification to +50/+75/+100
-- max pullback before each milestone
-- directional futures-VWAP context
-- peak favorable excursion after classification
-- giveback from peak to canonical structural invalidation
-- classification-to-invalidation duration
+For every minute after classification, V26 records:
+- directional close move
+- directional favorable move
+- running MFE
+- drawdown from running MFE
+- directional futures-VWAP diff
+- VWAP change vs classification
+- VWAP change vs prior minute
+- milestone state (+50/+75/+100)
 
-It does NOT:
-- define an exit
-- tune a stop
-- tune a trailing threshold
-- change Family B
-- change V20 classifier
-- touch production/runtime/order code
+It also prints the first descriptive coincidence of:
+- any drawdown + VWAP weakening
+- drawdown >=10 + VWAP weakening
+- drawdown >=20 + VWAP weakening
+
+IMPORTANT:
+10 and 20 are diagnostic labels only. They are NOT candidate exit thresholds.
 
 Run:
 
@@ -28,7 +30,7 @@ cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/b_family_runner_exit_diagnostic_v25.py \
-  | tee /tmp/b-family-runner-exit-diagnostic-v25.txt
+python scripts/b_family_runner_deterioration_diagnostic_v26.py \
+  | tee /tmp/b-family-runner-deterioration-v26.txt
 
 Paste the complete output back.
