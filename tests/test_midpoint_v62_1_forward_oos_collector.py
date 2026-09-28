@@ -26,7 +26,7 @@ def test_r1_r2_and_terminal(tmp_path: Path):
     )
     c.on_completed_underlying_candle(
         timestamp="2026-09-29T10:07:00+05:30",
-        high=128.0, low=112.0, close=114.0
+        high=134.0, low=112.0, close=114.0
     )
 
     snap = c.active_snapshot()[0]
