@@ -1,25 +1,21 @@
-B FAMILY — V32 MULTI-BLOCK DEGRADED-STATE POPULATION STUDY
-=============================================================
+B FAMILY — V33 RECOVERY ATTEMPT SEQUENCE DIAGNOSTIC
+====================================================
 
 Purpose
 -------
-Expand V31 across existing historical blocks.
+Study recovery-attempt sequences inside V32 DEGRADED states.
 
-Frozen semantics:
-- Family-B entry unchanged
-- V20 runner classifier unchanged
-- V29 remains rejected as an exit
-- V29-type signal is only a DEGRADED-state trigger
+Compare RECOVERED vs FAILED_RECOVERY paths using:
+- first attempt
+- second attempt
+- recovery gain
+- gap-to-target progression
+- improving vs weakening transitions
+- longest consecutive weakening streak
+- spacing between attempt peaks
 
-For every RUNNER_STRENGTHENING event with raw data available:
-- detect first V29-type degradation after classification
-- follow until price retakes episode-start level -> RECOVERED
-  or structural invalidation -> FAILED_RECOVERY
-- compare duration, damage, normalized damage, recovery attempts,
-  target gap, and VWAP path
-
-No threshold search.
-No exit rule.
+No thresholds are selected.
+No exit rule is defined.
 
 Run:
 
@@ -27,14 +23,7 @@ cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/b_family_degraded_state_population_v32.py \
-  | tee /tmp/b-family-degraded-state-population-v32.txt
+python scripts/b_family_recovery_attempt_sequence_v33.py \
+  | tee /tmp/b-family-recovery-attempt-sequence-v33.txt
 
-Important
----------
-This script auto-discovers prior B-event CSVs and historical raw sidecars.
-If it reports skipped_missing_raw > 0, paste the complete output before
-creating more data. We should inspect which blocks are missing rather than
-silently substituting or reconstructing data.
-
-Paste the complete V32 output back.
+Paste the complete V33 output back.
