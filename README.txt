@@ -1,25 +1,26 @@
-B FAMILY — V34.1 COMPLETE POINT-ACCOUNTING BASELINE
+B FAMILY — V34.2 COMPARABLE 18-EVENT POINTS BASELINE
 =====================================================
 
 Purpose
 -------
-Complete point accounting for all 18 V32 degraded-state events using raw
-underlying candles.
+Create one same-population 18-event points baseline before V35.
 
-Reconstruct:
-- lifecycle MFE
-- structural invalidation exit points
-- structural giveback
-- degraded-trigger points
-- rejected V29 exit points
-- V29 later-new-MFE
+Baseline:
+STRUCTURAL_OR_SESSION_CUTOFF
+- structural invalidation close if present
+- otherwise final trusted 1-minute session close
+
+V29:
+Reconstructed using the exact frozen multi-episode scan.
+If V29 never exits, the policy falls back to the common baseline so all
+18 events remain comparable.
+
+Metrics:
+- total / mean / median / worst / best
+- max drawdown
+- improvement vs baseline
 - +50/+75/+100 preservation
-
-Outputs a baseline scorecard for:
-- STRUCTURAL_INVALIDATION
-- V29_REJECTED_EXIT
-
-From here onward every actual exit candidate should be compared against these.
+- later new MFE after actual V29 exits
 
 Run:
 
@@ -27,7 +28,12 @@ cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/b_family_complete_points_baseline_v34_1.py \
-  | tee /tmp/b-family-complete-points-baseline-v34_1.txt
+python scripts/b_family_comparable_points_baseline_v34_2.py \
+  | tee /tmp/b-family-comparable-points-baseline-v34_2.txt
 
 Paste the complete output back.
+
+After V34.2:
+- freeze the first true V35 exit candidate
+- test on OOS
+- compare point scorecard against this baseline
