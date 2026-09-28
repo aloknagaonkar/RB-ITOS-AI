@@ -1,25 +1,30 @@
-B FAMILY — V27 RUNNER PERSISTENCE / RECOVERY DIAGNOSTIC
-=========================================================
+B FAMILY — V28 CAUSAL EPISODE CHECKPOINT DIAGNOSTIC
+====================================================
 
 Purpose
 -------
-Study whether runner deterioration is temporary or persistent.
+Compare recovered vs non-recovered deterioration episodes at fixed causal
+checkpoints:
 
-V27 uses the existing V26 minute timeline and measures:
-- longest consecutive VWAP weakening run
-- longest consecutive no-new-MFE run
-- longest consecutive joint deterioration run
-- joint deterioration episode count
-- which episodes later recover to a new MFE
-- time from episode end to new MFE
-- properties of the terminal deterioration episode
+- episode start
+- +1 minute
+- +3 minutes
+- +5 minutes
 
-Joint deterioration remains sign-only:
-  drawdown_from_running_mfe_close > 0
-  AND
-  vwap_change_vs_prior_minute < 0
+Features:
+- drawdown / running MFE
+- drawdown points
+- directional futures-VWAP diff
+- cumulative VWAP change from episode start
+- price recovery from worst directional close since episode start
+- whether joint deterioration is still active
 
-No magnitude threshold is introduced.
+This is descriptive only.
+
+No threshold search.
+No exit rule.
+No Family-B change.
+No V20 change.
 
 Run:
 
@@ -27,7 +32,7 @@ cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/b_family_runner_persistence_recovery_diagnostic_v27.py \
-  | tee /tmp/b-family-runner-persistence-recovery-v27.txt
+python scripts/b_family_causal_episode_checkpoint_diagnostic_v28.py \
+  | tee /tmp/b-family-causal-episode-checkpoint-v28.txt
 
-Paste the complete output back.
+Paste the complete V28 output back.
