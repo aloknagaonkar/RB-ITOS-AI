@@ -108,3 +108,10 @@ class UpstoxLiveShadowSourcesV1:
         body=self.gateway._get(f"/v3/historical-candle/intraday/{encoded}/minutes/1")
         return normalize_upstox_historical_candles(instrument_key,local.date(),body)
 
+    def nifty_futures_intraday_1m(self,*,now:datetime|None=None):
+        local=(now or datetime.now(IST)).astimezone(IST)
+        instrument=self.gateway.resolve_nifty_front_future(today=local.date())
+        encoded=quote(instrument.instrument_key,safe="")
+        body=self.gateway._get(f"/v3/historical-candle/intraday/{encoded}/minutes/1")
+        return normalize_upstox_historical_candles(instrument.instrument_key,local.date(),body)
+
