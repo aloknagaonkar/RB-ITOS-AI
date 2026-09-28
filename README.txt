@@ -1,33 +1,47 @@
-MIDPOINT STRATEGY — SHADOW LIVE V1 / PHASE M1
+MIDPOINT STRATEGY — M2 AUDITABLE FAMILY B RUNTIME
 
-This package is the additive first implementation step.
+Prerequisite:
+M1 files must already be present in the repo.
 
-It intentionally does NOT guess the existing Hilega API/router/frontend file
-paths. It creates the strategy module, safety contract, workspace contract and
-Family-B management state machine first.
+Copy this package over the repo preserving paths.
 
-Copy files into the repo preserving paths.
-
-Then run:
+Run:
 
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/midpoint_shadow_v1_smoke.py
+python scripts/midpoint_m2_audit_smoke.py
 
-Expected:
-PASS: safety contract
-PASS: Family B only
-PASS: CAP20 rescue
-PASS: one post-rescue re-entry
-PASS: second re-entry blocked
+Then:
 
-Do NOT stage unrelated files.
+python -m pytest tests/test_midpoint_m2_auditable_runtime.py -v
 
-Suggested staging after review:
+Expected smoke output includes PASS for:
+- delayed B detector
+- rejected confirmation audit
+- B entry audit
+- +20 / runner classification
+- degraded / recovery
+- rejected CAP20 check
+- CAP20 rescue
+- rejected re-entry check
+- post-CAP20 re-entry
+- safety on every audit row
+- no order functionality
 
-git add   backend/market_lab/midpoint_strategy/__init__.py   backend/market_lab/midpoint_strategy/config.py   backend/market_lab/midpoint_strategy/models.py   backend/market_lab/midpoint_strategy/family_b_shadow.py   backend/market_lab/midpoint_strategy/workspace_contract.py   scripts/midpoint_shadow_v1_smoke.py   docs/MIDPOINT_STRATEGY_SHADOW_V1.md
+Review before staging.
 
-The next phase is wiring this into the existing Hilega shared runtime/API/UI
-after inspecting the current exact integration files.
+Suggested explicit staging:
+
+git add \
+  backend/market_lab/midpoint_strategy/audit.py \
+  backend/market_lab/midpoint_strategy/structure.py \
+  backend/market_lab/midpoint_strategy/family_b_detector.py \
+  backend/market_lab/midpoint_strategy/runtime.py \
+  backend/market_lab/midpoint_strategy/replay.py \
+  scripts/midpoint_m2_audit_smoke.py \
+  tests/test_midpoint_m2_auditable_runtime.py \
+  docs/MIDPOINT_STRATEGY_M2_AUDITABLE_RUNTIME.md
+
+Do not use git add .
