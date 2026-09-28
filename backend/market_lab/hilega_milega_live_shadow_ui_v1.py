@@ -21,8 +21,30 @@ def _store() -> ShadowStepAuditStoreV1:
     return ShadowStepAuditStoreV1(STEP_AUDIT_PATH)
 
 
-def _rows() -> list[dict[str, Any]]:
+def _all_rows() -> list[dict[str, Any]]:
     return _store().read_all() if STEP_AUDIT_PATH.exists() else []
+
+
+def _row_session_date(row: dict[str, Any]) -> str | None:
+    payload = row.get("payload") or {}
+    for value in (
+        row.get("checkpoint"), row.get("event_time"), row.get("bar_timestamp"), row.get("signal_bar"),
+        payload.get("checkpoint"), payload.get("event_time"), payload.get("bar_timestamp"), payload.get("signal_bar"),
+    ):
+        text = str(value or "")
+        if len(text) >= 10 and text[4:5] == "-" and text[7:8] == "-":
+            return text[:10]
+    return None
+
+
+def _recent_session_rows(rows: list[dict[str, Any]], keep: int = 2) -> list[dict[str, Any]]:
+    days = sorted({d for row in rows if (d := _row_session_date(row))}, reverse=True)
+    allowed = set(days[:keep])
+    return rows if not allowed else [row for row in rows if _row_session_date(row) in allowed]
+
+
+def _rows() -> list[dict[str, Any]]:
+    return _recent_session_rows(_all_rows(), keep=2)
 
 
 @router.get("/status")
