@@ -1,20 +1,17 @@
-B FAMILY — V47 POST-CAP20 RECOVERY / RE-ENTRY DIAGNOSTIC
+B FAMILY — V48 FROZEN POST-CAP20 RE-ENTRY VALIDATION
 
-Purpose:
-Study what happens after the five CAP20 rescue exits from V43/V44/V45.
+Frozen rule derived from V47:
+After CAP20 rescue, allow ONE re-entry only when:
+- within 20 minutes,
+- close retakes degraded target,
+- directional futures-VWAP is above rescue-time level.
 
-No tuning.
-No rule changes.
-No re-entry rule yet.
+Re-entry at 1m close.
+Second leg exits only at original structural/session terminal.
+No second rescue / no repeated re-entry.
 
-Measures:
-- retake of degraded target
-- rescue-price retake
-- VWAP recovery
-- +1/+3/+5/+10 minute checkpoints
-- time to next new MFE
-- post-rescue adverse excursion
-- three descriptive causal re-entry markers
+Validation:
+43 RUNNER_STRENGTHENING events from V40.1.
 
 Run:
 
@@ -22,7 +19,7 @@ cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/b_family_post_cap20_reentry_diagnostic_v47.py \
-  | tee /tmp/b-family-post-cap20-reentry-diagnostic-v47.txt
+python scripts/b_family_post_cap20_reentry_validation_v48.py \
+  | tee /tmp/b-family-post-cap20-reentry-validation-v48.txt
 
 Paste the complete output back.
