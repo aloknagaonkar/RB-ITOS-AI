@@ -1,28 +1,25 @@
-B FAMILY — V26 RUNNER DETERIORATION DIAGNOSTIC
-================================================
+B FAMILY — V27 RUNNER PERSISTENCE / RECOVERY DIAGNOSTIC
+=========================================================
 
 Purpose
 -------
-Candle-by-candle descriptive analysis of the 11 frozen
-RUNNER_STRENGTHENING events.
+Study whether runner deterioration is temporary or persistent.
 
-For every minute after classification, V26 records:
-- directional close move
-- directional favorable move
-- running MFE
-- drawdown from running MFE
-- directional futures-VWAP diff
-- VWAP change vs classification
-- VWAP change vs prior minute
-- milestone state (+50/+75/+100)
+V27 uses the existing V26 minute timeline and measures:
+- longest consecutive VWAP weakening run
+- longest consecutive no-new-MFE run
+- longest consecutive joint deterioration run
+- joint deterioration episode count
+- which episodes later recover to a new MFE
+- time from episode end to new MFE
+- properties of the terminal deterioration episode
 
-It also prints the first descriptive coincidence of:
-- any drawdown + VWAP weakening
-- drawdown >=10 + VWAP weakening
-- drawdown >=20 + VWAP weakening
+Joint deterioration remains sign-only:
+  drawdown_from_running_mfe_close > 0
+  AND
+  vwap_change_vs_prior_minute < 0
 
-IMPORTANT:
-10 and 20 are diagnostic labels only. They are NOT candidate exit thresholds.
+No magnitude threshold is introduced.
 
 Run:
 
@@ -30,7 +27,7 @@ cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/b_family_runner_deterioration_diagnostic_v26.py \
-  | tee /tmp/b-family-runner-deterioration-v26.txt
+python scripts/b_family_runner_persistence_recovery_diagnostic_v27.py \
+  | tee /tmp/b-family-runner-persistence-recovery-v27.txt
 
 Paste the complete output back.
