@@ -1,23 +1,24 @@
-MIDPOINT V56.5 — CONFIRMED TREND 36 B+E TEST
+MIDPOINT V57 — FULL HISTORICAL B+E LIFECYCLE REPLAY
 
-Copy the package into the repository, then:
+Run:
 
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/midpoint_v56_5_confirmed_trend_36_be_validation.py
+python -m pytest tests/test_midpoint_v57_replay_contract.py -v
+
+python scripts/midpoint_v57_full_historical_be_lifecycle_replay.py
 
 cat \
 data/historical-evidence/hilega-pcr-oi-support-research-v1/\
-midpoint-confirmed-trend-36-v56-5/summary-v56-5.txt
+midpoint-v57-full-historical-be-lifecycle/summary-v57.txt
 
-Useful detail files:
+Outputs:
+- session-summary-v57.csv
+- trade-lifecycle-v57.csv
+- audit-events-v57.csv
+- report-v57.json
+- summary-v57.txt
 
-data/historical-evidence/hilega-pcr-oi-support-research-v1/\
-midpoint-confirmed-trend-36-v56-5/event-level-v56-5.csv
-
-data/historical-evidence/hilega-pcr-oi-support-research-v1/\
-midpoint-confirmed-trend-36-v56-5/session-summary-v56-5.csv
-
-This script is research-only. It does not modify live runtime or execution.
+Research-only: no live runtime mutation.
