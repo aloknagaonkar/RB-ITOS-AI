@@ -1,31 +1,28 @@
-MIDPOINT FAMILY E — V53
-
-What this does:
-- freezes Family E's entry definition
-- validates mutually-exclusive B/E boundary ownership
-- leaves Family B unchanged
-- replays 2026-09-28 from the live audit
-- does NOT modify live runtime
-- does NOT enable Family E
-
-Prerequisite:
-scripts/midpoint_mature_boundary_robustness_v52_1.py must already exist.
+MIDPOINT V54 — SHARED B/E MANAGEMENT
 
 Run:
+
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/midpoint_family_e_v53_freeze_and_coordinator_validation.py
+1) Dry run:
+python scripts/apply_midpoint_v54_shared_be_management.py
 
-Then:
-cat \
-data/historical-evidence/hilega-pcr-oi-support-research-v1/\
-midpoint-family-e-v53/summary-v53.txt
+2) Apply:
+python scripts/apply_midpoint_v54_shared_be_management.py --apply
 
-Expected 2026-09-28 bearish replay:
-09:26 boundary should classify owner=E with
-MATURE_DIRECTIONAL_VWAP_AT_BOUNDARY.
+3) Focused tests:
+python -m pytest tests/test_midpoint_v54_shared_be_management.py -v
 
-Do not enable E live from V53.
-V54 is the next phase: shared B/E post-entry management parity.
+4) Existing Midpoint tests:
+python -m pytest tests -q -k 'midpoint' --disable-warnings
+
+5) Smoke:
+python scripts/midpoint_v54_shared_management_smoke.py
+
+6) Inspect:
+git status --short
+git diff --   backend/market_lab/midpoint_strategy/models.py   backend/market_lab/midpoint_strategy/config.py   backend/market_lab/midpoint_strategy/family_b_shadow.py   backend/market_lab/midpoint_strategy/runtime.py   tests/test_midpoint_v54_shared_be_management.py   scripts/midpoint_v54_shared_management_smoke.py
+
+Do NOT restart the live worker in V54.
