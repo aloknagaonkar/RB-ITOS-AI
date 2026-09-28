@@ -1,29 +1,25 @@
-B FAMILY — V31 DEGRADED-STATE / FAILED-RECOVERY DIAGNOSTIC
-============================================================
+B FAMILY — V32 MULTI-BLOCK DEGRADED-STATE POPULATION STUDY
+=============================================================
 
 Purpose
 -------
-Treat the rejected V29 signal as a DEGRADED-state trigger, not an exit.
+Expand V31 across existing historical blocks.
 
-For each of the 7 V29 OOS runner events, follow the degraded state until:
-A) price retakes the V29 episode-start directional close level -> RECOVERED
-or
-B) canonical structural invalidation occurs first -> FAILED_RECOVERY
+Frozen semantics:
+- Family-B entry unchanged
+- V20 runner classifier unchanged
+- V29 remains rejected as an exit
+- V29-type signal is only a DEGRADED-state trigger
 
-Measure:
-- degraded-state duration
-- worst directional damage
-- damage / running MFE
-- VWAP path
-- recovery-attempt count
-- highest recovery attempt
-- gap to target
-- improving vs weakening recovery attempts
+For every RUNNER_STRENGTHENING event with raw data available:
+- detect first V29-type degradation after classification
+- follow until price retakes episode-start level -> RECOVERED
+  or structural invalidation -> FAILED_RECOVERY
+- compare duration, damage, normalized damage, recovery attempts,
+  target gap, and VWAP path
 
 No threshold search.
 No exit rule.
-No Family-B change.
-No V20 change.
 
 Run:
 
@@ -31,7 +27,14 @@ cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/b_family_degraded_state_path_diagnostic_v31.py \
-  | tee /tmp/b-family-degraded-state-v31.txt
+python scripts/b_family_degraded_state_population_v32.py \
+  | tee /tmp/b-family-degraded-state-population-v32.txt
 
-Paste the complete V31 output back.
+Important
+---------
+This script auto-discovers prior B-event CSVs and historical raw sidecars.
+If it reports skipped_missing_raw > 0, paste the complete output before
+creating more data. We should inspect which blocks are missing rather than
+silently substituting or reconstructing data.
+
+Paste the complete V32 output back.
