@@ -1,4 +1,9 @@
-MIDPOINT V58.1 FIX2 — ROBUST V57 REPLAY REUSE
+MIDPOINT V58.1 FIX3 — EXACT CURRENT V58 SCRIPT PATCH
+
+This patch matches the current script exactly:
+- load helper: load_module(...)
+- replay function: replay(day,u,fut)
+- single-quoted path constants
 
 Run:
 
@@ -6,8 +11,8 @@ cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/apply_midpoint_v58_1_fix2_reuse_v57_replay.py
-python scripts/verify_midpoint_v58_1_fix2.py
+python scripts/apply_midpoint_v58_1_fix3_exact_current_script.py
+python scripts/verify_midpoint_v58_1_fix3.py
 
 python -m pytest tests/test_midpoint_v58_accounting_contract.py -v
 
