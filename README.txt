@@ -1,52 +1,33 @@
-MIDPOINT V62.1 — FORWARD OOS AUTOMATIC COLLECTOR
+MIDPOINT V62.2 — EXACT COORDINATOR ADAPTER
 
-This package intentionally separates the research collector from live strategy
-logic.
+The inspected runtime shows the correct hook is inside
+MidpointLiveShadowCoordinatorV1.process(), directly after _process_minute().
 
-Safety
-------
+Safety:
+- disabled by default
 - no orders
-- no execution
-- no paper-order mutation
-- no quantity
-- no B/E/CAP20/re-entry rule changes
-- only writes the V62 forward research ledger
+- no B/E/CAP20/re-entry decision changes
+- only observes new midpoint audit records and completed 1m underlying candles
 
-Important integration note
---------------------------
-The collector requires BOTH:
-1. midpoint audit events
-2. every completed 1-minute underlying candle
+Enable later with:
+MIDPOINT_V62_OOS_COLLECTOR_ENABLED=1
 
-To avoid guessing the current worker layout, first run the preflight inspection.
+Optional:
+MIDPOINT_V62_OOS_LEDGER=<path>
 
-Commands
---------
+Apply/test:
+
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/midpoint_v62_1_preflight.py
+python scripts/apply_midpoint_v62_2_exact_coordinator_adapter.py
+python scripts/verify_midpoint_v62_2_exact_coordinator_adapter.py
 
 python -m pytest \
-  tests/test_midpoint_v62_1_forward_oos_collector.py -v
+  tests/test_midpoint_v62_1_forward_oos_collector.py \
+  tests/test_midpoint_v62_2_exact_coordinator_adapter.py -v
 
-Do NOT restart or patch the live worker yet.
+python -m pytest tests -q -k 'midpoint' --disable-warnings
 
-Paste the preflight output. The adapter can then be wired to the exact current
-worker without touching strategy decisions.
-
-Stream adapter contract
------------------------
-The standalone runner expects JSONL records:
-
-{"kind":"audit","event":{...midpoint audit event...}}
-
-{"kind":"candle",
- "timestamp":"2026-09-29T10:06:00+05:30",
- "high":123.4,
- "low":120.1,
- "close":122.8}
-
-Once wired, the sidecar writes completed forward cases into the existing V62
-ledger.
+DO NOT restart yet. Inspect git diff first.
