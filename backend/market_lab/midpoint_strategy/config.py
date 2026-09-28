@@ -14,6 +14,8 @@ class MidpointShadowConfig:
     version: str = "shadow-v1"
 
     family_b_enabled: bool = True
+    # V54 introduces Family E management parity but keeps E disabled live.
+    family_e_enabled: bool = False
     family_c_enabled: bool = False
     family_d_enabled: bool = False
     pm_e_enabled: bool = False
@@ -42,5 +44,7 @@ class MidpointShadowConfig:
             raise ValueError("quantity must remain None")
         if not self.family_b_enabled:
             raise ValueError("Phase M1 requires Family B enabled")
+        if self.family_e_enabled:
+            raise ValueError("V54 keeps Family E disabled in live shadow until explicit later enablement")
         if self.family_c_enabled or self.family_d_enabled or self.pm_e_enabled:
             raise ValueError("Phase M1 enables Family B only")

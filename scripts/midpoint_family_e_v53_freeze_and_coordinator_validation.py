@@ -220,7 +220,10 @@ def replay_2026_09_28():
         )
         original_a_false = bool(
             same_watch
-            and same_watch.get("result") == "ORIGINAL_EVENT_CANDIDATE_A_FALSE"
+            and (
+                same_watch.get("reason") == "ORIGINAL_EVENT_CANDIDATE_A_FALSE"
+                or (same_watch.get("evidence") or {}).get("original_full_candidate_a") is False
+            )
         )
 
         owner = None

@@ -21,6 +21,8 @@ class FamilyBShadowRuntime:
     direction: str
     entry_timestamp: datetime
     entry_underlying_close: float
+    # V54: management is shared by B and E. Default keeps all existing B callers unchanged.
+    family: MidpointFamily = MidpointFamily.B
 
     plus20_timestamp: Optional[datetime] = None
     classifier_timestamp: Optional[datetime] = None
@@ -68,7 +70,7 @@ class FamilyBShadowManager:
         rt.plus20_timestamp = timestamp
         return MidpointSignal(
             strategy=self.config.strategy_name,
-            family=MidpointFamily.B,
+            family=rt.family,
             direction=rt.direction,
             timestamp=timestamp,
             state=rt.state,
@@ -95,7 +97,7 @@ class FamilyBShadowManager:
 
         return MidpointSignal(
             strategy=self.config.strategy_name,
-            family=MidpointFamily.B,
+            family=rt.family,
             direction=rt.direction,
             timestamp=timestamp,
             state=rt.state,
@@ -119,7 +121,7 @@ class FamilyBShadowManager:
         rt.state = MidpointShadowState.DEGRADED
         return MidpointSignal(
             strategy=self.config.strategy_name,
-            family=MidpointFamily.B,
+            family=rt.family,
             direction=rt.direction,
             timestamp=timestamp,
             state=rt.state,
@@ -135,7 +137,7 @@ class FamilyBShadowManager:
         rt.recovery_timestamp = timestamp
         return MidpointSignal(
             strategy=self.config.strategy_name,
-            family=MidpointFamily.B,
+            family=rt.family,
             direction=rt.direction,
             timestamp=timestamp,
             state=rt.state,
@@ -171,7 +173,7 @@ class FamilyBShadowManager:
                 rt.state = MidpointShadowState.CAP20_RESCUED
                 return MidpointSignal(
                     strategy=self.config.strategy_name,
-                    family=MidpointFamily.B,
+                    family=rt.family,
                     direction=rt.direction,
                     timestamp=timestamp,
                     state=rt.state,
@@ -218,7 +220,7 @@ class FamilyBShadowManager:
             rt.state = MidpointShadowState.REENTERED
             return MidpointSignal(
                 strategy=self.config.strategy_name,
-                family=MidpointFamily.B,
+                family=rt.family,
                 direction=rt.direction,
                 timestamp=timestamp,
                 state=rt.state,

@@ -8,6 +8,7 @@ from typing import Any, Mapping, Optional
 
 class MidpointFamily(str, Enum):
     B = "B"
+    E = "E"
     C = "C"
     D = "D"
     PM_E = "PM_E"
