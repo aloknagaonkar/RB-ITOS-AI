@@ -1,0 +1,21 @@
+{
+  "version": "B_FAMILY_RUNNER_EXIT_CANDIDATE_V29",
+  "frozen_on": "2026-09-28",
+  "research_only": true,
+  "applies_to": "RUNNER_STRENGTHENING only",
+  "family_b_entry_changed": false,
+  "v20_classifier_changed": false,
+  "joint_deterioration_episode_start": {
+    "drawdown_from_running_mfe_close": "> 0",
+    "prior_minute_directional_futures_vwap_change": "< 0"
+  },
+  "confirmation_window_minutes": 3,
+  "exit_at_plus3_if_both": {
+    "directional_futures_vwap_vs_episode_start": "< 0 change",
+    "directional_close_move_vs_episode_start": "<= 0 change"
+  },
+  "same_episode_persistence_required": false,
+  "magnitude_thresholds": null,
+  "optimization_allowed_in_validation": false,
+  "production_runtime_order_changes": false
+}
