@@ -1,47 +1,69 @@
-MIDPOINT STRATEGY — M2 AUDITABLE FAMILY B RUNTIME
+MIDPOINT STRATEGY — M3A WORKSPACE / API / UI
 
-Prerequisite:
-M1 files must already be present in the repo.
+Prerequisites:
+- M1 passed
+- M2 passed
 
-Copy this package over the repo preserving paths.
+Copy package into repo preserving paths.
 
-Run:
+1. Backend/API projection smoke
 
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/midpoint_m2_audit_smoke.py
+python scripts/midpoint_m3_smoke.py
 
-Then:
+2. Tests
 
-python -m pytest tests/test_midpoint_m2_auditable_runtime.py -v
+python -m pytest tests/test_midpoint_m3_live_shadow_ui.py -v
 
-Expected smoke output includes PASS for:
-- delayed B detector
-- rejected confirmation audit
-- B entry audit
-- +20 / runner classification
-- degraded / recovery
-- rejected CAP20 check
-- CAP20 rescue
-- rejected re-entry check
-- post-CAP20 re-entry
-- safety on every audit row
-- no order functionality
+3. Dry-run existing-file patch
 
-Review before staging.
+python scripts/apply_midpoint_m3_workspace.py
 
-Suggested explicit staging:
+Expected:
+DRY RUN ONLY
+
+4. Apply only after dry-run succeeds
+
+python scripts/apply_midpoint_m3_workspace.py --apply
+
+5. Backend syntax / route test
+
+python -m pytest tests/test_midpoint_m3_live_shadow_ui.py -v
+
+6. Frontend build
+
+cd frontend
+npm run build
+cd ..
+
+7. Read-only shared-runtime preflight for M3B
+
+python scripts/midpoint_m3_runtime_preflight.py \
+  | tee /tmp/midpoint-m3-runtime-preflight.txt
+
+Paste:
+- M3 smoke output
+- pytest output
+- patch dry-run/apply output
+- frontend build output
+- runtime preflight output
+
+Do NOT restart the live worker yet.
+Do NOT run broad pkill commands.
+Do NOT use git add .
+
+Suggested explicit staging after all checks pass:
 
 git add \
-  backend/market_lab/midpoint_strategy/audit.py \
-  backend/market_lab/midpoint_strategy/structure.py \
-  backend/market_lab/midpoint_strategy/family_b_detector.py \
-  backend/market_lab/midpoint_strategy/runtime.py \
-  backend/market_lab/midpoint_strategy/replay.py \
-  scripts/midpoint_m2_audit_smoke.py \
-  tests/test_midpoint_m2_auditable_runtime.py \
-  docs/MIDPOINT_STRATEGY_M2_AUDITABLE_RUNTIME.md
-
-Do not use git add .
+  backend/market_lab/midpoint_strategy/live_shadow_ui.py \
+  frontend/src/midpointStrategyShadow.tsx \
+  backend/market_lab/api.py \
+  frontend/src/App.tsx \
+  scripts/apply_midpoint_m3_workspace.py \
+  scripts/midpoint_m3_smoke.py \
+  scripts/midpoint_m3_runtime_preflight.py \
+  tests/test_midpoint_m3_live_shadow_ui.py \
+  docs/MIDPOINT_STRATEGY_M3_WORKSPACE_API_UI.md
