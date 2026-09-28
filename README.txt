@@ -1,8 +1,23 @@
-MIDPOINT V60 — POST-REENTRY SECOND-LEG AUDIT
+MIDPOINT V61 — RE-ENTRY NECESSITY / SECOND-LEG EXIT POLICY COMPARISON
 
 Purpose:
-Keep all existing re-entry timestamps frozen and measure what the second leg
-actually does before structural terminal/session end.
+Answer the exact question: is post-CAP20 re-entry actually needed?
+
+The comparison keeps:
+- B/E entries fixed
+- CAP20 rescue fixed
+- existing re-entry timestamps fixed
+
+Policies:
+A. CAP20 only, no re-entry
+B. Current re-entry, structural terminal (session-end mark for open cases)
+C. Same re-entry + protect +10 after +20 proof
+D. Same re-entry + protect +20 after +30 proof
+E. Same re-entry + breakeven after +20 proof
+F. Same re-entry + 20-point trail after +20 proof
+
+The protected policies are exploratory screens only. Do not select one for live
+use from 9 re-entry cases alone.
 
 Run:
 
@@ -10,15 +25,10 @@ cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/midpoint_v60_post_reentry_second_leg_audit.py
+python scripts/midpoint_v61_reentry_necessity_exit_policy_comparison.py
 
 cat \
 data/historical-evidence/hilega-pcr-oi-support-research-v1/\
-midpoint-v60-post-reentry-second-leg-audit/summary-v60.txt
+midpoint-v61-reentry-necessity-exit-policy-comparison/summary-v61.txt
 
-Outputs:
-- second-leg-cases-v60.csv
-- report-v60.json
-- summary-v60.txt
-
-No restart required. No strategy rule changes.
+No restart required. No live mutation.
