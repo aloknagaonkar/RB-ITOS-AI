@@ -1,17 +1,15 @@
-B FAMILY — V48 FROZEN POST-CAP20 RE-ENTRY VALIDATION
+B FAMILY — V49 OLDER 100-SESSION FROZEN RE-ENTRY VALIDATION
 
-Frozen rule derived from V47:
-After CAP20 rescue, allow ONE re-entry only when:
-- within 20 minutes,
-- close retakes degraded target,
-- directional futures-VWAP is above rescue-time level.
+Frozen candidate:
+PRIMARY_OFF + CAP20
++ one post-rescue re-entry within 20m when:
+  - 1m close retakes degraded target
+  - directional futures-VWAP > rescue-time level
 
-Re-entry at 1m close.
-Second leg exits only at original structural/session terminal.
-No second rescue / no repeated re-entry.
+The script automatically picks the most recent 100 dual-valid sessions
+strictly before 2024-08-16.
 
-Validation:
-43 RUNNER_STRENGTHENING events from V40.1.
+No tuning.
 
 Run:
 
@@ -19,7 +17,7 @@ cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/b_family_post_cap20_reentry_validation_v48.py \
-  | tee /tmp/b-family-post-cap20-reentry-validation-v48.txt
+python scripts/b_family_older_frozen_reentry_validation_v49.py \
+  | tee /tmp/b-family-older-frozen-reentry-validation-v49.txt
 
 Paste the complete output back.
