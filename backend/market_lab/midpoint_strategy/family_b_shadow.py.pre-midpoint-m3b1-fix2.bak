@@ -36,8 +36,6 @@ class FamilyBShadowRuntime:
     reentry_timestamp: Optional[datetime] = None
     reentry_count: int = 0
 
-    cap20_rebreak_evaluated: bool = False
-
     state: MidpointShadowState = MidpointShadowState.ACTIVE
 
 
@@ -159,28 +157,28 @@ class FamilyBShadowManager:
         if timestamp < rt.recovery_timestamp + timedelta(minutes=10):
             return None
 
-        if rt.cap20_rebreak_evaluated:
-            return None
-
-        # Canonical CAP20: first eligible post-recovery rebreak only.
-        if current_directional_move < rt.degraded_target_move:
-            rt.cap20_rebreak_evaluated = True
-            if current_directional_points <= 20:
-                rt.rescue_timestamp = timestamp
-                rt.rescue_directional_points = current_directional_points
-                rt.state = MidpointShadowState.CAP20_RESCUED
-                return MidpointSignal(
-                    strategy=self.config.strategy_name,
-                    family=MidpointFamily.B,
-                    direction=rt.direction,
-                    timestamp=timestamp,
-                    state=rt.state,
-                    reason="CAP20_RESCUE",
-                    underlying_points=current_directional_points,
-                    metadata={
-                        "degraded_target_move": rt.degraded_target_move,
-                    },
-                )
+        # Frozen CAP20 rescue:
+        # after recovery, first rebreak below degraded target;
+        # rescue only when captured directional points <= +20.
+        if (
+            current_directional_move < rt.degraded_target_move
+            and current_directional_points <= 20
+        ):
+            rt.rescue_timestamp = timestamp
+            rt.rescue_directional_points = current_directional_points
+            rt.state = MidpointShadowState.CAP20_RESCUED
+            return MidpointSignal(
+                strategy=self.config.strategy_name,
+                family=MidpointFamily.B,
+                direction=rt.direction,
+                timestamp=timestamp,
+                state=rt.state,
+                reason="CAP20_RESCUE",
+                underlying_points=current_directional_points,
+                metadata={
+                    "degraded_target_move": rt.degraded_target_move,
+                },
+            )
 
         return None
 

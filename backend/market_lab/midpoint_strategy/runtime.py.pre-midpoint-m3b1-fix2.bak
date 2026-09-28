@@ -332,7 +332,6 @@ class AuditableFamilyBEngine:
         )
         current_move = current_points
         before = rt.state.value
-        rebreak_evaluated_before = rt.cap20_rebreak_evaluated
 
         sig = self.manager.maybe_cap20_rescue(
             rt,
@@ -355,17 +354,7 @@ class AuditableFamilyBEngine:
                 event_type="CAP20_CHECK",
                 direction=rt.direction,
                 result="NO_ACTION",
-                reason=(
-                    "CAP20_FIRST_REBREAK_ABOVE_20_NO_RESCUE"
-                    if (
-                        not rebreak_evaluated_before
-                        and rt.cap20_rebreak_evaluated
-                        and rt.degraded_target_move is not None
-                        and current_move < rt.degraded_target_move
-                        and current_points > 20
-                    )
-                    else "CAP20_CONDITIONS_NOT_ALL_MET"
-                ),
+                reason="CAP20_CONDITIONS_NOT_ALL_MET",
                 state_before=before,
                 state_after=rt.state.value,
                 observation=obs,

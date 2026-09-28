@@ -45,7 +45,10 @@ def boundary_broken(reference: ReferenceStructure, close: float) -> bool:
 
 
 def structure_still_valid(reference: ReferenceStructure, close: float) -> bool:
-    # Canonical Family-B delayed-confirmation lifecycle.
+    # Frozen Family-B lifecycle constraint:
+    # while waiting for delayed confirmation the same directional structure
+    # must remain valid. For the first shadow implementation we preserve the
+    # original full-range opposite-side invalidation.
     if reference.reference_type == "RED":
-        return close <= reference.midpoint
-    return close >= reference.midpoint
+        return close <= reference.high
+    return close >= reference.low

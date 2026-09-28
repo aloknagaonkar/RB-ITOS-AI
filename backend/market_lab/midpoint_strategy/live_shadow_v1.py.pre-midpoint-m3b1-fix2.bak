@@ -175,26 +175,10 @@ class MidpointLiveShadowCoordinatorV1:
             close,
         )
 
-    def _favorable_points(self, rr: _ReferenceRuntime, underlying) -> float:
-        lifecycle = rr.runtime.lifecycle
-        if lifecycle is None:
-            raise ValueError("favorable points requested before entry")
-        px = (
-            self._float(underlying, "high")
-            if lifecycle.direction == "BULLISH"
-            else self._float(underlying, "low")
-        )
-        return self.engine.manager.directional_points(
-            lifecycle.direction,
-            lifecycle.entry_underlying_close,
-            px,
-        )
-
     def _terminal_invalidated(self, rr: _ReferenceRuntime, close: float) -> bool:
-        # Canonical Family-B terminal: adverse midpoint close.
         if rr.reference.reference_type == "RED":
-            return close > rr.reference.midpoint
-        return close < rr.reference.midpoint
+            return close > rr.reference.high
+        return close < rr.reference.low
 
     def _close_terminal(
         self,
@@ -233,24 +217,21 @@ class MidpointLiveShadowCoordinatorV1:
         rr: _ReferenceRuntime,
         obs: FamilyBObservation,
         prev_obs: FamilyBObservation | None,
-        underlying,
     ) -> bool:
         lifecycle = rr.runtime.lifecycle
         if lifecycle is None or rr.closed:
             return False
 
         if self._terminal_invalidated(rr, obs.close):
-            self._close_terminal(rr, obs, "MIDPOINT_INVALIDATION")
+            self._close_terminal(rr, obs, "ORIGINAL_FULL_RANGE_INVALIDATION")
             return True
 
         points = self._directional_points(rr, obs.close)
-        favorable_points = self._favorable_points(rr, underlying)
-        rr.running_close_mfe = max(rr.running_close_mfe, favorable_points)
+        rr.running_close_mfe = max(rr.running_close_mfe, points)
 
-        # Canonical +20 proof uses favorable 1m high/low excursion.
-        if lifecycle.plus20_timestamp is None and favorable_points >= 20.0:
+        if lifecycle.plus20_timestamp is None and points >= 20.0:
             self.engine.mark_plus20(rr.runtime, obs)
-            rr.plus20_points = 20.0
+            rr.plus20_points = points
             rr.plus20_directional_vwap = self.engine.detector.directional_vwap_diff(
                 rr.reference, obs
             )
@@ -361,7 +342,7 @@ class MidpointLiveShadowCoordinatorV1:
             active_rr = self.state.references.get(active_type)
             if active_rr is not None and active_rr.runtime.lifecycle is not None:
                 terminal_this_minute = self._process_management(
-                    active_rr, obs, prev_obs, underlying
+                    active_rr, obs, prev_obs
                 )
                 if active_rr.closed:
                     self.state.active_reference_type = None
