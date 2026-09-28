@@ -13,6 +13,7 @@ from .hilega_directional_live_shadow_v1 import (
     STRATEGY_ID as HILEGA_DIRECTIONAL_STRATEGY_ID,
     HilegaDirectionalLiveShadowCoordinatorV1,
 )
+from .midpoint_strategy.live_shadow_v1 import MidpointLiveShadowCoordinatorV1
 
 HILEGA_UNDERLYING = "NSE_INDEX|Nifty 50"
 
@@ -64,6 +65,7 @@ def run():
                 })
                 active_sources=evidence
             coord=HilegaMilegaLiveShadowCoordinatorV1(market_sources=active_sources,option_expiry=option_expiry)
+            midpoint_coord=MidpointLiveShadowCoordinatorV1(market_sources=sources) if os.getenv("MIDPOINT_SHADOW_ENABLED","0")=="1" else None
             try:
                 while True:
                     now=datetime.now(IST)
@@ -91,6 +93,8 @@ def run():
                         if evidence is not None:
                             evidence.tick(now)
                         coord.process(now)
+                        if midpoint_coord is not None:
+                            midpoint_coord.process(now)
                     time.sleep(5)
             finally:
                 if evidence is not None:
@@ -123,6 +127,7 @@ def run():
                 })
                 active_sources=evidence
             coord=HilegaDirectionalLiveShadowCoordinatorV1(market_sources=active_sources,option_expiry=option_expiry)
+            midpoint_coord=MidpointLiveShadowCoordinatorV1(market_sources=sources) if os.getenv("MIDPOINT_SHADOW_ENABLED","0")=="1" else None
             try:
                 while True:
                     now=datetime.now(IST)
@@ -147,6 +152,8 @@ def run():
                     if now.second>=30:
                         if evidence is not None:evidence.tick(now)
                         coord.process(now)
+                        if midpoint_coord is not None:
+                            midpoint_coord.process(now)
                     time.sleep(5)
             finally:
                 if evidence is not None:evidence.close()

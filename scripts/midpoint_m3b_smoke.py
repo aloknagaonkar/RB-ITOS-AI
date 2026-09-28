@@ -64,7 +64,7 @@ def make_minutes():
         u.append(Candle(ts,o,h,l,c,1300))
         f.append(Candle(ts,c,c+1,c-1,c,2000))
 
-    f[-2].close = 24180.0
+    f[-2].close = 24185.2
     f[-1].close = 24000.0
 
     return u, f

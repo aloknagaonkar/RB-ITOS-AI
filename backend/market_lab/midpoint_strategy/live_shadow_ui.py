@@ -4,6 +4,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from typing import Annotated
+
 from fastapi import APIRouter, HTTPException, Query
 
 from .config import MidpointShadowConfig
@@ -85,7 +87,7 @@ def status():
 
 @router.get("/events")
 def events(
-    limit: int = Query(default=200, ge=1, le=2000),
+    limit: Annotated[int, Query(ge=1, le=2000)] = 200,
     event_type: str | None = None,
 ):
     rows = _rows()
@@ -100,7 +102,9 @@ def events(
 
 
 @router.get("/timeline")
-def timeline(limit: int = Query(default=500, ge=1, le=5000)):
+def timeline(
+    limit: Annotated[int, Query(ge=1, le=5000)] = 500,
+):
     rows = _rows()
     return {
         "model": MODEL,
