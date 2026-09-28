@@ -1,35 +1,23 @@
-MIDPOINT V56 — ENABLE FAMILY E IN LIVE SHADOW
+MIDPOINT V56.5 — CONFIRMED TREND 36 B+E TEST
 
-Selection:
-- fresh Candidate A at boundary -> OTHER_FRESH_A, no B/E entry
-- Candidate A false + mature VWAP -> E immediate shadow entry
-- Candidate A false + not mature -> current B 10-minute watch
-
-Shared management after B/E entry remains the V54 lifecycle.
-
-Safety remains:
-- observation_only=True
-- execution_enabled=False
-- paper_order_enabled=False
-- quantity=None
-- C/D/PM_E disabled
-
-Run:
+Copy the package into the repository, then:
 
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/apply_midpoint_v56_enable_family_e.py
-python scripts/apply_midpoint_v56_enable_family_e.py --apply
+python scripts/midpoint_v56_5_confirmed_trend_36_be_validation.py
 
-python -m pytest tests/test_midpoint_v56_live_e_wiring.py -v
-python -m pytest tests -q -k 'midpoint' --disable-warnings
-python scripts/midpoint_v56_safety_smoke.py
+cat \
+data/historical-evidence/hilega-pcr-oi-support-research-v1/\
+midpoint-confirmed-trend-36-v56-5/summary-v56-5.txt
 
-Inspect git diff before restart.
+Useful detail files:
 
-Only after all tests pass:
-scripts/restart.sh
+data/historical-evidence/hilega-pcr-oi-support-research-v1/\
+midpoint-confirmed-trend-36-v56-5/event-level-v56-5.csv
 
-Then confirm exactly one live-shadow worker and inspect Midpoint audit/status.
+data/historical-evidence/hilega-pcr-oi-support-research-v1/\
+midpoint-confirmed-trend-36-v56-5/session-summary-v56-5.csv
+
+This script is research-only. It does not modify live runtime or execution.
