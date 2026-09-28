@@ -368,9 +368,10 @@ class MidpointLiveShadowCoordinatorV1:
                 if active_rr.closed:
                     self.state.active_reference_type = None
 
-        if terminal_this_minute:
-            return
-
+        # V57.1 parity rule:
+        # A structural terminal does not suppress opposite-structure
+        # observation on the same completed 1m candle. Same-candle
+        # reversal entry remains prohibited below.
         for ref_type in ("RED", "GREEN"):
             rr = self.state.references.get(ref_type)
             if rr is None or rr.closed:
@@ -441,6 +442,23 @@ class MidpointLiveShadowCoordinatorV1:
                 )
 
                 if decision.owner == MidpointFamily.E.value:
+                    if terminal_this_minute:
+                        self.engine._audit(
+                            runtime=rr.runtime,
+                            timestamp=obs.timestamp,
+                            event_type="E_ENTRY_BLOCKED",
+                            direction=rr.reference.direction,
+                            result="NO_ENTRY",
+                            reason="SAME_CANDLE_REVERSAL_BLOCKED",
+                            observation=obs,
+                            evidence={
+                                "family_selected": "E",
+                                "same_candle_structural_terminal": True,
+                                "order_sent": False,
+                            },
+                        )
+                        continue
+
                     if not self.config.family_e_enabled:
                         self.engine._audit(
                             runtime=rr.runtime,
