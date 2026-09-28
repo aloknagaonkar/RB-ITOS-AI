@@ -1,64 +1,42 @@
-B FAMILY — V23 100-SESSION PRE-V22 HISTORICAL OOS
-====================================================
+B FAMILY — V24 COMBINED 200-SESSION VALIDATION
+================================================
 
-Goal
-----
-Run the previous 100 valid trading sessions immediately before V22.
+V24 does NOT fetch new market data and does NOT rerun Family-B detection.
 
-V22 starts: 2025-07-17
-V23 ends:   2025-07-16
+It combines the already completed, frozen validation outputs from:
 
-Everything stays frozen:
-- Family-B entry
-- 10-minute delayed confirmation window
-- Candidate A definition
-- +20 proof
-- fixed +10-minute observation
-- V20 sign-only runner classifier
+V23:
+  2025-02-06 -> 2025-07-16
+  100 sessions
 
-No exit optimization.
+V22:
+  2025-07-17 -> 2025-12-11
+  100 sessions
 
-STEP 1 — discover exactly 100 valid sessions
---------------------------------------------
+It reports:
+- combined B geometry
+- milestone reach
+- 95% Wilson confidence intervals
+- V22 vs V23 block stability
+- bull/bear stability
+- frozen V20 classifier outcomes
+- RUNNER_STRENGTHENING vs NORMAL_B
+- Newcombe 95% CI for classifier rate differences
+
+Run:
+
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
-set -a
-source .env
-set +a
 
-python scripts/b_family_prepare_pre_v22_100_v23.py \
-  | tee /tmp/b-family-v23-prepare.txt
+python scripts/b_family_combined_200_validation_v24.py \
+  | tee /tmp/b-family-combined-200-v24.txt
 
-STEP 2 — collect NIFTY underlying 1m
-------------------------------------
-python -m market_lab.historical_underlying_ohlc_sidecar \
-  --underlying "NSE_INDEX|Nifty 50" \
-  --manifest data/historical-validation/manifest-b-v23-pre-v22-100.json \
-  --output data/historical-evidence/b-v23-pre-v22-100-underlying.json \
-  --csv-output data/historical-evidence/b-v23-pre-v22-100-underlying.csv \
-  | tee /tmp/b-family-v23-underlying.txt
+Paste the complete V24 output back.
 
-Expected:
-requested_session_count = 100
-available_session_count = 100
-row_count = 37500
-
-STEP 3 — collect NIFTY futures 1m + causal VWAP
-------------------------------------------------
-python -m market_lab.midpoint_v2_nifty_futures_vwap_v1 \
-  --session-dates-file data/historical-validation/session-dates-b-v23-pre-v22-100.txt \
-  --output data/historical-evidence/b-v23-pre-v22-100-futures-vwap.csv \
-  | tee /tmp/b-family-v23-futures.txt
-
-Expected:
-100 sessions × 375 rows = 37500 rows.
-
-STEP 4 — run V23 validation
----------------------------
-python scripts/b_family_pre_v22_oos_100_v23.py \
-  | tee /tmp/b-family-pre-v22-oos-v23.txt
-
-Paste the full V23 validator output back.
-
-Do not tune B or V20 rules during this run.
+Important:
+- no B changes
+- no V20 changes
+- no threshold search
+- no exit optimization
+- no production/runtime/order changes
