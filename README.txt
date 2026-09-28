@@ -1,13 +1,10 @@
-B FAMILY — V44 SECOND 100-SESSION DUAL-CANDIDATE HISTORICAL COMPARISON
+B FAMILY — V45 THIRD HISTORICAL VALIDATION
 
 Range:
-2025-02-06 through 2025-07-16
+2024-08-16 through 2025-02-05
 
-Candidate A:
-W3 / AGE30 primary + CAP20 rescue
-
-Candidate B:
-PRIMARY OFF + CAP20 rescue
+Frozen candidate:
+PRIMARY_OFF + CAP20
 
 No tuning grid.
 
@@ -17,7 +14,7 @@ cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/b_family_dual_candidate_validation_v44.py \
-  | tee /tmp/b-family-dual-candidate-validation-v44.txt
+python scripts/b_family_primary_off_cap20_validation_v45.py \
+  | tee /tmp/b-family-primary-off-cap20-validation-v45.txt
 
 Paste the complete output back.
