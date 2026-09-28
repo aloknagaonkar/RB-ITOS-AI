@@ -1,21 +1,31 @@
-B FAMILY — V33 RECOVERY ATTEMPT SEQUENCE DIAGNOSTIC
-====================================================
+B FAMILY — V34 RECOVERY-ATTEMPT DETERIORATION + POINTS SCORECARD
+=================================================================
 
 Purpose
 -------
-Study recovery-attempt sequences inside V32 DEGRADED states.
+Study what happens after the BEST recovery attempt inside the DEGRADED state.
 
-Compare RECOVERED vs FAILED_RECOVERY paths using:
-- first attempt
-- second attempt
-- recovery gain
-- gap-to-target progression
-- improving vs weakening transitions
-- longest consecutive weakening streak
-- spacing between attempt peaks
+Also introduces a permanent point-accounting convention for future testing.
 
-No thresholds are selected.
-No exit rule is defined.
+V34 measures:
+- best recovery attempt
+- subsequent gap expansion
+- weakening after best attempt
+- time from best attempt to recovery/invalidation
+- recovered counterexamples
+
+POINT ACCOUNTING
+----------------
+From V34 onward, every actual exit candidate should report:
+- directional NIFTY points at exit
+- total / mean / median
+- improvement vs structural invalidation baseline
+- improvement vs previous candidate
+- runner preservation (+50/+75/+100)
+- max drawdown where meaningful
+
+This script itself does NOT create an exit rule, so recovered state transitions
+are NOT counted as realized P&L.
 
 Run:
 
@@ -23,7 +33,7 @@ cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/b_family_recovery_attempt_sequence_v33.py \
-  | tee /tmp/b-family-recovery-attempt-sequence-v33.txt
+python scripts/b_family_recovery_deterioration_points_v34.py \
+  | tee /tmp/b-family-recovery-deterioration-points-v34.txt
 
-Paste the complete V33 output back.
+Paste the complete V34 output back.
