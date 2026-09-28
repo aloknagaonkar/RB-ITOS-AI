@@ -1,36 +1,20 @@
-B FAMILY — V40 FROZEN V38_CAP50 HISTORICAL VALIDATION
-===========================================================
+V40.1 — EVENT DISCOVERY PATCH
+==============================
 
-Current frozen development winner:
-V38_CAP50
+Why V40 failed:
+- raw data was present for all 180 sessions
+- V40 searched only CSV filenames containing "b-event"/"b-events"
+- canonical B-family artifacts use different filenames
+- result: discovered_b_event_keys=0
 
-V40 applies that rule unchanged to the separate canonical 180-session block:
+V40.1 fixes only discovery:
+- scans CSV schema rather than filename
+- supports entry/date/direction aliases
+- deduplicates event rows
+- prints top source files
 
-2025-12-12 through 2026-09-08
-
-Important:
-This block is date-separated from the 18-event V38 tuning population, but it is
-not globally pristine because earlier B-family research used it. Treat V40 as
-historical validation / stress evidence.
-
-V40 does NOT tune parameters.
-
-Frozen:
-- V35 primary W1 AGE10
-- V37 recovery/rebreak structure
-- rescue cap = +50 points
-
-Reports:
-- number of sessions
-- B events
-- +20 events
-- RUNNER_STRENGTHENING events
-- baseline vs V38 total points
-- delta vs baseline
-- max drawdown
-- +30/+40/+50/+75/+100 preservation
-- later new MFE
-- primary/rescue/fallback counts
+V38_CAP50 logic is unchanged and frozen.
+No tuning is added.
 
 Run:
 
@@ -38,7 +22,7 @@ cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/b_family_v38_cap50_validation_v40.py \
-  | tee /tmp/b-family-v38-cap50-validation-v40.txt
+python scripts/b_family_v38_cap50_validation_v40_1.py \
+  | tee /tmp/b-family-v38-cap50-validation-v40_1.txt
 
-Paste the complete V40 output back.
+Paste the complete output, including TOP EVENT SOURCES.
