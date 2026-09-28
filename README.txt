@@ -1,20 +1,29 @@
-V40.1 — EVENT DISCOVERY PATCH
-==============================
+B FAMILY — V41 43-EVENT RESCUE CONTRIBUTION + CAP RETUNING
+================================================================
 
-Why V40 failed:
-- raw data was present for all 180 sessions
-- V40 searched only CSV filenames containing "b-event"/"b-events"
-- canonical B-family artifacts use different filenames
-- result: discovered_b_event_keys=0
+V40.1 result:
+baseline   +2416.05
+V38_CAP50  +2091.80
+delta       -324.25
 
-V40.1 fixes only discovery:
-- scans CSV schema rather than filename
-- supports entry/date/direction aliases
-- deduplicates event rows
-- prints top source files
+Risk improved, but total points fell.
 
-V38_CAP50 logic is unchanged and frozen.
-No tuning is added.
+V41 isolates the likely issue: the rescue layer.
+
+Tests on the same 43 events:
+- NO_RESCUE
+- CAP0
+- CAP10
+- CAP20
+- CAP30
+- CAP40
+- CAP50
+
+CAP60/75/100 are printed as INCOMPLETE diagnostics because V40.1 did not retain
+rescue candidates that were skipped by CAP50.
+
+V35 primary logic remains fixed.
+No entry changes.
 
 Run:
 
@@ -22,7 +31,7 @@ cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/b_family_v38_cap50_validation_v40_1.py \
-  | tee /tmp/b-family-v38-cap50-validation-v40_1.txt
+python scripts/b_family_rescue_cap_retuning_v41.py \
+  | tee /tmp/b-family-rescue-cap-retuning-v41.txt
 
-Paste the complete output, including TOP EVENT SOURCES.
+Paste the complete output back.
