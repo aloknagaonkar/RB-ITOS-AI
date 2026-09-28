@@ -1,34 +1,40 @@
-MIDPOINT V61 — RE-ENTRY NECESSITY / SECOND-LEG EXIT POLICY COMPARISON
+MIDPOINT V62 — RE-ENTRY OOS FREEZE + FORWARD VALIDATION
 
-Purpose:
-Answer the exact question: is post-CAP20 re-entry actually needed?
+Why this phase exists
+---------------------
+V61 used all 9 observed re-entry cases to screen second-leg management.
+Therefore those same 9 cases are development data and must NOT be called OOS.
 
-The comparison keeps:
-- B/E entries fixed
-- CAP20 rescue fixed
-- existing re-entry timestamps fixed
+V62 freezes exactly two research candidates before collecting new events:
 
-Policies:
-A. CAP20 only, no re-entry
-B. Current re-entry, structural terminal (session-end mark for open cases)
-C. Same re-entry + protect +10 after +20 proof
-D. Same re-entry + protect +20 after +30 proof
-E. Same re-entry + breakeven after +20 proof
-F. Same re-entry + 20-point trail after +20 proof
+R1
+  Existing frozen post-CAP20 re-entry trigger.
+  Once second-leg favorable excursion reaches +20, protect +10 on the first
+  completed 1m close back to <= +10.
 
-The protected policies are exploratory screens only. Do not select one for live
-use from 9 re-entry cases alone.
+R2
+  Existing frozen post-CAP20 re-entry trigger.
+  Once running second-leg favorable excursion reaches +20, exit on the first
+  completed 1m close <= running MFE - 20.
 
-Run:
+Validated baseline remains:
+  CAP20 rescue -> final exit -> NO RE-ENTRY.
 
-cd ~/RB-ITOS-AI
-source .venv/bin/activate
-export PYTHONPATH=backend
+Promotion gate:
+  minimum 20 NEW comparable re-entry events
+  preferred 30+
 
-python scripts/midpoint_v61_reentry_necessity_exit_policy_comparison.py
+Initial setup:
+  cd ~/RB-ITOS-AI
+  source .venv/bin/activate
+  export PYTHONPATH=backend
 
-cat \
-data/historical-evidence/hilega-pcr-oi-support-research-v1/\
-midpoint-v61-reentry-necessity-exit-policy-comparison/summary-v61.txt
+  python scripts/midpoint_v62_reentry_oos_forward_validation.py
 
-No restart required. No live mutation.
+This creates an empty forward ledger and verifies the freeze.
+
+Important:
+- Do not backfill the 9 V61 cases into the V62 ledger.
+- Do not change R1/R2 thresholds after the freeze.
+- No live strategy mutation is required.
+- No restart is required.
