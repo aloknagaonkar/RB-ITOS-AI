@@ -1,26 +1,21 @@
-B FAMILY — V35 EXIT OPTIMIZATION + POINT-IMPROVEMENT LEADERBOARD
-=================================================================
+B FAMILY — V36 SECOND-STAGE RESCUE EXIT OPTIMIZATION
+======================================================
 
-Purpose
--------
-Tune the degraded-state recovery-attempt exit on the current 18-event
-development population.
+Keeps V35_W1_AGE10 as the primary exit.
 
-Transparent search:
-- weakening streak required: 1 / 2 / 3 / 4
-- minimum degraded age: 0 / 3 / 5 / 10 minutes
+Tunes a secondary rescue exit for events V35 leaves as fallbacks:
+- timeout: 10 / 15 / 20 / 30 / 45 minutes
+- confirmation: none or directional futures-VWAP still weak
 
-Every candidate reports:
-- total / mean / median / worst / best points
-- max drawdown
+Reports:
+- total points
 - delta vs V34.2 baseline
 - delta vs V29
-- +30/+40/+50/+75/+100 chase success / preservation
-- later-new-MFE after actual exits
-- actual exits / fallbacks
-
-The winner is DEVELOPMENT only.
-After this, freeze the winner and validate it on separate OOS history.
+- delta vs V35
+- mean / median / worst / best / max drawdown
+- +30/+40/+50/+75/+100 chase success
+- later-new-MFE
+- primary / rescue / fallback counts
 
 Run:
 
@@ -28,7 +23,7 @@ cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/b_family_exit_optimization_v35.py \
-  | tee /tmp/b-family-exit-optimization-v35.txt
+python scripts/b_family_second_stage_rescue_v36.py \
+  | tee /tmp/b-family-second-stage-rescue-v36.txt
 
-Paste the complete V35 output back.
+Paste the complete output back.
