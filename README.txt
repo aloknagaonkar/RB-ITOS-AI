@@ -1,40 +1,52 @@
-MIDPOINT V62 — RE-ENTRY OOS FREEZE + FORWARD VALIDATION
+MIDPOINT V62.1 — FORWARD OOS AUTOMATIC COLLECTOR
 
-Why this phase exists
----------------------
-V61 used all 9 observed re-entry cases to screen second-leg management.
-Therefore those same 9 cases are development data and must NOT be called OOS.
+This package intentionally separates the research collector from live strategy
+logic.
 
-V62 freezes exactly two research candidates before collecting new events:
+Safety
+------
+- no orders
+- no execution
+- no paper-order mutation
+- no quantity
+- no B/E/CAP20/re-entry rule changes
+- only writes the V62 forward research ledger
 
-R1
-  Existing frozen post-CAP20 re-entry trigger.
-  Once second-leg favorable excursion reaches +20, protect +10 on the first
-  completed 1m close back to <= +10.
+Important integration note
+--------------------------
+The collector requires BOTH:
+1. midpoint audit events
+2. every completed 1-minute underlying candle
 
-R2
-  Existing frozen post-CAP20 re-entry trigger.
-  Once running second-leg favorable excursion reaches +20, exit on the first
-  completed 1m close <= running MFE - 20.
+To avoid guessing the current worker layout, first run the preflight inspection.
 
-Validated baseline remains:
-  CAP20 rescue -> final exit -> NO RE-ENTRY.
+Commands
+--------
+cd ~/RB-ITOS-AI
+source .venv/bin/activate
+export PYTHONPATH=backend
 
-Promotion gate:
-  minimum 20 NEW comparable re-entry events
-  preferred 30+
+python scripts/midpoint_v62_1_preflight.py
 
-Initial setup:
-  cd ~/RB-ITOS-AI
-  source .venv/bin/activate
-  export PYTHONPATH=backend
+python -m pytest \
+  tests/test_midpoint_v62_1_forward_oos_collector.py -v
 
-  python scripts/midpoint_v62_reentry_oos_forward_validation.py
+Do NOT restart or patch the live worker yet.
 
-This creates an empty forward ledger and verifies the freeze.
+Paste the preflight output. The adapter can then be wired to the exact current
+worker without touching strategy decisions.
 
-Important:
-- Do not backfill the 9 V61 cases into the V62 ledger.
-- Do not change R1/R2 thresholds after the freeze.
-- No live strategy mutation is required.
-- No restart is required.
+Stream adapter contract
+-----------------------
+The standalone runner expects JSONL records:
+
+{"kind":"audit","event":{...midpoint audit event...}}
+
+{"kind":"candle",
+ "timestamp":"2026-09-29T10:06:00+05:30",
+ "high":123.4,
+ "low":120.1,
+ "close":122.8}
+
+Once wired, the sidecar writes completed forward cases into the existing V62
+ledger.
