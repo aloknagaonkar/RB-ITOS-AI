@@ -1,28 +1,22 @@
-MIDPOINT V54 — SHARED B/E MANAGEMENT
+MIDPOINT V55 — B/E BOUNDARY CLASSIFIER + REPLAY PARITY
 
-Run:
+Install/copy these files into the repo, then:
 
 cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-1) Dry run:
-python scripts/apply_midpoint_v54_shared_be_management.py
+python -m pytest tests/test_midpoint_v55_boundary_classifier.py -v
 
-2) Apply:
-python scripts/apply_midpoint_v54_shared_be_management.py --apply
+python scripts/midpoint_v55_boundary_selection_replay.py
 
-3) Focused tests:
-python -m pytest tests/test_midpoint_v54_shared_be_management.py -v
+cat \
+data/historical-evidence/hilega-pcr-oi-support-research-v1/\
+midpoint-boundary-classifier-v55/summary-v55.txt
 
-4) Existing Midpoint tests:
+Then run existing Midpoint tests:
+
 python -m pytest tests -q -k 'midpoint' --disable-warnings
 
-5) Smoke:
-python scripts/midpoint_v54_shared_management_smoke.py
-
-6) Inspect:
-git status --short
-git diff --   backend/market_lab/midpoint_strategy/models.py   backend/market_lab/midpoint_strategy/config.py   backend/market_lab/midpoint_strategy/family_b_shadow.py   backend/market_lab/midpoint_strategy/runtime.py   tests/test_midpoint_v54_shared_be_management.py   scripts/midpoint_v54_shared_management_smoke.py
-
-Do NOT restart the live worker in V54.
+V55 does not modify live_shadow_v1.py.
+Do not restart live workers for V55.
