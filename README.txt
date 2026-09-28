@@ -1,26 +1,36 @@
-B FAMILY — V39 MILESTONE-AWARE RESCUE OPTIMIZATION
-=====================================================
+B FAMILY — V40 FROZEN V38_CAP50 HISTORICAL VALIDATION
+===========================================================
 
-Current best raw-points result:
-V38_CAP50 = +1233.75
+Current frozen development winner:
+V38_CAP50
 
-But V38 preserves only:
-+75  = 69.2%
-+100 = 60.0%
+V40 applies that rule unchanged to the separate canonical 180-session block:
 
-V39 adds a runner lockout:
-once a trade has already reached +50 / +75 / +100 before the rescue signal,
-the rescue can be disabled and the trade continues.
+2025-12-12 through 2026-09-08
 
-Grid:
-caps:
-35 / 40 / 45 / 50 / 55 / 60
+Important:
+This block is date-separated from the 18-event V38 tuning population, but it is
+not globally pristine because earlier B-family research used it. Treat V40 as
+historical validation / stress evidence.
 
-lockout:
-NONE / +50 / +75 / +100
+V40 does NOT tune parameters.
 
-Goal:
-keep V38-level points while improving +75/+100 runner preservation.
+Frozen:
+- V35 primary W1 AGE10
+- V37 recovery/rebreak structure
+- rescue cap = +50 points
+
+Reports:
+- number of sessions
+- B events
+- +20 events
+- RUNNER_STRENGTHENING events
+- baseline vs V38 total points
+- delta vs baseline
+- max drawdown
+- +30/+40/+50/+75/+100 preservation
+- later new MFE
+- primary/rescue/fallback counts
 
 Run:
 
@@ -28,7 +38,7 @@ cd ~/RB-ITOS-AI
 source .venv/bin/activate
 export PYTHONPATH=backend
 
-python scripts/b_family_milestone_aware_rescue_v39.py \
-  | tee /tmp/b-family-milestone-aware-rescue-v39.txt
+python scripts/b_family_v38_cap50_validation_v40.py \
+  | tee /tmp/b-family-v38-cap50-validation-v40.txt
 
-Paste the complete output back.
+Paste the complete V40 output back.
