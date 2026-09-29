@@ -275,13 +275,77 @@ function ContinuationCard({p}:{p:ReplayPresentation}){
 
 function ReplayMinuteTable({minutes,onInspect,selected}:{minutes:ReplayMinute[];onInspect:(id:string)=>void;selected:AuditEvent|null}){const[explained,setExplained]=useState<string|null>(null);return <section className="panel shadow-panel"><div className="panel-heading"><div><h2>Full-day minute replay</h2><p>Every minute remains evidence-faithful. Active continuation is a UI projection only; immutable audit events are unchanged.</p></div><span className="pill teal">REPLAY</span></div><div className="shadow-table-scroll mp-minute-scroll"><table className="shadow-table mp-minute-table"><thead><tr><th>Time</th><th>NIFTY O</th><th>H</th><th>L</th><th>C</th><th>Fut close</th><th>Fut VWAP</th><th>Data</th><th>Strategy / continuation / audit</th></tr></thead><tbody>{minutes.flatMap(m=>{const first=m.events?.[0];const expanded=!!selected&&!!m.events?.some(e=>e.event_id===selected.event_id);return [<tr key={m.timestamp} className={first?eventClass(first.event_type):m.presentation?'mp-minute-active':'mp-minute-plain'}><td><b>{tm(m.timestamp)}</b></td><td>{num(m.underlying_open)}</td><td>{num(m.underlying_high)}</td><td>{num(m.underlying_low)}</td><td>{num(m.underlying_close)}</td><td>{num(m.futures_close)}</td><td>{num(m.futures_vwap)}</td><td><span className={'mp-data-status '+(m.data_status!=='BOTH'?'warn':'')}>{words(m.data_status)}</span></td><td>{m.presentation&&<ContinuationCard p={m.presentation}/>} <div className="mp-minute-actions"><button className="secondary mp-explain-btn" aria-expanded={explained===m.timestamp} onClick={()=>setExplained(explained===m.timestamp?null:m.timestamp)}>{explained===m.timestamp?'Close explanation':'Explain minute'}</button></div>{m.events?.length?<div className="mp-minute-events">{m.events.map(e=><div className="mp-minute-event" key={e.event_id}><div><b>{words(e.event_type)}</b><small>{semanticOwner(e)} · {words(e.direction)} · {words(e.result)}</small><small>{words(e.reason)}</small></div><button className="secondary" aria-expanded={selected?.event_id===e.event_id} onClick={()=>onInspect(e.event_id)}>{selected?.event_id===e.event_id?'Collapse':'Inspect'}</button></div>)}</div>:!m.presentation?<span className="mp-no-event">—</span>:null}</td></tr>,explained===m.timestamp?<tr key={m.timestamp+'-explain'} className="mp-inline-detail-row"><td colSpan={9}><MinuteExplainPanel m={m}/></td></tr>:expanded&&selected?<tr key={m.timestamp+'-detail'} className="mp-inline-detail-row"><td colSpan={9}><div className="mp-inline-audit"><div className="mp-inline-audit-head"><div><span>DETAILED AUDIT</span><b>{words(selected.event_type)}</b><small>{dt(selected.event_timestamp)}</small></div><button className="secondary" onClick={()=>onInspect(selected.event_id)}>Collapse</button></div><AuditDetail event={selected}/></div></td></tr>:null]})}{!minutes.length&&<tr><td colSpan={9} className="empty">No full-day minute evidence materialized for this date.</td></tr>}</tbody></table></div></section>}
 
+
+function ActiveTradeSection({status}:{status:Status|null}){
+ const entry=status?.latest_entry
+ if(!entry)return <section className="mp-trade-strip mp-trade-strip-empty"><div><span>ACTIVE TRADE</span><b>NO ACTIVE TRADE</b></div><small>Waiting for a valid B/E entry.</small></section>
+
+ const entryMs=eventMs(entry.event_timestamp)
+ const terminal=status?.latest_terminal
+ const terminalMs=eventMs(terminal?.event_timestamp)
+ if(terminalMs>=entryMs)return <section className="mp-trade-strip mp-trade-strip-empty"><div><span>ACTIVE TRADE</span><b>NO ACTIVE TRADE</b></div><small>Latest trade lifecycle is closed.</small></section>
+
+ const latest=status?.latest_event
+ const currentPx=latest?.underlying_price??entry.underlying_price
+ const direction=String(entry.direction??'')
+ const move=entry.underlying_price!=null&&currentPx!=null
+   ?(direction==='BULLISH'?currentPx-entry.underlying_price:
+     direction==='BEARISH'?entry.underlying_price-currentPx:null)
+   :null
+ const fut=latest?.futures_price??entry.futures_price
+ const vwap=latest?.futures_vwap??entry.futures_vwap
+ const raw=fut!=null&&vwap!=null?fut-vwap:null
+ const optionIntent=direction==='BULLISH'?'BUY CE':direction==='BEARISH'?'BUY PE':'—'
+
+ return <section className="mp-trade-strip active">
+   <div className="mp-trade-strip-title"><span>ACTIVE TRADE</span><b>{words(entry.family)} · {words(direction)} · {optionIntent}</b></div>
+   <div className="mp-trade-strip-grid">
+     <article><span>Entry time</span><b>{tm(entry.event_timestamp)}</b></article>
+     <article><span>Entry NIFTY</span><b>{num(entry.underlying_price)}</b></article>
+     <article><span>Current NIFTY</span><b>{num(currentPx)}</b></article>
+     <article><span>Directional move</span><b>{num(move)}</b></article>
+     <article><span>Fut / VWAP</span><b>{num(fut)} / {num(vwap)}</b><small>{raw==null?'—':raw>0?'ABOVE VWAP':raw<0?'BELOW VWAP':'AT VWAP'}</small></article>
+     <article><span>+20</span><b>{eventMs(status?.latest_plus20?.event_timestamp)>=entryMs?'YES':'NO'}</b></article>
+     <article><span>Classifier</span><b>{eventMs(status?.latest_classifier?.event_timestamp)>=entryMs?words(status?.latest_classifier?.result||status?.latest_classifier?.reason):'WAITING'}</b></article>
+     <article><span>Degraded</span><b>{eventMs(status?.latest_degraded?.event_timestamp)>=entryMs?'YES':'NO'}</b></article>
+   </div>
+ </section>
+}
+
+function ExitDetailsSection({status}:{status:Status|null}){
+ const terminal=status?.latest_terminal
+ const rescue=status?.latest_rescue
+ const exit=(terminal&&eventMs(terminal.event_timestamp)>=eventMs(rescue?.event_timestamp))?terminal:rescue
+ if(!exit)return <section className="mp-exit-strip mp-exit-strip-empty"><div><span>EXIT DETAILS</span><b>NO EXIT YET</b></div><small>No completed Midpoint exit is available for this view.</small></section>
+
+ return <section className="mp-exit-strip">
+   <div className="mp-trade-strip-title"><span>EXIT DETAILS</span><b>{words(exit.event_type)}</b></div>
+   <div className="mp-trade-strip-grid">
+     <article><span>Exit time</span><b>{tm(exit.event_timestamp)}</b></article>
+     <article><span>Owner / family</span><b>{semanticOwner(exit)}</b></article>
+     <article><span>Direction</span><b>{words(exit.direction)}</b></article>
+     <article><span>NIFTY at exit</span><b>{num(exit.underlying_price)}</b></article>
+     <article><span>Directional points</span><b>{num(exit.directional_points)}</b></article>
+     <article><span>Futures close</span><b>{num(exit.futures_price)}</b></article>
+     <article><span>Futures VWAP</span><b>{num(exit.futures_vwap)}</b></article>
+     <article><span>Reason</span><b>{words(exit.reason||exit.result)}</b></article>
+   </div>
+ </section>
+}
+
 function SessionView({mode,status,timeline,minutes,selected,onInspect}:{mode:'LIVE'|'HISTORICAL_REPLAY';status:Status|null;timeline:TimelineRow[];minutes:ReplayMinute[];selected:AuditEvent|null;onInspect:(id:string)=>void}){
  const current=status?.latest_event
- return <><div className="shadow-safety"><b>MIDPOINT STRATEGY · {mode==='LIVE'?'OBSERVATION ONLY':'HISTORICAL REPLAY'}</b><span>Execution disabled</span><span>Paper orders disabled</span><span>Quantity none</span><span>{mode==='LIVE'?'Current + previous available trading session':'One selected trading date'}</span></div>
- <div className="shadow-metrics mp-summary"><article><span>Owner</span><b>{semanticOwner(current??status?.latest_entry)}</b><small>FRESH A = fresh Candidate A owns boundary; not B/E</small></article><article><span>Direction</span><b>{words(current?.direction)}</b><small>{words(current?.reference_type)} reference</small></article><article><span>Family state</span><b>{words(status?.family_b_state)}</b><small>{status?.audit_record_count??0} strategy events</small></article><article><span>Latest event</span><b>{words(current?.event_type)}</b><small>{tm(current?.event_timestamp)}</small></article><article><span>Boundary / midpoint</span><b>{num(current?.original_boundary)} / {num(current?.midpoint)}</b><small>High {num(current?.reference_high)} · Low {num(current?.reference_low)}</small></article><article><span>Safety</span><b>{status?.safety.observation_only?'SAFE':'CHECK'}</b><small>Execution {status?.safety.execution_enabled?'ON':'OFF'} · Paper {status?.safety.paper_order_enabled?'ON':'OFF'}</small></article></div>
- <div className="mp-lifecycle-grid"><EventCard label="Entry" event={status?.latest_entry}/><EventCard label="+20 proof" event={status?.latest_plus20}/><EventCard label="Runner classification" event={status?.latest_classifier}/><EventCard label="Degraded" event={status?.latest_degraded}/><EventCard label="CAP20 rescue" event={status?.latest_rescue}/><EventCard label="Structural terminal" event={status?.latest_terminal}/></div>
- {mode==='LIVE'&&<LiveContinuationPanel status={status}/>}\n {mode==='HISTORICAL_REPLAY'?<ReplayMinuteTable minutes={minutes} onInspect={onInspect} selected={selected}/>:<LiveAuditTable timeline={timeline} onInspect={onInspect} selected={selected}/>}</>
+ return <>
+ <div className="shadow-safety"><b>MIDPOINT STRATEGY · {mode==='LIVE'?'OBSERVATION ONLY':'HISTORICAL REPLAY'}</b><span>Execution disabled</span><span>Paper orders disabled</span><span>Quantity none</span><span>{mode==='LIVE'?'Current + previous available trading session':'One selected trading date'}</span></div>
+ <div className="shadow-metrics mp-summary mp-summary-compact"><article><span>Owner</span><b>{semanticOwner(current??status?.latest_entry)}</b><small>FRESH A = fresh Candidate A owns boundary; not B/E</small></article><article><span>Direction</span><b>{words(current?.direction)}</b><small>{words(current?.reference_type)} reference</small></article><article><span>Family state</span><b>{words(status?.family_b_state)}</b><small>{status?.audit_record_count??0} strategy events</small></article><article><span>Latest event</span><b>{words(current?.event_type)}</b><small>{tm(current?.event_timestamp)}</small></article><article><span>Boundary / midpoint</span><b>{num(current?.original_boundary)} / {num(current?.midpoint)}</b><small>High {num(current?.reference_high)} · Low {num(current?.reference_low)}</small></article><article><span>Safety</span><b>{status?.safety.observation_only?'SAFE':'CHECK'}</b><small>Execution {status?.safety.execution_enabled?'ON':'OFF'} · Paper {status?.safety.paper_order_enabled?'ON':'OFF'}</small></article></div>
+ <div className="mp-lifecycle-grid mp-lifecycle-compact"><EventCard label="Entry" event={status?.latest_entry}/><EventCard label="+20 proof" event={status?.latest_plus20}/><EventCard label="Runner classification" event={status?.latest_classifier}/><EventCard label="Degraded" event={status?.latest_degraded}/><EventCard label="CAP20 rescue" event={status?.latest_rescue}/><EventCard label="Structural terminal" event={status?.latest_terminal}/></div>
+ <ActiveTradeSection status={status}/>
+ {mode==='LIVE'&&<LiveContinuationPanel status={status}/>}
+ {mode==='HISTORICAL_REPLAY'?<ReplayMinuteTable minutes={minutes} onInspect={onInspect} selected={selected}/>:<LiveAuditTable timeline={timeline} onInspect={onInspect} selected={selected}/>}
+ <ExitDetailsSection status={status}/>
+ </>
 }
+
 
 export default function MidpointStrategyShadow(){
  const [mode,setMode]=useState<'LIVE'|'HISTORICAL_REPLAY'>('LIVE')
