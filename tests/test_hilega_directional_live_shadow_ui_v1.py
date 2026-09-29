@@ -34,6 +34,20 @@ def test_operational_uses_latest_process_start_expiry_metadata(tmp_path, monkeyp
     assert got["restart_restore"]["contract_master_lookup"] is False
 
 
+def test_fast_status_defers_evidence_and_chain_verification(tmp_path, monkeypatch):
+    root = tmp_path / "evidence"; root.mkdir()
+    monkeypatch.setattr(ui, "EVIDENCE_ROOT", root)
+    monkeypatch.setattr(ui, "STEP_AUDIT_PATH", tmp_path / "step-audit.jsonl")
+    monkeypatch.setattr(ui, "_rows", lambda: [row("DIRECTIONAL_DECISION", {
+        "bar_timestamp": "2026-09-26T09:30:00+05:30", "trade_owner_after": "NONE",
+    })])
+    monkeypatch.setattr(ui, "_latest_process_start", lambda: (_ for _ in ()).throw(AssertionError("full evidence read")))
+    result = ui.status(fast=True)
+    assert result["observation_only"] is True
+    assert result["step_audit_chain_ok"] is None
+    assert result["operational"]["market_evidence"]["chain_ok"] is None
+
+
 def test_operational_surfaces_bootstrap_restore_identity(tmp_path, monkeypatch):
     root = tmp_path / "evidence"; root.mkdir()
     journal = EvidenceJournalV1(root / "2026-09-26.jsonl")

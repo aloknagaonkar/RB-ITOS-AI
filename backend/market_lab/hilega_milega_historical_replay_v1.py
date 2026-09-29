@@ -43,8 +43,8 @@ class TradeRow:
     entry_price: float
     exit_time: str
     exit_reason: str
-    exit_price: float
-    points: float
+    exit_price: float | None
+    points: float | None
     outcome: str
 
 
@@ -164,7 +164,7 @@ def load_or_fetch_1m(
 
 
 def aggregate_exact_5m(
-    candles: Iterable[HistoricalCandle], session_date: date
+    candles: Iterable[HistoricalCandle], session_date: date, *, require_full_session: bool = False
 ) -> list[FiveMinuteBar]:
     by_minute: dict[datetime, HistoricalCandle] = {}
     for c in candles:
@@ -184,6 +184,8 @@ def aggregate_exact_5m(
         needed = [label + timedelta(minutes=i) for i in range(5)]
         present = [by_minute.get(ts) for ts in needed]
         if all(x is None for x in present):
+            if require_full_session:
+                raise ValueError(f"missing exact 5m candle {label.strftime('%H:%M')} for {session_date}")
             continue
         if any(x is None for x in present):
             missing = [ts.strftime("%H:%M") for ts, x in zip(needed, present) if x is None]
@@ -496,6 +498,14 @@ def _pair_trades(events: Sequence[Any], session_date: date) -> list[TradeRow]:
     trades: list[TradeRow] = []
     for e in events:
         if e.event_type.startswith(ENTRY_EVENT_PREFIX):
+            if active is not None:
+                trades.append(TradeRow(
+                    session_date=session_date.isoformat(),
+                    entry_time=active["entry_time"].strftime("%H:%M"),
+                    source=active["source"], entry_price=active["entry_price"],
+                    exit_time="", exit_reason="NEW_ENTRY_BEFORE_EXIT", exit_price=None,
+                    points=None, outcome="UNRESOLVED",
+                ))
             active = {
                 "entry_time": e.event_time,
                 "source": e.source or "UNKNOWN",
@@ -521,6 +531,14 @@ def _pair_trades(events: Sequence[Any], session_date: date) -> list[TradeRow]:
             )
         )
         active = None
+    if active is not None:
+        trades.append(TradeRow(
+            session_date=session_date.isoformat(),
+            entry_time=active["entry_time"].strftime("%H:%M"),
+            source=active["source"], entry_price=active["entry_price"],
+            exit_time="", exit_reason="MISSING_TERMINAL_EXIT", exit_price=None,
+            points=None, outcome="UNRESOLVED",
+        ))
     return trades
 
 
@@ -669,6 +687,7 @@ def replay_sessions(
     all_decisions: list[dict[str, Any]] = []
     all_candle_decisions: list[dict[str, Any]] = []
     data_availability: dict[str, int] = {}
+    last_missing_target: date | None = None
 
     current = begin
     while current <= last:
@@ -682,13 +701,36 @@ def replay_sessions(
         data_availability[current.isoformat()] = len(candles)
         if not candles:
             if current in target_set:
+                last_missing_target = current
                 session_summaries.append(
                     SessionSummary(current.isoformat(), "UNAVAILABLE", 0, 0, 0, 0, 0, 0.0, 0, 0, 0, 0, 0, 0, "No historical underlying candles returned.")
                 )
             current += timedelta(days=1)
             continue
 
-        bars = aggregate_exact_5m(candles, current)
+        try:
+            bars = aggregate_exact_5m(candles, current, require_full_session=current in target_set)
+        except ValueError as exc:
+            if current not in target_set:
+                raise
+            last_missing_target = current
+            session_summaries.append(SessionSummary(
+                current.isoformat(), "UNAVAILABLE", 0, 0, 0, 0, 0, 0.0,
+                0, 0, 0, 0, 0, 0, str(exc),
+            ))
+            current += timedelta(days=1)
+            continue
+        if (current in target_set and last_missing_target is not None
+                and (current - last_missing_target).days <= warmup_calendar_days):
+            session_summaries.append(SessionSummary(
+                current.isoformat(), "UNAVAILABLE", len(bars), 0, 0, 0, 0, 0.0,
+                0, 0, 0, 0, 0, 0,
+                f"prior target data gap at {last_missing_target.isoformat()} within warmup window",
+            ))
+            for bar in bars:
+                engine.indicators.update(bar.close)
+            current += timedelta(days=1)
+            continue
         if current not in target_set:
             # Preserve indicator continuity without creating strategy decisions.
             engine.previous_indicators = None
@@ -751,15 +793,16 @@ def replay_sessions(
         pos = sum(t.outcome == "POSITIVE" for t in trades)
         neg = sum(t.outcome == "NEGATIVE" for t in trades)
         flat = sum(t.outcome == "FLAT" for t in trades)
+        unresolved = sum(t.outcome == "UNRESOLVED" for t in trades)
         summary = SessionSummary(
             session_date=current.isoformat(),
-            status="PASS",
+            status="UNRESOLVED" if unresolved else "PASS",
             bars_5m=len(bars),
             trades=len(trades),
             positive=pos,
             negative=neg,
             flat=flat,
-            net_points=sum(t.points for t in trades),
+            net_points=sum(t.points for t in trades if t.points is not None),
             route_a_trades=sum("ROUTE_A" in t.source for t in trades),
             route_b_trades=sum("ROUTE_B" in t.source for t in trades),
             opening_trades=sum(t.source == "OPENING_PATH" for t in trades),
@@ -799,7 +842,8 @@ def replay_sessions(
             "positive": sum(t.outcome == "POSITIVE" for t in all_trades),
             "negative": sum(t.outcome == "NEGATIVE" for t in all_trades),
             "flat": sum(t.outcome == "FLAT" for t in all_trades),
-            "net_points": sum(t.points for t in all_trades),
+            "net_points": sum(t.points for t in all_trades if t.points is not None),
+            "unresolved": sum(t.outcome == "UNRESOLVED" for t in all_trades),
             "route_a_trades": sum("ROUTE_A" in t.source for t in all_trades),
             "route_b_trades": sum("ROUTE_B" in t.source for t in all_trades),
             "opening_trades": sum(t.source == "OPENING_PATH" for t in all_trades),

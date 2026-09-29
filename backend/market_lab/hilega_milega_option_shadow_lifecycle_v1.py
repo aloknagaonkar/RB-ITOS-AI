@@ -96,6 +96,9 @@ class HilegaMilegaOptionShadowLifecycleV1:
     def __init__(self) -> None:
         self._snapshot: ShadowOptionLifecycleSnapshot | None = None
         self._candidate_set: OptionCandidateSet | None = None
+        # Snapshot signatures detect corrected old minutes. Validation and
+        # excursion extrema advance only over genuinely new completed bars.
+        self._validated_paths: dict[str, dict[datetime, tuple]] = {}
 
     @property
     def snapshot(self) -> ShadowOptionLifecycleSnapshot | None:
@@ -176,6 +179,7 @@ class HilegaMilegaOptionShadowLifecycleV1:
         option_minutes: Callable[[str], Iterable],
     ) -> ShadowOptionLifecycleSnapshot:
         bar_ts = _minute_key(signal_bar_ts)
+        self._validated_paths.clear()
         boundary = bar_ts + timedelta(minutes=5)
 
         if candidate_set.status != "AVAILABLE":
@@ -318,6 +322,9 @@ class HilegaMilegaOptionShadowLifecycleV1:
             return self._snapshot
 
         through = _minute_key(through_completed_minute)
+        if (self._snapshot.latest_completed_minute is not None
+                and through < datetime.fromisoformat(self._snapshot.latest_completed_minute)):
+            return self._snapshot
         boundary = datetime.fromisoformat(self._snapshot.signal_boundary).astimezone(IST)
         if through < boundary:
             return self._snapshot
@@ -330,6 +337,7 @@ class HilegaMilegaOptionShadowLifecycleV1:
 
         new_legs: list[ShadowOptionLegSnapshot] = []
         issues: list[str] = []
+        next_validated: dict[str, dict[datetime, tuple]] = {}
         leg_by_key = {x.instrument_key: x for x in self._snapshot.legs}
         for candidate in self._candidate_set.candidates:
             prior_leg = leg_by_key[candidate.instrument_key]
@@ -340,29 +348,53 @@ class HilegaMilegaOptionShadowLifecycleV1:
 
             path = []
             previous = None
+            signatures = {}
+            prior_signatures = self._validated_paths.get(candidate.instrument_key, {})
+            prefix_unchanged = bool(prior_signatures)
             for minute in expected:
                 row = by_ts.get(minute)
                 if row is None:
                     issues.append(f"{candidate.instrument_key}:MISSING_EXACT_MINUTE:{minute.isoformat()}")
                     continue
+                signature = (row.timestamp, row.instrument_key, row.open, row.high, row.low, row.close)
+                signatures[minute] = signature
+                if minute in prior_signatures and prior_signatures[minute] != signature:
+                    prefix_unchanged = False
+                path.append(row)
+
+            if len(path) != len(expected):
+                continue
+            if not set(prior_signatures).issubset(signatures):
+                prefix_unchanged = False
+            previous = None
+            to_validate = path
+            if prefix_unchanged:
+                previous = max(prior_signatures)
+                to_validate = [row for row in path if _minute_key(row.timestamp) > previous]
+                previous = prior_signatures[previous][0]
+            for row in to_validate:
+                minute = _minute_key(row.timestamp)
                 health = validate_option_minute(
-                    row,
-                    expected_instrument_key=candidate.instrument_key,
+                    row, expected_instrument_key=candidate.instrument_key,
                     previous_timestamp=previous,
                 )
                 if not health.allowed:
                     issues.append(f"{candidate.instrument_key}:{minute.isoformat()}:{health.reason or health.state}")
                     continue
-                path.append(row)
                 previous = row.timestamp
-
-            if len(path) != len(expected):
+            if issues:
                 continue
             entry = prior_leg.entry_open
             latest = path[-1]
-            max_high = max(float(x.high) for x in path)
-            min_low = min(float(x.low) for x in path)
+            if prefix_unchanged:
+                highs = [entry + (prior_leg.mfe_points or 0), *(float(x.high) for x in to_validate)]
+                lows = [entry + (prior_leg.mae_points or 0), *(float(x.low) for x in to_validate)]
+                max_high, min_low = max(highs), min(lows)
+            else:
+                max_high = max(float(x.high) for x in path)
+                min_low = min(float(x.low) for x in path)
             latest_close = float(latest.close)
+            next_validated[candidate.instrument_key] = signatures
             new_legs.append(
                 ShadowOptionLegSnapshot(
                     strike=prior_leg.strike,
@@ -419,6 +451,7 @@ class HilegaMilegaOptionShadowLifecycleV1:
             legs=tuple(new_legs),
             issue=None,
         )
+        self._validated_paths = next_validated
         return self._snapshot
 
     def close(

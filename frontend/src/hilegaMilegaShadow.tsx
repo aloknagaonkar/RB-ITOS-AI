@@ -13,7 +13,7 @@ type DirectionalStatus = {
   execution_enabled:boolean
   paper_order_enabled:boolean
   option_selection_enabled:boolean
-  step_audit_chain_ok:boolean
+  step_audit_chain_ok:boolean|null
   step_audit_chain_issue:string|null
   current:{
     trade_owner:Direction
@@ -245,12 +245,16 @@ export default function HilegaMilegaShadow(){
   const [auditLoading,setAuditLoading]=useState(false)
   const [error,setError]=useState('')
 
-  const refresh=async()=>{
-    const [s,a,d,dr]=await Promise.all([
-      getDirectional<DirectionalStatus>('/status'),
-      getBullish<AuditReport[]>('/audit-index?limit=200'),
+  const refresh=async(active:()=>boolean)=>{
+    const [s,d]=await Promise.all([
+      getDirectional<DirectionalStatus>('/status?fast=true'),
       getDirectional<Dashboard>('/trade-dashboard'),
-      fetch('/api/live-shadow/hilega-directional-candles/live'),
+    ])
+    if(!active())return
+    setStatus(s);setDashboard(d);setError('')
+    const [a,dr]=await Promise.all([
+      getBullish<AuditReport[]>('/audit-index?limit=200'),
+      fetch('/api/live-shadow/hilega-directional-candles/live?audit_only=true'),
     ])
     let merged=a as HilegaAudit[]
     if(dr.ok){
@@ -260,10 +264,10 @@ export default function HilegaMilegaShadow(){
     }
     merged=overlayDirectionalTradeMarkers(merged,d.trades??[])
     merged=attachDirectionalTradeAuditMetadata(merged,d.trades??[])
-    setStatus(s);setRows(merged as AuditReport[]);setDashboard(d);setError('')
+    if(active())setRows(merged as AuditReport[])
   }
 
-  useEffect(()=>{let active=true;const poll=()=>void refresh().catch(e=>active&&setError((e as Error).message));poll();const t=setInterval(poll,5000);return()=>{active=false;clearInterval(t)}},[])
+  useEffect(()=>{let active=true;let inFlight=false;const poll=async()=>{if(!active||inFlight||document.hidden)return;inFlight=true;try{await refresh(()=>active)}catch(e){if(active)setError((e as Error).message)}finally{inFlight=false}};void poll();const t=setInterval(()=>void poll(),5000);return()=>{active=false;clearInterval(t)}},[])
 
   const activity=useMemo(()=>rows.filter(r=>r.transitions.length>0||(r.strategy.events_emitted||[]).length>0),[rows])
   const entries=useMemo(()=>activity.flatMap(r=>r.transitions.filter(isEntry).map(t=>({r,t}))),[activity])
@@ -289,7 +293,7 @@ export default function HilegaMilegaShadow(){
       <span>Execution disabled</span>
       <span>Paper orders disabled</span>
       <span>No CE/PE selector</span>
-      <span>Audit chain {status?.step_audit_chain_ok?'healthy':'check'}</span>
+      <span>Audit chain {status?.step_audit_chain_ok===null?'verification deferred':status?.step_audit_chain_ok?'healthy':'check'}</span>
     </div>
 
     <div className="shadow-metrics hilega-dashboard-summary">

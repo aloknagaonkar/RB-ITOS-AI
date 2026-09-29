@@ -218,8 +218,11 @@ def _cutoff_operational(rows: list[dict[str, Any]], session_date: str | None) ->
     return {"present": bool(cutoff_rows), "status": status, "processed": status == "PROCESSED", "record": latest}
 
 
-def _operational_payload(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    process_start = _latest_process_start()
+def _operational_payload(rows: list[dict[str, Any]], *, fast: bool = False) -> dict[str, Any]:
+    process_start = {"present": EVIDENCE_ROOT.is_dir(), "session_date": None,
+                     "evidence_path": None, "evidence_chain_ok": None,
+                     "evidence_chain_issue": "VERIFICATION_DEFERRED",
+                     "expiry": None, "expiry_source": None} if fast else _latest_process_start()
     worker_session = process_start.get("session_date")
     _, latest_state = _state_payload(rows)
     state_session = _record_session(latest_state) if latest_state else None
@@ -260,10 +263,10 @@ def _operational_payload(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 @router.get("/status")
-def status():
+def status(fast: bool = False):
     rows = _rows()
-    store = _store()
-    chain_ok, chain_issue = store.verify_chain() if STEP_AUDIT_PATH.exists() else (True, None)
+    chain_ok, chain_issue = ((None, "VERIFICATION_DEFERRED") if fast else
+                             _store().verify_chain() if STEP_AUDIT_PATH.exists() else (True, None))
     current, latest_state = _state_payload(rows)
     latest_accepted, latest_suppressed = _latest_event_rows(rows)
     counts = Counter(row.get("stage") for row in rows)
@@ -285,7 +288,7 @@ def status():
         "step_audit_chain_issue": chain_issue,
         "record_counts": dict(counts),
         "current": current,
-        "operational": _operational_payload(rows),
+        "operational": _operational_payload(rows, fast=fast),
         "latest_state_record": latest_state,
         "latest_accepted_record": latest_accepted,
         "latest_suppressed_record": latest_suppressed,

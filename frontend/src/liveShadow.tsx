@@ -87,19 +87,21 @@ export default function LiveShadowMonitor() {
   const [selected,setSelected]=useState<string|null>(null)
   const [detail,setDetail]=useState<ObservationDetail|null>(null)
   const [error,setError]=useState('')
-  const refresh=async()=>{
+  const refresh=async(active:()=>boolean)=>{
     const [s,o,h]=await Promise.all([
       api<ShadowStatus>('/status'),
       api<ShadowObservation[]>('/observations?limit=100'),
       api<Record<string,unknown>[]>('/health?limit=30'),
     ])
+    if(!active())return
     setStatus(s);setObservations(o);setHealth(h);setError('')
-    if (!selected && o.length) setSelected(o[0].observation_id)
+    if (o.length) setSelected(previous=>previous??o[0].observation_id)
   }
   useEffect(()=>{
     let active=true
-    const poll=()=>void refresh().catch(e=>{if(active)setError((e as Error).message)})
-    poll(); const timer=setInterval(poll,3000)
+    let inFlight=false
+    const poll=async()=>{if(!active||inFlight||document.hidden)return;inFlight=true;try{await refresh(()=>active)}catch(e){if(active)setError((e as Error).message)}finally{inFlight=false}}
+    void poll(); const timer=setInterval(()=>void poll(),5000)
     return()=>{active=false;clearInterval(timer)}
   },[])
   useEffect(()=>{
@@ -109,7 +111,7 @@ export default function LiveShadowMonitor() {
       .then(v=>{if(active)setDetail(v)})
       .catch(e=>{if(active)setError((e as Error).message)})
     return()=>{active=false}
-  },[selected,observations])
+  },[selected])
 
   const latestHealth=(health[0]??status?.latest_health??{}) as Record<string,unknown>
   const healthState=String(latestHealth.health_state ?? latestHealth.state ?? 'NO DATA')

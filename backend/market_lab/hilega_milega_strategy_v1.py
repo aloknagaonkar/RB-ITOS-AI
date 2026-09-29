@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta
+from math import isfinite
 from typing import Any
 
 from .live_shadow_step_audit_v1 import ShadowStepAuditStoreV1
@@ -38,7 +39,7 @@ class IndicatorSnapshot:
 
     @property
     def ready(self) -> bool:
-        return None not in (self.rsi9, self.ema3_rsi, self.wma21_rsi)
+        return all(value is not None and isfinite(value) for value in (self.rsi9, self.ema3_rsi, self.wma21_rsi))
 
 
 @dataclass(frozen=True)
@@ -111,6 +112,8 @@ class HilegaMilegaIndicatorEngineV1:
 
     def update(self, close: float) -> IndicatorSnapshot:
         close = float(close)
+        if not isfinite(close):
+            raise ValueError("indicator close must be finite")
         rsi: float | None = None
 
         if self._last_close is None:

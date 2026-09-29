@@ -195,11 +195,11 @@ def _points(direction: str, entry: float, exit_: float) -> float:
     return (exit_ - entry) if direction == "BULLISH" else (entry - exit_)
 
 
-def _mfe_mae(direction: str, entry: float, bars: list[TFBar]) -> tuple[float | None, float | None]:
-    if not bars:
+def _mfe_mae(direction: str, entry: float, bars: list[TFBar], *, exit_price: float | None = None) -> tuple[float | None, float | None]:
+    if not bars and exit_price is None:
         return None, None
-    high = max(x.high for x in bars)
-    low = min(x.low for x in bars)
+    high = max([entry, *(x.high for x in bars), *([exit_price] if exit_price is not None else [])])
+    low = min([entry, *(x.low for x in bars), *([exit_price] if exit_price is not None else [])])
     if direction == "BULLISH":
         return high - entry, low - entry
     return entry - low, entry - high
@@ -377,8 +377,14 @@ def run_research(
                 else:
                     entry_price = baseline_entry_price if version == "V1_5M_ONLY" else selected.close
                     pts = _points(direction, entry_price, exit_price)
-                    path_bars = [b for b in five_bars[d] if selected.ts <= b.ts <= exit_ts]
-                    mfe, mae = _mfe_mae(direction, entry_price, path_bars)
+                    # Entry is at the selected bar's close. The entry signal
+                    # candle preceded the holding interval. A cutoff exit uses
+                    # the 14:55 OPEN, before that candle's range exists.
+                    cutoff_open = str(trade.get("exit_reason") or "").upper().find("CUTOFF") >= 0
+                    path_bars = [b for b in five_bars[d]
+                                 if selected.completed_at <= b.ts
+                                 and (b.ts < exit_ts if cutoff_open else b.ts <= exit_ts)]
+                    mfe, mae = _mfe_mae(direction, entry_price, path_bars, exit_price=exit_price)
                     row.update({
                         "accepted": True,
                         "entry_time": selected.ts.isoformat(),

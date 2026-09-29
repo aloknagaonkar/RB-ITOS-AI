@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import copy
+import hashlib
+from functools import lru_cache
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -10,7 +13,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from .live_shadow_step_audit_v1 import ShadowStepAuditStoreV1
 from .domain import HistoricalCandle
-from .hilega_market_evidence_v1 import verify_journal
+from .hilega_market_evidence_v1 import canonical, verify_journal
 from .hilega_milega_historical_replay_v1 import aggregate_exact_5m
 from .hilega_milega_live_shadow_v1 import (
     completed_intraday_1m_for_label,
@@ -258,6 +261,7 @@ def _cache_rows_for_day(day: str) -> list[HistoricalCandle]:
 
 def _latest_directional_underlying(
     session_date: str,
+    *, fast: bool = False,
 ) -> tuple[datetime, list[HistoricalCandle]] | None:
 
     path = (
@@ -268,7 +272,7 @@ def _latest_directional_underlying(
     if not path.is_file():
         return None
 
-    rows = verify_journal(path)
+    rows = _recent_underlying_records(path) if fast else verify_journal(path)
 
     candidates = [
         r
@@ -303,8 +307,44 @@ def _latest_directional_underlying(
     return acquired_now, candles
 
 
+def _recent_underlying_records(path: Path) -> list[dict[str, Any]]:
+    """Read a bounded journal tail for display; full chain verification is separate."""
+    with path.open("rb") as handle:
+        handle.seek(0, 2)
+        size = handle.tell()
+        start = max(0, size - 16 * 1024 * 1024)
+        handle.seek(start)
+        raw = handle.read()
+    lines = raw.splitlines()
+    if start:
+        lines = lines[1:]
+    wanted = None
+    selected = None
+    for line in reversed(lines):
+        try:
+            row = json.loads(line)
+        except (ValueError, UnicodeDecodeError):
+            continue
+        if row.get("kind") != "underlying" or row.get("status") != "OK":
+            continue
+        body = {k: v for k, v in row.items() if k != "record_hash"}
+        if hashlib.sha256(canonical(body)).hexdigest() != row.get("record_hash"):
+            continue
+        if selected is None:
+            selected = row
+            if isinstance(row.get("response"), list):
+                return [row]
+            wanted = row.get("response_ref")
+        elif wanted and isinstance(row.get("response"), list):
+            if hashlib.sha256(canonical(row["response"])).hexdigest() == wanted:
+                selected["response"] = row["response"]
+                return [selected]
+    return []
+
+
 def _directional_evidence_live_rows(
     session_date: str,
+    *, fast: bool = False,
 ) -> dict[str, dict[str, Any]]:
     """Reconstruct live OHLC + indicators from directional evidence.
 
@@ -313,7 +353,7 @@ def _directional_evidence_live_rows(
     """
 
     source = _latest_directional_underlying(
-        session_date
+        session_date, fast=fast
     )
 
     if source is None:
@@ -346,6 +386,56 @@ def _directional_evidence_live_rows(
 
     # Match live bootstrap indicator warm-up:
     # previous 45 calendar days, indicator history continuous.
+    indicators = _warmup_indicators(day)
+
+    merged: dict[str, dict[str, Any]] = {}
+
+    for bar in current_bars:
+
+        ind = indicators.update(
+            bar.close
+        )
+
+        ts = bar.ts.isoformat()
+
+        merged[ts] = {
+            "session_date": session_date,
+            "time": bar.ts.astimezone(IST).strftime("%H:%M"),
+            "bar_timestamp": ts,
+            "open": float(bar.open),
+            "high": float(bar.high),
+            "low": float(bar.low),
+            "close": float(bar.close),
+            "volume": int(bar.volume or 0),
+            "rsi9": ind.rsi9,
+            "ema3_rsi": ind.ema3_rsi,
+            "wma21_rsi": ind.wma21_rsi,
+            "owner_before": None,
+            "owner_after": None,
+            "bullish_state": None,
+            "bearish_state": None,
+            "bullish_armed": None,
+            "bearish_armed": None,
+            "action": "NO_DIRECTIONAL_AUDIT",
+            "accepted_events": "",
+            "suppressed_events": "",
+            "note": "Directional state unavailable for this candle",
+            "directional_evidence": False,
+        }
+
+    return merged
+
+
+def _warmup_indicators(day):
+    paths = [UNDERLYING_CACHE_ROOT / f"{(day - timedelta(days=i)).isoformat()}.json"
+             for i in range(1, LIVE_UI_WARMUP_CALENDAR_DAYS + 1)]
+    signature = tuple((p.name, p.stat().st_size, p.stat().st_mtime_ns) for p in paths if p.is_file())
+    return copy.deepcopy(_cached_warmup(day.isoformat(), str(UNDERLYING_CACHE_ROOT), signature))
+
+
+@lru_cache(maxsize=8)
+def _cached_warmup(day_string: str, cache_root: str, signature: tuple) -> HilegaMilegaIndicatorEngineV1:
+    day = datetime.strptime(day_string, "%Y-%m-%d").date()
     indicators = HilegaMilegaIndicatorEngineV1()
 
     d = day - timedelta(
@@ -369,87 +459,7 @@ def _directional_evidence_live_rows(
 
         d += timedelta(days=1)
 
-    merged: dict[str, dict[str, Any]] = {}
-
-    for bar in current_bars:
-
-        ind = indicators.update(
-            bar.close
-        )
-
-        ts = bar.ts.isoformat()
-
-        merged[ts] = {
-            "session_date":
-                session_date,
-
-            "time":
-                bar.ts.astimezone(IST).strftime(
-                    "%H:%M"
-                ),
-
-            "bar_timestamp":
-                ts,
-
-            "open":
-                float(bar.open),
-
-            "high":
-                float(bar.high),
-
-            "low":
-                float(bar.low),
-
-            "close":
-                float(bar.close),
-
-            "volume":
-                int(bar.volume or 0),
-
-            "rsi9":
-                ind.rsi9,
-
-            "ema3_rsi":
-                ind.ema3_rsi,
-
-            "wma21_rsi":
-                ind.wma21_rsi,
-
-            "owner_before":
-                None,
-
-            "owner_after":
-                None,
-
-            "bullish_state":
-                None,
-
-            "bearish_state":
-                None,
-
-            "bullish_armed":
-                None,
-
-            "bearish_armed":
-                None,
-
-            "action":
-                "NO_DIRECTIONAL_AUDIT",
-
-            "accepted_events":
-                "",
-
-            "suppressed_events":
-                "",
-
-            "note":
-                "Directional state unavailable for this candle",
-
-            "directional_evidence":
-                False,
-        }
-
-    return merged
+    return indicators
 
 
 def _base_live_rows(
@@ -490,7 +500,7 @@ def _latest_live_session() -> str | None:
     return max(sessions) if sessions else None
 
 
-def build_live_directional_candles(session_date: str | None = None) -> dict[str, Any]:
+def build_live_directional_candles(session_date: str | None = None, *, audit_only: bool = False) -> dict[str, Any]:
     day = session_date or _latest_live_session()
     if not day:
         return {
@@ -503,7 +513,15 @@ def build_live_directional_candles(session_date: str | None = None) -> dict[str,
             "warning": "No current live candle evidence is available.",
         }
 
-    rows = _base_live_rows(day)
+    if audit_only:
+        try:
+            rows = _directional_evidence_live_rows(day, fast=True)
+        except Exception:
+            rows = {}
+        if not rows:
+            rows = _base_live_rows_legacy(day)
+    else:
+        rows = _base_live_rows(day)
     directional_count = 0
 
     for record in _read_audit(LIVE_DIRECTIONAL_AUDIT):
@@ -545,6 +563,9 @@ def build_live_directional_candles(session_date: str | None = None) -> dict[str,
         "directional_row_count": directional_count,
         "rows": ordered,
         "warning": (
+            "Fast view from recorded underlying snapshot; full journal chain verification was deferred. "
+            "Directional state is overlaid only where an exact audit bar exists."
+            if audit_only else
             "Candle/indicator evidence is shown for the current live session. "
             "Directional state is overlaid only where the directional audit contains "
             "that exact bar; earlier bars are not retroactively invented."
@@ -586,5 +607,5 @@ def historical(session_date: str = Query(..., pattern=r"^\d{4}-\d{2}-\d{2}$")):
 
 
 @router.get("/live")
-def live(session_date: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$")):
-    return build_live_directional_candles(session_date)
+def live(session_date: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"), audit_only: bool = False):
+    return build_live_directional_candles(session_date, audit_only=audit_only)

@@ -64,10 +64,6 @@ def test_api_flow(engine):
     with TestClient(create_app(engine)) as client:
         state = client.get("/api/state").json()
         assert state["observation_count"] == 4 and not state["execution_enabled"]
-        slim = client.get("/api/state?history_limit=1").json()
-        assert slim["observation_count"] == 4 and len(slim["history"]) == 1
-        assert slim["history"][0]["id"] == state["history"][-1]["id"]
-        assert client.get("/api/state?history_limit=0").status_code == 422
         assert client.get("/api/observations/1").json()["snapshot"]["raw"]["synthetic"]
         assert client.post("/api/replay/1", json={}).json()["matched"]
         assert client.post("/api/collection", json={"enabled": True}).status_code == 200

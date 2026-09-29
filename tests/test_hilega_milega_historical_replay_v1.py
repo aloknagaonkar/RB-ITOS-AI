@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from market_lab.domain import HistoricalCandle
+from market_lab.domain import HistoricalCandle, IST
 from market_lab.hilega_milega_historical_replay_v1 import (
     _decision_reason_rows,
     aggregate_exact_5m,
@@ -55,6 +55,24 @@ def test_exact_5m_aggregation_fails_on_partial_bar():
     rows = [candle(sd, 9, 15 + i, 100 + i) for i in (0, 1, 2, 4)]
     with pytest.raises(ValueError, match="incomplete exact 5m candle"):
         aggregate_exact_5m(rows, sd)
+
+
+def test_complete_session_policy_rejects_entire_missing_tail():
+    sd = date(2026, 9, 17)
+    rows = [candle(sd, 9, 15 + i, 100 + i) for i in range(10)]
+    with pytest.raises(ValueError, match="missing exact 5m candle 09:25"):
+        aggregate_exact_5m(rows, sd, require_full_session=True)
+
+
+def test_unmatched_entry_is_retained_as_unresolved():
+    from types import SimpleNamespace
+    from market_lab.hilega_milega_historical_replay_v1 import _pair_trades
+    sd = date(2026, 9, 17)
+    event = SimpleNamespace(event_type="ENTRY_PATH1_ROUTE_A", event_time=datetime(2026, 9, 17, 10, 0, tzinfo=IST),
+                            source="ROUTE_A", price=100.0, entry_price=100.0)
+    trades = _pair_trades([event], sd)
+    assert len(trades) == 1
+    assert trades[0].outcome == "UNRESOLVED" and trades[0].points is None
 
 
 def test_decision_audit_explains_route_a_failure_and_route_b_wait():

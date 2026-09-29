@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
 import os
@@ -8,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from . import platform_file_lock as fcntl
 
 MODEL = "LIVE_SHADOW_STEP_AUDIT_V1"
 
@@ -48,6 +48,26 @@ class ShadowStepAuditStoreV1:
                 rows.append(json.loads(line))
         return rows
 
+    @staticmethod
+    def _last_record_from_handle(handle) -> dict[str, Any] | None:
+        """Read only the last complete record while the append lock is held."""
+        raw = handle.buffer
+        raw.seek(0, os.SEEK_END)
+        end = raw.tell()
+        if not end:
+            return None
+        raw.seek(end - 1)
+        if raw.read(1) != b"\n":
+            raise ValueError("audit journal has an incomplete final record; recover it before appending")
+        start = end - 1
+        while start > 0:
+            raw.seek(start - 1)
+            if raw.read(1) == b"\n":
+                break
+            start -= 1
+        raw.seek(start)
+        return json.loads(raw.read(end - start))
+
     def read_all(self) -> list[dict[str, Any]]:
         if not self.path.exists():
             return []
@@ -74,12 +94,12 @@ class ShadowStepAuditStoreV1:
         with self.path.open("a+", encoding="utf-8") as handle:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
             try:
-                rows = self._read_all_from_handle(handle)
-                previous_hash = rows[-1]["record_hash"] if rows else None
+                previous = self._last_record_from_handle(handle)
+                previous_hash = previous["record_hash"] if previous else None
 
                 core = {
                     "model": MODEL,
-                    "sequence": len(rows) + 1,
+                    "sequence": previous["sequence"] + 1 if previous else 1,
                     "event_time": event_time.isoformat(),
                     "checkpoint": checkpoint.isoformat() if checkpoint else None,
                     "observation_id": observation_id,

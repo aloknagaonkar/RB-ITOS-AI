@@ -100,3 +100,22 @@ def test_live_merges_candle_and_directional_evidence(tmp_path, monkeypatch):
     assert result["rows"][1]["time"] == "14:35"
     assert result["rows"][1]["owner_after"] == "BULLISH"
     assert result["rows"][1]["action"] == "BULLISH_ACTIVE"
+
+    monkeypatch.setattr(m, "_base_live_rows", lambda _: (_ for _ in ()).throw(AssertionError("full evidence reconstruction")))
+    fast = m.build_live_directional_candles(day, audit_only=True)
+    assert fast["row_count"] == 2
+    assert "verification was deferred" in fast["warning"]
+
+
+def test_fast_evidence_tail_resolves_latest_underlying_response(tmp_path):
+    from market_lab.hilega_market_evidence_v1 import EvidenceJournalV1
+    path = tmp_path / "evidence.jsonl"
+    journal = EvidenceJournalV1(path)
+    response = [{"timestamp": "2026-09-29T09:15:00+05:30", "close": 100}]
+    journal.append("underlying", {"now": "2026-09-29T09:16:00+05:30"}, response)
+    journal.append("underlying", {"now": "2026-09-29T09:17:00+05:30"}, response)
+    journal.close()
+    rows = m._recent_underlying_records(path)
+    assert len(rows) == 1
+    assert rows[0]["args"]["now"] == "2026-09-29T09:17:00+05:30"
+    assert rows[0]["response"] == response

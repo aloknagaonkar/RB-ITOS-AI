@@ -119,3 +119,29 @@ def test_shadow_lifecycle_fails_closed_if_any_exact_entry_minute_missing():
     assert started.active is False
     assert "CE-23500:MISSING_ENTRY_MINUTE" in (started.issue or "")
     assert started.payload()["order_created"] is False
+
+
+def test_incremental_update_matches_rebuild_and_detects_old_minute_revision():
+    signal = datetime(2026, 9, 23, 10, 15, tzinfo=IST)
+    boundary = signal + timedelta(minutes=5)
+    source = _minute_source(boundary)
+    tracker = HilegaMilegaOptionShadowLifecycleV1()
+    tracker.start(signal_bar_ts=signal, signal_spot=23393.25, source="TEST",
+                  candidate_set=_candidate_set(), option_minutes=source)
+    tracker.update(through_completed_minute=boundary + timedelta(minutes=2), option_minutes=source)
+    incremental = tracker.update(through_completed_minute=boundary + timedelta(minutes=5), option_minutes=source)
+    rebuilt = HilegaMilegaOptionShadowLifecycleV1()
+    rebuilt.start(signal_bar_ts=signal, signal_spot=23393.25, source="TEST",
+                  candidate_set=_candidate_set(), option_minutes=source)
+    full = rebuilt.update(through_completed_minute=boundary + timedelta(minutes=5), option_minutes=source)
+    assert incremental == full
+    original = source
+    def revised(key):
+        rows = original(key)
+        if key == "CE-23400":
+            row = rows[1]
+            rows[1] = CompletedOptionMinute(row.instrument_key, row.timestamp, row.open,
+                                            row.high + 10, row.low, row.close, row.volume)
+        return rows
+    corrected = tracker.update(through_completed_minute=boundary + timedelta(minutes=5), option_minutes=revised)
+    assert corrected.legs[2].mfe_points == incremental.legs[2].mfe_points + 6

@@ -10,12 +10,14 @@ from fastapi import APIRouter, HTTPException, Query
 from .config import MidpointShadowConfig
 from .replay import load_audit_jsonl
 from .workspace_contract import midpoint_workspace_status
+from .option_observation import project_tape
 
 MODEL = "MIDPOINT_STRATEGY_LIVE_SHADOW_UI_V2"
 DATA_DIR = Path("data/live-observation/midpoint-strategy-v1")
 AUDIT_PATH = DATA_DIR / "audit.jsonl"
 HIST_ROOT = Path("data/historical-evidence/hilega-pcr-oi-support-research-v1/midpoint-ui-replay-v1")
 HIST_MANIFEST = HIST_ROOT / "manifest.json"
+OPTION_TAPE_ROOT = DATA_DIR / "option-observation"
 
 router = APIRouter(prefix="/api/live-shadow/midpoint-strategy", tags=["live-shadow-midpoint-strategy"])
 
@@ -701,6 +703,32 @@ def audit_detail(event_id: str):
                 "display_owner": _display_owner(row),
             }
     raise HTTPException(404, "Midpoint audit event not found")
+
+
+@router.get("/option-observation")
+def option_observation(session_date: str, as_of: str):
+    """Read a previously acquired exact tape; never call a provider in a UI request."""
+    from datetime import date, datetime
+    try:
+        day = date.fromisoformat(session_date)
+        cutoff = datetime.fromisoformat(as_of)
+        if cutoff.tzinfo is None or cutoff.date() != day:
+            raise ValueError("AS_OF_REQUIRES_SESSION_DATE_AND_TIMEZONE")
+    except ValueError as exc:
+        raise HTTPException(422, "Invalid option observation date/as_of") from exc
+    path = OPTION_TAPE_ROOT / f"{day.isoformat()}.json"
+    if not path.exists():
+        return {"model": "MIDPOINT_EXACT_OPTION_OBSERVATION_V1", "status": "UNAVAILABLE",
+                "reason": "EXACT_OPTION_TAPE_NOT_MATERIALIZED", "as_of": as_of, "legs": []}
+    try:
+        payload = json.loads(path.read_text())
+        tapes = [t for t in payload["tapes"] if t["entry_timestamp"] <= as_of]
+        if not tapes:
+            return {"model": "MIDPOINT_EXACT_OPTION_OBSERVATION_V1", "status": "NO_ENTRY_YET",
+                    "as_of": as_of, "legs": []}
+        return project_tape(tapes[-1], as_of)
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(422, "Exact option observation tape unreadable") from exc
 
 
 def _manifest():

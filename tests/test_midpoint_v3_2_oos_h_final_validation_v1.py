@@ -115,6 +115,16 @@ def test_time_exit_after_15_bars():
     assert round(out["net_return_pct"], 8) == 2.5
 
 
+def test_replay_rejects_missing_entry_or_nonconsecutive_minutes():
+    missing_entry = flat_path()[1:] + [candle("2026-01-01T09:45:00+05:30", 100, 101, 99, 100)]
+    with pytest.raises(ValueError, match="nonconsecutive 1m path"):
+        simulate_frozen_exit(trade=trade(), candles=missing_entry)
+    spaced = flat_path()
+    spaced[5] = candle("2026-01-01T09:46:00+05:30", 100, 101, 99, 100)
+    with pytest.raises(ValueError, match="nonconsecutive 1m path"):
+        simulate_frozen_exit(trade=trade(), candles=spaced)
+
+
 def test_final_decision_hold_for_small_sample():
     decision, _ = final_decision(
         trade_count=9,

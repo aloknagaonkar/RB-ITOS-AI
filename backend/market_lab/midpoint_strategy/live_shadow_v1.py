@@ -39,6 +39,14 @@ class _SessionState:
     references: dict[str, _ReferenceRuntime] = field(default_factory=dict)
     observations: list[FamilyBObservation] = field(default_factory=list)
     processed_minutes: set[datetime] = field(default_factory=set)
+    latest_processed_minute: datetime | None = None
+    quarantined_late_minutes: set[datetime] = field(default_factory=set)
+    quarantined_revised_futures_minutes: set[datetime] = field(default_factory=set)
+    futures_inputs: dict[datetime, tuple[float, float]] = field(default_factory=dict)
+    futures_vwap: dict[datetime, tuple[float, float]] = field(default_factory=dict)
+    futures_pv: float = 0.0
+    futures_volume: float = 0.0
+    latest_futures_minute: datetime | None = None
     active_reference_type: Optional[str] = None
 
 
@@ -99,6 +107,28 @@ class MidpointLiveShadowCoordinatorV1:
         return 0.0 if value is None else float(value)
 
     def _reset_session(self, session_date: date) -> None:
+        if self.state is not None and self.state.session_date != session_date:
+            previous = self.state
+            active_type = previous.active_reference_type
+            rr = previous.references.get(active_type) if active_type else None
+            lifecycle = rr.runtime.lifecycle if rr else None
+            if rr and lifecycle and not rr.closed:
+                last = previous.observations[-1] if previous.observations else None
+                self.engine._audit(
+                    runtime=rr.runtime,
+                    timestamp=last.timestamp if last else lifecycle.entry_timestamp.isoformat(),
+                    event_type="SESSION_END_UNRESOLVED",
+                    direction=lifecycle.direction,
+                    result="UNRESOLVED_VALUATION",
+                    reason="NO_EXACT_SESSION_CLOSE_OBSERVATION",
+                    state_before=lifecycle.state.value,
+                    state_after="UNRESOLVED",
+                    observation=last,
+                    directional_points=self._directional_points(rr, last.close) if last else None,
+                    evidence={"valuation_only": True, "order_sent": False,
+                              "last_observed_timestamp": last.timestamp if last else None},
+                )
+                rr.closed = True
         self.state = _SessionState(session_date=session_date)
 
     def bootstrap(self, now: datetime) -> dict[str, Any]:
@@ -108,6 +138,37 @@ class MidpointLiveShadowCoordinatorV1:
 
     def _futures_vwap_map(self, candles: list[Any], latest: datetime) -> dict[datetime, tuple[float, float]]:
         """Cumulative raw futures close-volume VWAP, exact minute only."""
+        if self.state is not None:
+            state = self.state
+            seen: set[datetime] = set()
+            available: set[datetime] = set()
+            for c in sorted(candles, key=self._candle_ts):
+                ts = self._candle_ts(c)
+                if ts > latest:
+                    continue
+                close, volume = self._float(c, "close"), self._volume(c)
+                if volume <= 0:
+                    continue
+                available.add(ts)
+                if ts in seen:
+                    state.quarantined_revised_futures_minutes.add(ts)
+                    continue
+                seen.add(ts)
+                previous = state.futures_inputs.get(ts)
+                if previous is not None:
+                    if previous != (close, volume):
+                        state.quarantined_revised_futures_minutes.add(ts)
+                    continue
+                if state.latest_futures_minute is not None and ts < state.latest_futures_minute:
+                    state.quarantined_revised_futures_minutes.add(ts)
+                    state.quarantined_late_minutes.add(ts)
+                    continue
+                state.futures_inputs[ts] = (close, volume)
+                state.latest_futures_minute = ts
+                state.futures_pv += close * volume
+                state.futures_volume += volume
+                state.futures_vwap[ts] = (close, state.futures_pv / state.futures_volume)
+            return {ts: state.futures_vwap[ts] for ts in available if ts in state.futures_vwap}
         out: dict[datetime, tuple[float, float]] = {}
         pv = 0.0
         vol = 0.0
@@ -485,7 +546,7 @@ class MidpointLiveShadowCoordinatorV1:
                 decision = self.boundary_classifier.classify(
                     reference=rr.reference,
                     boundary_observation=obs,
-                    history=self.state.observations,
+                    history=self.state.observations[-12:],
                 )
 
                 if decision.owner == MidpointFamily.E.value:
@@ -561,7 +622,7 @@ class MidpointLiveShadowCoordinatorV1:
                     self.engine.start_b_watch(
                         rr.runtime,
                         obs,
-                        self.state.observations,
+                        self.state.observations[-12:],
                     )
                     continue
 
@@ -585,11 +646,12 @@ class MidpointLiveShadowCoordinatorV1:
                 and rr.runtime.lifecycle is None
                 and rr.runtime.watch.active
                 and not another_active
+                and not terminal_this_minute
             ):
                 result = self.engine.evaluate_b_watch(
                     rr.runtime,
                     obs,
-                    self.state.observations,
+                    self.state.observations[-12:],
                 )
                 if result == "ENTRY":
                     self.state.active_reference_type = ref_type
@@ -618,6 +680,9 @@ class MidpointLiveShadowCoordinatorV1:
         for ts in common:
             if ts in self.state.processed_minutes:
                 continue
+            if self.state.latest_processed_minute is not None and ts < self.state.latest_processed_minute:
+                self.state.quarantined_late_minutes.add(ts)
+                continue
             if ts.time() < time(9, 15):
                 self.state.processed_minutes.add(ts)
                 continue
@@ -635,6 +700,7 @@ class MidpointLiveShadowCoordinatorV1:
                 underlying=underlying_by_ts[ts],
             )
             self.state.processed_minutes.add(ts)
+            self.state.latest_processed_minute = ts
             processed_now += 1
 
         active = self.state.active_reference_type
@@ -651,6 +717,8 @@ class MidpointLiveShadowCoordinatorV1:
             "latest_complete_minute": latest.isoformat(),
             "processed_now": processed_now,
             "processed_total": len(self.state.processed_minutes),
+            "quarantined_late_minutes": len(self.state.quarantined_late_minutes),
+            "quarantined_revised_futures_minutes": len(self.state.quarantined_revised_futures_minutes),
             "reference_types": sorted(self.state.references),
             "active_reference_type": active,
             "active_state": active_state,

@@ -8,6 +8,7 @@ from market_lab.hilega_mtf_alignment_research_v1 import (
     classify_alignment,
     latest_completed_snapshot,
     _passes,
+    _mfe_mae,
 )
 
 
@@ -16,6 +17,15 @@ def test_alignment_classification():
     assert classify_alignment(IndicatorSnapshot(40.0, 45.0, 48.0)) == "BEARISH"
     assert classify_alignment(IndicatorSnapshot(55.0, 58.0, 52.0)) == "NEUTRAL"
     assert classify_alignment(IndicatorSnapshot(None, None, None)) == "UNREADY"
+
+
+def test_excursion_excludes_signal_and_cutoff_candles():
+    entry = 100.0
+    signal = TFBar(datetime(2026, 9, 23, 9, 15, tzinfo=IST), 5, 100, 180, 20, 100)
+    held = TFBar(datetime(2026, 9, 23, 9, 20, tzinfo=IST), 5, 100, 110, 95, 105)
+    cutoff = TFBar(datetime(2026, 9, 23, 9, 25, tzinfo=IST), 5, 106, 190, 10, 120)
+    bars = [b for b in (signal, held, cutoff) if signal.completed_at <= b.ts < cutoff.ts]
+    assert _mfe_mae("BULLISH", entry, bars, exit_price=cutoff.open) == (10.0, -5.0)
 
 
 def test_latest_completed_snapshot_is_causal():

@@ -6,7 +6,7 @@ import json
 import math
 import statistics
 from collections import Counter, defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
@@ -219,6 +219,12 @@ def simulate_frozen_exit(
             f"incomplete 15m path for {trade['session_date']} {trade['instrument_key']} "
             f"at {trade['entry_timestamp']}: only {len(path)} candles"
         )
+
+    for index, candle in enumerate(path):
+        expected = entry_dt + timedelta(minutes=index)
+        actual = candle["_dt"].replace(second=0, microsecond=0)
+        if actual != expected:
+            raise ValueError(f"nonconsecutive 1m path: expected {expected.isoformat()}, got {actual.isoformat()}")
 
     # Exact next-minute OPEN integrity: economics entry must equal first replay bar OPEN.
     first_open = float(path[0]["open"])

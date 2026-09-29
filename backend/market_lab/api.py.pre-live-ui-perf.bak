@@ -3,11 +3,10 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI, HTTPException, Request, Query
+from fastapi import FastAPI, HTTPException, Request
 from .historical_replay_data_api_v1 import router as historical_replay_data_router
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -64,7 +63,6 @@ def create_app(engine=None, historical_gateway_factory=None):
     app.include_router(midpoint_strategy_live_shadow_router)
     app.include_router(hilega_directional_live_shadow_router)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "testserver", "35.244.46.53"])
-    app.add_middleware(GZipMiddleware, minimum_size=1000)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -108,7 +106,7 @@ def create_app(engine=None, historical_gateway_factory=None):
         return PCRConfig.model_json_schema()
 
     @app.get("/api/state")
-    def state(history_limit: int = Query(default=240, ge=1, le=240)):
+    def state():
         with Session(app.state.engine) as session:
             config_id, config, enabled = active_config(session)
             worker = session.get(Health, 1)
@@ -125,7 +123,7 @@ def create_app(engine=None, historical_gateway_factory=None):
                 select(Observation)
                 .where(Observation.config_id == config_id)
                 .order_by(Observation.id.desc())
-                .limit(history_limit)
+                .limit(240)
             ).all()
             count = session.scalar(
                 select(func.count()).select_from(Observation).where(Observation.config_id == config_id)

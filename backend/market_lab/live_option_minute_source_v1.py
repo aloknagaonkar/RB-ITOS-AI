@@ -1,6 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
+from math import isfinite
 MODEL="LIVE_OPTION_MINUTE_SOURCE_V1_1"
 @dataclass(frozen=True)
 class CompletedOptionMinute:
@@ -12,6 +13,8 @@ class OptionMinuteHealth:
 def validate_option_minute(bar,*,expected_instrument_key,previous_timestamp):
     if bar.timestamp.tzinfo is None:return OptionMinuteHealth("UNHEALTHY",False,"OPTION_TIMESTAMP_NAIVE")
     if bar.instrument_key!=expected_instrument_key:return OptionMinuteHealth("UNHEALTHY",False,"OPTION_INSTRUMENT_MISMATCH")
+    if not all(isfinite(value) for value in (bar.open,bar.high,bar.low,bar.close)):
+        return OptionMinuteHealth("UNHEALTHY",False,"OPTION_NONFINITE_OHLC")
     if min(bar.open,bar.high,bar.low,bar.close)<=0:return OptionMinuteHealth("UNHEALTHY",False,"OPTION_NONPOSITIVE_OHLC")
     if bar.low>min(bar.open,bar.close,bar.high):return OptionMinuteHealth("UNHEALTHY",False,"OPTION_INVALID_LOW")
     if bar.high<max(bar.open,bar.close,bar.low):return OptionMinuteHealth("UNHEALTHY",False,"OPTION_INVALID_HIGH")

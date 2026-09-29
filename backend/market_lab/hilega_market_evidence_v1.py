@@ -9,7 +9,6 @@ from __future__ import annotations
 from dataclasses import asdict, is_dataclass
 from datetime import date, datetime, timezone
 import hashlib
-import fcntl
 import json
 import os
 from pathlib import Path
@@ -17,6 +16,7 @@ from typing import Any
 
 from .domain import HistoricalCandle, IST
 from .live_option_minute_source_v1 import CompletedOptionMinute
+from . import platform_file_lock as fcntl
 
 MODEL = "HILEGA_MARKET_EVIDENCE_V1"
 ZERO_HASH = "0" * 64
