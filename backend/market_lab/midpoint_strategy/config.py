@@ -28,7 +28,7 @@ class MidpointShadowConfig:
     # Frozen current Family-B management candidate.
     primary_exit_enabled: bool = False
     cap20_rescue_enabled: bool = True
-    post_rescue_reentry_enabled: bool = True
+    post_rescue_reentry_enabled: bool = False
     post_rescue_reentry_window_minutes: int = 20
     max_post_rescue_reentries: int = 1
     second_rescue_after_reentry_enabled: bool = False
