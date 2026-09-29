@@ -1,15 +1,38 @@
-Copy the script to ~/RB-ITOS-AI/scripts/ and run:
+Midpoint M2.4A backend bundle
+=============================
 
-cd ~/RB-ITOS-AI
-source .venv/bin/activate
-export PYTHONPATH=backend
-python scripts/midpoint_vwap_delayed_and_rebreak_research.py \
-  | tee /tmp/midpoint-vwap-delayed-and-rebreak-research.txt
+Purpose
+-------
+Adds UI-only audit enrichment and historical replay continuation projection:
+- PASS/FAIL checks
+- observed vs required
+- gap-to-qualify
+- futures/VWAP interpretation
+- CE/PE intent (no fabricated contract)
+- presentation-only CONTINUE state for historical replay
 
-Research only. Candidate A/Hilega/runtime/execution remain unchanged.
+It does NOT change Candidate A, Family B/E ownership, +20, classifier,
+DEGRADED, CAP20, no-reentry baseline, execution, paper orders, or quantity.
 
-25 Aug Study A RED sanity target:
-T0 09:39, Candidate A=False, delayed bearish VWAP confirmation around 09:42,
-delay=3m, confirmation VWAP distance about -8.31.
+Usage on the VM
+---------------
+1) unzip midpoint_m24a_backend_bundle.zip
+2) from ~/RB-ITOS-AI:
 
-Study B should expose the later midpoint/reclaim/rebreak sequence for manual review.
+   source .venv/bin/activate
+   export PYTHONPATH=backend
+
+   python /path/to/apply_midpoint_m24a.py
+   python /path/to/verify_midpoint_m24a.py
+
+Do not restart services yet.
+
+Expected safety
+---------------
+observation_only = true
+execution_enabled = false
+paper_order_enabled = false
+quantity = None
+
+The patch script creates:
+backend/market_lab/midpoint_strategy/live_shadow_ui.py.pre-m2-4a.bak
