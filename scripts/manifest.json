@@ -1,0 +1,5 @@
+{
+  "backend/market_lab/api.py": "91aacac61d2b9e0b0c8a079589d04e47d313cd26a0b030940f1a1c6db46e9955",
+  "frontend/src/App.tsx": "463188a27519ce7632818e8263efab8d3ff52a957666a6d3ba95ce901722d1e0",
+  "tests/test_storage_api.py": "d8d817c4e7fbaf0d7423c66c421b24674cde349970fd773ff2d977243bdffb1f"
+}
