@@ -29,6 +29,119 @@ const yn=(v:any)=>v?'YES':'NO'
 const eventClass=(v:string)=>{const x=String(v||'').toUpperCase();if(x.includes('ENTRY'))return'mp-entry';if(x==='PLUS20_PROOF'||x.includes('RUNNER_STRENGTHENING'))return'mp-positive';if(x.includes('DEGRADED'))return'mp-warning';if(x.includes('CAP20'))return'mp-rescue';if(x.includes('STRUCTURAL_TERMINAL')||x.includes('INVALIDATED')||x.includes('EXPIRED'))return'mp-terminal';if(x.includes('BOUNDARY'))return'mp-boundary';if(x.includes('MIDPOINT'))return'mp-midpoint';return'mp-neutral'}
 const semanticOwner=(event:{event_type?:string|null;reason?:string|null;family?:string|null;display_owner?:string|null}|null|undefined)=>{if(!event)return'—';if(event.display_owner)return event.display_owner;const et=String(event.event_type??'').toUpperCase();const reason=String(event.reason??'').toUpperCase();const family=String(event.family??'').toUpperCase();if(et==='BOUNDARY_OWNER_OTHER'&&reason==='FRESH_CANDIDATE_A_AT_BOUNDARY')return'FRESH A';if(family==='OTHER_FRESH_A')return'FRESH A';return words(event.family)}
 
+
+function ageLabel(ts:string|null|undefined){
+ if(!ts)return'—'
+ const ms=Date.now()-Date.parse(ts)
+ if(!Number.isFinite(ms))return'—'
+ const s=Math.max(0,Math.floor(ms/1000))
+ if(s<60)return`${s}s`
+ const m=Math.floor(s/60)
+ if(m<60)return`${m}m ${s%60}s`
+ const h=Math.floor(m/60)
+ return`${h}h ${m%60}m`
+}
+
+function sourceLabel(mode:'LIVE'|'HISTORICAL_REPLAY',source?:string|null){
+ if(mode==='LIVE')return'LIVE SHADOW'
+ if(source==='FORWARD_OOS_REPLAY')return'FORWARD OOS REPLAY · NO-REENTRY'
+ if(source==='V57_PARITY_PROVEN_REPLAY')return'V57 PARITY-PROVEN REPLAY'
+ return words(source)
+}
+
+function MidpointFreshnessHeader({
+ mode,status,selectedDate,selectedSession,minutes,lastRefresh
+}:{
+ mode:'LIVE'|'HISTORICAL_REPLAY';
+ status:Status|null;
+ selectedDate:string;
+ selectedSession?:Session;
+ minutes:ReplayMinute[];
+ lastRefresh:string|null;
+}){
+ const latestAudit=status?.latest_event?.event_timestamp??null
+ const latestMarket=mode==='HISTORICAL_REPLAY'
+   ?(minutes.at(-1)?.timestamp??null)
+   :(status?.latest_event?.event_timestamp??null)
+ const sessionDate=mode==='HISTORICAL_REPLAY'
+   ?selectedDate
+   :(status?.latest_event?.session_date??status?.session_dates?.at(-1)??'—')
+ const stale=mode==='LIVE'&&latestMarket?Date.now()-Date.parse(latestMarket)>120000:false
+
+ return <section className={`mp-freshness ${stale?'stale':''}`}>
+   <div className="mp-freshness-title">
+     <div>
+       <span>LATEST MIDPOINT DETAILS</span>
+       <b>{sessionDate}</b>
+     </div>
+     <strong>{sourceLabel(mode,selectedSession?.source)}</strong>
+   </div>
+   <div className="mp-freshness-grid">
+     <article><span>Session / trading date</span><b>{sessionDate}</b></article>
+     <article><span>Latest market/evidence time</span><b>{dt(latestMarket)}</b><small>{mode==='LIVE'?`age ${ageLabel(latestMarket)}`:'replay session end'}</small></article>
+     <article><span>Latest strategy audit</span><b>{dt(latestAudit)}</b><small>{words(status?.latest_event?.event_type)}</small></article>
+     <article><span>UI refreshed</span><b>{dt(lastRefresh)}</b><small>{mode==='LIVE'?'5-second polling':'manual / replay load'}</small></article>
+     <article><span>Current owner</span><b>{semanticOwner(status?.latest_event??status?.latest_entry)}</b><small>{words(status?.latest_event?.direction)}</small></article>
+     <article><span>Safety</span><b>{status?.safety.observation_only?'OBSERVATION ONLY':'CHECK'}</b><small>Execution {status?.safety.execution_enabled?'ON':'OFF'} · Paper {status?.safety.paper_order_enabled?'ON':'OFF'}</small></article>
+   </div>
+   {stale&&<div className="mp-stale-warning">Latest live evidence is older than 2 minutes. Treat the screen as stale until new evidence arrives.</div>}
+ </section>
+}
+
+function CheckpointComparison({status}:{status:Status|null}){
+ const rows=[
+   ['ENTRY',status?.latest_entry],
+   ['+20 PROOF',status?.latest_plus20],
+   ['CLASSIFIER',status?.latest_classifier],
+   ['DEGRADED',status?.latest_degraded],
+   ['RECOVERY',status?.latest_recovery],
+   ['CAP20',status?.latest_rescue],
+   ['TERMINAL',status?.latest_terminal],
+ ] as [string,AuditEvent|null|undefined][]
+ const useful=rows.filter(([,e])=>!!e)
+ if(!useful.length)return null
+ return <section className="panel shadow-panel mp-checkpoint-panel">
+   <div className="panel-heading"><div><h2>Lifecycle checkpoint comparison</h2><p>Compare the same trade at important state transitions without changing immutable audit evidence.</p></div><span className="pill teal">FORENSICS</span></div>
+   <div className="shadow-table-scroll"><table className="shadow-table mp-checkpoint-table">
+     <thead><tr><th>Checkpoint</th><th>Time</th><th>Owner</th><th>Direction</th><th>NIFTY</th><th>Dir pts</th><th>Fut close</th><th>Fut VWAP</th><th>Raw diff</th><th>Result / reason</th></tr></thead>
+     <tbody>{useful.map(([label,e])=>{
+       const raw=e?.futures_price!=null&&e?.futures_vwap!=null?e.futures_price-e.futures_vwap:null
+       return <tr key={label}><td><b>{label}</b></td><td>{tm(e?.event_timestamp)}</td><td>{semanticOwner(e)}</td><td>{words(e?.direction)}</td><td>{num(e?.underlying_price)}</td><td>{num(e?.directional_points)}</td><td>{num(e?.futures_price)}</td><td>{num(e?.futures_vwap)}</td><td>{raw==null?'—':`${raw>=0?'+':''}${num(raw)}`}</td><td>{words(e?.result||e?.reason)}</td></tr>
+     })}</tbody>
+   </table></div>
+ </section>
+}
+
+function nextTransitionText(m:ReplayMinute){
+ const p=m.presentation
+ if(!p){
+   if(m.events?.length)return'No active B/E position at this minute. Inspect the immutable event below to see why the strategy changed state or why ownership was assigned.'
+   return'No active Midpoint position and no immutable strategy event at this minute.'
+ }
+ if(!p.plus20)return'Next management milestone: +20 proof — first favorable intrabar excursion of at least 20 underlying points.'
+ if(!p.classifier)return'Next management milestone: exact +10-minute runner classifier after +20 proof. It checks positive directional progress and positive directional futures-VWAP change.'
+ if(!p.degraded)return'Runner has been classified. Continue monitoring for joint deterioration: drawdown from running favorable excursion together with negative directional futures-VWAP change.'
+ if(p.degraded&&!p.recovered)return'DEGRADED is active. Waiting for strict recovery through the degraded target before CAP20 rebreak timing can begin.'
+ if(p.recovered)return'Recovery has occurred. After at least 10 minutes, the first strict rebreak of the degraded target is the CAP20 decision point; rescue is eligible only when directional move is <= +20.'
+ return'Continue following the immutable lifecycle events.'
+}
+
+function MinuteExplainPanel({m}:{m:ReplayMinute}){
+ const raw=m.futures_close!=null&&m.futures_vwap!=null?m.futures_close-m.futures_vwap:null
+ const p=m.presentation
+ return <div className="mp-minute-explain">
+   <div className="mp-minute-explain-head"><div><span>EXPLAIN THIS MINUTE</span><b>{dt(m.timestamp)}</b></div><strong>{p?.label??(m.events?.length?words(m.events[0].event_type):'NO ACTIVE EVENT')}</strong></div>
+   <div className="mp-minute-explain-grid">
+     <article><span>NIFTY candle</span><b>{num(m.underlying_close)}</b><small>O {num(m.underlying_open)} · H {num(m.underlying_high)} · L {num(m.underlying_low)}</small></article>
+     <article><span>Futures vs VWAP</span><b>{raw==null?'—':`${raw>=0?'+':''}${num(raw)}`}</b><small>{raw==null?'Unavailable':raw>0?'ABOVE VWAP':raw<0?'BELOW VWAP':'AT VWAP'}</small></article>
+     <article><span>Lifecycle</span><b>{p?`${words(p.family)} · ${words(p.direction)}`:'—'}</b><small>{p?`Move ${num(p.directional_move)} · +20 ${yn(p.plus20)} · degraded ${yn(p.degraded)}`:'No active position'}</small></article>
+     <article><span>Option intent</span><b>{p?.option_intent??'—'}</b><small>{p?'Exact basket attaches in M2.5B option observation.':'No active option intent'}</small></article>
+   </div>
+   <div className="mp-next-transition"><span>WHAT MUST HAPPEN NEXT</span><p>{nextTransitionText(m)}</p></div>
+   {m.events?.length>0&&<div className="mp-explain-events"><span>IMMUTABLE EVENTS AT THIS MINUTE</span>{m.events.map(e=><b key={e.event_id}>{words(e.event_type)} · {semanticOwner(e)} · {words(e.result||e.reason)}</b>)}</div>}
+ </div>
+}
+
 function EventCard({label,event}:{label:string;event:AuditEvent|null|undefined}){return <article className={`mp-card ${eventClass(event?.event_type??'')}`}><span>{label}</span><b>{event?words(event.result||event.event_type):'—'}</b><small>{event?`${tm(event.event_timestamp)} · ${words(event.reason)}`:'No event yet'}</small></article>}
 
 function CheckTable({title,rows}:{title:string;rows:AuditCheck[]|undefined}){
@@ -160,7 +273,7 @@ function ContinuationCard({p}:{p:ReplayPresentation}){
  </div>
 }
 
-function ReplayMinuteTable({minutes,onInspect,selected}:{minutes:ReplayMinute[];onInspect:(id:string)=>void;selected:AuditEvent|null}){return <section className="panel shadow-panel"><div className="panel-heading"><div><h2>Full-day minute replay</h2><p>Every minute remains evidence-faithful. Active continuation is a UI projection only; immutable audit events are unchanged.</p></div><span className="pill teal">REPLAY</span></div><div className="shadow-table-scroll mp-minute-scroll"><table className="shadow-table mp-minute-table"><thead><tr><th>Time</th><th>NIFTY O</th><th>H</th><th>L</th><th>C</th><th>Fut close</th><th>Fut VWAP</th><th>Data</th><th>Strategy / continuation / audit</th></tr></thead><tbody>{minutes.flatMap(m=>{const first=m.events?.[0];const expanded=!!selected&&!!m.events?.some(e=>e.event_id===selected.event_id);return [<tr key={m.timestamp} className={first?eventClass(first.event_type):m.presentation?'mp-minute-active':'mp-minute-plain'}><td><b>{tm(m.timestamp)}</b></td><td>{num(m.underlying_open)}</td><td>{num(m.underlying_high)}</td><td>{num(m.underlying_low)}</td><td>{num(m.underlying_close)}</td><td>{num(m.futures_close)}</td><td>{num(m.futures_vwap)}</td><td><span className={'mp-data-status '+(m.data_status!=='BOTH'?'warn':'')}>{words(m.data_status)}</span></td><td>{m.presentation&&<ContinuationCard p={m.presentation}/>} {m.events?.length?<div className="mp-minute-events">{m.events.map(e=><div className="mp-minute-event" key={e.event_id}><div><b>{words(e.event_type)}</b><small>{semanticOwner(e)} · {words(e.direction)} · {words(e.result)}</small><small>{words(e.reason)}</small></div><button className="secondary" aria-expanded={selected?.event_id===e.event_id} onClick={()=>onInspect(e.event_id)}>{selected?.event_id===e.event_id?'Collapse':'Inspect'}</button></div>)}</div>:!m.presentation?<span className="mp-no-event">—</span>:null}</td></tr>,expanded&&selected?<tr key={m.timestamp+'-detail'} className="mp-inline-detail-row"><td colSpan={9}><div className="mp-inline-audit"><div className="mp-inline-audit-head"><div><span>DETAILED AUDIT</span><b>{words(selected.event_type)}</b><small>{dt(selected.event_timestamp)}</small></div><button className="secondary" onClick={()=>onInspect(selected.event_id)}>Collapse</button></div><AuditDetail event={selected}/></div></td></tr>:null]})}{!minutes.length&&<tr><td colSpan={9} className="empty">No full-day minute evidence materialized for this date.</td></tr>}</tbody></table></div></section>}
+function ReplayMinuteTable({minutes,onInspect,selected}:{minutes:ReplayMinute[];onInspect:(id:string)=>void;selected:AuditEvent|null}){const[explained,setExplained]=useState<string|null>(null);return <section className="panel shadow-panel"><div className="panel-heading"><div><h2>Full-day minute replay</h2><p>Every minute remains evidence-faithful. Active continuation is a UI projection only; immutable audit events are unchanged.</p></div><span className="pill teal">REPLAY</span></div><div className="shadow-table-scroll mp-minute-scroll"><table className="shadow-table mp-minute-table"><thead><tr><th>Time</th><th>NIFTY O</th><th>H</th><th>L</th><th>C</th><th>Fut close</th><th>Fut VWAP</th><th>Data</th><th>Strategy / continuation / audit</th></tr></thead><tbody>{minutes.flatMap(m=>{const first=m.events?.[0];const expanded=!!selected&&!!m.events?.some(e=>e.event_id===selected.event_id);return [<tr key={m.timestamp} className={first?eventClass(first.event_type):m.presentation?'mp-minute-active':'mp-minute-plain'}><td><b>{tm(m.timestamp)}</b></td><td>{num(m.underlying_open)}</td><td>{num(m.underlying_high)}</td><td>{num(m.underlying_low)}</td><td>{num(m.underlying_close)}</td><td>{num(m.futures_close)}</td><td>{num(m.futures_vwap)}</td><td><span className={'mp-data-status '+(m.data_status!=='BOTH'?'warn':'')}>{words(m.data_status)}</span></td><td>{m.presentation&&<ContinuationCard p={m.presentation}/>} <div className="mp-minute-actions"><button className="secondary mp-explain-btn" aria-expanded={explained===m.timestamp} onClick={()=>setExplained(explained===m.timestamp?null:m.timestamp)}>{explained===m.timestamp?'Close explanation':'Explain minute'}</button></div>{m.events?.length?<div className="mp-minute-events">{m.events.map(e=><div className="mp-minute-event" key={e.event_id}><div><b>{words(e.event_type)}</b><small>{semanticOwner(e)} · {words(e.direction)} · {words(e.result)}</small><small>{words(e.reason)}</small></div><button className="secondary" aria-expanded={selected?.event_id===e.event_id} onClick={()=>onInspect(e.event_id)}>{selected?.event_id===e.event_id?'Collapse':'Inspect'}</button></div>)}</div>:!m.presentation?<span className="mp-no-event">—</span>:null}</td></tr>,explained===m.timestamp?<tr key={m.timestamp+'-explain'} className="mp-inline-detail-row"><td colSpan={9}><MinuteExplainPanel m={m}/></td></tr>:expanded&&selected?<tr key={m.timestamp+'-detail'} className="mp-inline-detail-row"><td colSpan={9}><div className="mp-inline-audit"><div className="mp-inline-audit-head"><div><span>DETAILED AUDIT</span><b>{words(selected.event_type)}</b><small>{dt(selected.event_timestamp)}</small></div><button className="secondary" onClick={()=>onInspect(selected.event_id)}>Collapse</button></div><AuditDetail event={selected}/></div></td></tr>:null]})}{!minutes.length&&<tr><td colSpan={9} className="empty">No full-day minute evidence materialized for this date.</td></tr>}</tbody></table></div></section>}
 
 function SessionView({mode,status,timeline,minutes,selected,onInspect}:{mode:'LIVE'|'HISTORICAL_REPLAY';status:Status|null;timeline:TimelineRow[];minutes:ReplayMinute[];selected:AuditEvent|null;onInspect:(id:string)=>void}){
  const current=status?.latest_event
@@ -180,12 +293,13 @@ export default function MidpointStrategyShadow(){
  const [selected,setSelected]=useState<AuditEvent|null>(null)
  const [error,setError]=useState('')
  const [loading,setLoading]=useState(true)
+ const [lastRefresh,setLastRefresh]=useState<string|null>(null)
 
- const refreshLive=async()=>{try{const [s,t]=await Promise.all([get<Status>('/status'),get<{timeline:TimelineRow[]}>('/timeline?limit=200')]);setStatus(s);setTimeline(t.timeline);setMinutes([]);setError('')}catch(e){setError((e as Error).message)}finally{setLoading(false)}}
- const fetchReplay=async(date:string)=>{if(!date)return;setLoading(true);setSelected(null);try{const r=await get<HistResponse>('/historical/session?session_date='+encodeURIComponent(date));setSelectedDate(date);setStatus(r.status);setTimeline(r.timeline);setMinutes(r.minutes??[]);setError('')}catch(e){setError((e as Error).message)}finally{setLoading(false)}}
+ const refreshLive=async()=>{try{const [s,t]=await Promise.all([get<Status>('/status'),get<{timeline:TimelineRow[]}>('/timeline?limit=200')]);setStatus(s);setTimeline(t.timeline);setMinutes([]);setLastRefresh(new Date().toISOString());setError('')}catch(e){setError((e as Error).message)}finally{setLoading(false)}}
+ const fetchReplay=async(date:string)=>{if(!date)return;setLoading(true);setSelected(null);try{const r=await get<HistResponse>('/historical/session?session_date='+encodeURIComponent(date));setSelectedDate(date);setStatus(r.status);setTimeline(r.timeline);setMinutes(r.minutes??[]);setLastRefresh(new Date().toISOString());setError('')}catch(e){setError((e as Error).message)}finally{setLoading(false)}}
 
  useEffect(()=>{if(mode!=='LIVE')return;let active=true;const poll=()=>{if(active)void refreshLive()};poll();const id=window.setInterval(poll,5000);return()=>{active=false;window.clearInterval(id)}},[mode])
- useEffect(()=>{if(mode!=='HISTORICAL_REPLAY')return;let active=true;setLoading(true);void (async()=>{try{const r=await get<{sessions:Session[]}>('/historical/sessions');if(!active)return;const available=r.sessions??[];setSessions(available);const date=available.some(x=>x.session_date===selectedDate)?selectedDate:(available[0]?.session_date??'');setSelectedDate(date);if(date){const replay=await get<HistResponse>('/historical/session?session_date='+encodeURIComponent(date));if(!active)return;setStatus(replay.status);setTimeline(replay.timeline);setMinutes(replay.minutes??[]);setError('')}else{setStatus(null);setTimeline([]);setMinutes([])}}catch(e){if(active)setError((e as Error).message)}finally{if(active)setLoading(false)}})();return()=>{active=false}},[mode])
+ useEffect(()=>{if(mode!=='HISTORICAL_REPLAY')return;let active=true;setLoading(true);void (async()=>{try{const r=await get<{sessions:Session[]}>('/historical/sessions');if(!active)return;const available=r.sessions??[];setSessions(available);const date=available.some(x=>x.session_date===selectedDate)?selectedDate:(available[0]?.session_date??'');setSelectedDate(date);if(date){const replay=await get<HistResponse>('/historical/session?session_date='+encodeURIComponent(date));if(!active)return;setStatus(replay.status);setTimeline(replay.timeline);setMinutes(replay.minutes??[]);setLastRefresh(new Date().toISOString());setError('')}else{setStatus(null);setTimeline([]);setMinutes([])}}catch(e){if(active)setError((e as Error).message)}finally{if(active)setLoading(false)}})();return()=>{active=false}},[mode])
 
  const inspect=async(eventId:string)=>{if(selected?.event_id===eventId){setSelected(null);return}try{const path=mode==='LIVE'?'/audit-detail?event_id='+encodeURIComponent(eventId):'/historical/audit-detail?session_date='+encodeURIComponent(selectedDate)+'&event_id='+encodeURIComponent(eventId);const r=await get<{event:AuditEvent}>(path);setSelected(r.event);setError('')}catch(e){setError((e as Error).message)}}
  const latestSessions=useMemo(()=>status?.session_dates??[],[status])
@@ -196,5 +310,5 @@ export default function MidpointStrategyShadow(){
  const selectedSession=sessions.find(x=>x.session_date===selectedDate)
  const replaySource=selectedSession?.source==='FORWARD_OOS_REPLAY'?'FORWARD OOS REPLAY · NO-REENTRY BASELINE':selectedSession?.source==='V57_PARITY_PROVEN_REPLAY'?'V57 PARITY-PROVEN REPLAY':words(selectedSession?.source)
 
- return <div className="shadow-page hilega-page midpoint-page">{error&&<div role="alert" className="banner error">{error}</div>}<div className="mp-modebar"><div><button className={mode==='LIVE'?'primary':'secondary'} onClick={()=>{setMode('LIVE');setSelected(null);setLoading(true)}}>Live shadow</button><button className={mode==='HISTORICAL_REPLAY'?'primary':'secondary'} onClick={()=>{setMode('HISTORICAL_REPLAY');setSelected(null);setLoading(true)}}>Historical replay</button></div>{mode==='LIVE'?<small>Visible sessions: {latestSessions.length?latestSessions.join(' + '):'waiting for audit'}</small>:<div className="mp-replay-controls"><button className="secondary" disabled={!previousDate||loading} onClick={()=>void fetchReplay(previousDate)}>← Previous date</button><select value={selectedDate} disabled={loading&&!sessions.length} onChange={e=>void fetchReplay(e.target.value)}>{!sessions.length&&<option value="">No materialized sessions</option>}{sessions.map(x=><option key={x.session_date} value={x.session_date}>{x.session_date} · {x.minute_count??0} min · {x.event_count??0} events</option>)}</select><button className="secondary" disabled={!nextDate||loading} onClick={()=>void fetchReplay(nextDate)}>Next date →</button><button className="primary" disabled={!selectedDate||loading} onClick={()=>void fetchReplay(selectedDate)}>{loading?'Loading…':'Reload date'}</button></div>}</div>{mode==='HISTORICAL_REPLAY'&&selectedDate&&<div className="mp-replay-banner"><b>HISTORICAL REPLAY</b><span>{selectedDate}</span><span>{minutes.length} minute rows</span><span>{timeline.length} strategy events</span><small>{selectedSession?.block??'tested source'} · {replaySource} · manual validation · no broker / no execution</small></div>}{loading&&!status?<section className="panel"><div className="empty">Loading Midpoint Strategy…</div></section>:<SessionView mode={mode} status={status} timeline={timeline} minutes={minutes} selected={selected} onInspect={id=>void inspect(id)}/>}</div>
+ return <div className="shadow-page hilega-page midpoint-page">{error&&<div role="alert" className="banner error">{error}</div>}<div className="mp-modebar"><div><button className={mode==='LIVE'?'primary':'secondary'} onClick={()=>{setMode('LIVE');setSelected(null);setLoading(true)}}>Live shadow</button><button className={mode==='HISTORICAL_REPLAY'?'primary':'secondary'} onClick={()=>{setMode('HISTORICAL_REPLAY');setSelected(null);setLoading(true)}}>Historical replay</button></div>{mode==='LIVE'?<small>Visible sessions: {latestSessions.length?latestSessions.join(' + '):'waiting for audit'}</small>:<div className="mp-replay-controls"><button className="secondary" disabled={!previousDate||loading} onClick={()=>void fetchReplay(previousDate)}>← Previous date</button><select value={selectedDate} disabled={loading&&!sessions.length} onChange={e=>void fetchReplay(e.target.value)}>{!sessions.length&&<option value="">No materialized sessions</option>}{sessions.map(x=><option key={x.session_date} value={x.session_date}>{x.session_date} · {x.minute_count??0} min · {x.event_count??0} events</option>)}</select><button className="secondary" disabled={!nextDate||loading} onClick={()=>void fetchReplay(nextDate)}>Next date →</button><button className="primary" disabled={!selectedDate||loading} onClick={()=>void fetchReplay(selectedDate)}>{loading?'Loading…':'Reload date'}</button></div>}</div><MidpointFreshnessHeader mode={mode} status={status} selectedDate={selectedDate} selectedSession={selectedSession} minutes={minutes} lastRefresh={lastRefresh}/>{mode==='HISTORICAL_REPLAY'&&selectedDate&&<div className="mp-replay-banner"><b>HISTORICAL REPLAY</b><span>{selectedDate}</span><span>{minutes.length} minute rows</span><span>{timeline.length} strategy events</span><small>{selectedSession?.block??'tested source'} · {replaySource} · manual validation · no broker / no execution</small></div>}{loading&&!status?<section className="panel"><div className="empty">Loading Midpoint Strategy…</div></section>:<SessionView mode={mode} status={status} timeline={timeline} minutes={minutes} selected={selected} onInspect={id=>void inspect(id)}/>}<CheckpointComparison status={status}/></div>
 }
