@@ -463,6 +463,9 @@ class AuditableFamilyBEngine:
         runtime: MidpointFamilyBRuntime,
         obs: FamilyBObservation,
     ) -> bool:
+        if not self.config.post_rescue_reentry_enabled:
+            return False
+
         if runtime.lifecycle is None:
             raise ValueError("no active B lifecycle")
         if runtime.rescue_directional_vwap is None:
