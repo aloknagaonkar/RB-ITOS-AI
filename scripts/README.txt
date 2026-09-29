@@ -1,25 +1,18 @@
-Midpoint M2.5A — Forensics UX
-================================
+Midpoint M2.5 layout polish
+=============================
 
-Adds the "better than Hilega" forensic layer that does not require exact option
-provider wiring yet:
+Changes:
+- compact Owner/Direction/Family State/Latest Event/Boundary/Safety cards
+- compact Entry/+20/Classifier/Degraded/CAP20/Structural Terminal cards
+- ACTIVE TRADE section immediately above the candle-by-candle audit/replay
+- EXIT DETAILS section immediately below the candle-by-candle audit/replay
+- same layout behavior for LIVE and HISTORICAL REPLAY
 
-- latest details header at the top:
-  session/trading date, latest evidence time, latest audit time/type,
-  UI refresh time, source/mode, owner/direction, safety, stale-live warning
-- lifecycle checkpoint comparison
-- Explain this minute in historical replay
-- factual "what must happen next" based on frozen lifecycle semantics
-
-M2.5B remains the exact five-contract option-observation adapter:
-ATM-2..ATM+2, correct CE/PE side, instrument, entry/latest/exit premium,
-current/realized points and %, MFE/MAE, and as-of-minute historical progression.
-
-No strategy-engine changes. No execution changes.
+No backend or strategy changes.
 
 Run:
   cd ~/RB-ITOS-AI
   source .venv/bin/activate
   export PYTHONPATH=backend
-  python scripts/apply_midpoint_m25a.py
-  python scripts/verify_midpoint_m25a.py
+  python scripts/apply_midpoint_m25_layout.py
+  python scripts/verify_midpoint_m25_layout.py
