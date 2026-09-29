@@ -99,6 +99,35 @@ def _display_owner(row: dict[str, Any]) -> str | None:
     return str(family) if family is not None else None
 
 
+def _with_nifty_points(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Presentation-only, close-based points for each event of an active B/E leg."""
+    active: dict[str, Any] | None = None
+    day: str | None = None
+    projected = []
+    for original in rows:
+        row = dict(original)
+        event_day = _row_day(row)
+        if event_day != day:
+            active = None
+            day = event_day
+        kind = row.get("event_type")
+        if kind in ("B_ENTRY", "E_ENTRY"):
+            entry_price = _num(row.get("underlying_price"))
+            active = {"entry": entry_price, "direction": row.get("direction"),
+                      "family": row.get("family")} if entry_price is not None else None
+        price = _num(row.get("underlying_price"))
+        move = None
+        if active and price is not None and row.get("direction") == active["direction"] and row.get("family") == active["family"]:
+            sign = 1 if active["direction"] == "BULLISH" else -1
+            move = round(sign * (price - active["entry"]), 4)
+        row["nifty_points_from_entry"] = move
+        row["nifty_entry_price"] = active["entry"] if move is not None else None
+        projected.append(row)
+        if kind in ("CAP20_RESCUE_TRIGGERED", "CAP20_SHADOW_EXIT", "STRUCTURAL_TERMINAL"):
+            active = None
+    return projected
+
+
 def _timeline_projection(rows):
     return [
         {
@@ -115,6 +144,8 @@ def _timeline_projection(rows):
             "reason": r.get("reason"),
             "underlying_price": r.get("underlying_price"),
             "directional_points": r.get("directional_points"),
+            "nifty_points_from_entry": r.get("nifty_points_from_entry"),
+            "nifty_entry_price": r.get("nifty_entry_price"),
             "reference_type": r.get("reference_type"),
         }
         for r in rows
@@ -122,6 +153,7 @@ def _timeline_projection(rows):
 
 
 def _status_payload(rows, mode, *, audit_path: Path | None = None):
+    rows = _with_nifty_points(rows)
     cfg = MidpointShadowConfig()
     cfg.assert_safe()
     resolved_path = AUDIT_PATH if audit_path is None else audit_path
@@ -652,6 +684,9 @@ def _presentation_for_replay(
                 ),
             }
 
+            item["nifty_points_from_entry"] = round(directional_move, 4) if directional_move is not None else None
+            item["nifty_entry_price"] = entry
+
         terminal = any(
             str(e.get("event_type") or "")
             in ("CAP20_RESCUE_TRIGGERED", "STRUCTURAL_TERMINAL")
@@ -687,13 +722,13 @@ def events(limit: Annotated[int, Query(ge=1, le=2000)] = 200, event_type: str | 
 
 @router.get("/timeline")
 def timeline(limit: Annotated[int, Query(ge=1, le=5000)] = 200):
-    rows = _rows()[-limit:]
+    rows = _with_nifty_points(_rows())[-limit:]
     return {"model": MODEL, "count": len(rows), "timeline": _timeline_projection(rows)}
 
 
 @router.get("/audit-detail")
 def audit_detail(event_id: str):
-    for row in _all_rows():
+    for row in _with_nifty_points(_all_rows()):
         if row.get("event_id") == event_id:
             enriched = dict(row)
             enriched["ui"] = _audit_ui_detail(row)
@@ -786,7 +821,7 @@ def historical_sessions():
 @router.get("/historical/session")
 def historical_session(session_date: str):
     audit_path = _historical_audit_path(session_date)
-    rows = _all_rows(audit_path)
+    rows = _with_nifty_points(_all_rows(audit_path))
     projected = _timeline_projection(rows)
     minutes_path = _historical_minutes_path(session_date)
     minutes = _load_jsonl(minutes_path)
@@ -805,7 +840,7 @@ def historical_session(session_date: str):
 
 @router.get("/historical/audit-detail")
 def historical_audit_detail(session_date: str, event_id: str):
-    for row in _all_rows(_historical_audit_path(session_date)):
+    for row in _with_nifty_points(_all_rows(_historical_audit_path(session_date))):
         if row.get("event_id") == event_id:
             return {
                 "model": MODEL,
