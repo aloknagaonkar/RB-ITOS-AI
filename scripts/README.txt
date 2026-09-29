@@ -1,28 +1,25 @@
-Midpoint M2.5 discovery bundle
-===============================
+Midpoint M2.5A — Forensics UX
+================================
 
-This is intentionally read-only.
+Adds the "better than Hilega" forensic layer that does not require exact option
+provider wiring yet:
 
-Why discovery first?
---------------------
-M2.5 needs exact CE/PE instrument keys, premiums, MFE and MAE. The repository
-already appears to contain Hilega option-observation logic, so we should reuse
-the canonical provider/data path instead of inventing a second selector.
+- latest details header at the top:
+  session/trading date, latest evidence time, latest audit time/type,
+  UI refresh time, source/mode, owner/direction, safety, stale-live warning
+- lifecycle checkpoint comparison
+- Explain this minute in historical replay
+- factual "what must happen next" based on frozen lifecycle semantics
 
-It also captures the new top-of-page requirement:
-- trading/session date
-- latest market-data timestamp
-- latest audit timestamp
-- last UI refresh timestamp
-- freshness/data age
-- source/mode
+M2.5B remains the exact five-contract option-observation adapter:
+ATM-2..ATM+2, correct CE/PE side, instrument, entry/latest/exit premium,
+current/realized points and %, MFE/MAE, and as-of-minute historical progression.
 
-Run from ~/RB-ITOS-AI:
+No strategy-engine changes. No execution changes.
+
+Run:
+  cd ~/RB-ITOS-AI
   source .venv/bin/activate
   export PYTHONPATH=backend
-  python scripts/discover_midpoint_m25.py
-
-It writes:
-  /tmp/midpoint-m25-discovery.txt
-
-No services are restarted and no repository files are modified.
+  python scripts/apply_midpoint_m25a.py
+  python scripts/verify_midpoint_m25a.py
