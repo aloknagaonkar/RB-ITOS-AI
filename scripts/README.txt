@@ -1,24 +1,28 @@
-Midpoint M2.4C — Live continuation projection
-==============================================
+Midpoint M2.5 discovery bundle
+===============================
 
-Requires M2.4A + M2.4B.
+This is intentionally read-only.
 
-Adds a LIVE ACTIVE continuation panel when the latest Midpoint entry has not
-yet reached a structural terminal. It uses the same displayed lifecycle
-semantics as historical replay: family, direction, BUY CE/PE intent,
-entry/current NIFTY, directional move, futures/VWAP/raw diff, +20 proof,
-classifier, and degraded state.
+Why discovery first?
+--------------------
+M2.5 needs exact CE/PE instrument keys, premiums, MFE and MAE. The repository
+already appears to contain Hilega option-observation logic, so we should reuse
+the canonical provider/data path instead of inventing a second selector.
 
-This is presentation-only and updates via the existing live polling.
-It does not write synthetic CONTINUE events into immutable audit evidence.
-
-Important: it does not fabricate a separate 1-minute live candle stream.
-Historical replay remains the exact full minute-by-minute evidence view.
-
-No strategy-engine or execution changes.
+It also captures the new top-of-page requirement:
+- trading/session date
+- latest market-data timestamp
+- latest audit timestamp
+- last UI refresh timestamp
+- freshness/data age
+- source/mode
 
 Run from ~/RB-ITOS-AI:
   source .venv/bin/activate
   export PYTHONPATH=backend
-  python scripts/apply_midpoint_m24c.py
-  python scripts/verify_midpoint_m24c.py
+  python scripts/discover_midpoint_m25.py
+
+It writes:
+  /tmp/midpoint-m25-discovery.txt
+
+No services are restarted and no repository files are modified.
