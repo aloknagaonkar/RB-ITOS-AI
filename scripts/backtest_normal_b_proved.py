@@ -142,10 +142,11 @@ def _prepare_input(
         raise ValueError("Duplicate candle timestamps are not allowed")
     if not output["Timestamp"].is_monotonic_increasing:
         raise ValueError("Candles must be sorted in ascending timestamp order")
-    if output["Timestamp"].iloc[0] != entry_at + pd.Timedelta(minutes=1):
+    one_minute = pd.Timedelta("1min")
+    if output["Timestamp"].iloc[0] != entry_at + one_minute:
         raise ValueError("First candle must be exactly entry_timestamp + 1 minute")
     differences = output["Timestamp"].diff().iloc[1:]
-    if not differences.eq(pd.Timedelta(minutes=1)).all():
+    if not differences.eq(one_minute).all():
         raise ValueError("Candles must be contiguous exact one-minute rows")
 
     numeric_columns = ["Open", "High", "Low", "Close", "Intrabar_MFE"]
@@ -320,10 +321,11 @@ def backtest_normal_b_proved(
 
         if exit_index is None and scheduled_time_exit is None:
             elapsed_without_peak = timestamp - last_mfe_at
-            if elapsed_without_peak >= pd.Timedelta(
-                minutes=policy.inactivity_minutes
-            ):
-                scheduled_time_exit = timestamp + pd.Timedelta(minutes=1)
+            inactivity_period = pd.Timedelta(
+                f"{policy.inactivity_minutes}min"
+            )
+            if elapsed_without_peak >= inactivity_period:
+                scheduled_time_exit = timestamp + pd.Timedelta("1min")
 
         states[index] = "CLOSED" if exit_index == index else state
         floors[index] = np.nan if floor is None else floor
