@@ -44,11 +44,11 @@ DEFAULT_OUTDIR = Path(
 )
 DEFAULT_FORWARD_ROOT = Path(
     "data/historical-evidence/hilega-pcr-oi-support-research-v1/"
-    "midpoint-forward-oos-2026-09-09-to-29-v2"
+    "midpoint-forward-oos-2026-09-09-to-29-v1"
 )
 DEFAULT_FORWARD_OUTDIR = Path(
     "data/historical-evidence/hilega-pcr-oi-support-research-v1/"
-    "midpoint-pm-be-backtest-480-plus-forward-corrected-v2"
+    "midpoint-pm-be-backtest-480-plus-forward-v1"
 )
 PM_ENTRY_TYPES = {"PM_B_ENTRY", "PM_E_ENTRY"}
 
