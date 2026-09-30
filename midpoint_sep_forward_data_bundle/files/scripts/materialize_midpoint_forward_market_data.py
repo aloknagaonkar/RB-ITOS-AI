@@ -21,11 +21,11 @@ from dotenv import load_dotenv
 
 from market_lab.domain import IST
 from market_lab.midpoint_v2_nifty_futures_vwap_v1 import (
-    FutureContract,
     _client,
     available_expiries,
     fetch_one_minute_candles,
     resolve_active_future,
+    resolve_expired_future,
 )
 from market_lab.upstox_live_shadow_sources_v1 import UpstoxLiveShadowSourcesV1
 
@@ -45,17 +45,8 @@ REPLAY_ROOT = Path(
 INDEX = "NSE_INDEX|Nifty 50"
 START = time(9, 15)
 END = time(15, 14)
-SEPTEMBER_FUTURE = FutureContract(
-    instrument_key="NSE_FO|68407",
-    expiry=date(2026, 9, 29),
-    trading_symbol="NIFTY SEP 2026 FUT",
-    instrument_type="FUT",
-    # On the first day after expiry Upstox can return HTTP 400 from the
-    # expired-instrument candle route even though the standard V3 historical
-    # route still serves the pinned instrument key. Keep the contract pinned;
-    # select only the working historical transport.
-    source="CURRENT_INSTRUMENT_SEARCH_API",
-)
+SEPTEMBER_EXPIRY = date(2026, 9, 29)
+SEPTEMBER_LIVE_INSTRUMENT_KEY = "NSE_FO|68407"
 
 
 def minute(value) -> datetime:
@@ -156,11 +147,11 @@ def load_replay(day: date) -> list[dict] | None:
         metadata = json.loads(metadata_path.read_text())
         observed_key = metadata.get("futures_instrument_key")
         observed_expiry = metadata.get("futures_expiry")
-        if observed_key not in (None, SEPTEMBER_FUTURE.instrument_key):
+        if observed_key not in (None, SEPTEMBER_LIVE_INSTRUMENT_KEY):
             raise ValueError(
                 f"REPLAY_FRONT_FUTURE_KEY_MISMATCH_{day}_{observed_key}"
             )
-        if observed_expiry not in (None, SEPTEMBER_FUTURE.expiry.isoformat()):
+        if observed_expiry not in (None, SEPTEMBER_EXPIRY.isoformat()):
             raise ValueError(
                 f"REPLAY_FRONT_FUTURE_EXPIRY_MISMATCH_{day}_{observed_expiry}"
             )
@@ -232,8 +223,8 @@ def main() -> int:
             else:
                 staged.append((day, rows, {
                     "source": "EXISTING_EXACT_UI_REPLAY",
-                    "futures_instrument_key": SEPTEMBER_FUTURE.instrument_key,
-                    "futures_expiry": SEPTEMBER_FUTURE.expiry.isoformat(),
+                    "futures_instrument_key": SEPTEMBER_LIVE_INSTRUMENT_KEY,
+                    "futures_expiry": SEPTEMBER_EXPIRY.isoformat(),
                 }))
                 print("VALIDATED REPLAY", day, "minutes", len(rows))
     else:
@@ -248,16 +239,37 @@ def main() -> int:
         try:
             with _client() as client:
                 expiries = available_expiries(client)
+                september_expired = resolve_expired_future(
+                    client,
+                    min(missing),
+                    [SEPTEMBER_EXPIRY],
+                )
+                if september_expired is None:
+                    raise RuntimeError(
+                        "SEPTEMBER_29_EXPIRED_FUTURE_NOT_AVAILABLE_FROM_UPSTOX. "
+                        "The provider has not published the expired contract yet; "
+                        "no forward evidence was written."
+                    )
+                if september_expired.expiry != SEPTEMBER_EXPIRY:
+                    raise AssertionError(
+                        f"SEPTEMBER_EXPIRY_MISMATCH_{september_expired}"
+                    )
+                print(
+                    "RESOLVED SEPTEMBER EXPIRED FUTURE",
+                    september_expired.instrument_key,
+                    "expiry", september_expired.expiry,
+                    "live_key", SEPTEMBER_LIVE_INSTRUMENT_KEY,
+                )
                 for day in missing:
                     index_rows = sources.historical_candles(INDEX, day)
                     contract = (
-                        SEPTEMBER_FUTURE
+                        september_expired
                         if date(2026, 9, 9) <= day <= date(2026, 9, 29)
                         else resolve_active_future(client, day, expiries)
                     )
                     if day <= date(2026, 9, 29) and (
-                        contract.instrument_key != SEPTEMBER_FUTURE.instrument_key
-                        or contract.expiry != SEPTEMBER_FUTURE.expiry
+                        contract.expiry != SEPTEMBER_EXPIRY
+                        or contract.source != "EXPIRED_FUTURE_API"
                     ):
                         raise AssertionError(
                             f"FRONT_FUTURE_CONTRACT_MISMATCH_{day}_{contract}"
@@ -316,8 +328,9 @@ def main() -> int:
         "frozen_480_modified": False,
         "contract_guard": {
             "2026-09-09_to_2026-09-29": {
-                "instrument_key": SEPTEMBER_FUTURE.instrument_key,
-                "expiry": SEPTEMBER_FUTURE.expiry.isoformat(),
+                "live_instrument_key": SEPTEMBER_LIVE_INSTRUMENT_KEY,
+                "expiry": SEPTEMBER_EXPIRY.isoformat(),
+                "historical_key_policy": "RESOLVE_DIRECTLY_FROM_EXPIRED_CONTRACT_API",
             }
         },
         "observation_only": True,

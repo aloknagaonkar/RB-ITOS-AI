@@ -33,5 +33,6 @@ changed or restarted.
 Important: the earlier v1 forward block that selected the October future for
 September 28-29 is provisional and must not be used. This v2 bundle pins the
 September 29 future (NSE_FO|68407) for the complete September 9-29 block.
-The pinned key is read through Upstox's V3 historical-candle transport because
-the expired-instrument transport may return HTTP 400 immediately after expiry.
+For missing dates, the materializer resolves the September 29 contract directly
+through Upstox's expired-future contract endpoint. The returned historical key
+may differ from the live key NSE_FO|68407; expiry and FUT type are authoritative.
