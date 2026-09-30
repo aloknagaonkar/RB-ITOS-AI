@@ -50,7 +50,11 @@ SEPTEMBER_FUTURE = FutureContract(
     expiry=date(2026, 9, 29),
     trading_symbol="NIFTY SEP 2026 FUT",
     instrument_type="FUT",
-    source="EXPIRED_FUTURE_API",
+    # On the first day after expiry Upstox can return HTTP 400 from the
+    # expired-instrument candle route even though the standard V3 historical
+    # route still serves the pinned instrument key. Keep the contract pinned;
+    # select only the working historical transport.
+    source="CURRENT_INSTRUMENT_SEARCH_API",
 )
 
 
