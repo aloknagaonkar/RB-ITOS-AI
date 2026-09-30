@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +26,10 @@ DEFAULT_REPLAY_ROOT = Path(
     "midpoint-ui-replay-v1"
 )
 ENTRY_TYPES = {"B_ENTRY", "E_ENTRY"}
+LIVE_AUDIT = Path("data/live-observation/midpoint-strategy-v1/audit.jsonl")
+INDEX_INSTRUMENT = "NSE_INDEX|Nifty 50"
+MARKET_START = time(9, 15)
+MARKET_MINUTES = 360
 
 
 def _load_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -34,6 +40,83 @@ def _load_jsonl(path: Path) -> list[dict[str, Any]]:
         for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
+
+
+def _load_session_sources(
+    session_date: str, replay_root: Path
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str]:
+    """Use replay when present; otherwise fetch index minutes read-only."""
+
+    session_root = replay_root / session_date
+    replay_audit = session_root / "audit.jsonl"
+    replay_minutes = session_root / "minutes.jsonl"
+    if replay_audit.is_file() and replay_minutes.is_file():
+        return (
+            _load_jsonl(replay_audit),
+            _load_jsonl(replay_minutes),
+            "HISTORICAL_REPLAY",
+        )
+
+    if not LIVE_AUDIT.is_file():
+        raise FileNotFoundError(
+            f"Neither replay audit nor live audit is available for {session_date}"
+        )
+    audit = [
+        row
+        for row in _load_jsonl(LIVE_AUDIT)
+        if row.get("session_date") == session_date
+    ]
+    if not audit:
+        raise ValueError(f"Live audit has no events for {session_date}")
+
+    # Lazy imports keep ordinary replay research independent of broker modules.
+    from dotenv import load_dotenv
+
+    from market_lab.domain import IST
+    from market_lab.upstox_live_shadow_sources_v1 import (
+        UpstoxLiveShadowSourcesV1,
+    )
+
+    load_dotenv(".env")
+    token = os.getenv("UPSTOX_ACCESS_TOKEN")
+    if not token:
+        raise ValueError("UPSTOX_ACCESS_TOKEN is required for live-audit fallback")
+    day = date.fromisoformat(session_date)
+    expected = [
+        datetime.combine(day, MARKET_START, IST) + timedelta(minutes=index)
+        for index in range(MARKET_MINUTES)
+    ]
+    source = UpstoxLiveShadowSourcesV1(token)
+    try:
+        candles = source.historical_candles(INDEX_INSTRUMENT, day)
+    finally:
+        source.close()
+    indexed = {}
+    for candle in candles:
+        timestamp = candle.timestamp.astimezone(IST)
+        if timestamp in expected:
+            if timestamp in indexed:
+                raise ValueError(f"Duplicate historical index minute: {timestamp}")
+            indexed[timestamp] = candle
+    missing = [timestamp for timestamp in expected if timestamp not in indexed]
+    if missing:
+        sample = [timestamp.strftime("%H:%M") for timestamp in missing[:10]]
+        raise ValueError(
+            f"Exact 360 historical index minutes required; missing={sample}"
+        )
+    minutes = [
+        {
+            "session_date": session_date,
+            "timestamp": timestamp.isoformat(),
+            "underlying_open": float(indexed[timestamp].open),
+            "underlying_high": float(indexed[timestamp].high),
+            "underlying_low": float(indexed[timestamp].low),
+            "underlying_close": float(indexed[timestamp].close),
+            "data_status": "UNDERLYING_ONLY",
+        }
+        for timestamp in expected
+    ]
+    return audit, minutes, "LIVE_AUDIT_PLUS_UPSTOX_HISTORICAL_INDEX_1M"
 
 
 def _directional_points(direction: str, entry: float, price: float) -> float:
@@ -125,9 +208,9 @@ def compare_session_trade(
     *, session_date: str, entry_timestamp: str,
     replay_root: Path = DEFAULT_REPLAY_ROOT
 ) -> dict[str, Any]:
-    session_root = replay_root / session_date
-    audit = _load_jsonl(session_root / "audit.jsonl")
-    minute_rows = _load_jsonl(session_root / "minutes.jsonl")
+    audit, minute_rows, data_source = _load_session_sources(
+        session_date, replay_root
+    )
     entry, events = _find_trade_events(audit, entry_timestamp)
     direction = str(entry["direction"])
     entry_price = float(entry["underlying_price"])
@@ -208,6 +291,7 @@ def compare_session_trade(
         "midpoint": midpoint,
         "classifier_timestamp": classifier["event_timestamp"],
         "classifier_result": classifier_result,
+        "data_source": data_source,
         "three_tier_policy_status": (
             "CANONICAL_NORMAL_B_PROVED"
             if classifier_result == "NORMAL_B"
