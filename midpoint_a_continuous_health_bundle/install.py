@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -48,9 +49,12 @@ FLAGS = {
 }
 
 
-def run(command: list[str], *, cwd: Path = ROOT) -> None:
+def run(
+    command: list[str], *, cwd: Path = ROOT,
+    env: dict[str, str] | None = None,
+) -> None:
     print("Running:", " ".join(command), flush=True)
-    subprocess.run(command, cwd=cwd, check=True)
+    subprocess.run(command, cwd=cwd, check=True, env=env)
 
 
 def restore(backup: Path, existed: dict[str, bool]) -> None:
@@ -122,7 +126,14 @@ def main() -> int:
             target = ROOT / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(PAYLOAD / relative, target)
-        run([str(python), "-m", "pytest", "-q", *TESTS])
+        # Tests must not inherit a live family combination from the operator's
+        # shell.  One legacy test temporarily enables C; an inherited BE_REARM
+        # value would correctly violate the C/BE_REARM mutual-exclusion guard
+        # before that test can inspect the requested gates.  This environment
+        # applies only to pytest and never edits the real .env.
+        test_env = os.environ.copy()
+        test_env["MIDPOINT_BE_REARM_SHADOW_ENABLED"] = "false"
+        run([str(python), "-m", "pytest", "-q", *TESTS], env=test_env)
         run([str(python), "-m", "py_compile",
              "scripts/backtest_midpoint_a_continuous_health.py"])
         run(["npm", "run", "build"], cwd=ROOT / "frontend")
