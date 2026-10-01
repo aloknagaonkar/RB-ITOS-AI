@@ -36,7 +36,13 @@ def main() -> None:
     if not token:
         raise SystemExit("UPSTOX_ACCESS_TOKEN is required")
     rows = [r for r in load_audit_jsonl(AUDIT) if r.get("session_date") == args.session_date.isoformat()]
-    entries = [r for r in rows if r.get("event_type") in {"B_ENTRY", "E_ENTRY"}]
+    entries = [
+        r for r in rows
+        if r.get("event_type") in {
+            "B_ENTRY", "E_ENTRY", "B_REARM_ENTRY", "E_REARM_ENTRY",
+            "PM_B_ENTRY", "PM_E_ENTRY",
+        }
+    ]
     if not entries:
         raise SystemExit("No Midpoint B/E entry audit for this date")
     sources = UpstoxLiveShadowSourcesV1(token)

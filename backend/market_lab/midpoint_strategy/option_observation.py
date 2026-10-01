@@ -30,7 +30,10 @@ def create_tape(entry: dict[str, Any], terminal: dict[str, Any] | None, *,
     Failed acquisition is recorded as unavailable, never filled or interpolated.
     """
     direction = entry.get("direction")
-    if entry.get("event_type") not in {"B_ENTRY", "E_ENTRY"} or direction not in {"BULLISH", "BEARISH"}:
+    if entry.get("event_type") not in {
+        "B_ENTRY", "E_ENTRY", "B_REARM_ENTRY", "E_REARM_ENTRY",
+        "PM_B_ENTRY", "PM_E_ENTRY",
+    } or direction not in {"BULLISH", "BEARISH"}:
         raise ValueError("ENTRY_EVENT_REQUIRED")
     if entry.get("underlying_price") is None:
         raise ValueError("ENTRY_SPOT_REQUIRED")

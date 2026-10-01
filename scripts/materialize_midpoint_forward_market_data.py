@@ -25,6 +25,7 @@ from market_lab.midpoint_v2_nifty_futures_vwap_v1 import (
     available_expiries,
     fetch_one_minute_candles,
     resolve_active_future,
+    resolve_expired_future,
 )
 from market_lab.upstox_live_shadow_sources_v1 import UpstoxLiveShadowSourcesV1
 
@@ -35,7 +36,7 @@ DEFAULT_DATES = tuple(
 )
 ROOT = Path(
     "data/historical-evidence/hilega-pcr-oi-support-research-v1/"
-    "midpoint-forward-oos-2026-09-09-to-29-v1"
+    "midpoint-forward-oos-2026-09-09-to-29-v2"
 )
 REPLAY_ROOT = Path(
     "data/historical-evidence/hilega-pcr-oi-support-research-v1/"
@@ -44,6 +45,8 @@ REPLAY_ROOT = Path(
 INDEX = "NSE_INDEX|Nifty 50"
 START = time(9, 15)
 END = time(15, 14)
+SEPTEMBER_EXPIRY = date(2026, 9, 29)
+SEPTEMBER_LIVE_INSTRUMENT_KEY = "NSE_FO|68407"
 
 
 def minute(value) -> datetime:
@@ -139,6 +142,19 @@ def load_replay(day: date) -> list[dict] | None:
     path = REPLAY_ROOT / day.isoformat() / "minutes.jsonl"
     if not path.exists():
         return None
+    metadata_path = path.parent / "metadata.json"
+    if metadata_path.exists():
+        metadata = json.loads(metadata_path.read_text())
+        observed_key = metadata.get("futures_instrument_key")
+        observed_expiry = metadata.get("futures_expiry")
+        if observed_key not in (None, SEPTEMBER_LIVE_INSTRUMENT_KEY):
+            raise ValueError(
+                f"REPLAY_FRONT_FUTURE_KEY_MISMATCH_{day}_{observed_key}"
+            )
+        if observed_expiry not in (None, SEPTEMBER_EXPIRY.isoformat()):
+            raise ValueError(
+                f"REPLAY_FRONT_FUTURE_EXPIRY_MISMATCH_{day}_{observed_expiry}"
+            )
     source = [json.loads(line) for line in path.read_text().splitlines() if line]
     if len(source) != 360:
         raise ValueError(f"REPLAY_NOT_EXACT_360_{day}_{len(source)}")
@@ -205,7 +221,11 @@ def main() -> int:
             if rows is None:
                 missing.append(day)
             else:
-                staged.append((day, rows, {"source": "EXISTING_EXACT_UI_REPLAY"}))
+                staged.append((day, rows, {
+                    "source": "EXISTING_EXACT_UI_REPLAY",
+                    "futures_instrument_key": SEPTEMBER_LIVE_INSTRUMENT_KEY,
+                    "futures_expiry": SEPTEMBER_EXPIRY.isoformat(),
+                }))
                 print("VALIDATED REPLAY", day, "minutes", len(rows))
     else:
         missing = list(days)
@@ -219,9 +239,41 @@ def main() -> int:
         try:
             with _client() as client:
                 expiries = available_expiries(client)
+                september_expired = resolve_expired_future(
+                    client,
+                    min(missing),
+                    [SEPTEMBER_EXPIRY],
+                )
+                if september_expired is None:
+                    raise RuntimeError(
+                        "SEPTEMBER_29_EXPIRED_FUTURE_NOT_AVAILABLE_FROM_UPSTOX. "
+                        "The provider has not published the expired contract yet; "
+                        "no forward evidence was written."
+                    )
+                if september_expired.expiry != SEPTEMBER_EXPIRY:
+                    raise AssertionError(
+                        f"SEPTEMBER_EXPIRY_MISMATCH_{september_expired}"
+                    )
+                print(
+                    "RESOLVED SEPTEMBER EXPIRED FUTURE",
+                    september_expired.instrument_key,
+                    "expiry", september_expired.expiry,
+                    "live_key", SEPTEMBER_LIVE_INSTRUMENT_KEY,
+                )
                 for day in missing:
                     index_rows = sources.historical_candles(INDEX, day)
-                    contract = resolve_active_future(client, day, expiries)
+                    contract = (
+                        september_expired
+                        if date(2026, 9, 9) <= day <= date(2026, 9, 29)
+                        else resolve_active_future(client, day, expiries)
+                    )
+                    if day <= date(2026, 9, 29) and (
+                        contract.expiry != SEPTEMBER_EXPIRY
+                        or contract.source != "EXPIRED_FUTURE_API"
+                    ):
+                        raise AssertionError(
+                            f"FRONT_FUTURE_CONTRACT_MISMATCH_{day}_{contract}"
+                        )
                     futures_rows = fetch_one_minute_candles(client, contract, day)
                     rows = validate_and_join(
                         day,
@@ -270,10 +322,17 @@ def main() -> int:
         )
         manifest_rows.append(session_metadata)
     manifest = {
-        "model": "MIDPOINT_FORWARD_OOS_MARKET_DATA_V1",
+        "model": "MIDPOINT_FORWARD_OOS_MARKET_DATA_V2",
         "session_count": len(manifest_rows),
         "sessions": manifest_rows,
         "frozen_480_modified": False,
+        "contract_guard": {
+            "2026-09-09_to_2026-09-29": {
+                "live_instrument_key": SEPTEMBER_LIVE_INSTRUMENT_KEY,
+                "expiry": SEPTEMBER_EXPIRY.isoformat(),
+                "historical_key_policy": "RESOLVE_DIRECTLY_FROM_EXPIRED_CONTRACT_API",
+            }
+        },
         "observation_only": True,
     }
     with tempfile.NamedTemporaryFile(

@@ -15,6 +15,7 @@ def midpoint_workspace_status(config: MidpointShadowConfig | None = None) -> dic
             "B": {"enabled": cfg.family_b_enabled},
             "E": {"enabled": cfg.family_e_enabled},
             "C": {"enabled": cfg.family_c_enabled},
+            "BE_REARM": {"enabled": cfg.be_rearm_enabled},
             "D": {"enabled": cfg.family_d_enabled},
             "PM_E": {"enabled": cfg.pm_e_enabled},
         },
@@ -27,6 +28,10 @@ def midpoint_workspace_status(config: MidpointShadowConfig | None = None) -> dic
             "max_post_rescue_reentries": cfg.max_post_rescue_reentries,
             "second_rescue_after_reentry_enabled":
                 cfg.second_rescue_after_reentry_enabled,
+            "normal_b_proved_candidate_enabled":
+                cfg.normal_b_proved_candidate_enabled,
+            "degraded_exit_candidate_enabled":
+                cfg.degraded_exit_candidate_enabled,
         },
         "safety": {
             "observation_only": cfg.observation_only,

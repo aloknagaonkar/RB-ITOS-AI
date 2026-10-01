@@ -68,9 +68,12 @@ def project(audit_events, tape: dict, *, quotes=None,
         raise ValueError('NONNEGATIVE_FINITE_COSTS_REQUIRED')
     rows = sorted(_rows(audit_events), key=lambda r: _time(r['event_timestamp']))
     entry = next((r for r in rows if r.get('event_id') == tape.get('entry_event_id')
-                  and r.get('event_type') in ('B_ENTRY', 'E_ENTRY')), None)
-    if entry is None or entry.get('family') not in ('B', 'E'):
-        raise ValueError('MATCHED_B_E_ENTRY_REQUIRED')
+                  and r.get('event_type') in (
+                      'B_ENTRY', 'E_ENTRY', 'B_REARM_ENTRY', 'E_REARM_ENTRY',
+                      'PM_B_ENTRY', 'PM_E_ENTRY'
+                  )), None)
+    if entry is None or entry.get('family') not in ('B', 'E', 'PM_B', 'PM_E'):
+        raise ValueError('MATCHED_MIDPOINT_ENTRY_REQUIRED')
     if tape.get('session_date') != entry.get('session_date'):
         raise ValueError('SESSION_MISMATCH')
     if tape.get('direction') != entry.get('direction'):
@@ -78,7 +81,11 @@ def project(audit_events, tape: dict, *, quotes=None,
     entry_ts = _time(entry['event_timestamp'])
     following_entry = next((_time(r['event_timestamp']) for r in rows
                             if _time(r['event_timestamp']) > entry_ts
-                            and r.get('event_type') in ('B_ENTRY', 'E_ENTRY')), None)
+                            and r.get('event_type') in (
+                                'B_ENTRY', 'E_ENTRY',
+                                'B_REARM_ENTRY', 'E_REARM_ENTRY',
+                                'PM_B_ENTRY', 'PM_E_ENTRY'
+                            )), None)
     later = [r for r in rows if _time(r['event_timestamp']) >= entry_ts
              and (following_entry is None or _time(r['event_timestamp']) < following_entry)
              and r.get('family') == entry['family'] and r.get('direction') == entry['direction']]

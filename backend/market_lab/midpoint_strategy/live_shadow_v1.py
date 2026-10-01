@@ -13,7 +13,13 @@ from market_lab.domain import IST
 from .boundary_classifier import MidpointBoundaryClassifierV55, OTHER_FRESH_A
 from .config import MidpointShadowConfig
 from .family_b_detector import FamilyBObservation
+from .extended_entry_candidates import CRearmCandidate, PMMidpointBECandidate
 from .models import MidpointFamily, MidpointShadowState
+from .family_b_shadow import FamilyBShadowRuntime
+from .normal_b_proved_candidate import (
+    Bar as NormalBProvedBar,
+    NormalBProvedCandidate,
+)
 from .runtime import AuditableFamilyBEngine, MidpointFamilyBRuntime
 from .structure import ReferenceStructure, boundary_broken, midpoint_broken
 
@@ -31,6 +37,12 @@ class _ReferenceRuntime:
     plus20_directional_vwap: Optional[float] = None
     running_close_mfe: float = 0.0
     closed: bool = False
+    normal_b_proved: NormalBProvedCandidate | None = None
+    normal_b_proved_last_state: str | None = None
+    normal_b_proved_unavailable: bool = False
+    management_route: str = "STRUCTURAL_BASELINE"
+    degraded_exit_candidate_timestamp: datetime | None = None
+    generation: int = 0
 
 
 @dataclass
@@ -48,6 +60,13 @@ class _SessionState:
     futures_volume: float = 0.0
     latest_futures_minute: datetime | None = None
     active_reference_type: Optional[str] = None
+    c_rearms: dict[str, CRearmCandidate] = field(default_factory=dict)
+    c_runtimes: dict[str, MidpointFamilyBRuntime] = field(default_factory=dict)
+    be_rearms: dict[str, CRearmCandidate] = field(default_factory=dict)
+    be_rearm_runtimes: dict[str, MidpointFamilyBRuntime] = field(default_factory=dict)
+    be_rearm_meta: dict[str, dict[str, Any]] = field(default_factory=dict)
+    pm_e_candidate: PMMidpointBECandidate | None = None
+    pm_e_runtime: MidpointFamilyBRuntime | None = None
 
 
 from .forward_oos_v62_1 import MidpointV621ForwardOOSCollector
@@ -60,9 +79,10 @@ class MidpointLiveShadowCoordinatorV1:
         *,
         market_sources,
         audit_path: str | Path = "data/live-observation/midpoint-strategy-v1/audit.jsonl",
+        config: MidpointShadowConfig | None = None,
     ) -> None:
         self.market_sources = market_sources
-        self.config = MidpointShadowConfig()
+        self.config = config or MidpointShadowConfig()
         self.config.assert_safe()
         self.engine = AuditableFamilyBEngine(
             journal_path=audit_path,
@@ -295,6 +315,25 @@ class MidpointLiveShadowCoordinatorV1:
         before = lifecycle.state.value
         lifecycle.state = MidpointShadowState.CLOSED
         rr.closed = True
+        if self.state is not None:
+            for key, candidate in self.state.c_rearms.items():
+                if (
+                    candidate.reference == rr.reference
+                    and candidate.origin_entry_timestamp
+                    == lifecycle.entry_timestamp
+                ):
+                    candidate.mark_origin_closed(
+                        datetime.fromisoformat(obs.timestamp)
+                    )
+            for candidate in self.state.be_rearms.values():
+                if (
+                    candidate.reference == rr.reference
+                    and candidate.origin_entry_timestamp
+                    == lifecycle.entry_timestamp
+                ):
+                    candidate.mark_origin_closed(
+                        datetime.fromisoformat(obs.timestamp)
+                    )
 
         self.engine._audit(
             runtime=rr.runtime,
@@ -313,6 +352,235 @@ class MidpointLiveShadowCoordinatorV1:
             },
         )
 
+    def _ensure_c_rearm(self, rr: _ReferenceRuntime) -> CRearmCandidate | None:
+        if not self.config.family_c_enabled or self.state is None:
+            return None
+        lifecycle = rr.runtime.lifecycle
+        if lifecycle is None or rr.runtime.family not in {
+            MidpointFamily.B, MidpointFamily.E
+        }:
+            return None
+        key = rr.reference.reference_type
+        candidate = self.state.c_rearms.get(key)
+        if candidate is None:
+            candidate = CRearmCandidate(
+                reference=rr.reference,
+                origin_family=rr.runtime.family.value,
+                origin_entry_timestamp=lifecycle.entry_timestamp,
+            )
+            self.state.c_rearms[key] = candidate
+            self.state.c_runtimes[key] = MidpointFamilyBRuntime(
+                reference=rr.reference,
+                family=MidpointFamily.C,
+            )
+        return candidate
+
+    def _ensure_be_rearm(
+        self, rr: _ReferenceRuntime
+    ) -> tuple[str, CRearmCandidate] | None:
+        if not self.config.be_rearm_enabled or self.state is None:
+            return None
+        lifecycle = rr.runtime.lifecycle
+        if lifecycle is None or rr.runtime.family not in {
+            MidpointFamily.B,
+            MidpointFamily.E,
+            MidpointFamily.PM_B,
+            MidpointFamily.PM_E,
+        }:
+            return None
+        key = (
+            f"{rr.reference.reference_type}:"
+            f"{lifecycle.entry_timestamp.isoformat()}"
+        )
+        candidate = self.state.be_rearms.get(key)
+        if candidate is None:
+            candidate = CRearmCandidate(
+                reference=rr.reference,
+                origin_family=rr.runtime.family.value,
+                origin_entry_timestamp=lifecycle.entry_timestamp,
+            )
+            self.state.be_rearms[key] = candidate
+            self.state.be_rearm_runtimes[key] = MidpointFamilyBRuntime(
+                reference=rr.reference,
+                family=rr.runtime.family,
+            )
+            self.state.be_rearm_meta[key] = {
+                "generation": rr.generation + 1,
+                "origin_generation": rr.generation,
+                "origin_family": rr.runtime.family.value,
+                "origin_entry_timestamp": lifecycle.entry_timestamp.isoformat(),
+            }
+        return key, candidate
+
+    def _observe_be_rearm_touch(
+        self, rr: _ReferenceRuntime, obs: FamilyBObservation, underlying
+    ) -> None:
+        ensured = self._ensure_be_rearm(rr)
+        if ensured is None or self.state is None:
+            return
+        key, candidate = ensured
+        action = candidate.observe_active_bar(
+            timestamp=datetime.fromisoformat(obs.timestamp),
+            high=self._float(underlying, "high"),
+            low=self._float(underlying, "low"),
+        )
+        if action is None:
+            return
+        runtime = self.state.be_rearm_runtimes[key]
+        self.engine._audit(
+            runtime=runtime,
+            timestamp=obs.timestamp,
+            event_type="BE_REARM_MIDPOINT_TOUCH_ARMED",
+            direction=action.direction,
+            result="ARMED",
+            reason="INTRABAR_TOUCH_OF_ORIGINAL_MIDPOINT",
+            observation=obs,
+            evidence={
+                **self.state.be_rearm_meta[key],
+                "candidate_only": True,
+                "order_sent": False,
+            },
+        )
+
+    def _observe_c_touch(
+        self, rr: _ReferenceRuntime, obs: FamilyBObservation, underlying
+    ) -> None:
+        candidate = self._ensure_c_rearm(rr)
+        if candidate is None or self.state is None:
+            return
+        action = candidate.observe_active_bar(
+            timestamp=datetime.fromisoformat(obs.timestamp),
+            high=self._float(underlying, "high"),
+            low=self._float(underlying, "low"),
+        )
+        if action is None:
+            return
+        runtime = self.state.c_runtimes[rr.reference.reference_type]
+        self.engine._audit(
+            runtime=runtime,
+            timestamp=obs.timestamp,
+            event_type=action.event_type,
+            direction=action.direction,
+            result="ARMED",
+            reason=action.reason,
+            observation=obs,
+            evidence={
+                "origin_family": candidate.origin_family,
+                "origin_entry_timestamp":
+                    candidate.origin_entry_timestamp.isoformat(),
+                "candidate_only": True,
+                "order_sent": False,
+            },
+        )
+
+    def _ensure_normal_b_proved_candidate(
+        self,
+        rr: _ReferenceRuntime,
+    ) -> NormalBProvedCandidate:
+        lifecycle = rr.runtime.lifecycle
+        if lifecycle is None:
+            raise ValueError("candidate requires active lifecycle")
+        if rr.normal_b_proved is None:
+            rr.normal_b_proved = NormalBProvedCandidate(
+                entry_timestamp=lifecycle.entry_timestamp,
+                entry_price=lifecycle.entry_underlying_close,
+                direction=lifecycle.direction,
+                midpoint=rr.reference.midpoint,
+            )
+            rr.normal_b_proved_last_state = rr.normal_b_proved.state
+        return rr.normal_b_proved
+
+    def _observe_normal_b_proved(
+        self,
+        rr: _ReferenceRuntime,
+        obs: FamilyBObservation,
+        underlying,
+        *,
+        classifier_result: str | None = None,
+    ) -> None:
+        """Advance the parallel candidate without changing baseline lifecycle."""
+        if rr.normal_b_proved_unavailable:
+            return
+        candidate = self._ensure_normal_b_proved_candidate(rr)
+        if candidate.state == "RUNNER_BASELINE" or candidate.exit is not None:
+            return
+        before = candidate.state
+        try:
+            result = candidate.on_bar(
+                NormalBProvedBar(
+                    timestamp=datetime.fromisoformat(obs.timestamp),
+                    high=self._float(underlying, "high"),
+                    low=self._float(underlying, "low"),
+                    close=obs.close,
+                ),
+                classifier_result=classifier_result,
+            )
+        except ValueError as exc:
+            rr.normal_b_proved_unavailable = True
+            self.engine._audit(
+                runtime=rr.runtime,
+                timestamp=obs.timestamp,
+                event_type="NORMAL_B_PROVED_UNAVAILABLE",
+                direction=rr.runtime.lifecycle.direction,
+                result="UNAVAILABLE",
+                reason=type(exc).__name__,
+                state_before=before,
+                state_after="UNAVAILABLE",
+                observation=obs,
+                directional_points=self._directional_points(rr, obs.close),
+                evidence={"candidate_error": str(exc), "order_sent": False},
+            )
+            return
+
+        after = str(result["state"])
+        rr.normal_b_proved_last_state = after
+        event_type = None
+        event_result = None
+        reason = None
+        if result.get("reason"):
+            event_type = "NORMAL_B_PROVED_EXIT_CANDIDATE"
+            event_result = "SHADOW_EXIT_CANDIDATE"
+            reason = str(result["reason"])
+        elif after != before and after == "NORMAL_B_PROVED":
+            event_type = "NORMAL_B_PROVED_STARTED"
+            event_result = "OBSERVING"
+            reason = "PLUS20_PROVED_RUNNER_CLASSIFIED_NORMAL_B"
+        elif after != before and after == "NORMAL_B_PROVED_TIER2":
+            event_type = "NORMAL_B_PROVED_TIER2"
+            event_result = "FLOOR_ACTIVE"
+            reason = "MFE_CROSSED_ABOVE_30"
+        elif after != before and after == "NORMAL_B_PROVED_TIER3":
+            event_type = "NORMAL_B_PROVED_TIER3"
+            event_result = "RATCHET_ACTIVE"
+            reason = "MFE_CROSSED_ABOVE_45"
+        if event_type is None:
+            return
+
+        candidate_points = result.get("pnl_points", result.get("close_points"))
+        evidence = {
+            key: value for key, value in result.items()
+            if key not in {"timestamp", "state"}
+        }
+        evidence.update({
+            "candidate_only": True,
+            "baseline_lifecycle_unchanged": True,
+            "action_intent": "SHADOW_VALUATION_ONLY",
+            "order_sent": False,
+        })
+        self.engine._audit(
+            runtime=rr.runtime,
+            timestamp=obs.timestamp,
+            event_type=event_type,
+            direction=rr.runtime.lifecycle.direction,
+            result=event_result,
+            reason=reason,
+            state_before=before,
+            state_after=after,
+            observation=obs,
+            directional_points=candidate_points,
+            evidence=evidence,
+        )
+
     def _process_management(
         self,
         rr: _ReferenceRuntime,
@@ -323,6 +591,47 @@ class MidpointLiveShadowCoordinatorV1:
         lifecycle = rr.runtime.lifecycle
         if lifecycle is None or rr.closed:
             return False
+
+        if self.config.be_rearm_enabled:
+            self._observe_be_rearm_touch(rr, obs, underlying)
+        else:
+            self._observe_c_touch(rr, obs, underlying)
+
+        candidate = (
+            self._ensure_normal_b_proved_candidate(rr)
+            if self.config.normal_b_proved_candidate_enabled else None
+        )
+        current_ts = datetime.fromisoformat(obs.timestamp)
+        candidate_target = (
+            candidate.proof_timestamp + timedelta(minutes=10)
+            if candidate is not None
+            and candidate.proof_timestamp is not None
+            and candidate.classified_at is None
+            else None
+        )
+        candidate_waits_for_classifier = candidate_target == current_ts
+        if candidate is not None and (
+            candidate_target is not None
+            and current_ts > candidate_target
+            and candidate.classified_at is None
+        ):
+            rr.normal_b_proved_unavailable = True
+            self.engine._audit(
+                runtime=rr.runtime,
+                timestamp=obs.timestamp,
+                event_type="NORMAL_B_PROVED_UNAVAILABLE",
+                direction=lifecycle.direction,
+                result="UNAVAILABLE",
+                reason="EXACT_PLUS20_PLUS10_MINUTE_MISSING",
+                state_before=candidate.state,
+                state_after="UNAVAILABLE",
+                observation=obs,
+                directional_points=self._directional_points(rr, obs.close),
+                evidence={"required_timestamp": candidate_target.isoformat(),
+                          "candidate_only": True, "order_sent": False},
+            )
+        elif candidate is not None and not candidate_waits_for_classifier:
+            self._observe_normal_b_proved(rr, obs, underlying)
 
         if self._terminal_invalidated(rr, obs.close):
             self._close_terminal(rr, obs, "MIDPOINT_INVALIDATION")
@@ -359,6 +668,43 @@ class MidpointLiveShadowCoordinatorV1:
                     net_directional_progress_from_plus20=points - rr.plus20_points,
                     directional_futures_vwap_change=current_dv - rr.plus20_directional_vwap,
                 )
+                rr.management_route = (
+                    "RUNNER_DEGRADED_EXIT"
+                    if lifecycle.runner_strengthening
+                    else "NORMAL_B_PROVED_THREE_TIER"
+                )
+                self.engine._audit(
+                    runtime=rr.runtime,
+                    timestamp=obs.timestamp,
+                    event_type="MANAGEMENT_ROUTE_SELECTED",
+                    direction=lifecycle.direction,
+                    result=rr.management_route,
+                    reason=(
+                        "EXACT_PLUS20_PLUS10_RUNNER_STRENGTHENING"
+                        if lifecycle.runner_strengthening
+                        else "EXACT_PLUS20_PLUS10_NORMAL_B"
+                    ),
+                    state_before=lifecycle.state.value,
+                    state_after=lifecycle.state.value,
+                    observation=obs,
+                    directional_points=points,
+                    evidence={
+                        "exclusive_route": True,
+                        "candidate_only": True,
+                        "baseline_lifecycle_unchanged": True,
+                        "order_sent": False,
+                    },
+                )
+                if self.config.normal_b_proved_candidate_enabled:
+                    self._observe_normal_b_proved(
+                        rr,
+                        obs,
+                        underlying,
+                        classifier_result=(
+                            "RUNNER_STRENGTHENING"
+                            if lifecycle.runner_strengthening else "NORMAL_B"
+                        ),
+                    )
             elif current_ts > target:
                 self.engine._audit(
                     runtime=rr.runtime,
@@ -396,6 +742,37 @@ class MidpointLiveShadowCoordinatorV1:
                     drawdown_from_running_mfe_close=drawdown,
                     prior_minute_directional_vwap_change=prior_minute_dv_change,
                 )
+                if (
+                    self.config.degraded_exit_candidate_enabled
+                    and rr.management_route == "RUNNER_DEGRADED_EXIT"
+                    and rr.degraded_exit_candidate_timestamp is None
+                ):
+                    rr.degraded_exit_candidate_timestamp = current_ts
+                    self.engine._audit(
+                        runtime=rr.runtime,
+                        timestamp=obs.timestamp,
+                        event_type="DEGRADED_EXIT_CANDIDATE_TRIGGERED",
+                        direction=lifecycle.direction,
+                        result="SHADOW_EXIT_CANDIDATE",
+                        reason="FIRST_DEGRADED_STARTED_COMPLETED_CLOSE",
+                        state_before="RUNNER_STRENGTHENING",
+                        state_after="CANDIDATE_CLOSED",
+                        observation=obs,
+                        directional_points=points,
+                        evidence={
+                            "management_route": rr.management_route,
+                            "signal_timestamp": obs.timestamp,
+                            "option_valuation_timestamp": (
+                                current_ts + timedelta(minutes=1)
+                            ).isoformat(),
+                            "option_valuation_basis": "NEXT_EXACT_OPTION_MINUTE_OPEN",
+                            "candidate_only": True,
+                            "baseline_lifecycle_unchanged": True,
+                            "no_candidate_reentry": True,
+                            "action_intent": "SHADOW_VALUATION_ONLY",
+                            "order_sent": False,
+                        },
+                    )
                 return False
 
         if (
@@ -464,6 +841,633 @@ class MidpointLiveShadowCoordinatorV1:
         for event in terminal_events:
             self._v621_collector.on_audit_event(event)
 
+    def _build_pm_e_reference_if_ready(
+        self, *, ts: datetime, underlying_by_ts: dict[datetime, Any]
+    ) -> None:
+        if (
+            not self.config.pm_e_enabled
+            or self.state is None
+            or self.state.pm_e_candidate is not None
+            or ts.time() != time(13, 14)
+        ):
+            return
+        start = ts.replace(hour=12, minute=45)
+        minutes = [start + timedelta(minutes=index) for index in range(30)]
+        if not all(minute in underlying_by_ts for minute in minutes):
+            return
+        rows = [underlying_by_ts[minute] for minute in minutes]
+        high = max(self._float(row, "high") for row in rows)
+        low = min(self._float(row, "low") for row in rows)
+        open_price = self._float(rows[0], "open")
+        close_price = self._float(rows[-1], "close")
+        reference = ReferenceStructure(
+            session_date=self.state.session_date.isoformat(),
+            reference_type="GREEN" if close_price >= open_price else "RED",
+            start_timestamp=start.isoformat(),
+            end_timestamp=ts.isoformat(),
+            high=high,
+            low=low,
+        )
+        self.state.pm_e_candidate = PMMidpointBECandidate(
+            session_date=self.state.session_date.isoformat(),
+            reference_start=start,
+            reference_end=ts,
+            high=high,
+            low=low,
+        )
+        self.state.pm_e_runtime = MidpointFamilyBRuntime(
+            reference=reference, family=MidpointFamily.PM_E
+        )
+        self.engine._audit(
+            runtime=self.state.pm_e_runtime,
+            timestamp=ts.isoformat(),
+            event_type="PM_REFERENCE_LOCKED",
+            direction=None,
+            result="LOCKED",
+            reason="EXACT_1245_TO_1314_COMPLETED_WINDOW",
+            evidence={
+                "reference_row_count": 30,
+                "reference_high": high,
+                "reference_low": low,
+                "reference_midpoint": (high + low) / 2.0,
+                "candidate_only": True,
+                "order_sent": False,
+            },
+        )
+
+    def _start_be_rearm_entry(
+        self,
+        *,
+        key: str,
+        runtime: MidpointFamilyBRuntime,
+        obs: FamilyBObservation,
+        owner: str,
+        reason: str,
+    ) -> None:
+        if self.state is None or owner not in {"B", "E"}:
+            raise ValueError("B/E rearm entry requires canonical B or E owner")
+        if runtime.lifecycle is not None:
+            raise ValueError("B/E rearm lifecycle already active")
+        family = MidpointFamily.B if owner == "B" else MidpointFamily.E
+        runtime.family = family
+        runtime.watch = None
+        runtime.lifecycle = FamilyBShadowRuntime(
+            direction=runtime.reference.direction,
+            entry_timestamp=datetime.fromisoformat(obs.timestamp),
+            entry_underlying_close=obs.close,
+            family=family,
+            state=MidpointShadowState.ACTIVE,
+        )
+        meta = self.state.be_rearm_meta[key]
+        self.engine._audit(
+            runtime=runtime,
+            timestamp=obs.timestamp,
+            event_type=f"{owner}_REARM_ENTRY",
+            direction=runtime.reference.direction,
+            result="SHADOW_ENTRY",
+            reason=reason,
+            state_before="BE_REARM_BOUNDARY_CLASSIFIED",
+            state_after="ACTIVE",
+            observation=obs,
+            directional_points=0.0,
+            evidence={
+                **meta,
+                "qualification_owner": owner,
+                "rearm_type": "MIDPOINT_TOUCH_REVALIDATION",
+                "action_intent": "SHADOW_ENTRY",
+                "order_sent": False,
+            },
+        )
+
+    def _start_be_rearm_watch(
+        self,
+        *,
+        key: str,
+        runtime: MidpointFamilyBRuntime,
+        obs: FamilyBObservation,
+    ) -> None:
+        if self.state is None:
+            return
+        runtime.family = MidpointFamily.B
+        runtime.watch = self.engine.detector.start_watch(
+            runtime.reference, obs, self.state.observations[-12:]
+        )
+        self.engine._audit(
+            runtime=runtime,
+            timestamp=obs.timestamp,
+            event_type="B_REARM_WATCH_STARTED",
+            direction=runtime.reference.direction,
+            result="STARTED" if runtime.watch.active else "NOT_STARTED",
+            reason="FRESH_BOUNDARY_CLASSIFIED_B",
+            observation=obs,
+            evidence={**self.state.be_rearm_meta[key], "order_sent": False},
+        )
+
+    def _evaluate_be_rearm_watch(
+        self,
+        *,
+        key: str,
+        runtime: MidpointFamilyBRuntime,
+        obs: FamilyBObservation,
+    ) -> str:
+        if self.state is None or runtime.watch is None:
+            raise ValueError("active B rearm watch required")
+        decision = self.engine.detector.evaluate(
+            runtime.watch, obs, self.state.observations[-12:]
+        )
+        self.engine._audit(
+            runtime=runtime,
+            timestamp=obs.timestamp,
+            event_type="B_REARM_CONFIRMATION_CHECK",
+            direction=runtime.reference.direction,
+            result=decision.result,
+            reason=decision.reason,
+            observation=obs,
+            evidence={
+                **self.state.be_rearm_meta[key],
+                "full_candidate_a": decision.full_candidate_a,
+                "directional_vwap_diff": decision.directional_vwap_diff,
+                "prior_window_crossed_threshold": (
+                    decision.prior_window_crossed_threshold
+                ),
+                "still_beyond_original_boundary": (
+                    decision.still_beyond_original_boundary
+                ),
+                "structure_valid": decision.structure_valid,
+                "minutes_since_boundary_break": (
+                    decision.minutes_since_boundary_break
+                ),
+                "order_sent": False,
+            },
+        )
+        if decision.result == "ENTRY":
+            runtime.watch = None
+            self._start_be_rearm_entry(
+                key=key,
+                runtime=runtime,
+                obs=obs,
+                owner="B",
+                reason="DELAYED_FULL_CANDIDATE_A_AFTER_MIDPOINT_REARM",
+            )
+        return decision.result
+
+    def _process_be_rearms(
+        self,
+        *,
+        obs: FamilyBObservation,
+        prev_obs: FamilyBObservation,
+        terminal_this_minute: bool,
+    ) -> None:
+        if not self.config.be_rearm_enabled or self.state is None:
+            return
+        for key, candidate in list(self.state.be_rearms.items()):
+            runtime = self.state.be_rearm_runtimes[key]
+            watch_key = f"BE_REARM:{key}"
+            rr = self.state.references.get(watch_key)
+            if (
+                rr is not None
+                and runtime.watch is not None
+                and runtime.lifecycle is None
+                and runtime.watch.active
+                and self.state.active_reference_type is None
+                and not terminal_this_minute
+            ):
+                result = self._evaluate_be_rearm_watch(
+                    key=key, runtime=runtime, obs=obs
+                )
+                if result == "ENTRY":
+                    self.state.active_reference_type = watch_key
+                    rr.running_close_mfe = 0.0
+                continue
+            if runtime.watch is not None or runtime.lifecycle is not None:
+                continue
+            action = candidate.observe_after_close(
+                timestamp=datetime.fromisoformat(obs.timestamp),
+                previous_close=prev_obs.close,
+                close=obs.close,
+            )
+            if action is None:
+                continue
+            decision = self.boundary_classifier.classify(
+                reference=candidate.reference,
+                boundary_observation=obs,
+                history=self.state.observations[-12:],
+            )
+            self.engine._audit(
+                runtime=runtime,
+                timestamp=obs.timestamp,
+                event_type="BE_REARM_BOUNDARY_CLASSIFIED",
+                direction=action.direction,
+                result=decision.owner,
+                reason=decision.reason,
+                observation=obs,
+                evidence={
+                    **self.state.be_rearm_meta[key],
+                    "midpoint_touch_timestamp": (
+                        candidate.midpoint_touch_timestamp.isoformat()
+                    ),
+                    "origin_closed_timestamp": (
+                        candidate.origin_closed_timestamp.isoformat()
+                    ),
+                    "fresh_boundary_break": True,
+                    "candidate_a_at_boundary": decision.candidate_a_at_boundary,
+                    "order_sent": False,
+                },
+            )
+            generation = int(self.state.be_rearm_meta[key]["generation"])
+            self.state.references[watch_key] = _ReferenceRuntime(
+                reference=candidate.reference,
+                runtime=runtime,
+                generation=generation,
+            )
+            blocked = terminal_this_minute or (
+                self.state.active_reference_type is not None
+            )
+            if blocked:
+                self.engine._audit(
+                    runtime=runtime,
+                    timestamp=obs.timestamp,
+                    event_type="BE_REARM_ENTRY_BLOCKED",
+                    direction=action.direction,
+                    result="NO_ENTRY",
+                    reason=(
+                        "SAME_CANDLE_REARM_BLOCKED"
+                        if terminal_this_minute else "ANOTHER_REFERENCE_ACTIVE"
+                    ),
+                    observation=obs,
+                    evidence={**self.state.be_rearm_meta[key], "order_sent": False},
+                )
+            elif decision.owner == MidpointFamily.E.value:
+                self._start_be_rearm_entry(
+                    key=key,
+                    runtime=runtime,
+                    obs=obs,
+                    owner="E",
+                    reason="MATURE_DIRECTIONAL_VWAP_AFTER_MIDPOINT_REARM",
+                )
+                self.state.active_reference_type = watch_key
+            elif decision.owner == MidpointFamily.B.value:
+                self._start_be_rearm_watch(key=key, runtime=runtime, obs=obs)
+            else:
+                self.engine._audit(
+                    runtime=runtime,
+                    timestamp=obs.timestamp,
+                    event_type="BE_REARM_ENTRY_REJECTED",
+                    direction=action.direction,
+                    result="NO_ENTRY",
+                    reason="FRESH_CANDIDATE_A_AT_BOUNDARY",
+                    observation=obs,
+                    evidence={**self.state.be_rearm_meta[key], "order_sent": False},
+                )
+
+    def _start_pm_b_watch(
+        self,
+        *,
+        runtime: MidpointFamilyBRuntime,
+        obs: FamilyBObservation,
+    ) -> None:
+        runtime.family = MidpointFamily.PM_B
+        runtime.watch = self.engine.detector.start_watch(
+            runtime.reference, obs, self.state.observations[-12:]
+        )
+        self.engine._audit(
+            runtime=runtime,
+            timestamp=obs.timestamp,
+            event_type="PM_B_WATCH_STARTED",
+            direction=runtime.reference.direction,
+            result="STARTED" if runtime.watch.active else "NOT_STARTED",
+            reason="PM_BOUNDARY_CLASSIFIED_B",
+            observation=obs,
+            evidence={"qualification_owner": "B", "order_sent": False},
+        )
+
+    def _evaluate_pm_b_watch(
+        self,
+        *,
+        runtime: MidpointFamilyBRuntime,
+        obs: FamilyBObservation,
+    ) -> str:
+        if runtime.watch is None:
+            raise ValueError("active PM_B watch required")
+        decision = self.engine.detector.evaluate(
+            runtime.watch, obs, self.state.observations[-12:]
+        )
+        self.engine._audit(
+            runtime=runtime,
+            timestamp=obs.timestamp,
+            event_type="PM_B_CONFIRMATION_CHECK",
+            direction=runtime.reference.direction,
+            result=decision.result,
+            reason=decision.reason,
+            observation=obs,
+            evidence={
+                "qualification_owner": "B",
+                "full_candidate_a": decision.full_candidate_a,
+                "directional_vwap_diff": decision.directional_vwap_diff,
+                "prior_window_crossed_threshold": (
+                    decision.prior_window_crossed_threshold
+                ),
+                "still_beyond_original_boundary": (
+                    decision.still_beyond_original_boundary
+                ),
+                "structure_valid": decision.structure_valid,
+                "minutes_since_boundary_break": (
+                    decision.minutes_since_boundary_break
+                ),
+                "order_sent": False,
+            },
+        )
+        if decision.result == "ENTRY":
+            runtime.watch = None
+            self.engine.start_extended_entry(
+                runtime,
+                obs,
+                family=MidpointFamily.PM_B,
+                qualification_owner="B",
+                reason="PM_DELAYED_FULL_CANDIDATE_A",
+                state_before="PM_B_WATCH",
+            )
+        return decision.result
+
+    def _process_extended_entries(
+        self,
+        *,
+        ts: datetime,
+        obs: FamilyBObservation,
+        prev_obs: FamilyBObservation | None,
+        terminal_this_minute: bool,
+    ) -> None:
+        if self.state is None or prev_obs is None:
+            return
+
+        self._process_be_rearms(
+            obs=obs,
+            prev_obs=prev_obs,
+            terminal_this_minute=terminal_this_minute,
+        )
+
+        if self.config.family_c_enabled:
+            for source_key, candidate in list(self.state.c_rearms.items()):
+                runtime = self.state.c_runtimes[source_key]
+                watch_key = f"C:{source_key}"
+                rr = self.state.references.get(watch_key)
+                if (
+                    rr is not None
+                    and runtime.watch is not None
+                    and runtime.lifecycle is None
+                    and runtime.watch.active
+                    and self.state.active_reference_type is None
+                    and not terminal_this_minute
+                ):
+                    result = self.engine.evaluate_extended_watch(
+                        runtime, obs, self.state.observations[-12:]
+                    )
+                    if result == "ENTRY":
+                        self.state.active_reference_type = watch_key
+                        rr.running_close_mfe = 0.0
+                    continue
+                if runtime.watch is not None or runtime.lifecycle is not None:
+                    continue
+                action = candidate.observe_after_close(
+                    timestamp=ts,
+                    previous_close=prev_obs.close,
+                    close=obs.close,
+                )
+                if action is None:
+                    continue
+                decision = self.boundary_classifier.classify(
+                    reference=candidate.reference,
+                    boundary_observation=obs,
+                    history=self.state.observations[-12:],
+                )
+                self.engine._audit(
+                    runtime=runtime,
+                    timestamp=obs.timestamp,
+                    event_type="C_BOUNDARY_CLASSIFIED",
+                    direction=action.direction,
+                    result=decision.owner,
+                    reason=decision.reason,
+                    observation=obs,
+                    evidence={
+                        "midpoint_touch_timestamp":
+                            candidate.midpoint_touch_timestamp.isoformat(),
+                        "origin_closed_timestamp":
+                            candidate.origin_closed_timestamp.isoformat(),
+                        "fresh_boundary_break": True,
+                        "candidate_a_at_boundary":
+                            decision.candidate_a_at_boundary,
+                        "order_sent": False,
+                    },
+                )
+                self.state.references[watch_key] = _ReferenceRuntime(
+                    reference=candidate.reference, runtime=runtime
+                )
+                blocked = terminal_this_minute or (
+                    self.state.active_reference_type is not None
+                )
+                if blocked:
+                    self.engine._audit(
+                        runtime=runtime,
+                        timestamp=obs.timestamp,
+                        event_type="C_ENTRY_BLOCKED",
+                        direction=action.direction,
+                        result="NO_ENTRY",
+                        reason=(
+                            "SAME_CANDLE_REVERSAL_BLOCKED"
+                            if terminal_this_minute
+                            else "ANOTHER_REFERENCE_ACTIVE"
+                        ),
+                        observation=obs,
+                        evidence={"order_sent": False},
+                    )
+                elif decision.owner == MidpointFamily.E.value:
+                    self.engine.start_extended_entry(
+                        runtime,
+                        obs,
+                        family=MidpointFamily.C,
+                        qualification_owner="E",
+                    )
+                    self.state.active_reference_type = watch_key
+                elif decision.owner == MidpointFamily.B.value:
+                    self.engine.start_extended_watch(
+                        runtime,
+                        obs,
+                        self.state.observations[-12:],
+                        family=MidpointFamily.C,
+                    )
+                else:
+                    self.engine._audit(
+                        runtime=runtime,
+                        timestamp=obs.timestamp,
+                        event_type="C_ENTRY_REJECTED",
+                        direction=action.direction,
+                        result="NO_ENTRY",
+                        reason="FRESH_CANDIDATE_A_AT_BOUNDARY",
+                        observation=obs,
+                        evidence={"order_sent": False},
+                    )
+
+        candidate = self.state.pm_e_candidate
+        runtime = self.state.pm_e_runtime
+        if not self.config.pm_e_enabled or candidate is None or runtime is None:
+            return
+
+        pm_key = "PM_B"
+        pm_rr = self.state.references.get(pm_key)
+        if (
+            pm_rr is not None
+            and runtime.watch is not None
+            and runtime.lifecycle is None
+            and runtime.watch.active
+            and self.state.active_reference_type is None
+            and not terminal_this_minute
+        ):
+            if ts.time() >= time(15, 15):
+                runtime.watch.active = False
+                self.engine._audit(
+                    runtime=runtime,
+                    timestamp=obs.timestamp,
+                    event_type="PM_ENTRY_WINDOW_EXPIRED",
+                    direction=runtime.reference.direction,
+                    result="NO_ENTRY",
+                    reason="NO_PM_ENTRY_AT_OR_AFTER_1515",
+                    observation=obs,
+                    evidence={
+                        "entry_cutoff": "15:15",
+                        "pending_owner": "B",
+                        "order_sent": False,
+                    },
+                )
+                return
+            result = self._evaluate_pm_b_watch(runtime=runtime, obs=obs)
+            if result == "ENTRY":
+                self.state.active_reference_type = pm_key
+                pm_rr.running_close_mfe = 0.0
+            return
+        if runtime.watch is not None or runtime.lifecycle is not None:
+            return
+
+        actions = candidate.observe(
+            timestamp=ts, previous_close=prev_obs.close, close=obs.close
+        )
+        for action in actions:
+            if action.event_type == "PM_MIDPOINT_BREAK":
+                runtime.reference = candidate.directional_reference(action.direction)
+                self.engine._audit(
+                    runtime=runtime,
+                    timestamp=obs.timestamp,
+                    event_type=action.event_type,
+                    direction=action.direction,
+                    result="CONFIRMED_CLOSE",
+                    reason=action.reason,
+                    observation=obs,
+                    evidence={
+                        "midpoint_break_timestamp": obs.timestamp,
+                        "midpoint_break_direction": action.direction,
+                        "reference_midpoint": candidate.midpoint,
+                        "order_sent": False,
+                    },
+                )
+                continue
+            if action.event_type == "PM_ENTRY_WINDOW_EXPIRED":
+                self.engine._audit(
+                    runtime=runtime,
+                    timestamp=obs.timestamp,
+                    event_type=action.event_type,
+                    direction=action.direction,
+                    result="NO_ENTRY",
+                    reason=action.reason,
+                    observation=obs,
+                    evidence={"entry_cutoff": "15:15", "order_sent": False},
+                )
+                continue
+            if action.event_type != "PM_BOUNDARY_BREAK":
+                raise AssertionError(f"unsupported PM action: {action.event_type}")
+
+            reference = candidate.directional_reference()
+            runtime.reference = reference
+            decision = self.boundary_classifier.classify(
+                reference=reference,
+                boundary_observation=obs,
+                history=self.state.observations[-12:],
+            )
+            self.engine._audit(
+                runtime=runtime,
+                timestamp=obs.timestamp,
+                event_type="PM_BOUNDARY_CLASSIFIED",
+                direction=action.direction,
+                result=decision.owner,
+                reason=decision.reason,
+                observation=obs,
+                evidence={
+                    "midpoint_break_timestamp": (
+                        (
+                            candidate.bearish_midpoint_break_timestamp
+                            if action.direction == "BEARISH"
+                            else candidate.bullish_midpoint_break_timestamp
+                        ).isoformat()
+                    ),
+                    "boundary_break_timestamp": (
+                        candidate.boundary_break_timestamp.isoformat()
+                    ),
+                    "candidate_a_at_boundary": decision.candidate_a_at_boundary,
+                    "prior_window_crossed_threshold": (
+                        decision.prior_window_crossed_threshold
+                    ),
+                    "raw_futures_vwap_diff": decision.raw_futures_vwap_diff,
+                    "directional_vwap_diff": decision.directional_vwap_diff,
+                    "order_sent": False,
+                },
+            )
+            blocked_reason = None
+            if terminal_this_minute:
+                blocked_reason = "SAME_CANDLE_TERMINAL_BLOCKED"
+            elif self.state.active_reference_type is not None:
+                blocked_reason = "ANOTHER_REFERENCE_ACTIVE"
+            if blocked_reason is not None:
+                self.engine._audit(
+                    runtime=runtime,
+                    timestamp=obs.timestamp,
+                    event_type="PM_ENTRY_BLOCKED",
+                    direction=action.direction,
+                    result="NO_ENTRY",
+                    reason=blocked_reason,
+                    observation=obs,
+                    evidence={"owner": decision.owner, "order_sent": False},
+                )
+                continue
+
+            if decision.owner == MidpointFamily.E.value:
+                key = "PM_E"
+                runtime.family = MidpointFamily.PM_E
+                self.state.references[key] = _ReferenceRuntime(
+                    reference=reference, runtime=runtime
+                )
+                self.engine.start_extended_entry(
+                    runtime,
+                    obs,
+                    family=MidpointFamily.PM_E,
+                    qualification_owner="E",
+                )
+                self.state.active_reference_type = key
+            elif decision.owner == MidpointFamily.B.value:
+                runtime.family = MidpointFamily.PM_B
+                self.state.references[pm_key] = _ReferenceRuntime(
+                    reference=reference, runtime=runtime
+                )
+                self._start_pm_b_watch(runtime=runtime, obs=obs)
+            else:
+                self.engine._audit(
+                    runtime=runtime,
+                    timestamp=obs.timestamp,
+                    event_type="PM_ENTRY_REJECTED",
+                    direction=action.direction,
+                    result="NO_ENTRY",
+                    reason="FRESH_CANDIDATE_A_AT_BOUNDARY",
+                    observation=obs,
+                    evidence={"owner": decision.owner, "order_sent": False},
+                )
+
     def _process_minute(
         self,
         *,
@@ -476,6 +1480,9 @@ class MidpointLiveShadowCoordinatorV1:
         assert self.state is not None
 
         self._build_reference_if_ready(ts=ts, underlying_by_ts=underlying_by_ts)
+        self._build_pm_e_reference_if_ready(
+            ts=ts, underlying_by_ts=underlying_by_ts
+        )
 
         obs = FamilyBObservation(
             timestamp=ts.isoformat(),
@@ -656,6 +1663,13 @@ class MidpointLiveShadowCoordinatorV1:
                 if result == "ENTRY":
                     self.state.active_reference_type = ref_type
                     rr.running_close_mfe = 0.0
+
+        self._process_extended_entries(
+            ts=ts,
+            obs=obs,
+            prev_obs=prev_obs,
+            terminal_this_minute=terminal_this_minute,
+        )
 
     def process(self, now: datetime) -> dict[str, Any]:
         local = now.astimezone(IST)
