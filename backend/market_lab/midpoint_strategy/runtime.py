@@ -238,6 +238,131 @@ class AuditableFamilyBEngine:
             },
         )
 
+    def start_extended_entry(
+        self,
+        runtime: MidpointFamilyBRuntime,
+        boundary_obs: FamilyBObservation,
+        *,
+        family: MidpointFamily,
+        qualification_owner: str,
+        reason: str = "FRESH_BOUNDARY_REQUALIFIED",
+        state_before: str | None = None,
+    ) -> None:
+        """Start a C or PM B/E lifecycle after structural qualification."""
+        if family not in {
+            MidpointFamily.C, MidpointFamily.PM_B, MidpointFamily.PM_E
+        }:
+            raise ValueError("extended entry requires C, PM_B or PM_E")
+        if runtime.lifecycle is not None:
+            raise ValueError("lifecycle already active")
+        runtime.family = family
+        runtime.watch = None
+        runtime.lifecycle = FamilyBShadowRuntime(
+            direction=runtime.reference.direction,
+            entry_timestamp=datetime.fromisoformat(boundary_obs.timestamp),
+            entry_underlying_close=boundary_obs.close,
+            family=family,
+            state=MidpointShadowState.ACTIVE,
+        )
+        self._audit(
+            runtime=runtime,
+            timestamp=boundary_obs.timestamp,
+            event_type=f"{family.value}_ENTRY",
+            direction=runtime.reference.direction,
+            result="SHADOW_ENTRY",
+            reason=reason,
+            state_before=state_before or f"{family.value}_BOUNDARY_CLASSIFIED",
+            state_after="ACTIVE",
+            observation=boundary_obs,
+            directional_points=0.0,
+            evidence={
+                "qualification_owner": qualification_owner,
+                "action_intent": "SHADOW_ENTRY",
+                "order_sent": False,
+            },
+        )
+
+    def start_extended_watch(
+        self,
+        runtime: MidpointFamilyBRuntime,
+        boundary_obs: FamilyBObservation,
+        history: list[FamilyBObservation],
+        *,
+        family: MidpointFamily,
+    ) -> None:
+        if family is not MidpointFamily.C:
+            raise ValueError("only C supports delayed B qualification")
+        runtime.family = family
+        runtime.watch = self.detector.start_watch(
+            runtime.reference, boundary_obs, history
+        )
+        self._audit(
+            runtime=runtime,
+            timestamp=boundary_obs.timestamp,
+            event_type="C_WATCH_STARTED",
+            direction=runtime.reference.direction,
+            result="STARTED" if runtime.watch.active else "NOT_STARTED",
+            reason="C_FRESH_BOUNDARY_CLASSIFIED_B",
+            observation=boundary_obs,
+            evidence={"order_sent": False},
+        )
+
+    def evaluate_extended_watch(
+        self,
+        runtime: MidpointFamilyBRuntime,
+        obs: FamilyBObservation,
+        history: list[FamilyBObservation],
+    ) -> str:
+        if runtime.family is not MidpointFamily.C or runtime.watch is None:
+            raise ValueError("active C watch required")
+        decision = self.detector.evaluate(runtime.watch, obs, history)
+        self._audit(
+            runtime=runtime,
+            timestamp=obs.timestamp,
+            event_type="C_CONFIRMATION_CHECK",
+            direction=runtime.reference.direction,
+            result=decision.result,
+            reason=decision.reason,
+            observation=obs,
+            evidence={
+                "full_candidate_a": decision.full_candidate_a,
+                "directional_vwap_diff": decision.directional_vwap_diff,
+                "prior_window_crossed_threshold":
+                    decision.prior_window_crossed_threshold,
+                "still_beyond_original_boundary":
+                    decision.still_beyond_original_boundary,
+                "structure_valid": decision.structure_valid,
+                "minutes_since_boundary_break":
+                    decision.minutes_since_boundary_break,
+            },
+        )
+        if decision.result == "ENTRY":
+            runtime.lifecycle = FamilyBShadowRuntime(
+                direction=runtime.reference.direction,
+                entry_timestamp=datetime.fromisoformat(obs.timestamp),
+                entry_underlying_close=obs.close,
+                family=MidpointFamily.C,
+                state=MidpointShadowState.ACTIVE,
+            )
+            self._audit(
+                runtime=runtime,
+                timestamp=obs.timestamp,
+                event_type="C_ENTRY",
+                direction=runtime.reference.direction,
+                result="SHADOW_ENTRY",
+                reason="C_DELAYED_FULL_CANDIDATE_A",
+                state_before="C_WATCH",
+                state_after="ACTIVE",
+                observation=obs,
+                directional_points=0.0,
+                evidence={
+                    "qualification_owner": "B",
+                    "action_intent": "SHADOW_ENTRY",
+                    "order_sent": False,
+                },
+            )
+        return decision.result
+
     def mark_plus20(
         self,
         runtime: MidpointFamilyBRuntime,

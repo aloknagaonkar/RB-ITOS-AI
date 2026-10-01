@@ -44,11 +44,11 @@ DEFAULT_OUTDIR = Path(
 )
 DEFAULT_FORWARD_ROOT = Path(
     "data/historical-evidence/hilega-pcr-oi-support-research-v1/"
-    "midpoint-forward-oos-2026-09-09-to-29-v1"
+    "midpoint-forward-oos-2026-09-09-to-29-v2"
 )
 DEFAULT_FORWARD_OUTDIR = Path(
     "data/historical-evidence/hilega-pcr-oi-support-research-v1/"
-    "midpoint-pm-be-backtest-480-plus-forward-v1"
+    "midpoint-pm-be-backtest-480-plus-forward-corrected-v2"
 )
 PM_ENTRY_TYPES = {"PM_B_ENTRY", "PM_E_ENTRY"}
 
@@ -115,6 +115,21 @@ def event_price(event: dict | None) -> float | None:
     evidence = event.get("evidence") or {}
     value = evidence.get("valuation_price", event.get("underlying_price"))
     return float(value) if value is not None else None
+
+
+def number(value) -> float | None:
+    """Return a finite audit number without converting missing values to zero."""
+    if value in (None, ""):
+        return None
+    return float(value)
+
+
+def directional_vwap_from_raw(direction: str, raw_value) -> float | None:
+    """Orient futures-minus-VWAP so positive always supports the trade."""
+    raw = number(raw_value)
+    if raw is None:
+        return None
+    return raw if direction == "BULLISH" else -raw
 
 
 def replay_session(
@@ -273,6 +288,16 @@ def reconstruct_pm_trades(
         proof = first(segment, "PLUS20_PROOF")
         classifier = first(segment, "RUNNER_CLASSIFICATION")
         route = first(segment, "MANAGEMENT_ROUTE_SELECTED")
+        confirmation = next(
+            (
+                row for row in reversed(rows[: index + 1])
+                if row.get("event_type") == "PM_B_CONFIRMATION_CHECK"
+                and row.get("direction") == entry.get("direction")
+                and row.get("result") == "ENTRY"
+                and row.get("event_timestamp") == entry.get("event_timestamp")
+            ),
+            None,
+        )
         if proof is not None and classifier is not None:
             expected = dt(proof["event_timestamp"]) + timedelta(minutes=10)
             if dt(classifier["event_timestamp"]) != expected:
@@ -309,23 +334,86 @@ def reconstruct_pm_trades(
         delay = (
             dt(entry["event_timestamp"]) - dt(boundary["event_timestamp"])
         ).total_seconds() / 60.0
+        midpoint_timestamp = (boundary.get("evidence") or {}).get(
+            "midpoint_break_timestamp", ""
+        )
+        midpoint_to_boundary = (
+            (dt(boundary["event_timestamp"]) - dt(midpoint_timestamp)).total_seconds()
+            / 60.0
+            if midpoint_timestamp else None
+        )
         pre_entry_move = directional_points(direction, boundary_price, entry_price)
+        boundary_evidence = boundary.get("evidence") or {}
+        confirmation_evidence = (confirmation.get("evidence") or {}) if confirmation else {}
+        boundary_raw_vwap = number(
+            boundary_evidence.get("raw_futures_vwap_diff")
+        )
+        boundary_directional_vwap = number(
+            boundary_evidence.get("directional_vwap_diff")
+        )
+        entry_raw_vwap = (
+            number(entry.get("futures_price")) - number(entry.get("futures_vwap"))
+            if number(entry.get("futures_price")) is not None
+            and number(entry.get("futures_vwap")) is not None
+            else None
+        )
+        entry_directional_vwap = directional_vwap_from_raw(
+            direction, entry_raw_vwap
+        )
+        reference_high = number(entry.get("reference_high"))
+        reference_low = number(entry.get("reference_low"))
         output.append({
             "block": block,
             "session_date": session_date,
             "month": session_date[:7],
             "family": entry["family"],
             "direction": direction,
-            "midpoint_timestamp": (boundary.get("evidence") or {}).get(
-                "midpoint_break_timestamp", ""
-            ),
+            "midpoint_timestamp": midpoint_timestamp,
+            "midpoint_to_boundary_minutes": midpoint_to_boundary,
             "boundary_timestamp": boundary["event_timestamp"],
             "boundary_price": boundary_price,
             "boundary_owner": boundary.get("result"),
+            "boundary_futures_price": number(boundary.get("futures_price")),
+            "boundary_futures_vwap": number(boundary.get("futures_vwap")),
+            "boundary_raw_futures_vwap_diff": boundary_raw_vwap,
+            "boundary_directional_vwap_diff": boundary_directional_vwap,
+            "boundary_candidate_a": boundary_evidence.get(
+                "candidate_a_at_boundary"
+            ),
+            "boundary_prior_window_crossed_threshold": boundary_evidence.get(
+                "prior_window_crossed_threshold"
+            ),
             "entry_timestamp": entry["event_timestamp"],
             "entry_price": entry_price,
+            "entry_futures_price": number(entry.get("futures_price")),
+            "entry_futures_vwap": number(entry.get("futures_vwap")),
+            "entry_raw_futures_vwap_diff": entry_raw_vwap,
+            "entry_directional_vwap_diff": entry_directional_vwap,
+            "directional_vwap_change_boundary_to_entry": (
+                entry_directional_vwap - boundary_directional_vwap
+                if entry_directional_vwap is not None
+                and boundary_directional_vwap is not None else None
+            ),
+            "confirmation_full_candidate_a": confirmation_evidence.get(
+                "full_candidate_a"
+            ),
+            "confirmation_prior_window_crossed_threshold": (
+                confirmation_evidence.get("prior_window_crossed_threshold")
+            ),
             "confirmation_delay_minutes": delay,
             "pre_entry_move_points": pre_entry_move,
+            "entry_minutes_before_1515": (
+                dt(session_date + "T15:15:00+05:30")
+                - dt(entry["event_timestamp"])
+            ).total_seconds() / 60.0,
+            "reference_high": reference_high,
+            "reference_low": reference_low,
+            "reference_midpoint": number(entry.get("midpoint")),
+            "pm_range_points": (
+                reference_high - reference_low
+                if reference_high is not None and reference_low is not None
+                else None
+            ),
             "plus20": proof is not None,
             "plus20_timestamp": proof.get("event_timestamp", "") if proof else "",
             "classifier_result": classifier.get("result", "") if classifier else "",

@@ -11,6 +11,7 @@ class MidpointFamily(str, Enum):
     E = "E"
     C = "C"
     D = "D"
+    PM_B = "PM_B"
     PM_E = "PM_E"
 
 

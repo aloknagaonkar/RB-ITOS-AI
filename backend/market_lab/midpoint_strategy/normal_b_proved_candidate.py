@@ -116,7 +116,6 @@ class NormalBProvedCandidate:
         if excursion > self.mfe:
             self.mfe = excursion
             self.last_mfe_at = t
-            self.inactivity_exit_due = None
         if self.proof_timestamp is None and self.mfe >= 20:
             self.proof_timestamp = t
         if classifier_result is not None:

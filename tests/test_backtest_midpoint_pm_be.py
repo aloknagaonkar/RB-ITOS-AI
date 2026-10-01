@@ -3,6 +3,7 @@ from datetime import datetime
 
 from scripts.backtest_midpoint_pm_be import (
     directional_points,
+    directional_vwap_from_raw,
     load_forward_sessions,
     selected_exit,
     trade_metric,
@@ -21,6 +22,12 @@ def event(timestamp, event_type, **values):
 def test_directional_points_are_signed_by_trade_direction():
     assert directional_points("BULLISH", 100.0, 112.0) == 12.0
     assert directional_points("BEARISH", 100.0, 88.0) == 12.0
+
+
+def test_directional_vwap_is_positive_when_supporting_trade():
+    assert directional_vwap_from_raw("BULLISH", 12.5) == 12.5
+    assert directional_vwap_from_raw("BEARISH", -12.5) == 12.5
+    assert directional_vwap_from_raw("BEARISH", None) is None
 
 
 def test_selected_exit_uses_route_candidate_before_structural():

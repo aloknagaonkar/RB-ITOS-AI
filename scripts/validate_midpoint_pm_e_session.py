@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only PM_E counterfactual validation for the current NSE session.
+"""Read-only PM B/E counterfactual validation for the current NSE session.
 
 The validator fetches the same completed NIFTY and front-future one-minute
 candles used by the live shadow worker, but replays them through an isolated
@@ -34,11 +34,15 @@ from market_lab.upstox_live_shadow_sources_v1 import (
 
 PM_EVENT_TYPES = {
     "PM_REFERENCE_LOCKED",
-    "PM_FALSE_BREAK_OBSERVED",
-    "PM_MIDPOINT_RECROSS_ARMED",
-    "PM_E_BOUNDARY_CLASSIFIED",
+    "PM_MIDPOINT_BREAK",
+    "PM_BOUNDARY_CLASSIFIED",
+    "PM_B_WATCH_STARTED",
+    "PM_B_CONFIRMATION_CHECK",
+    "PM_B_ENTRY",
     "PM_E_ENTRY",
-    "PM_E_REJECTED",
+    "PM_ENTRY_REJECTED",
+    "PM_ENTRY_BLOCKED",
+    "PM_ENTRY_WINDOW_EXPIRED",
 }
 
 
@@ -118,16 +122,20 @@ def _implemented_rules() -> dict[str, Any]:
             "same_candle_reentry": False,
             "repeat": "every entered generation may arm exactly one next generation",
         },
-        "PM_E": {
+        "PM_BE": {
             "reference": "exact completed 12:45-13:14 one-minute range",
             "sequence": [
-                "first completed close outside PM high or low",
-                "completed close recrosses PM midpoint in the opposite direction",
-                "later fresh completed close breaks the opposite PM boundary",
-                "canonical boundary owner must be E",
+                "first completed close below/above midpoint sets bearish/bullish direction",
+                "both directional midpoint paths may arm before the first boundary is consumed",
+                "completed close beyond same-direction PM low/high confirms boundary",
+                "run canonical B/E boundary owner",
+                "E enters immediately; B starts delayed Candidate-A watch",
             ],
-            "first_break_above": "bearish reversal candidate",
-            "first_break_below": "bullish reversal candidate",
+            "midpoint_below": "bearish PM direction",
+            "midpoint_above": "bullish PM direction",
+            "E_result": "immediate PM_E_ENTRY",
+            "B_result": "delayed watch then PM_B_ENTRY on confirmation",
+            "entry_cutoff": "no new PM entry at or after 15:15",
             "single_use": True,
             "same_candle_reentry": False,
         },
@@ -199,7 +207,7 @@ def _implemented_rules() -> dict[str, Any]:
 
 def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Validate today's PM_E rules without changing live state."
+        description="Validate today's PM B/E rules without changing live state."
     )
     parser.add_argument(
         "--session-date",
@@ -241,31 +249,45 @@ def _event_time(event: dict[str, Any]) -> str | None:
 
 def _pm_stage(events: list[dict[str, Any]]) -> tuple[str, str]:
     by_type = {event.get("event_type"): event for event in events}
+    if "PM_B_ENTRY" in by_type:
+        return "ENTERED_PM_B", "PM boundary classified B and delayed confirmation entered."
     if "PM_E_ENTRY" in by_type:
-        return "ENTERED", "PM_E completed all rules and entered shadow lifecycle."
-    if "PM_E_REJECTED" in by_type:
-        event = by_type["PM_E_REJECTED"]
-        return "REJECTED", str(event.get("reason") or "PM_E_REJECTED")
-    if "PM_E_BOUNDARY_CLASSIFIED" in by_type:
-        event = by_type["PM_E_BOUNDARY_CLASSIFIED"]
+        return "ENTERED_PM_E", "PM boundary classified E and entered immediately."
+    if "PM_ENTRY_WINDOW_EXPIRED" in by_type:
+        return "EXPIRED", "PM entry window ended at 15:15 without an entry."
+    if "PM_ENTRY_BLOCKED" in by_type:
+        event = by_type["PM_ENTRY_BLOCKED"]
+        return "BLOCKED", str(event.get("reason") or "PM_ENTRY_BLOCKED")
+    if "PM_ENTRY_REJECTED" in by_type:
+        event = by_type["PM_ENTRY_REJECTED"]
+        return "REJECTED", str(event.get("reason") or "PM_ENTRY_REJECTED")
+    checks = [
+        event for event in events
+        if event.get("event_type") == "PM_B_CONFIRMATION_CHECK"
+    ]
+    if checks:
+        event = checks[-1]
+        return (
+            "PM_B_WATCH",
+            f"latest delayed B result={event.get('result')} reason={event.get('reason')}",
+        )
+    if "PM_B_WATCH_STARTED" in by_type:
+        return "PM_B_WATCH", "PM boundary classified B; delayed confirmation is active."
+    if "PM_BOUNDARY_CLASSIFIED" in by_type:
+        event = by_type["PM_BOUNDARY_CLASSIFIED"]
         return (
             "CLASSIFIED_NO_ENTRY",
-            f"owner={event.get('result')} with no PM_E entry event",
+            f"owner={event.get('result')} with no PM entry event",
         )
-    if "PM_MIDPOINT_RECROSS_ARMED" in by_type:
+    if "PM_MIDPOINT_BREAK" in by_type:
         return (
-            "WAITING_OPPOSITE_BOUNDARY_BREAK",
-            "Midpoint recross completed; waiting for a later fresh opposite boundary close.",
-        )
-    if "PM_FALSE_BREAK_OBSERVED" in by_type:
-        return (
-            "WAITING_MIDPOINT_RECROSS",
-            "First PM boundary break completed; waiting for a completed midpoint recross.",
+            "WAITING_BOUNDARY_BREAK",
+            "PM direction is established; waiting for the same-direction boundary close.",
         )
     if "PM_REFERENCE_LOCKED" in by_type:
         return (
-            "WAITING_FIRST_BOUNDARY_BREAK",
-            "12:45-13:14 PM range is locked; no completed close outside it yet.",
+            "WAITING_MIDPOINT_BREAK",
+            "12:45-13:14 PM range is locked; waiting for a close below/above midpoint.",
         )
     return (
         "REFERENCE_NOT_LOCKED",
@@ -303,8 +325,8 @@ def _compact_event(event: dict[str, Any]) -> dict[str, Any]:
         "futures_price": event.get("futures_price"),
         "futures_vwap": event.get("futures_vwap"),
         "candidate_a_at_boundary": evidence.get("candidate_a_at_boundary"),
-        "first_break_timestamp": evidence.get("first_break_timestamp"),
-        "midpoint_recross_timestamp": evidence.get("midpoint_recross_timestamp"),
+        "midpoint_break_timestamp": evidence.get("midpoint_break_timestamp"),
+        "boundary_break_timestamp": evidence.get("boundary_break_timestamp"),
         "order_sent": evidence.get("order_sent", False),
     }
 
@@ -369,7 +391,7 @@ def main() -> int:
                 else None
             )
             report = {
-                "model": "MIDPOINT_PM_E_CURRENT_SESSION_VALIDATION_V1",
+                "model": "MIDPOINT_PM_BE_CURRENT_SESSION_VALIDATION_V2",
                 "session_date": session_date.isoformat(),
                 "as_of": as_of.isoformat(),
                 "data_source": "UPSTOX_INTRADAY_NIFTY_AND_FRONT_FUTURE_1M",
@@ -389,14 +411,18 @@ def main() -> int:
                 "candidate_state": (
                     {
                         "state": candidate.state,
-                        "first_break_timestamp": (
-                            candidate.first_break_timestamp.isoformat()
-                            if candidate.first_break_timestamp else None
+                        "direction": candidate.direction,
+                        "bearish_midpoint_break_timestamp": (
+                            candidate.bearish_midpoint_break_timestamp.isoformat()
+                            if candidate.bearish_midpoint_break_timestamp else None
                         ),
-                        "first_break_direction": candidate.first_break_direction,
-                        "midpoint_recross_timestamp": (
-                            candidate.midpoint_recross_timestamp.isoformat()
-                            if candidate.midpoint_recross_timestamp else None
+                        "bullish_midpoint_break_timestamp": (
+                            candidate.bullish_midpoint_break_timestamp.isoformat()
+                            if candidate.bullish_midpoint_break_timestamp else None
+                        ),
+                        "boundary_break_timestamp": (
+                            candidate.boundary_break_timestamp.isoformat()
+                            if candidate.boundary_break_timestamp else None
                         ),
                     }
                     if candidate is not None else None
@@ -425,7 +451,7 @@ def main() -> int:
     output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
 
     print(
-        f"PM_E SESSION {report['session_date']} as of {report['as_of']}"
+        f"PM B/E SESSION {report['session_date']} as of {report['as_of']}"
     )
     print("live gate:", report["live_gate"])
     print("isolated replay:", report["isolated_replay_gate"])

@@ -7,7 +7,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, HTTPException, Query
 
-from .config import MidpointShadowConfig
+from .config import live_shadow_config_from_env
 from .replay import load_audit_jsonl
 from .workspace_contract import midpoint_workspace_status
 from .option_observation import project_tape
@@ -82,6 +82,12 @@ def _latest_any(rows, types):
 
 def _latest_family_state(rows):
     for row in reversed(rows):
+        event_type = str(row.get("event_type") or "")
+        if (
+            event_type.startswith("NORMAL_B_PROVED_")
+            or event_type == "DEGRADED_EXIT_CANDIDATE_TRIGGERED"
+        ):
+            continue
         if row.get("state_after"):
             return str(row["state_after"])
     return "IDLE"
@@ -111,7 +117,10 @@ def _with_nifty_points(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             active = None
             day = event_day
         kind = row.get("event_type")
-        if kind in ("B_ENTRY", "E_ENTRY"):
+        if kind in (
+            "B_ENTRY", "E_ENTRY", "C_ENTRY", "PM_B_ENTRY", "PM_E_ENTRY",
+            "B_REARM_ENTRY", "E_REARM_ENTRY",
+        ):
             entry_price = _num(row.get("underlying_price"))
             active = {"entry": entry_price, "direction": row.get("direction"),
                       "family": row.get("family")} if entry_price is not None else None
@@ -154,7 +163,7 @@ def _timeline_projection(rows):
 
 def _status_payload(rows, mode, *, audit_path: Path | None = None):
     rows = _with_nifty_points(rows)
-    cfg = MidpointShadowConfig()
+    cfg = live_shadow_config_from_env()
     cfg.assert_safe()
     resolved_path = AUDIT_PATH if audit_path is None else audit_path
     return {
@@ -172,10 +181,24 @@ def _status_payload(rows, mode, *, audit_path: Path | None = None):
         "event_counts": dict(Counter(str(r.get("event_type")) for r in rows)),
         "family_b_state": _latest_family_state(rows),
         "latest_event": rows[-1] if rows else None,
-        "latest_entry": _latest_any(rows, ("B_ENTRY", "E_ENTRY")),
+        "latest_entry": _latest_any(
+            rows, (
+                "B_ENTRY", "E_ENTRY", "C_ENTRY", "PM_B_ENTRY", "PM_E_ENTRY",
+                "B_REARM_ENTRY", "E_REARM_ENTRY",
+            )
+        ),
         "latest_plus20": _latest(rows, "PLUS20_PROOF"),
         "latest_classifier": _latest(rows, "RUNNER_CLASSIFICATION"),
+        "latest_management_route": _latest(rows, "MANAGEMENT_ROUTE_SELECTED"),
+        "latest_normal_b_proved": _latest(rows, "NORMAL_B_PROVED_STARTED"),
+        "latest_normal_b_tier2": _latest(rows, "NORMAL_B_PROVED_TIER2"),
+        "latest_normal_b_tier3": _latest(rows, "NORMAL_B_PROVED_TIER3"),
+        "latest_normal_b_exit": _latest(rows, "NORMAL_B_PROVED_EXIT_CANDIDATE"),
+        "latest_normal_b_unavailable": _latest(rows, "NORMAL_B_PROVED_UNAVAILABLE"),
         "latest_degraded": _latest(rows, "DEGRADED_STARTED"),
+        "latest_degraded_exit_candidate": _latest(
+            rows, "DEGRADED_EXIT_CANDIDATE_TRIGGERED"
+        ),
         "latest_recovery": _latest(rows, "DEGRADED_TARGET_RECOVERED"),
         "latest_rescue": _latest_any(rows, ("CAP20_RESCUE_TRIGGERED", "CAP20_SHADOW_EXIT")),
         "latest_reentry": _latest_any(

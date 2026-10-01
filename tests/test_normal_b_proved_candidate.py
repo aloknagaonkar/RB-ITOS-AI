@@ -48,6 +48,11 @@ class Tests(unittest.TestCase):
         _,s=setup()
         for i in range(12,40):s(i)
         s(40,26,25);self.assertIsNone(s(41)["inactivity_exit_due"])
+    def test_scheduled_inactivity_exit_cannot_be_cancelled(self):
+        _,s=setup()
+        for i in range(12,42):s(i)
+        r=s(42,29,28)
+        self.assertEqual(r["reason"],"NO_NEW_MFE_TIME_EXIT")
     def test_missing_minute_and_reentry_fail(self):
         _,s=setup()
         with self.assertRaises(ValueError):s(13)

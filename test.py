@@ -20,20 +20,7 @@ IMPORTANT = {
     "B_ENTRY",
     "E_ENTRY",
     "C_ENTRY",
-    "B_REARM_ENTRY",
-    "E_REARM_ENTRY",
-    "BE_REARM_MIDPOINT_TOUCH_ARMED",
-    "BE_REARM_BOUNDARY_CLASSIFIED",
     "PM_E_ENTRY",
-    "PM_B_ENTRY",
-    "PM_REFERENCE_LOCKED",
-    "PM_MIDPOINT_BREAK",
-    "PM_BOUNDARY_CLASSIFIED",
-    "PM_B_WATCH_STARTED",
-    "PM_B_CONFIRMATION_CHECK",
-    "PM_ENTRY_REJECTED",
-    "PM_ENTRY_BLOCKED",
-    "PM_ENTRY_WINDOW_EXPIRED",
     "PLUS20_PROOF",
     "RUNNER_CLASSIFICATION",
     "RUNNER_CLASSIFICATION_UNAVAILABLE",
@@ -114,10 +101,7 @@ def session_rows(payloads: list[object], session_date: str) -> list[dict]:
 def pair_segments(events: list[dict]) -> list[tuple[dict, list[dict]]]:
     entries = [
         index for index, row in enumerate(events)
-        if row.get("event_type") in {
-            "B_ENTRY", "E_ENTRY", "C_ENTRY", "PM_B_ENTRY", "PM_E_ENTRY",
-            "B_REARM_ENTRY", "E_REARM_ENTRY",
-        }
+        if row.get("event_type") in {"B_ENTRY", "E_ENTRY", "C_ENTRY", "PM_E_ENTRY"}
     ]
     output = []
     for sequence, index in enumerate(entries):
@@ -141,31 +125,28 @@ def summarize_trade(entry: dict, segment: list[dict]) -> dict:
     terminal = first(segment, {"STRUCTURAL_TERMINAL", "SESSION_END_UNRESOLVED"})
     exact_classifier = None
     if proof and classifier:
-        proof_timestamp = timestamp(proof)
-        classifier_timestamp = timestamp(classifier)
-        if proof_timestamp and classifier_timestamp:
-            exact_classifier = (
-                datetime.fromisoformat(classifier_timestamp)
-                == datetime.fromisoformat(proof_timestamp) + timedelta(minutes=10)
-            )
+        exact_classifier = (
+            datetime.fromisoformat(classifier["event_timestamp"])
+            == datetime.fromisoformat(proof["event_timestamp"]) + timedelta(minutes=10)
+        )
     exit_event = normal_exit or degraded_exit or terminal
     return {
         "family": entry.get("family"),
         "direction": entry.get("direction"),
-        "entry_timestamp": timestamp(entry) or None,
+        "entry_timestamp": entry.get("event_timestamp"),
         "entry_price": entry.get("underlying_price"),
         "entry_boundary": entry.get("original_boundary"),
         "midpoint": entry.get("midpoint"),
-        "plus20_timestamp": timestamp(proof) if proof else None,
+        "plus20_timestamp": proof.get("event_timestamp") if proof else None,
         "plus20_directional_points_close": proof.get("directional_points") if proof else None,
-        "classifier_timestamp": timestamp(classifier) if classifier else None,
+        "classifier_timestamp": classifier.get("event_timestamp") if classifier else None,
         "classifier_result": classifier.get("result") if classifier else None,
         "classifier_exact_proof_plus_10": exact_classifier,
         "classifier_unavailable": unavailable is not None,
         "management_route": route.get("result") if route else None,
-        "degraded_timestamp": timestamp(degraded) if degraded else None,
+        "degraded_timestamp": degraded.get("event_timestamp") if degraded else None,
         "candidate_exit_event": exit_event.get("event_type") if exit_event else None,
-        "candidate_exit_timestamp": timestamp(exit_event) if exit_event else None,
+        "candidate_exit_timestamp": exit_event.get("event_timestamp") if exit_event else None,
         "candidate_exit_points": exit_event.get("directional_points") if exit_event else None,
         "candidate_exit_reason": exit_event.get("reason") if exit_event else None,
         "current_or_final_state": (
@@ -190,7 +171,7 @@ def main() -> int:
     for name, path in (
         ("status", "/status"),
         ("timeline", "/timeline?limit=2000"),
-        ("events", "/events?limit=2000"),
+        ("events", "/events?limit=5000"),
     ):
         payloads[name], transport[name] = fetch(arguments.base_url, path)
 
