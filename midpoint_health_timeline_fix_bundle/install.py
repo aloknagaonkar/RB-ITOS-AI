@@ -71,7 +71,7 @@ def main() -> int:
         raise
 
     print("PASS: Midpoint decision and health timeline presentation corrected.")
-    print("Event/Reason remain strategy decisions; health has a separate exact inspect path.")
+    print("Event/Reason remain strategy decisions; Inspect decision includes matching health.")
     print("Raw audit, strategy decisions, entries, exits, orders and quantity are unchanged.")
     print("API restart is required for the projection change; live worker logic is unchanged.")
     if backup_root.exists():

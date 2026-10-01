@@ -25,4 +25,6 @@ After PASS:
   ./scripts/status.sh
 
 The installer does not restart a service. It changes presentation projection
-only. Immutable health and strategy audit events remain untouched.
+only. Every active-trade signal receives causal health for the same reference.
+The single Inspect decision action includes its matching health evidence.
+Immutable health and strategy audit events remain untouched.

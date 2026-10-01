@@ -229,59 +229,92 @@ def _timeline_projection(rows):
 
 
 def _decision_timeline_projection(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Keep lifecycle rows primary and attach later health snapshots to them.
+    """Keep lifecycle rows primary and causally project health onto every signal.
 
-    The raw audit is deliberately unchanged.  A health snapshot updates the
-    latest compatible decision row, retaining a pointer to the exact immutable
-    health event so the UI can inspect the same evidence shown in the Health
-    column.  Candidate exit events are not snapshot-only and remain visible as
-    first-class decision rows.
+    The raw audit is deliberately unchanged.  Each decision receives the latest
+    already-observed health for its own lane.  A snapshot written after several
+    decisions for the same completed minute is attached to every matching
+    decision in that minute, but never rewrites an earlier minute (no future
+    leakage).  Candidate exit events remain first-class decision rows.
     """
     output: list[dict[str, Any]] = []
-    latest_by_lane: dict[tuple[Any, ...], int] = {}
+    latest_health: dict[tuple[Any, ...], dict[str, Any]] = {}
+    active_lanes: set[tuple[Any, ...]] = set()
+    decisions_by_lane_minute: dict[tuple[tuple[Any, ...], Any], list[int]] = defaultdict(list)
 
     def lane(row: dict[str, Any]) -> tuple[Any, ...]:
+        # Family is deliberately excluded: midpoint/boundary qualification can
+        # be logged under B before the same reference is finally owned by E/A.
+        # The reference and its direction are the stable trade identity.
         return (
             _row_day(row),
-            row.get("family"),
             row.get("direction"),
             row.get("reference_type"),
         )
 
+    def health_payload(row: dict[str, Any]) -> dict[str, Any]:
+        health, support_count = _timeline_health(row)
+        return {
+            "health": health,
+            "health_support_count": support_count,
+            "health_event_id": row.get("event_id"),
+            "health_timestamp": row.get("event_timestamp"),
+        }
+
+    def attach(index: int, payload: dict[str, Any]) -> None:
+        output[index].update(payload)
+
     for row in rows:
         event_type = str(row.get("event_type") or "").upper()
+        row_lane = lane(row)
+        row_minute = row.get("event_timestamp")
+        is_entry = event_type in {
+            "A_ENTRY", "B_ENTRY", "E_ENTRY", "C_ENTRY", "PM_B_ENTRY",
+            "PM_E_ENTRY", "B_REARM_ENTRY", "E_REARM_ENTRY",
+        }
+        if is_entry:
+            active_lanes.add(row_lane)
         if event_type in _HEALTH_SNAPSHOT_ONLY_TYPES:
-            health, support_count = _timeline_health(row)
-            target = latest_by_lane.get(lane(row))
-            if target is None:
-                # Defensive fallback for legacy events that omitted a lane
-                # field: attach only within the same trading session.
-                session = _row_day(row)
-                target = next(
-                    (
-                        index for index in range(len(output) - 1, -1, -1)
-                        if output[index].get("session_date") == session
-                    ),
-                    None,
-                )
-            if target is not None:
-                output[target]["health"] = health
-                output[target]["health_support_count"] = support_count
-                output[target]["health_event_id"] = row.get("event_id")
-                output[target]["health_timestamp"] = row.get("event_timestamp")
+            payload = health_payload(row)
+            latest_health[row_lane] = payload
+            for target in decisions_by_lane_minute.get((row_lane, row_minute), []):
+                attach(target, payload)
             continue
 
         projected = _timeline_projection([row])[0]
-        projected["health_event_id"] = (
-            row.get("event_id") if projected.get("health") is not None else None
-        )
-        projected["health_timestamp"] = (
-            row.get("event_timestamp") if projected.get("health") is not None else None
-        )
+        if projected.get("health") is not None:
+            payload = health_payload(row)
+            latest_health[row_lane] = payload
+            projected.update(payload)
+        elif row_lane in active_lanes and row_lane in latest_health:
+            projected.update(latest_health[row_lane])
+        else:
+            projected["health_event_id"] = None
+            projected["health_timestamp"] = None
         output.append(projected)
-        latest_by_lane[lane(row)] = len(output) - 1
+        decisions_by_lane_minute[(row_lane, row_minute)].append(len(output) - 1)
+        if event_type in {"STRUCTURAL_TERMINAL", "CAP20_SHADOW_EXIT"}:
+            active_lanes.discard(row_lane)
+            latest_health.pop(row_lane, None)
 
     return output
+
+
+def _matching_health_detail(
+    decision: dict[str, Any], candidate: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """Accept only same-lane health known no later than the decision minute."""
+    if candidate is None:
+        return None
+    same_lane = (
+        _row_day(candidate) == _row_day(decision)
+        and candidate.get("direction") == decision.get("direction")
+        and candidate.get("reference_type") == decision.get("reference_type")
+    )
+    causal = str(candidate.get("event_timestamp") or "") <= str(
+        decision.get("event_timestamp") or ""
+    )
+    return candidate if same_lane and causal else None
 
 
 def _status_payload(rows, mode, *, audit_path: Path | None = None):
@@ -905,13 +938,23 @@ def timeline(limit: Annotated[int, Query(ge=1, le=5000)] = 200):
 
 
 @router.get("/audit-detail")
-def audit_detail(event_id: str):
-    for row in _with_nifty_points(_all_rows()):
+def audit_detail(event_id: str, health_event_id: str | None = None):
+    rows = _with_nifty_points(_all_rows())
+    health_row = next(
+        (row for row in rows if row.get("event_id") == health_event_id), None
+    ) if health_event_id else None
+    for row in rows:
         if row.get("event_id") == event_id:
+            health_row = _matching_health_detail(row, health_row)
             enriched = dict(row)
-            health, support_count = _timeline_health(row)
+            health_source = health_row or row
+            health, support_count = _timeline_health(health_source)
             enriched["health"] = health
             enriched["health_support_count"] = support_count
+            if health_row is not None:
+                enriched["health_event_id"] = health_row.get("event_id")
+                enriched["health_timestamp"] = health_row.get("event_timestamp")
+                enriched["health_evidence"] = health_row.get("evidence") or {}
             enriched["ui"] = _audit_ui_detail(row)
             return {
                 "model": MODEL,
@@ -1021,10 +1064,18 @@ def historical_session(session_date: str):
 
 
 @router.get("/historical/audit-detail")
-def historical_audit_detail(session_date: str, event_id: str):
-    for row in _with_nifty_points(_all_rows(_historical_audit_path(session_date))):
+def historical_audit_detail(
+    session_date: str, event_id: str, health_event_id: str | None = None
+):
+    rows = _with_nifty_points(_all_rows(_historical_audit_path(session_date)))
+    health_row = next(
+        (row for row in rows if row.get("event_id") == health_event_id), None
+    ) if health_event_id else None
+    for row in rows:
         if row.get("event_id") == event_id:
-            health, support_count = _timeline_health(row)
+            health_row = _matching_health_detail(row, health_row)
+            health_source = health_row or row
+            health, support_count = _timeline_health(health_source)
             return {
                 "model": MODEL,
                 "mode": "HISTORICAL_REPLAY",
@@ -1032,6 +1083,15 @@ def historical_audit_detail(session_date: str, event_id: str):
                     **row,
                     "health": health,
                     "health_support_count": support_count,
+                    "health_event_id": (
+                        health_row.get("event_id") if health_row else None
+                    ),
+                    "health_timestamp": (
+                        health_row.get("event_timestamp") if health_row else None
+                    ),
+                    "health_evidence": (
+                        health_row.get("evidence") or {} if health_row else None
+                    ),
                     "ui": _audit_ui_detail(row),
                 },
                 "display_owner": _display_owner(row),
