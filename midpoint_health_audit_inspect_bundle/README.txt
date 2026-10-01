@@ -15,7 +15,10 @@ What changes
 - It displays DI spread, combined edge, price momentum, futures/VWAP,
   directional volume, EMA 9/21, MACD, RSI14, scores, ADX and volume ratio.
 - The main audit table combines Time with Session and NIFTY with points from
-  entry, reducing the table from 11 to 9 columns.
+  entry. With the new Health column, the table has 10 compact columns.
+- A Health column displays HEALTHY, UNHEALTHY, or UNAVAILABLE and the recorded
+  core-support count. Non-health events display a dash; health is not carried
+  forward from another minute.
 - Raw evidence remains available.
 
 Safety

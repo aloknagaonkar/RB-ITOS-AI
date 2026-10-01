@@ -12,9 +12,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 BUNDLE = Path(__file__).resolve().parent / "files"
+BUNDLE_VERSION = "V2_HEALTH_COLUMN_MATCHED"
 FILES = (
     Path("backend/market_lab/midpoint_strategy/entry_health_live_v1.py"),
     Path("backend/market_lab/midpoint_strategy/live_shadow_v1.py"),
+    Path("backend/market_lab/midpoint_strategy/live_shadow_ui.py"),
     Path("frontend/src/midpointStrategyShadow.tsx"),
     Path("frontend/src/midpointStrategyShadow.css"),
     Path("tests/test_midpoint_health_audit_inspect.py"),
@@ -27,6 +29,7 @@ def run(command: list[str], *, cwd: Path = ROOT) -> None:
 
 
 def main() -> int:
+    print("Bundle:", BUNDLE_VERSION, flush=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     backup = ROOT / "data" / "backups" / f"midpoint-health-audit-{stamp}"
     copied: list[Path] = []
@@ -65,6 +68,7 @@ def main() -> int:
                 "py_compile",
                 "backend/market_lab/midpoint_strategy/entry_health_live_v1.py",
                 "backend/market_lab/midpoint_strategy/live_shadow_v1.py",
+                "backend/market_lab/midpoint_strategy/live_shadow_ui.py",
             ]
         )
         run(["npm", "run", "build"], cwd=ROOT / "frontend")
@@ -81,7 +85,7 @@ def main() -> int:
         raise
 
     print("PASS: Midpoint Trade Health evidence added to Audit Inspect.")
-    print("Layout: Time/Session and NIFTY/delta are combined columns.")
+    print("Layout: combined columns plus event-level Health status and support count.")
     print("Safety: observation only; no veto, baseline exit, order or quantity changed.")
     print("API and workers were not restarted.")
     if backup.exists():

@@ -75,3 +75,9 @@
 .mp-combined-cell{min-width:128px;text-align:left!important}
 .mp-combined-cell b,.mp-combined-cell small{display:block}
 .mp-combined-cell small{margin-top:3px;color:#7893a3;font-size:8px;white-space:nowrap}
+.mp-health-cell{min-width:104px}
+.mp-health-cell small{display:block;margin-top:4px;color:#7893a3;font-size:8px;white-space:nowrap}
+.mp-health-badge{display:inline-block;padding:4px 7px;border:1px solid #3d5662;border-radius:10px;background:#172a34;color:#9cb2bd;font-size:8px;font-weight:700;letter-spacing:.35px}
+.mp-health-badge.healthy{border-color:#2f6859;background:#12352e;color:#79d8b5}
+.mp-health-badge.unhealthy{border-color:#703a44;background:#3a2026;color:#ef98a5}
+.mp-health-badge.unavailable{border-color:#6b5936;background:#302819;color:#d8b76d}

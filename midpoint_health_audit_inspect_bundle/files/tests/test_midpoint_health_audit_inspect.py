@@ -44,4 +44,32 @@ def test_primary_audit_uses_compact_combined_columns():
     assert "Time / Session" in source
     assert "NIFTY / Δ from entry" in source
     assert 'className="mp-combined-cell"' in source
-    assert "colSpan={9}" in source
+    assert "<th>Health</th>" in source
+    assert "health_support_count" in source
+    assert "colSpan={10}" in source
+    assert "event.health??e.health" in source
+    assert "event.health_support_count??e.support_count" in source
+
+
+def test_timeline_projects_recorded_health_without_forward_fill():
+    from market_lab.midpoint_strategy.live_shadow_ui import _timeline_projection
+
+    rows = [
+        {
+            "event_id": "health",
+            "event_timestamp": "2026-10-01T09:30:00+05:30",
+            "event_type": "ENTRY_HEALTH_SNAPSHOT",
+            "evidence": {"health": "HEALTHY", "support_count": 2},
+        },
+        {
+            "event_id": "ordinary",
+            "event_timestamp": "2026-10-01T09:31:00+05:30",
+            "event_type": "MIDPOINT_BREAK",
+            "evidence": {},
+        },
+    ]
+    projected = _timeline_projection(rows)
+    assert projected[0]["health"] == "HEALTHY"
+    assert projected[0]["health_support_count"] == 2
+    assert projected[1]["health"] is None
+    assert projected[1]["health_support_count"] is None
