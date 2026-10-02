@@ -111,3 +111,27 @@ else
 fi
 # ===== END LIVE SHADOW WORKER V1 =====
 
+# ===== MIDPOINT HISTORICAL AUTO-PUBLISHER =====
+PUBLISHER_PID_FILE="data/midpoint-historical-publisher.pid"
+if [ -f "$PUBLISHER_PID_FILE" ]; then
+    PUBLISHER_PID="$(cat "$PUBLISHER_PID_FILE" 2>/dev/null || true)"
+    if [ -n "$PUBLISHER_PID" ] && kill -0 "$PUBLISHER_PID" 2>/dev/null; then
+        kill "$PUBLISHER_PID" 2>/dev/null || true
+        for _ in $(seq 1 20); do
+            if ! kill -0 "$PUBLISHER_PID" 2>/dev/null; then
+                break
+            fi
+            sleep 0.25
+        done
+        if kill -0 "$PUBLISHER_PID" 2>/dev/null; then
+            kill -9 "$PUBLISHER_PID" 2>/dev/null || true
+        fi
+        echo "midpoint-history: publisher stopped (PID $PUBLISHER_PID)"
+    else
+        echo "midpoint-history: stale publisher pid"
+    fi
+    rm -f "$PUBLISHER_PID_FILE"
+else
+    echo "midpoint-history: publisher not running"
+fi
+# ===== END MIDPOINT HISTORICAL AUTO-PUBLISHER =====

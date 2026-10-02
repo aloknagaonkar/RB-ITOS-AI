@@ -581,6 +581,17 @@ def build_historical_directional_candles(session_date: str) -> dict[str, Any]:
 
     path = HIST_ROOT / session_date / "directional-candle-by-candle.json"
     if not path.is_file():
+        live = build_live_directional_candles(session_date)
+        if live.get("rows"):
+            return {
+                **live,
+                "mode": "HISTORICAL_LIVE_CAPTURE",
+                "warning": (
+                    "Historical view reconstructed from recorded directional live "
+                    "audit/evidence for this session. No broker call or synthetic "
+                    "strategy decision was made."
+                ),
+            }
         raise HTTPException(404, f"No directional candle replay evidence for {session_date}.")
 
     data = json.loads(path.read_text(encoding="utf-8"))

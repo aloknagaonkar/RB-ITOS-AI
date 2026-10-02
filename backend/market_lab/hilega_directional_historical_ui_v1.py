@@ -8,6 +8,9 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Query
 
+from .hilega_directional_trade_dashboard_v1 import project_directional_shadow_dashboard
+from .live_shadow_step_audit_v1 import ShadowStepAuditStoreV1
+
 router = APIRouter(
     prefix="/api/live-shadow/hilega-historical",
     tags=["hilega-historical-directional"],
@@ -18,6 +21,9 @@ DIRECTIONAL_ROOT = ROOT / "hilega-directional-replay-v1"
 CE_ROOT = ROOT / "hilega-directional-ce-shadow-v1"
 PE_ROOT = ROOT / "hilega-directional-pe-shadow-v1"
 IST = ZoneInfo("Asia/Kolkata")
+LIVE_DIRECTIONAL_AUDIT = Path(
+    "data/live-observation/hilega-directional-v1/step-audit.jsonl"
+)
 
 
 def _csv_rows(path: Path) -> list[dict[str, str]]:
@@ -50,6 +56,55 @@ def _int(value: Any) -> int | None:
 
 def _accepted_directional_trades(session_date: str) -> list[dict[str, str]]:
     return _csv_rows(DIRECTIONAL_ROOT / session_date / "directional-trades.csv")
+
+
+def _record_day(row: dict[str, Any]) -> str | None:
+    payload = row.get("payload") or {}
+    for value in (
+        payload.get("session_date"), payload.get("bar_timestamp"),
+        payload.get("signal_bar"), payload.get("cutoff_timestamp"),
+        row.get("checkpoint"), row.get("event_time"),
+    ):
+        if isinstance(value, str) and len(value) >= 10:
+            return value[:10]
+    return None
+
+
+def _live_directional_dashboard(session_date: str) -> dict[str, Any] | None:
+    if not LIVE_DIRECTIONAL_AUDIT.is_file():
+        return None
+    rows = ShadowStepAuditStoreV1(LIVE_DIRECTIONAL_AUDIT).read_all()
+    session_rows = [row for row in rows if _record_day(row) == session_date]
+    if not session_rows:
+        return None
+    dashboard = project_directional_shadow_dashboard(session_rows)
+    trades = dashboard.get("trades") or []
+    bullish = [t for t in trades if str(t.get("direction") or "").upper() == "BULLISH"]
+    bearish = [t for t in trades if str(t.get("direction") or "").upper() == "BEARISH"]
+    return {
+        **dashboard,
+        "model": "HILEGA_DIRECTIONAL_HISTORICAL_DASHBOARD_V2",
+        "session_date": session_date,
+        "historical_source": "DIRECTIONAL_LIVE_AUDIT",
+        "directional_trade_count": len(trades),
+        "accepted_bullish_trades": len(bullish),
+        "accepted_bearish_trades": len(bearish),
+        "by_direction": {
+            "BULLISH": {
+                "accepted_trade_count": len(bullish),
+                "projected_trade_count": len(bullish),
+            },
+            "BEARISH": {
+                "accepted_trade_count": len(bearish),
+                "projected_trade_count": len(bearish),
+            },
+        },
+        "coverage_note": (
+            "Exact recorded directional live shadow lifecycle for this session. "
+            "Bullish CE and bearish PE ATM±2 evidence is shown when audited; "
+            "missing premiums remain unavailable and are never synthesized."
+        ),
+    }
 
 
 def _accepted_entry_times(rows: list[dict[str, str]], direction: str) -> set[str]:
@@ -202,6 +257,9 @@ def build_directional_historical_dashboard(session_date: str) -> dict[str, Any]:
 
     directional_file = DIRECTIONAL_ROOT / session_date / "directional-trades.csv"
     if not directional_file.is_file():
+        live = _live_directional_dashboard(session_date)
+        if live is not None:
+            return live
         raise HTTPException(
             404,
             f"No directional replay evidence for {session_date}. "

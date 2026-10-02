@@ -44,6 +44,94 @@ def _load_jsonl(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def _market_health_payload(audit_path: Path) -> dict[str, Any] | None:
+    path = audit_path.with_name("market-health.json")
+    if not path.exists():
+        return None
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _market_health_timeline(audit_path: Path) -> list[dict[str, Any]]:
+    """Project the separate minute heartbeat log into presentation rows.
+
+    These rows are not strategy decisions and never enter the immutable audit.
+    They exist only so the live candle-by-candle table continues moving when
+    no Midpoint entry or lifecycle event fires.
+    """
+    path = audit_path.with_name("market-health.jsonl")
+    try:
+        rows = _load_jsonl(path)
+    except HTTPException:
+        # Presentation history must never make the decision-audit endpoint fail.
+        return []
+    rows = _recent_rows(rows, keep=2)
+    projected: list[dict[str, Any]] = []
+    for row in rows:
+        directions = row.get("directions")
+        directions = directions if isinstance(directions, dict) else {}
+        bullish = (
+            directions.get("bullish")
+            if isinstance(directions.get("bullish"), dict)
+            else {}
+        )
+        bearish = (
+            directions.get("bearish")
+            if isinstance(directions.get("bearish"), dict)
+            else {}
+        )
+        timestamp = str(row.get("timestamp") or "")
+        projected.append({
+            "event_id": f"market-health:{timestamp}",
+            "session_date": row.get("session_date") or _row_day(row),
+            "timestamp": timestamp,
+            "event_type": "MARKET_HEALTH_MINUTE",
+            "family": None,
+            "display_owner": "MARKET",
+            "direction": "BOTH",
+            "state_before": None,
+            "state_after": "OBSERVED",
+            "result": "DUAL_DIRECTION_HEALTH",
+            "reason": "COMPLETED_ONE_MINUTE_HEALTH",
+            "underlying_price": row.get("underlying_close"),
+            "directional_points": None,
+            "nifty_points_from_entry": None,
+            "nifty_entry_price": None,
+            "reference_type": None,
+            "health": None,
+            "health_support_count": None,
+            "bullish_health": bullish.get("health"),
+            "bullish_health_support_count": bullish.get("support_count"),
+            "bearish_health": bearish.get("health"),
+            "bearish_health_support_count": bearish.get("support_count"),
+            "health_event_id": None,
+            "health_timestamp": timestamp,
+            "is_health_minute": True,
+            "futures_close": row.get("futures_close"),
+            "futures_vwap": row.get("futures_vwap"),
+            "bullish_health_detail": bullish,
+            "bearish_health_detail": bearish,
+        })
+    return projected
+
+
+def _combined_live_timeline(audit_path: Path = AUDIT_PATH) -> list[dict[str, Any]]:
+    decisions = _decision_timeline_projection(
+        _with_nifty_points(_recent_rows(_all_rows(audit_path), keep=2))
+    )
+    minutes = _market_health_timeline(audit_path)
+    combined = [*decisions, *minutes]
+    combined.sort(key=lambda row: (
+        str(row.get("timestamp") or ""),
+        0 if row.get("is_health_minute") else 1,
+        str(row.get("event_id") or ""),
+    ))
+    return combined
+
+
 def _row_day(row: dict[str, Any]) -> str | None:
     for key in ("session_date", "event_timestamp", "source_candle_timestamp"):
         value = str(row.get(key) or "")
@@ -80,12 +168,26 @@ def _latest_any(rows, types):
     return None
 
 
+def _causal_option_tapes(payload: dict[str, Any], as_of: str) -> list[dict]:
+    """Sort eligible tapes by entry time, never by JSON append order."""
+    return sorted(
+        (tape for tape in payload["tapes"]
+         if tape["entry_timestamp"] <= as_of),
+        key=lambda tape: (
+            str(tape.get("entry_timestamp") or ""),
+            str(tape.get("entry_event_id") or ""),
+        ),
+    )
+
+
 def _latest_family_state(rows):
     for row in reversed(rows):
         event_type = str(row.get("event_type") or "")
         if (
             event_type.startswith("NORMAL_B_PROVED_")
             or event_type == "DEGRADED_EXIT_CANDIDATE_TRIGGERED"
+            or event_type.startswith("HEALTH_")
+            or event_type.startswith("CONTINUOUS_HEALTH_")
         ):
             continue
         if row.get("state_after"):
@@ -105,35 +207,226 @@ def _display_owner(row: dict[str, Any]) -> str | None:
     return str(family) if family is not None else None
 
 
+_HEALTH_EVENT_TYPES = {
+    "PRE_ENTRY_HEALTH_SNAPSHOT",
+    "ENTRY_HEALTH_SNAPSHOT",
+    "T5_HEALTH_CHECK",
+    "T5_TWO_OF_THREE_EXIT_CANDIDATE",
+    "T5_COMBINED_EDGE_EXIT_CANDIDATE",
+    "T5_PROVED_BYPASS",
+    "T5_HEALTH_UNAVAILABLE",
+}
+
+# These are health observations, not lifecycle decisions.  They remain in the
+# immutable audit and in the full minute replay, but the primary decision table
+# projects them into its dedicated Health column instead of allowing them to
+# replace Event / Reason rows.
+_HEALTH_SNAPSHOT_ONLY_TYPES = {
+    "PRE_ENTRY_HEALTH_SNAPSHOT",
+    "ENTRY_HEALTH_SNAPSHOT",
+    "T5_HEALTH_CHECK",
+    "T5_PROVED_BYPASS",
+    "T5_HEALTH_UNAVAILABLE",
+    "CONTINUOUS_HEALTH_CHECK",
+}
+
+_TRADE_ENTRY_TYPES = {
+    "A_ENTRY", "B_ENTRY", "E_ENTRY", "C_ENTRY", "PM_B_ENTRY", "PM_E_ENTRY",
+    "B_REARM_ENTRY", "E_REARM_ENTRY",
+}
+_TRADE_TERMINAL_TYPES = {"STRUCTURAL_TERMINAL", "CAP20_SHADOW_EXIT"}
+
+
+def _trade_identity(row: dict[str, Any]) -> tuple[Any, ...]:
+    """Identity shared by one independently managed trade lane."""
+    return (
+        _row_day(row),
+        row.get("family"),
+        row.get("direction"),
+        row.get("reference_type"),
+    )
+
+
+def _selected_trade_view(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Return one causally coherent lane for the dashboard summary.
+
+    A, canonical B/E, repeated B/E and PM lifecycles may coexist in the audit.
+    Global ``latest_*`` fields therefore cannot safely be combined. Events are
+    assigned to the newest still-open entry with the exact same session,
+    family, direction and reference. The newest active lane wins; otherwise
+    the most recently updated completed lane is shown.
+    """
+    lanes: list[dict[str, Any]] = []
+    open_by_identity: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
+
+    for order, original in enumerate(rows):
+        event_type = str(original.get("event_type") or "").upper()
+        identity = _trade_identity(original)
+        if event_type in _TRADE_ENTRY_TYPES:
+            lane = {
+                "identity": identity,
+                "entry": dict(original),
+                "events": [dict(original)],
+                "entry_order": order,
+                "last_order": order,
+                "terminal": None,
+            }
+            lanes.append(lane)
+            open_by_identity[identity].append(lane)
+            continue
+
+        candidates = open_by_identity.get(identity) or []
+        if not candidates:
+            continue
+        lane = candidates[-1]
+        lane["events"].append(dict(original))
+        lane["last_order"] = order
+        if event_type in _TRADE_TERMINAL_TYPES:
+            lane["terminal"] = dict(original)
+            candidates.pop()
+
+    if not lanes:
+        return None
+    latest_day = max(str(lane["identity"][0] or "") for lane in lanes)
+    current_day_lanes = [
+        lane for lane in lanes if str(lane["identity"][0] or "") == latest_day
+    ]
+    active = [lane for lane in current_day_lanes if lane["terminal"] is None]
+    selected = max(active or current_day_lanes, key=lambda lane: lane["last_order"])
+    entry = selected["entry"]
+    entry_price = _num(entry.get("underlying_price"))
+    direction = entry.get("direction")
+    sign = 1 if direction == "BULLISH" else -1
+    lane_rows: list[dict[str, Any]] = []
+    for original in selected["events"]:
+        row = dict(original)
+        price = _num(row.get("underlying_price"))
+        points = (
+            round(sign * (price - entry_price), 4)
+            if entry_price is not None and price is not None
+            and direction in {"BULLISH", "BEARISH"}
+            else None
+        )
+        row["nifty_points_from_entry"] = points
+        row["nifty_entry_price"] = entry_price if points is not None else None
+        lane_rows.append(row)
+
+    def latest(*types: str) -> dict[str, Any] | None:
+        wanted = set(types)
+        return next(
+            (row for row in reversed(lane_rows)
+             if str(row.get("event_type") or "").upper() in wanted),
+            None,
+        )
+
+    health = next(
+        (row for row in reversed(lane_rows)
+         if _timeline_health(row)[0] is not None),
+        None,
+    )
+    return {
+        "trade_id": entry.get("event_id"),
+        "status": "ACTIVE" if selected["terminal"] is None else "CLOSED",
+        "entry": lane_rows[0],
+        "latest_event": lane_rows[-1],
+        "plus20": latest("PLUS20_PROOF"),
+        "classifier": latest("RUNNER_CLASSIFICATION"),
+        "management_route": latest("MANAGEMENT_ROUTE_SELECTED"),
+        "degraded": latest("DEGRADED_STARTED"),
+        "degraded_exit": latest("DEGRADED_EXIT_CANDIDATE_TRIGGERED"),
+        "recovery": latest("DEGRADED_TARGET_RECOVERED"),
+        "rescue": latest("CAP20_RESCUE_TRIGGERED", "CAP20_SHADOW_EXIT"),
+        "normal_b_step": latest(
+            "NORMAL_B_PROVED_STARTED", "NORMAL_B_PROVED_TIER2",
+            "NORMAL_B_PROVED_TIER3", "NORMAL_B_PROVED_EXIT_CANDIDATE",
+            "NORMAL_B_PROVED_UNAVAILABLE",
+        ),
+        "health": health,
+        "health_immediate_exit": latest(
+            "HEALTH_IMMEDIATE_CONFIRMATION_EXIT_CANDIDATE"
+        ),
+        "health_two_close_exit": latest(
+            "HEALTH_TWO_CLOSE_CONFIRMATION_EXIT_CANDIDATE"
+        ),
+        "terminal": latest(*_TRADE_TERMINAL_TYPES),
+        "event_count": len(lane_rows),
+    }
+
+
+def _timeline_health(row: dict[str, Any]) -> tuple[str | None, int | None]:
+    """Project only health evidence recorded on this exact event."""
+    evidence = row.get("evidence")
+    evidence = evidence if isinstance(evidence, dict) else {}
+    event_type = str(row.get("event_type") or "").upper()
+    if event_type not in _HEALTH_EVENT_TYPES and "health" not in evidence:
+        return None, None
+
+    health = evidence.get("health")
+    support_count = evidence.get("support_count")
+    if health is None and evidence.get("available") is False:
+        health = "UNAVAILABLE"
+    if health is None and evidence.get("failure_count") is not None:
+        failures = int(evidence["failure_count"])
+        health = "UNHEALTHY" if failures >= 2 else "HEALTHY"
+        support_count = 3 - failures if support_count is None else support_count
+    if health is None and event_type in _HEALTH_EVENT_TYPES:
+        result = str(row.get("result") or "").upper()
+        if result in {"HEALTHY", "UNHEALTHY", "UNAVAILABLE"}:
+            health = result
+
+    return (
+        str(health) if health is not None else None,
+        int(support_count) if support_count is not None else None,
+    )
+
+
+def _timeline_dual_health(row: dict[str, Any]) -> dict[str, Any]:
+    """Flatten both causal directional labels recorded for this minute."""
+    evidence = row.get("evidence")
+    evidence = evidence if isinstance(evidence, dict) else {}
+    dual = evidence.get("dual_health")
+    dual = dual if isinstance(dual, dict) else {}
+    bullish = dual.get("bullish") if isinstance(dual.get("bullish"), dict) else {}
+    bearish = dual.get("bearish") if isinstance(dual.get("bearish"), dict) else {}
+    health, support_count = _timeline_health(row)
+    if not dual and str(row.get("direction") or "").upper() == "BULLISH":
+        bullish = {"health": health, "support_count": support_count}
+    elif not dual and str(row.get("direction") or "").upper() == "BEARISH":
+        bearish = {"health": health, "support_count": support_count}
+    return {
+        "bullish_health": bullish.get("health"),
+        "bullish_health_support_count": bullish.get("support_count"),
+        "bearish_health": bearish.get("health"),
+        "bearish_health_support_count": bearish.get("support_count"),
+    }
+
+
 def _with_nifty_points(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Presentation-only, close-based points for each event of an active B/E leg."""
-    active: dict[str, Any] | None = None
-    day: str | None = None
+    """Presentation-only close points, independently tracked per trade lane."""
+    active: dict[tuple[Any, ...], dict[str, Any]] = {}
     projected = []
     for original in rows:
         row = dict(original)
-        event_day = _row_day(row)
-        if event_day != day:
-            active = None
-            day = event_day
         kind = row.get("event_type")
-        if kind in (
-            "B_ENTRY", "E_ENTRY", "C_ENTRY", "PM_B_ENTRY", "PM_E_ENTRY",
-            "B_REARM_ENTRY", "E_REARM_ENTRY",
-        ):
+        identity = _trade_identity(row)
+        if kind in _TRADE_ENTRY_TYPES:
             entry_price = _num(row.get("underlying_price"))
-            active = {"entry": entry_price, "direction": row.get("direction"),
-                      "family": row.get("family")} if entry_price is not None else None
+            if entry_price is not None:
+                active[identity] = {
+                    "entry": entry_price,
+                    "direction": row.get("direction"),
+                }
+        lane = active.get(identity)
         price = _num(row.get("underlying_price"))
         move = None
-        if active and price is not None and row.get("direction") == active["direction"] and row.get("family") == active["family"]:
-            sign = 1 if active["direction"] == "BULLISH" else -1
-            move = round(sign * (price - active["entry"]), 4)
+        if lane and price is not None:
+            sign = 1 if lane["direction"] == "BULLISH" else -1
+            move = round(sign * (price - lane["entry"]), 4)
         row["nifty_points_from_entry"] = move
-        row["nifty_entry_price"] = active["entry"] if move is not None else None
+        row["nifty_entry_price"] = lane["entry"] if move is not None else None
         projected.append(row)
-        if kind in ("CAP20_RESCUE_TRIGGERED", "CAP20_SHADOW_EXIT", "STRUCTURAL_TERMINAL"):
-            active = None
+        if kind in _TRADE_TERMINAL_TYPES:
+            active.pop(identity, None)
     return projected
 
 
@@ -156,9 +449,117 @@ def _timeline_projection(rows):
             "nifty_points_from_entry": r.get("nifty_points_from_entry"),
             "nifty_entry_price": r.get("nifty_entry_price"),
             "reference_type": r.get("reference_type"),
+            "health": _timeline_health(r)[0],
+            "health_support_count": _timeline_health(r)[1],
+            **_timeline_dual_health(r),
         }
         for r in rows
     ]
+
+
+def _decision_timeline_projection(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep lifecycle rows primary and causally project health onto every signal.
+
+    The raw audit is deliberately unchanged.  Each decision receives the latest
+    already-observed health for its own lane.  A snapshot written after several
+    decisions for the same completed minute is attached to every matching
+    decision in that minute, but never rewrites an earlier minute (no future
+    leakage).  Candidate exit events remain first-class decision rows.
+    """
+    output: list[dict[str, Any]] = []
+    latest_health: dict[tuple[Any, ...], dict[str, Any]] = {}
+    active_lanes: set[tuple[Any, ...]] = set()
+    decisions_by_lane_minute: dict[tuple[tuple[Any, ...], Any], list[int]] = defaultdict(list)
+
+    def lane(row: dict[str, Any]) -> tuple[Any, ...]:
+        # Family is deliberately excluded: midpoint/boundary qualification can
+        # be logged under B before the same reference is finally owned by E/A.
+        # The reference and its direction are the stable trade identity.
+        return (
+            _row_day(row),
+            row.get("direction"),
+            row.get("reference_type"),
+        )
+
+    def health_payload(row: dict[str, Any]) -> dict[str, Any]:
+        health, support_count = _timeline_health(row)
+        return {
+            "health": health,
+            "health_support_count": support_count,
+            **_timeline_dual_health(row),
+            "health_event_id": row.get("event_id"),
+            "health_timestamp": row.get("event_timestamp"),
+        }
+
+    def attach(index: int, payload: dict[str, Any]) -> None:
+        output[index].update(payload)
+
+    for row in rows:
+        event_type = str(row.get("event_type") or "").upper()
+        row_lane = lane(row)
+        row_minute = row.get("event_timestamp")
+        is_entry = event_type in {
+            "A_ENTRY", "B_ENTRY", "E_ENTRY", "C_ENTRY", "PM_B_ENTRY",
+            "PM_E_ENTRY", "B_REARM_ENTRY", "E_REARM_ENTRY",
+        }
+        if is_entry:
+            active_lanes.add(row_lane)
+        if event_type in _HEALTH_SNAPSHOT_ONLY_TYPES:
+            payload = health_payload(row)
+            latest_health[row_lane] = payload
+            for target in decisions_by_lane_minute.get((row_lane, row_minute), []):
+                attach(target, payload)
+            continue
+
+        projected = _timeline_projection([row])[0]
+        if projected.get("health") is not None:
+            payload = health_payload(row)
+            previous = latest_health.get(row_lane)
+            if (
+                previous is not None
+                and payload.get("health_support_count") is None
+            ):
+                # Compact exit-candidate events carry the health label but do
+                # not repeat the full vote evidence.  Preserve the latest
+                # already-observed same-lane snapshot instead of replacing it
+                # with an incomplete value.  The current label is retained;
+                # metrics and the inspect link remain tied to the causal
+                # completed health check.
+                payload = {
+                    **previous,
+                    "health": payload.get("health") or previous.get("health"),
+                }
+            latest_health[row_lane] = payload
+            projected.update(payload)
+        elif row_lane in active_lanes and row_lane in latest_health:
+            projected.update(latest_health[row_lane])
+        else:
+            projected["health_event_id"] = None
+            projected["health_timestamp"] = None
+        output.append(projected)
+        decisions_by_lane_minute[(row_lane, row_minute)].append(len(output) - 1)
+        if event_type in {"STRUCTURAL_TERMINAL", "CAP20_SHADOW_EXIT"}:
+            active_lanes.discard(row_lane)
+            latest_health.pop(row_lane, None)
+
+    return output
+
+
+def _matching_health_detail(
+    decision: dict[str, Any], candidate: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """Accept only same-lane health known no later than the decision minute."""
+    if candidate is None:
+        return None
+    same_lane = (
+        _row_day(candidate) == _row_day(decision)
+        and candidate.get("direction") == decision.get("direction")
+        and candidate.get("reference_type") == decision.get("reference_type")
+    )
+    causal = str(candidate.get("event_timestamp") or "") <= str(
+        decision.get("event_timestamp") or ""
+    )
+    return candidate if same_lane and causal else None
 
 
 def _status_payload(rows, mode, *, audit_path: Path | None = None):
@@ -180,10 +581,14 @@ def _status_payload(rows, mode, *, audit_path: Path | None = None):
         ),
         "event_counts": dict(Counter(str(r.get("event_type")) for r in rows)),
         "family_b_state": _latest_family_state(rows),
+        "selected_trade": _selected_trade_view(rows),
+        "system_health": (
+            _market_health_payload(resolved_path) if mode == "LIVE" else None
+        ),
         "latest_event": rows[-1] if rows else None,
         "latest_entry": _latest_any(
             rows, (
-                "B_ENTRY", "E_ENTRY", "C_ENTRY", "PM_B_ENTRY", "PM_E_ENTRY",
+                "A_ENTRY", "B_ENTRY", "E_ENTRY", "C_ENTRY", "PM_B_ENTRY", "PM_E_ENTRY",
                 "B_REARM_ENTRY", "E_REARM_ENTRY",
             )
         ),
@@ -198,6 +603,26 @@ def _status_payload(rows, mode, *, audit_path: Path | None = None):
         "latest_degraded": _latest(rows, "DEGRADED_STARTED"),
         "latest_degraded_exit_candidate": _latest(
             rows, "DEGRADED_EXIT_CANDIDATE_TRIGGERED"
+        ),
+        "latest_t5_health_check": _latest(rows, "T5_HEALTH_CHECK"),
+        "latest_t5_two_of_three": _latest(
+            rows, "T5_TWO_OF_THREE_EXIT_CANDIDATE"
+        ),
+        "latest_t5_combined_edge": _latest(
+            rows, "T5_COMBINED_EDGE_EXIT_CANDIDATE"
+        ),
+        "latest_t5_proved_bypass": _latest(rows, "T5_PROVED_BYPASS"),
+        "latest_t5_unavailable": _latest(rows, "T5_HEALTH_UNAVAILABLE"),
+        "latest_pre_entry_health": _latest(
+            rows, "PRE_ENTRY_HEALTH_SNAPSHOT"
+        ),
+        "latest_entry_health": _latest(rows, "ENTRY_HEALTH_SNAPSHOT"),
+        "latest_continuous_health": _latest(rows, "CONTINUOUS_HEALTH_CHECK"),
+        "latest_health_immediate_exit": _latest(
+            rows, "HEALTH_IMMEDIATE_CONFIRMATION_EXIT_CANDIDATE"
+        ),
+        "latest_health_two_close_exit": _latest(
+            rows, "HEALTH_TWO_CLOSE_CONFIRMATION_EXIT_CANDIDATE"
         ),
         "latest_recovery": _latest(rows, "DEGRADED_TARGET_RECOVERED"),
         "latest_rescue": _latest_any(rows, ("CAP20_RESCUE_TRIGGERED", "CAP20_SHADOW_EXIT")),
@@ -485,6 +910,18 @@ def _audit_ui_detail(row: dict[str, Any]) -> dict[str, Any]:
             )
         )
 
+    if event_type == "A_ENTRY":
+        strategy_checks.append(
+            _check(
+                "Family A parallel entry",
+                passed=True,
+                observed="A ENTRY · OBSERVATION ONLY",
+                required=(
+                    "fresh Candidate A at boundary; canonical B/E lane remains unchanged"
+                ),
+            )
+        )
+
     if event_type == "B_ENTRY":
         strategy_checks.append(
             _check(
@@ -618,6 +1055,9 @@ def _presentation_for_replay(
         by_minute[_minute_token(event.get("timestamp"))].append(event)
 
     active: dict[str, Any] | None = None
+    active_health: str | None = None
+    active_health_support: int | None = None
+    active_health_event_id: str | None = None
     result: list[dict[str, Any]] = []
 
     for minute in minutes:
@@ -630,7 +1070,15 @@ def _presentation_for_replay(
         for event in events:
             et = str(event.get("event_type") or "")
 
-            if et in ("B_ENTRY", "E_ENTRY"):
+            if event.get("health") is not None:
+                active_health = str(event.get("health"))
+                active_health_support = event.get("health_support_count")
+                active_health_event_id = event.get("event_id")
+
+            if et in (
+                "A_ENTRY", "B_ENTRY", "E_ENTRY", "C_ENTRY", "PM_B_ENTRY",
+                "PM_E_ENTRY", "B_REARM_ENTRY", "E_REARM_ENTRY",
+            ):
                 active = {
                     "family": event.get("family"),
                     "direction": event.get("direction"),
@@ -705,10 +1153,17 @@ def _presentation_for_replay(
                     if raw == 0
                     else "NOT AVAILABLE"
                 ),
+                "health": active_health,
+                "health_support_count": active_health_support,
+                "health_event_id": active_health_event_id,
             }
 
             item["nifty_points_from_entry"] = round(directional_move, 4) if directional_move is not None else None
             item["nifty_entry_price"] = entry
+
+        item["health"] = active_health if active is not None else None
+        item["health_support_count"] = active_health_support if active is not None else None
+        item["health_event_id"] = active_health_event_id if active is not None else None
 
         terminal = any(
             str(e.get("event_type") or "")
@@ -726,6 +1181,9 @@ def _presentation_for_replay(
 
         if terminal:
             active = None
+            active_health = None
+            active_health_support = None
+            active_health_event_id = None
 
     return result
 
@@ -745,15 +1203,28 @@ def events(limit: Annotated[int, Query(ge=1, le=2000)] = 200, event_type: str | 
 
 @router.get("/timeline")
 def timeline(limit: Annotated[int, Query(ge=1, le=5000)] = 200):
-    rows = _with_nifty_points(_rows())[-limit:]
-    return {"model": MODEL, "count": len(rows), "timeline": _timeline_projection(rows)}
+    projected = _combined_live_timeline()[-limit:]
+    return {"model": MODEL, "count": len(projected), "timeline": projected}
 
 
 @router.get("/audit-detail")
-def audit_detail(event_id: str):
-    for row in _with_nifty_points(_all_rows()):
+def audit_detail(event_id: str, health_event_id: str | None = None):
+    rows = _with_nifty_points(_all_rows())
+    health_row = next(
+        (row for row in rows if row.get("event_id") == health_event_id), None
+    ) if health_event_id else None
+    for row in rows:
         if row.get("event_id") == event_id:
+            health_row = _matching_health_detail(row, health_row)
             enriched = dict(row)
+            health_source = health_row or row
+            health, support_count = _timeline_health(health_source)
+            enriched["health"] = health
+            enriched["health_support_count"] = support_count
+            if health_row is not None:
+                enriched["health_event_id"] = health_row.get("event_id")
+                enriched["health_timestamp"] = health_row.get("event_timestamp")
+                enriched["health_evidence"] = health_row.get("evidence") or {}
             enriched["ui"] = _audit_ui_detail(row)
             return {
                 "model": MODEL,
@@ -780,7 +1251,7 @@ def option_observation(session_date: str, as_of: str):
                 "reason": "EXACT_OPTION_TAPE_NOT_MATERIALIZED", "as_of": as_of, "legs": []}
     try:
         payload = json.loads(path.read_text())
-        tapes = [t for t in payload["tapes"] if t["entry_timestamp"] <= as_of]
+        tapes = _causal_option_tapes(payload, as_of)
         if not tapes:
             return {"model": "MIDPOINT_EXACT_OPTION_OBSERVATION_V1", "status": "NO_ENTRY_YET",
                     "as_of": as_of, "legs": []}
@@ -810,6 +1281,27 @@ def _historical_audit_path(session_date: str) -> Path:
     if not p.exists():
         raise HTTPException(404, "Midpoint historical audit not materialized")
     return p
+
+
+def _historical_health_path(session_date: str) -> Path:
+    return _historical_session_dir(session_date) / "trade-health.jsonl"
+
+
+def _historical_rows(session_date: str) -> list[dict[str, Any]]:
+    """Merge immutable strategy audit with a separate health overlay.
+
+    Health rows sort before decisions from the same completed minute so every
+    same-minute decision can receive that completed-close health without
+    making a later minute visible early.  Neither source file is rewritten.
+    """
+    audit = _all_rows(_historical_audit_path(session_date))
+    health = _load_jsonl(_historical_health_path(session_date))
+    tagged = [(row, 1, index) for index, row in enumerate(audit)]
+    tagged.extend((row, 0, index) for index, row in enumerate(health))
+    tagged.sort(key=lambda item: (
+        str(item[0].get("event_timestamp") or ""), item[1], item[2]
+    ))
+    return [row for row, _, _ in tagged]
 
 
 def _historical_minutes_path(session_date: str) -> Path:
@@ -844,31 +1336,64 @@ def historical_sessions():
 @router.get("/historical/session")
 def historical_session(session_date: str):
     audit_path = _historical_audit_path(session_date)
-    rows = _with_nifty_points(_all_rows(audit_path))
-    projected = _timeline_projection(rows)
+    rows = _with_nifty_points(_historical_rows(session_date))
+    raw_projected = _timeline_projection(rows)
+    projected = _decision_timeline_projection(rows)
     minutes_path = _historical_minutes_path(session_date)
     minutes = _load_jsonl(minutes_path)
-    merged_minutes = _presentation_for_replay(minutes, projected)
+    merged_minutes = _presentation_for_replay(minutes, raw_projected)
     return {
         "model": MODEL,
         "mode": "HISTORICAL_REPLAY",
         "session_date": session_date,
         "status": _status_payload(rows, "HISTORICAL_REPLAY", audit_path=audit_path),
-        "count": len(rows),
+        "count": len(projected),
         "timeline": projected,
         "minute_count": len(merged_minutes),
         "minutes": merged_minutes,
+        "health_overlay": {
+            "available": _historical_health_path(session_date).exists(),
+            "event_count": sum(
+                1 for row in rows
+                if str(row.get("event_type") or "") in _HEALTH_SNAPSHOT_ONLY_TYPES
+            ),
+            "source": "SAME_LIVE_DIRECTIONAL_HEALTH_ENGINE",
+            "observation_only": True,
+        },
     }
 
 
 @router.get("/historical/audit-detail")
-def historical_audit_detail(session_date: str, event_id: str):
-    for row in _with_nifty_points(_all_rows(_historical_audit_path(session_date))):
+def historical_audit_detail(
+    session_date: str, event_id: str, health_event_id: str | None = None
+):
+    rows = _with_nifty_points(_historical_rows(session_date))
+    health_row = next(
+        (row for row in rows if row.get("event_id") == health_event_id), None
+    ) if health_event_id else None
+    for row in rows:
         if row.get("event_id") == event_id:
+            health_row = _matching_health_detail(row, health_row)
+            health_source = health_row or row
+            health, support_count = _timeline_health(health_source)
             return {
                 "model": MODEL,
                 "mode": "HISTORICAL_REPLAY",
-                "event": {**row, "ui": _audit_ui_detail(row)},
+                "event": {
+                    **row,
+                    "health": health,
+                    "health_support_count": support_count,
+                    "health_event_id": (
+                        health_row.get("event_id") if health_row else None
+                    ),
+                    "health_timestamp": (
+                        health_row.get("event_timestamp") if health_row else None
+                    ),
+                    "health_evidence": (
+                        health_row.get("evidence") or {} if health_row else None
+                    ),
+                    "ui": _audit_ui_detail(row),
+                },
                 "display_owner": _display_owner(row),
             }
     raise HTTPException(404, "Midpoint historical audit event not found")

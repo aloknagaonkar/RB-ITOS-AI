@@ -25,6 +25,20 @@ OUT = Path("data/live-observation/midpoint-strategy-v1/option-observation")
 UNDERLYING = "NSE_INDEX|Nifty 50"
 
 
+def sorted_entry_events(rows):
+    """Return causal entry events independent of append/restart audit order."""
+    return sorted([
+        row for row in rows
+        if row.get("event_type") in {
+            "A_ENTRY", "B_ENTRY", "E_ENTRY", "B_REARM_ENTRY", "E_REARM_ENTRY",
+            "PM_B_ENTRY", "PM_E_ENTRY",
+        }
+    ], key=lambda row: (
+        str(row.get("event_timestamp") or ""),
+        str(row.get("event_id") or ""),
+    ))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--session-date", required=True, type=date.fromisoformat)
@@ -36,13 +50,7 @@ def main() -> None:
     if not token:
         raise SystemExit("UPSTOX_ACCESS_TOKEN is required")
     rows = [r for r in load_audit_jsonl(AUDIT) if r.get("session_date") == args.session_date.isoformat()]
-    entries = [
-        r for r in rows
-        if r.get("event_type") in {
-            "B_ENTRY", "E_ENTRY", "B_REARM_ENTRY", "E_REARM_ENTRY",
-            "PM_B_ENTRY", "PM_E_ENTRY",
-        }
-    ]
+    entries = sorted_entry_events(rows)
     if not entries:
         raise SystemExit("No Midpoint B/E entry audit for this date")
     sources = UpstoxLiveShadowSourcesV1(token)

@@ -53,3 +53,27 @@ def test_live_candidates_completed_day_stays_complete(tmp_path, monkeypatch):
     assert len(got) == 1
     assert got[0]["status"] == "COMPLETE"
     assert got[0]["evidence_level"] == "FULL"
+
+
+def test_directional_live_session_auto_promotes_at_cutoff(tmp_path, monkeypatch):
+    path = tmp_path / "directional-step-audit.jsonl"
+    path.write_text("{}\n", encoding="utf-8")
+    day = "2026-10-01"
+    rows = [{
+        "checkpoint": f"{day}T09:20:00+05:30",
+        "stage": "DIRECTIONAL_DECISION",
+        "status": "PROCESSED",
+        "payload": {"bar_timestamp": f"{day}T09:20:00+05:30"},
+    }, {
+        "checkpoint": f"{day}T14:55:00+05:30",
+        "stage": "DIRECTIONAL_SESSION_CUTOFF",
+        "status": "PROCESSED",
+        "payload": {"cutoff_timestamp": f"{day}T14:55:00+05:30"},
+    }]
+    monkeypatch.setattr(mod, "_read_audit", lambda _p: (True, None, rows))
+
+    got = mod._directional_live_candidates(path)
+    assert len(got) == 1
+    assert got[0]["source"] == "DIRECTIONAL_LIVE_SHADOW"
+    assert got[0]["status"] == "COMPLETE"
+    assert got[0]["evidence_level"] == "FULL"

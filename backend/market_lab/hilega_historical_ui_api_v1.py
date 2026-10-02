@@ -3,10 +3,11 @@
 The historical page selects a trading day, not a capture folder.
 
 Source precedence for a selected day:
-1. Rich Phase-7D historical capture
-2. Completed Hilega live-shadow audit
-3. Per-session canonical Hilega replay
-4. 120-session research summary fallback
+1. Current directional live-shadow audit
+2. Rich Phase-7D historical capture
+3. Legacy completed Hilega live-shadow audit
+4. Per-session canonical Hilega replay
+5. 120-session research summary fallback
 
 This module never calls broker APIs, never starts/restarts a worker and never
 submits orders. Existing append-only evidence is read without mutation.
@@ -33,11 +34,15 @@ ROOT = Path("data/historical-evidence")
 REPLAY_ROOT = ROOT / "hilega-milega-replay-v1"
 RESEARCH_ROOT = ROOT / "hilega-milega-bullish-expansion-multisession-v1"
 LIVE_AUDIT = Path("data/live-observation/hilega-milega-v1/step-audit.jsonl")
+DIRECTIONAL_LIVE_AUDIT = Path(
+    "data/live-observation/hilega-directional-v1/step-audit.jsonl"
+)
 
 NAME_RE = re.compile(r"^hilega-phase7d-(\d{4}-\d{2}-\d{2})(?:-[a-zA-Z0-9_-]+)?$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 SOURCE_RANK = {
+    "DIRECTIONAL_LIVE_SHADOW": 500,
     "PHASE7D": 400,
     "LIVE_SHADOW": 300,
     "SESSION_REPLAY": 200,
@@ -53,8 +58,16 @@ def _json_file(path: Path):
 
 
 def _row_day(row: dict) -> str | None:
-    for key in ("checkpoint", "event_time"):
-        value = str(row.get(key) or "")
+    payload = row.get("payload") or {}
+    for value in (
+        row.get("checkpoint"),
+        row.get("event_time"),
+        payload.get("session_date"),
+        payload.get("bar_timestamp"),
+        payload.get("signal_bar"),
+        payload.get("cutoff_timestamp"),
+    ):
+        value = str(value or "")
         if len(value) >= 10 and DATE_RE.fullmatch(value[:10]):
             return value[:10]
     return None
@@ -174,6 +187,51 @@ def _live_candidates(path: Path = LIVE_AUDIT):
     return found
 
 
+def _directional_live_is_complete(rows: list[dict]) -> bool:
+    return any(
+        str(row.get("stage") or "").upper() == "DIRECTIONAL_SESSION_CUTOFF"
+        and str(row.get("status") or "").upper() == "PROCESSED"
+        for row in rows
+    )
+
+
+def _directional_live_candidates(path: Path = DIRECTIONAL_LIVE_AUDIT):
+    """Expose every recorded directional live day without copying evidence."""
+    if not path.is_file():
+        return []
+    chain_ok, chain_issue, rows = _read_audit(path)
+    grouped: dict[str, list[dict]] = defaultdict(list)
+    for row in rows:
+        day = _row_day(row)
+        if day:
+            grouped[day].append(row)
+
+    today = datetime.now(IST).date().isoformat()
+    found = []
+    for day, day_rows in grouped.items():
+        complete = _directional_live_is_complete(day_rows)
+        found.append({
+            "session_date": day,
+            "source": "DIRECTIONAL_LIVE_SHADOW",
+            "source_id": f"directional-live:{day}",
+            "path": path,
+            "manifest": {},
+            "has_report": True,
+            "has_manifest": False,
+            "ce_available": any(
+                "OPTION" in str(row.get("stage") or "").upper()
+                for row in day_rows
+            ),
+            "evidence_level": "FULL" if complete else "PARTIAL",
+            "status": "COMPLETE" if complete else (
+                "LIVE" if day == today else "PARTIAL"
+            ),
+            "live_chain_ok": chain_ok,
+            "live_chain_issue": chain_issue,
+        })
+    return found
+
+
 def _research_files(root: Path = RESEARCH_ROOT):
     return root / "day-summary.csv", root / "trade-expansion-details.csv"
 
@@ -214,9 +272,11 @@ def _research_candidates(root: Path = RESEARCH_ROOT):
 
 
 def _all_candidates(root: Path = ROOT, replay_root: Path = REPLAY_ROOT,
-                    research_root: Path = RESEARCH_ROOT, live_path: Path = LIVE_AUDIT):
+                    research_root: Path = RESEARCH_ROOT, live_path: Path = LIVE_AUDIT,
+                    directional_live_path: Path = DIRECTIONAL_LIVE_AUDIT):
     return (
         _phase7d_candidates(root)
+        + _directional_live_candidates(directional_live_path)
         + _live_candidates(live_path)
         + _replay_candidates(replay_root)
         + _research_candidates(research_root)
@@ -233,9 +293,12 @@ def _best_for_day(rows: list[dict]):
 
 
 def list_sessions(root: Path = ROOT, replay_root: Path = REPLAY_ROOT,
-                  research_root: Path = RESEARCH_ROOT, live_path: Path = LIVE_AUDIT):
+                  research_root: Path = RESEARCH_ROOT, live_path: Path = LIVE_AUDIT,
+                  directional_live_path: Path = DIRECTIONAL_LIVE_AUDIT):
     grouped: dict[str, list[dict]] = defaultdict(list)
-    for row in _all_candidates(root, replay_root, research_root, live_path):
+    for row in _all_candidates(
+        root, replay_root, research_root, live_path, directional_live_path
+    ):
         grouped[row["session_date"]].append(row)
 
     sessions = []
@@ -282,6 +345,96 @@ def _load_audit_candidate(candidate: dict):
         "warning": (
             "Read-only session view. Source evidence is preserved as recorded. "
             "No broker request, replay worker or execution action is started."
+        ),
+    }
+
+
+def _directional_report(row: dict) -> dict:
+    """Project a directional candle into the established audit-table contract."""
+    accepted = [x for x in str(row.get("accepted_events") or "").split(",") if x]
+    transitions = [{
+        "event_time": row.get("bar_timestamp"),
+        "event_type": event,
+        "price": row.get("close"),
+        "source": "DIRECTIONAL_LIVE_AUDIT",
+        "state_before": row.get("owner_before"),
+        "state_after": row.get("owner_after"),
+        "details": {
+            "bullish_state": row.get("bullish_state"),
+            "bearish_state": row.get("bearish_state"),
+            "suppressed_events": row.get("suppressed_events"),
+        },
+    } for event in accepted]
+    selected_route = next((
+        route for route in ("ROUTE_A", "ROUTE_B", "OPENING")
+        if any(route in event for event in accepted)
+    ), None)
+    return {
+        "checkpoint": row.get("bar_timestamp"),
+        "bar": {key: row.get(key) for key in ("open", "high", "low", "close", "volume")},
+        "indicators": {
+            "rsi9": row.get("rsi9"),
+            "ema3_rsi": row.get("ema3_rsi"),
+            "wma21_rsi": row.get("wma21_rsi"),
+        },
+        "conditions": {},
+        "strategy": {
+            "state_before": row.get("owner_before"),
+            "state_after": row.get("owner_after"),
+            "selected_route": selected_route,
+            "events_emitted": accepted,
+            "direction": row.get("owner_after") or row.get("owner_before"),
+            "bullish_state": row.get("bullish_state"),
+            "bearish_state": row.get("bearish_state"),
+            "bullish_armed": row.get("bullish_armed"),
+            "bearish_armed": row.get("bearish_armed"),
+        },
+        "route_a": {},
+        "route_b": {},
+        "transitions": transitions,
+        "option_candidate": None,
+        "option_market_snapshot": None,
+        "option_lifecycle": {},
+        "audit_integrity": {
+            "source": "DIRECTIONAL_LIVE_AUDIT",
+            "canonical_step_audit_available": bool(row.get("directional_evidence")),
+        },
+        "safety": {
+            "observation_only": True,
+            "execution_enabled": False,
+            "paper_order_enabled": False,
+        },
+    }
+
+
+def _load_directional_live_candidate(candidate: dict):
+    # Lazy import avoids coupling session discovery to candle reconstruction.
+    from .hilega_directional_candle_ui_v1 import build_live_directional_candles
+
+    chain_ok, chain_issue, _ = _read_audit(candidate["path"])
+    candles = build_live_directional_candles(candidate["session_date"])
+    reports = [
+        _directional_report(row) for row in candles.get("rows", [])
+        if row.get("bar_timestamp")
+    ]
+    reports.sort(key=lambda row: row["checkpoint"])
+    return {
+        "session_date": candidate["session_date"],
+        "source": candidate["source"],
+        "source_id": candidate["source_id"],
+        "evidence_level": candidate["evidence_level"],
+        "ce_available": bool(candidate.get("ce_available")),
+        "manifest": {},
+        "audit_chain_ok": chain_ok,
+        "audit_chain_issue": chain_issue,
+        "reports": reports,
+        "report_count": len(reports),
+        "observation_only": True,
+        "execution_enabled": False,
+        "warning": (
+            "Read-only replay from the recorded directional live audit and market "
+            "evidence. Bullish and bearish decisions are preserved; no broker call, "
+            "strategy execution or synthetic trade is created."
         ),
     }
 
@@ -401,14 +554,17 @@ def _load_research_summary(candidate: dict, research_root: Path = RESEARCH_ROOT)
 
 
 def load_session(session_date: str, root: Path = ROOT, replay_root: Path = REPLAY_ROOT,
-                 research_root: Path = RESEARCH_ROOT, live_path: Path = LIVE_AUDIT):
+                 research_root: Path = RESEARCH_ROOT, live_path: Path = LIVE_AUDIT,
+                 directional_live_path: Path = DIRECTIONAL_LIVE_AUDIT):
     try:
         day = date.fromisoformat(session_date).isoformat()
     except ValueError as exc:
         raise HTTPException(422, "Invalid session date") from exc
 
     candidates = [
-        x for x in _all_candidates(root, replay_root, research_root, live_path)
+        x for x in _all_candidates(
+            root, replay_root, research_root, live_path, directional_live_path
+        )
         if x["session_date"] == day
     ]
     if not candidates:
@@ -416,6 +572,8 @@ def load_session(session_date: str, root: Path = ROOT, replay_root: Path = REPLA
     best = _best_for_day(candidates)
     if best["source"] == "RESEARCH_120":
         result = _load_research_summary(best, research_root)
+    elif best["source"] == "DIRECTIONAL_LIVE_SHADOW":
+        result = _load_directional_live_candidate(best)
     else:
         result = _load_audit_candidate(best)
     result["available_sources"] = sorted({x["source"] for x in candidates})

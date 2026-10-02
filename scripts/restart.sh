@@ -68,3 +68,30 @@ fi
 echo "live-shadow: OBSERVATION ONLY (execution disabled)"
 # ===== END LIVE SHADOW WORKER V1 =====
 
+# ===== MIDPOINT HISTORICAL AUTO-PUBLISHER =====
+PUBLISHER_PID_FILE="data/midpoint-historical-publisher.pid"
+PUBLISHER_LOG_FILE="data/logs/midpoint-historical-publisher.log"
+
+mkdir -p data/logs
+if [ -f "$PUBLISHER_PID_FILE" ]; then
+    PUBLISHER_PID="$(cat "$PUBLISHER_PID_FILE" 2>/dev/null || true)"
+    if [ -n "$PUBLISHER_PID" ] && kill -0 "$PUBLISHER_PID" 2>/dev/null; then
+        kill "$PUBLISHER_PID" 2>/dev/null || true
+    fi
+fi
+
+nohup env PYTHONPATH="$ROOT/backend${PYTHONPATH:+:$PYTHONPATH}" \
+    "$ROOT/.venv/bin/python" \
+    "$ROOT/scripts/midpoint_auto_publish_historical.py" \
+    --interval-seconds 900 \
+    >> "$PUBLISHER_LOG_FILE" 2>&1 < /dev/null &
+PUBLISHER_PID=$!
+echo "$PUBLISHER_PID" > "$PUBLISHER_PID_FILE"
+sleep 0.5
+if kill -0 "$PUBLISHER_PID" 2>/dev/null; then
+    echo "midpoint-history: publisher started (PID $PUBLISHER_PID)"
+else
+    echo "midpoint-history: publisher failed; check $PUBLISHER_LOG_FILE"
+    exit 1
+fi
+# ===== END MIDPOINT HISTORICAL AUTO-PUBLISHER =====

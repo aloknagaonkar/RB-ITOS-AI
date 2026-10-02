@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import HilegaDecisionTable,{type HilegaAudit} from './hilegaDecisionTable'
 import {overlayDirectionalTradeMarkers} from './hilegaDirectionalTradeMarkerOverlay'
 import {augmentDirectionalRowsWithTrades,overlayDirectionalAuditReports} from './hilegaDirectionalAuditOverlay'
+import HilegaHistoricalReplay from './hilegaHistoricalReplay'
 
 type Direction='BULLISH'|'BEARISH'|'NONE'|string
 
@@ -237,6 +238,7 @@ function attachDirectionalTradeAuditMetadata(
 }
 
 export default function HilegaMilegaShadow(){
+  const [workspaceMode,setWorkspaceMode]=useState<'LIVE'|'HISTORICAL_REPLAY'>('LIVE')
   const [status,setStatus]=useState<DirectionalStatus|null>(null)
   const [rows,setRows]=useState<AuditReport[]>([])
   const [dashboard,setDashboard]=useState<Dashboard|null>(null)
@@ -285,7 +287,18 @@ export default function HilegaMilegaShadow(){
     catch(e){setError(`Detailed trade audit failed: ${(e as Error).message}`)}finally{setAuditLoading(false)}
   }
 
+  const modeSelector=<div className="hime-controls hilega-mode-selector" role="group" aria-label="Hilega workspace mode">
+    <button aria-pressed={workspaceMode==='LIVE'} onClick={()=>setWorkspaceMode('LIVE')}>Live shadow</button>
+    <button aria-pressed={workspaceMode==='HISTORICAL_REPLAY'} onClick={()=>setWorkspaceMode('HISTORICAL_REPLAY')}>Historical replay</button>
+  </div>
+
+  if(workspaceMode==='HISTORICAL_REPLAY')return <div className="shadow-page hilega-page">
+    {modeSelector}
+    <HilegaHistoricalReplay/>
+  </div>
+
   return <div className="shadow-page hilega-page">
+    {modeSelector}
     {error&&<div className="banner error">{error}</div>}
 
     <div className="shadow-safety">

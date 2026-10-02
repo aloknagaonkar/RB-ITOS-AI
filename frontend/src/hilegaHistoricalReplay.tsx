@@ -95,6 +95,20 @@ export default function HilegaHistoricalReplay(){
   }
 
   useEffect(()=>{
+    if(selectedDate)void load()
+  // A selected date is a complete replay request; no separate Load click is required.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[selectedDate])
+
+  useEffect(()=>{
+    if(!selectedDate||selected?.status==='COMPLETE')return
+    const id=window.setInterval(()=>void load(),60000)
+    return()=>window.clearInterval(id)
+  // Active/partial recorded evidence refreshes automatically; completed days are immutable.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[selectedDate,selected?.status])
+
+  useEffect(()=>{
     if(!playing||!step||!reports.length)return
     const handle=window.setInterval(()=>setCursor(i=>Math.min(i+1,reports.length-1)),1200)
     return()=>clearInterval(handle)
@@ -133,7 +147,7 @@ export default function HilegaHistoricalReplay(){
           {s.session_date} · {s.evidence_level} · {s.source}{s.ce_available?' · CE':''}
         </option>)}
       </select></label>
-      <button onClick={()=>void load()} disabled={!selectedDate||busy}>{busy?'Loading…':'Load session'}</button>
+      <button onClick={()=>void load()} disabled={!selectedDate||busy}>{busy?'Loading…':'Reload session'}</button>
       <button onClick={()=>void refreshSessions()} disabled={refreshing}>{refreshing?'Refreshing…':'Refresh sessions'}</button>
     </div>
 

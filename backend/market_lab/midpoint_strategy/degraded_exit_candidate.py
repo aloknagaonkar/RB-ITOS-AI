@@ -69,7 +69,7 @@ def project(audit_events, tape: dict, *, quotes=None,
     rows = sorted(_rows(audit_events), key=lambda r: _time(r['event_timestamp']))
     entry = next((r for r in rows if r.get('event_id') == tape.get('entry_event_id')
                   and r.get('event_type') in (
-                      'B_ENTRY', 'E_ENTRY', 'B_REARM_ENTRY', 'E_REARM_ENTRY',
+                      'A_ENTRY', 'B_ENTRY', 'E_ENTRY', 'B_REARM_ENTRY', 'E_REARM_ENTRY',
                       'PM_B_ENTRY', 'PM_E_ENTRY'
                   )), None)
     if entry is None or entry.get('family') not in ('B', 'E', 'PM_B', 'PM_E'):
@@ -82,7 +82,7 @@ def project(audit_events, tape: dict, *, quotes=None,
     following_entry = next((_time(r['event_timestamp']) for r in rows
                             if _time(r['event_timestamp']) > entry_ts
                             and r.get('event_type') in (
-                                'B_ENTRY', 'E_ENTRY',
+                                'A_ENTRY', 'B_ENTRY', 'E_ENTRY',
                                 'B_REARM_ENTRY', 'E_REARM_ENTRY',
                                 'PM_B_ENTRY', 'PM_E_ENTRY'
                             )), None)

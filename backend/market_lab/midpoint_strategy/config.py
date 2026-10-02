@@ -14,6 +14,9 @@ class MidpointShadowConfig:
     strategy_name: str = "MIDPOINT_STRATEGY"
     version: str = "shadow-v1"
 
+    # Family A is a parallel, non-blocking observation lane.  It never owns
+    # or suppresses the canonical B/E lifecycle.
+    family_a_enabled: bool = False
     family_b_enabled: bool = True
     # V56: Family E is enabled for observation-only live shadow.
     family_e_enabled: bool = True
@@ -39,6 +42,11 @@ class MidpointShadowConfig:
     normal_b_proved_candidate_enabled: bool = True
     # Observation-only candidate exit on the first DEGRADED_STARTED close.
     degraded_exit_candidate_enabled: bool = True
+    # Parallel T+5 initial-risk observations; never authoritative exits.
+    t5_two_of_three_candidate_enabled: bool = True
+    t5_combined_edge_candidate_enabled: bool = True
+    pre_entry_health_observation_enabled: bool = True
+    continuous_health_exit_candidate_enabled: bool = False
 
     def assert_safe(self) -> None:
         if not self.observation_only:
@@ -73,6 +81,9 @@ def live_shadow_config_from_env() -> MidpointShadowConfig:
     """Read observation-only family gates without exposing execution controls."""
     defaults = MidpointShadowConfig()
     config = MidpointShadowConfig(
+        family_a_enabled=_enabled(
+            "MIDPOINT_FAMILY_A_SHADOW_ENABLED", defaults.family_a_enabled
+        ),
         family_c_enabled=_enabled(
             "MIDPOINT_FAMILY_C_SHADOW_ENABLED", defaults.family_c_enabled
         ),
@@ -89,6 +100,22 @@ def live_shadow_config_from_env() -> MidpointShadowConfig:
         degraded_exit_candidate_enabled=_enabled(
             "MIDPOINT_DEGRADED_EXIT_CANDIDATE_ENABLED",
             defaults.degraded_exit_candidate_enabled,
+        ),
+        t5_two_of_three_candidate_enabled=_enabled(
+            "MIDPOINT_T5_TWO_OF_THREE_CANDIDATE_ENABLED",
+            defaults.t5_two_of_three_candidate_enabled,
+        ),
+        t5_combined_edge_candidate_enabled=_enabled(
+            "MIDPOINT_T5_COMBINED_EDGE_CANDIDATE_ENABLED",
+            defaults.t5_combined_edge_candidate_enabled,
+        ),
+        pre_entry_health_observation_enabled=_enabled(
+            "MIDPOINT_PRE_ENTRY_HEALTH_OBSERVATION_ENABLED",
+            defaults.pre_entry_health_observation_enabled,
+        ),
+        continuous_health_exit_candidate_enabled=_enabled(
+            "MIDPOINT_CONTINUOUS_HEALTH_EXIT_CANDIDATE_ENABLED",
+            defaults.continuous_health_exit_candidate_enabled,
         ),
     )
     config.assert_safe()

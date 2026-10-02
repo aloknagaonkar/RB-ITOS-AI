@@ -35,7 +35,10 @@ DEFAULT_OUTPUT = Path(
     "midpoint-entry-health-490-v1"
 )
 
-SNAPSHOTS = ("midpoint", "preboundary", "boundary", "entry", "t1", "t3", "t5")
+SNAPSHOTS = (
+    "midpoint", "preboundary", "boundary", "preentry", "entry",
+    "t1", "t3", "t5",
+)
 METRICS = (
     "precision_intended_pct", "precision_opposite_pct", "precision_edge",
     "community_intended_pct", "community_opposite_pct", "community_edge",
@@ -461,6 +464,7 @@ def trade_health_row(
         "midpoint": iso(midpoint_text) if midpoint_text else None,
         "preboundary": boundary_at - timedelta(minutes=1),
         "boundary": boundary_at,
+        "preentry": entry_at - timedelta(minutes=1),
         "entry": entry_at,
         "t1": entry_at + timedelta(minutes=1),
         "t3": entry_at + timedelta(minutes=3),

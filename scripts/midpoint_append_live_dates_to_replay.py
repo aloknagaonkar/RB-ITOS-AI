@@ -56,7 +56,10 @@ def normalize_futures(rows, day):
         if ts in by_ts:raise ValueError('DUPLICATE_FUTURES_MINUTE')
         volume=candle.get('volume')
         if volume is None or float(volume)<=0:raise ValueError(f'FUTURES_VOLUME_MISSING_{ts.isoformat()}')
-        by_ts[ts]={'close':float(candle['close']),'volume':float(volume)}
+        by_ts[ts]={
+            'open':float(candle['open']) if candle.get('open') is not None else None,
+            'close':float(candle['close']),'volume':float(volume)
+        }
     pv=volume_sum=0.0
     for ts in sorted(by_ts):
         f=by_ts[ts]
@@ -75,19 +78,31 @@ def exact_minutes(day,index,futures):
     return [{'session_date':day.isoformat(),'timestamp':ts.isoformat(),
              'underlying_open':index[ts]['open'],'underlying_high':index[ts]['high'],
              'underlying_low':index[ts]['low'],'underlying_close':index[ts]['close'],
+             'futures_open':futures[ts]['open'],
              'futures_close':futures[ts]['close'],'futures_vwap':futures[ts]['vwap'],
+             'futures_volume':futures[ts]['volume'],
              'data_status':'BOTH'} for ts in expected]
 
 
 def audit_parity(day, audit_rows, index, futures):
-    rows=[r for r in audit_rows if r.get('session_date')==day.isoformat()]
-    if not rows:
+    day_rows=[r for r in audit_rows if r.get('session_date')==day.isoformat()]
+    if not day_rows:
         raise ValueError(f'LIVE_AUDIT_REQUIRED_{day}')
+    rows=[]
     verified_price_rows=0
-    for row in rows:
+    differences=[]
+    for row in day_rows:
         if row.get('observation_only') is not True or row.get('execution_enabled') is not False or row.get('paper_order_enabled') is not False or row.get('quantity') is not None:
             raise ValueError('LIVE_AUDIT_SAFETY_MISMATCH')
         ts=minute_key(row['event_timestamp'])
+        # Historical Replay is deliberately the exact 360 completed candles
+        # from 09:15 through 15:14.  Session-end bookkeeping stamped 15:15 or
+        # later remains in the immutable live audit but is outside this replay
+        # evidence window and therefore has no candle with which to prove
+        # parity.  Never fabricate a 361st minute.
+        if ts.date()!=day or not START<=ts.time()<=END:
+            continue
+        rows.append(row)
         if ts not in index or ts not in futures:
             raise ValueError(f'AUDIT_EVENT_MINUTE_UNAVAILABLE_{ts.isoformat()}')
         for field, source, tolerance in (
@@ -97,10 +112,13 @@ def audit_parity(day, audit_rows, index, futures):
         ):
             observed=row.get(field)
             if observed is not None and abs(float(observed)-source)>tolerance:
-                raise ValueError(f'LIVE_PARITY_MISMATCH {day} {ts.time()} {field} audit={observed} acquired={source:.5f}')
+                differences.append({'event_timestamp':ts.isoformat(),'event_type':row['event_type'],
+                                    'field':field,'live_audit':float(observed),
+                                    'downloaded_candle':source,'delta':round(source-float(observed),6)})
             if field=='futures_price' and observed is not None:verified_price_rows+=1
+    if not rows:raise ValueError(f'LIVE_AUDIT_IN_REPLAY_WINDOW_REQUIRED_{day}')
     if not verified_price_rows:raise ValueError(f'LIVE_FUTURES_PARITY_UNAVAILABLE_{day}')
-    return rows
+    return rows,differences
 
 
 def fetch_day(day, audit_rows, sources, expired_expiries, futures_client):
@@ -109,15 +127,15 @@ def fetch_day(day, audit_rows, sources, expired_expiries, futures_client):
                 else sources.historical_candles(INDEX,day))
     contract=resolve_active_future(futures_client,day,expired_expiries)
     if day==today:
-        raw=[{'timestamp':c.timestamp,'close':c.close,'volume':c.volume}
+        raw=[{'timestamp':c.timestamp,'open':c.open,'close':c.close,'volume':c.volume}
              for c in sources.option_intraday_1m(contract.instrument_key)]
     else:
         raw=fetch_one_minute_candles(futures_client,contract,day)
     index=normalize_index(index_rows,day)
     futures=normalize_futures(raw,day)
     minutes=exact_minutes(day,index,futures)
-    events=audit_parity(day,audit_rows,index,futures)
-    return minutes,events,contract
+    events,differences=audit_parity(day,audit_rows,index,futures)
+    return minutes,events,contract,differences
 
 
 def write_jsonl(path,rows):
@@ -128,6 +146,8 @@ def write_jsonl(path,rows):
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--dates',nargs='+',type=date.fromisoformat,default=[date(2026,9,28),date(2026,9,29)])
+    p.add_argument('--accept-revised-candles',action='store_true',
+                   help='Publish with audited live signal values and separately labelled downloaded minute candles')
     args=p.parse_args()
     days=sorted(set(args.dates))
     if any(d>datetime.now(IST).date() for d in days):raise SystemExit('STOP future session')
@@ -147,24 +167,37 @@ def main():
         with _client() as client:
             expiries=available_expiries(client)
             for day in days:
-                minutes,events,contract=fetch_day(day,live_rows,sources,expiries,client)
-                staged.append((day,minutes,events,contract))
+                minutes,events,contract,differences=fetch_day(day,live_rows,sources,expiries,client)
+                staged.append((day,minutes,events,contract,differences))
                 print('VALIDATED',day,'minutes',len(minutes),'events',len(events),
                       'futures',contract.instrument_key,'expiry',contract.expiry)
+                for field in ('underlying_price','futures_price','futures_vwap'):
+                    mismatches=[x for x in differences if x['field']==field]
+                    print('SOURCE COMPARISON',day,field,'differences',len(mismatches),
+                          'max_abs_delta',round(max((abs(x['delta']) for x in mismatches),default=0),5))
     finally:
         sources.close()
+    all_differences=sum(len(x[4]) for x in staged)
+    if all_differences and not args.accept_revised_candles:
+        raise SystemExit('STOP revised candles differ from live audit at '
+                         f'{all_differences} event fields. No dates published. '
+                         'Review SOURCE COMPARISON and rerun with --accept-revised-candles '
+                         'to keep both values with provenance.')
     # No writes until every requested session has passed source and audit parity.
     ROOT.mkdir(parents=True,exist_ok=True)
-    for day,minutes,events,contract in staged:
+    for day,minutes,events,contract,differences in staged:
         folder=ROOT/day.isoformat()
         folder.mkdir(exist_ok=False)
         write_jsonl(folder/'minutes.jsonl',minutes)
         write_jsonl(folder/'audit.jsonl',events)
-        metadata={'session_date':day.isoformat(),'block':'LIVE_AUDIT_RECENT_2026-09',
+        metadata={'session_date':day.isoformat(),'block':f'LIVE_AUDIT_RECENT_{day:%Y-%m}',
                   'event_count':len(events),'minute_count':360,
                   'first_minute':minutes[0]['timestamp'],'last_minute':minutes[-1]['timestamp'],
-                  'source':'LIVE_AUDIT_PARITY_REPLAY',
+                  'source':'LIVE_AUDIT_WITH_DOWNLOADED_CANDLES',
                   'minute_source':'UPSTOX_EXACT_1M_CLOSE_VOLUME_VWAP',
+                  'signal_value_source':'ORIGINAL_LIVE_AUDIT',
+                  'source_comparison_status':'REVISED_CANDLES' if differences else 'EXACT_PARITY',
+                  'source_differences':differences,
                   'futures_instrument_key':contract.instrument_key,
                   'futures_expiry':contract.expiry.isoformat(),
                   'observation_only':True,'execution_enabled':False,

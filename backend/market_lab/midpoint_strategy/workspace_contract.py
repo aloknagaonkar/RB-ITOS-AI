@@ -12,6 +12,7 @@ def midpoint_workspace_status(config: MidpointShadowConfig | None = None) -> dic
         "version": cfg.version,
         "mode": "SHADOW",
         "families": {
+            "A": {"enabled": cfg.family_a_enabled, "parallel": True},
             "B": {"enabled": cfg.family_b_enabled},
             "E": {"enabled": cfg.family_e_enabled},
             "C": {"enabled": cfg.family_c_enabled},
@@ -32,6 +33,14 @@ def midpoint_workspace_status(config: MidpointShadowConfig | None = None) -> dic
                 cfg.normal_b_proved_candidate_enabled,
             "degraded_exit_candidate_enabled":
                 cfg.degraded_exit_candidate_enabled,
+            "t5_two_of_three_candidate_enabled":
+                cfg.t5_two_of_three_candidate_enabled,
+            "t5_combined_edge_candidate_enabled":
+                cfg.t5_combined_edge_candidate_enabled,
+            "pre_entry_health_observation_enabled":
+                cfg.pre_entry_health_observation_enabled,
+            "continuous_health_exit_candidate_enabled":
+                cfg.continuous_health_exit_candidate_enabled,
         },
         "safety": {
             "observation_only": cfg.observation_only,

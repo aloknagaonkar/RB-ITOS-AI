@@ -89,8 +89,10 @@ def _minute_rows(day: str, u_day: dict, f_day: dict) -> list[dict[str, Any]]:
                 "underlying_high": _number(_field(underlying, "high")),
                 "underlying_low": _number(_field(underlying, "low")),
                 "underlying_close": _number(_field(underlying, "close")),
+                "futures_open": _number(_field(futures, "open")),
                 "futures_close": _number(_field(futures, "close")),
                 "futures_vwap": _number(_field(futures, "vwap")),
+                "futures_volume": _number(_field(futures, "volume")),
                 "data_status": (
                     "BOTH"
                     if underlying is not None and futures is not None

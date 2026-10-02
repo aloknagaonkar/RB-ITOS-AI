@@ -238,6 +238,43 @@ class AuditableFamilyBEngine:
             },
         )
 
+    def start_a_entry(
+        self,
+        runtime: MidpointFamilyBRuntime,
+        boundary_obs: FamilyBObservation,
+    ) -> None:
+        """Start fresh Candidate-A as a parallel observation-only lifecycle."""
+        if runtime.lifecycle is not None:
+            raise ValueError("lifecycle already active")
+        runtime.family = MidpointFamily.A
+        runtime.watch = None
+        runtime.lifecycle = FamilyBShadowRuntime(
+            direction=runtime.reference.direction,
+            entry_timestamp=datetime.fromisoformat(boundary_obs.timestamp),
+            entry_underlying_close=boundary_obs.close,
+            family=MidpointFamily.A,
+            state=MidpointShadowState.ACTIVE,
+        )
+        self._audit(
+            runtime=runtime,
+            timestamp=boundary_obs.timestamp,
+            event_type="A_ENTRY",
+            direction=runtime.reference.direction,
+            result="SHADOW_ENTRY",
+            reason="FRESH_CANDIDATE_A_AT_BOUNDARY",
+            state_before="BOUNDARY_CLASSIFIED_A",
+            state_after="ACTIVE",
+            observation=boundary_obs,
+            directional_points=0.0,
+            evidence={
+                "action_intent": "SHADOW_ENTRY",
+                "parallel_lane": True,
+                "canonical_b_e_lifecycle_unchanged": True,
+                "candidate_a_at_boundary": True,
+                "raw_futures_vwap_diff": boundary_obs.raw_futures_vwap_diff,
+                "order_sent": False,
+            },
+        )
     def start_extended_entry(
         self,
         runtime: MidpointFamilyBRuntime,

@@ -47,6 +47,18 @@ PY
 service_status "api"
 service_status "worker"
 
+PUBLISHER_PID_FILE="$ROOT/data/midpoint-historical-publisher.pid"
+if [[ -f "$PUBLISHER_PID_FILE" ]]; then
+    publisher_pid="$(cat "$PUBLISHER_PID_FILE" 2>/dev/null || true)"
+    if [[ -n "$publisher_pid" ]] && kill -0 "$publisher_pid" 2>/dev/null; then
+        echo "midpoint-history: RUNNING (PID $publisher_pid)"
+    else
+        echo "midpoint-history: STOPPED (stale pid file)"
+    fi
+else
+    echo "midpoint-history: STOPPED (no pid file)"
+fi
+
 if curl -fsS --max-time 3 "$HEALTH_URL" >/dev/null 2>&1; then
     execution="$(curl -fsS --max-time 3 "$HEALTH_URL" 2>/dev/null | "$PYTHON" -c 'import json,sys; print(json.load(sys.stdin).get("execution","unknown"))' 2>/dev/null || echo unknown)"
     echo "dashboard: AVAILABLE at http://127.0.0.1:8123 (execution: $execution)"

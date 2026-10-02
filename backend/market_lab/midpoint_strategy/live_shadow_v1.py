@@ -20,6 +20,16 @@ from .normal_b_proved_candidate import (
     Bar as NormalBProvedBar,
     NormalBProvedCandidate,
 )
+from .entry_health_live_v1 import (
+    MidpointEntryHealthLiveV1,
+    dual_directional_health,
+    entry_health_label,
+    evaluate_t5_candidates,
+)
+from .continuous_health_exit_v1 import (
+    ContinuousHealthExitV1,
+    HealthExitRecord,
+)
 from .runtime import AuditableFamilyBEngine, MidpointFamilyBRuntime
 from .structure import ReferenceStructure, boundary_broken, midpoint_broken
 
@@ -42,7 +52,10 @@ class _ReferenceRuntime:
     normal_b_proved_unavailable: bool = False
     management_route: str = "STRUCTURAL_BASELINE"
     degraded_exit_candidate_timestamp: datetime | None = None
+    t5_health_checked: bool = False
+    entry_health_logged: bool = False
     generation: int = 0
+    continuous_health: ContinuousHealthExitV1 | None = None
 
 
 @dataclass
@@ -60,6 +73,7 @@ class _SessionState:
     futures_volume: float = 0.0
     latest_futures_minute: datetime | None = None
     active_reference_type: Optional[str] = None
+    a_reference_types: set[str] = field(default_factory=set)
     c_rearms: dict[str, CRearmCandidate] = field(default_factory=dict)
     c_runtimes: dict[str, MidpointFamilyBRuntime] = field(default_factory=dict)
     be_rearms: dict[str, CRearmCandidate] = field(default_factory=dict)
@@ -89,11 +103,20 @@ class MidpointLiveShadowCoordinatorV1:
             config=self.config,
         )
         self.boundary_classifier = MidpointBoundaryClassifierV55()
+        self.entry_health = MidpointEntryHealthLiveV1()
+        self.latest_entry_health_raw: dict | None = None
         self.state: _SessionState | None = None
 
         # V62.2 forward-OOS research adapter. Disabled unless explicitly enabled.
         # It is observational only and never changes strategy decisions or orders.
         self._audit_path = Path(audit_path)
+        self._market_health_path = self._audit_path.with_name("market-health.json")
+        self._market_health_history_path = self._audit_path.with_name(
+            "market-health.jsonl"
+        )
+        self._last_market_health_history_timestamp = (
+            self._last_jsonl_timestamp(self._market_health_history_path)
+        )
         self._v621_collector = None
         self._v621_audit_offset = 0
         if os.getenv("MIDPOINT_V62_OOS_COLLECTOR_ENABLED", "0") == "1":
@@ -107,6 +130,79 @@ class MidpointLiveShadowCoordinatorV1:
             self._v621_collector = MidpointV621ForwardOOSCollector(ledger_path)
             if self._audit_path.exists():
                 self._v621_audit_offset = self._audit_path.stat().st_size
+
+    def _write_market_health_snapshot(
+        self,
+        *,
+        timestamp: datetime,
+        health_raw: dict[str, Any],
+        underlying_close: float,
+        futures_close: float,
+        futures_vwap: float,
+    ) -> None:
+        """Publish both directional views for every completed market minute.
+
+        This is a replaceable runtime heartbeat, not an immutable strategy
+        decision. It cannot create an entry, exit, order or quantity.
+        """
+        directions = dual_directional_health(health_raw)
+        payload = {
+            "model": "MIDPOINT_CONTINUOUS_MARKET_HEALTH_V1",
+            "session_date": timestamp.date().isoformat(),
+            "timestamp": timestamp.isoformat(),
+            "underlying_close": underlying_close,
+            "futures_close": futures_close,
+            "futures_vwap": futures_vwap,
+            "directions": directions,
+            "safety": {
+                "observation_only": True,
+                "execution_enabled": False,
+                "paper_order_enabled": False,
+                "quantity": None,
+                "order_sent": False,
+            },
+        }
+        try:
+            self._market_health_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = self._market_health_path.with_suffix(".json.tmp")
+            temporary.write_text(
+                json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n",
+                encoding="utf-8",
+            )
+            temporary.replace(self._market_health_path)
+            if (
+                self._last_market_health_history_timestamp is None
+                or payload["timestamp"] > self._last_market_health_history_timestamp
+            ):
+                with self._market_health_history_path.open(
+                    "a", encoding="utf-8"
+                ) as history:
+                    history.write(
+                        json.dumps(
+                            payload, sort_keys=True, separators=(",", ":")
+                        )
+                        + "\n"
+                    )
+                self._last_market_health_history_timestamp = payload["timestamp"]
+        except OSError:
+            # A presentation heartbeat must never stop strategy observation.
+            return
+
+    @staticmethod
+    def _last_jsonl_timestamp(path: Path) -> str | None:
+        """Return the newest persisted presentation heartbeat, if readable."""
+        if not path.exists():
+            return None
+        try:
+            with path.open(encoding="utf-8") as handle:
+                for line in reversed(handle.readlines()):
+                    if line.strip():
+                        value = json.loads(line)
+                        timestamp = value.get("timestamp")
+                        return str(timestamp) if timestamp else None
+        except (OSError, json.JSONDecodeError, AttributeError):
+            return None
+        return None
 
     @staticmethod
     def _latest_complete_minute(now: datetime) -> datetime:
@@ -580,6 +676,329 @@ class MidpointLiveShadowCoordinatorV1:
             directional_points=candidate_points,
             evidence=evidence,
         )
+        if event_type == "NORMAL_B_PROVED_EXIT_CANDIDATE":
+            # The control event above is unchanged.  The health paths only
+            # decide whether to confirm this already-existing soft signal.
+            self._arm_continuous_health_soft_exit(rr, obs, str(reason))
+
+    def _observe_new_entry_health(
+        self,
+        *,
+        ts: datetime,
+        obs: FamilyBObservation,
+        previous_obs: FamilyBObservation | None,
+        previous_raw: dict | None,
+        entry_raw: dict | None,
+        rr_override: _ReferenceRuntime | None = None,
+    ) -> None:
+        """Log causal T-1 and entry-close health for a newly active trade."""
+        if not self.config.pre_entry_health_observation_enabled:
+            return
+        if self.state is None:
+            return
+        rr = rr_override
+        if rr is None:
+            if self.state.active_reference_type is None:
+                return
+            rr = self.state.references.get(self.state.active_reference_type)
+        lifecycle = rr.runtime.lifecycle if rr is not None else None
+        if (
+            rr is None or lifecycle is None or rr.entry_health_logged
+            or lifecycle.entry_timestamp != ts
+        ):
+            return
+        rr.entry_health_logged = True
+        common = {
+            "candidate_only": True,
+            "entry_blocked": False,
+            "baseline_lifecycle_unchanged": True,
+            "observation_only": True,
+            "execution_enabled": False,
+            "paper_order_enabled": False,
+            "quantity": None,
+            "order_sent": False,
+        }
+        for event_type, raw, source_obs, basis in (
+            ("PRE_ENTRY_HEALTH_SNAPSHOT", previous_raw, previous_obs,
+             "PREVIOUS_COMPLETED_ONE_MINUTE_CANDLE"),
+            ("ENTRY_HEALTH_SNAPSHOT", entry_raw, obs,
+             "COMPLETED_ENTRY_CANDLE"),
+        ):
+            if raw is None or source_obs is None:
+                snapshot = {"available": False, "warmup_bars": None}
+            else:
+                snapshot = self.entry_health.directional_snapshot(
+                    raw, lifecycle.direction
+                )
+            label = entry_health_label(snapshot)
+            evidence = {
+                **common, **snapshot, **label,
+                "dual_health": dual_directional_health(raw),
+                "snapshot_timestamp": (
+                    source_obs.timestamp if source_obs is not None else None
+                ),
+                "snapshot_basis": basis,
+            }
+            self.engine._audit(
+                runtime=rr.runtime,
+                timestamp=obs.timestamp,
+                event_type=event_type,
+                direction=lifecycle.direction,
+                result=label["health"],
+                reason=(
+                    "CAUSAL_DIRECTIONAL_HEALTH_OBSERVED"
+                    if snapshot.get("available")
+                    else "INDICATOR_WARMUP_INCOMPLETE"
+                ),
+                state_before=lifecycle.state.value,
+                state_after=lifecycle.state.value,
+                observation=source_obs,
+                directional_points=(
+                    self._directional_points(rr, source_obs.close)
+                    if source_obs is not None else None
+                ),
+                evidence=evidence,
+            )
+
+    def _observe_t5_health(
+        self,
+        rr: _ReferenceRuntime,
+        obs: FamilyBObservation,
+        health_raw: dict | None,
+    ) -> None:
+        """Emit parallel T+5 evidence without mutating the canonical lifecycle."""
+        lifecycle = rr.runtime.lifecycle
+        if lifecycle is None or rr.t5_health_checked:
+            return
+        current = datetime.fromisoformat(obs.timestamp)
+        target = lifecycle.entry_timestamp + timedelta(minutes=5)
+        if current < target:
+            return
+        rr.t5_health_checked = True
+        points = self._directional_points(rr, obs.close)
+        common = {
+            "required_timestamp": target.isoformat(),
+            "candidate_only": True,
+            "baseline_lifecycle_unchanged": True,
+            "action_intent": "SHADOW_VALUATION_ONLY",
+            "observation_only": True,
+            "execution_enabled": False,
+            "paper_order_enabled": False,
+            "quantity": None,
+            "order_sent": False,
+        }
+        if current != target:
+            self.engine._audit(
+                runtime=rr.runtime, timestamp=obs.timestamp,
+                event_type="T5_HEALTH_UNAVAILABLE", direction=lifecycle.direction,
+                result="UNAVAILABLE", reason="EXACT_ENTRY_PLUS5_MINUTE_MISSING",
+                state_before=lifecycle.state.value, state_after=lifecycle.state.value,
+                observation=obs, directional_points=points, evidence=common,
+            )
+            return
+        if lifecycle.plus20_timestamp is not None:
+            self.engine._audit(
+                runtime=rr.runtime, timestamp=obs.timestamp,
+                event_type="T5_PROVED_BYPASS", direction=lifecycle.direction,
+                result="BYPASSED", reason="PLUS20_PROOF_REACHED_ON_OR_BEFORE_T5",
+                state_before=lifecycle.state.value, state_after=lifecycle.state.value,
+                observation=obs, directional_points=points,
+                evidence={**common, "plus20_timestamp": lifecycle.plus20_timestamp.isoformat()},
+            )
+            return
+        if health_raw is None:
+            snapshot = {"available": False, "warmup_bars": None}
+        else:
+            snapshot = self.entry_health.directional_snapshot(
+                health_raw, lifecycle.direction
+            )
+        decision = evaluate_t5_candidates(snapshot)
+        label = entry_health_label(snapshot)
+        evidence = {**common, **snapshot, **decision, **label,
+                    "dual_health": dual_directional_health(health_raw),
+                    "valuation_price": obs.close,
+                    "valuation_basis": "OBSERVED_COMPLETED_CANDLE_CLOSE"}
+        if not decision["available"]:
+            self.engine._audit(
+                runtime=rr.runtime, timestamp=obs.timestamp,
+                event_type="T5_HEALTH_UNAVAILABLE", direction=lifecycle.direction,
+                result="UNAVAILABLE", reason="INDICATOR_WARMUP_INCOMPLETE",
+                state_before=lifecycle.state.value, state_after=lifecycle.state.value,
+                observation=obs, directional_points=points, evidence=evidence,
+            )
+            return
+        self.engine._audit(
+            runtime=rr.runtime, timestamp=obs.timestamp,
+            event_type="T5_HEALTH_CHECK", direction=lifecycle.direction,
+            result="OBSERVED", reason="EXACT_ENTRY_PLUS5_COMPLETED_CLOSE",
+            state_before=lifecycle.state.value, state_after=lifecycle.state.value,
+            observation=obs, directional_points=points, evidence=evidence,
+        )
+        if self.config.t5_two_of_three_candidate_enabled and decision["two_of_three"]:
+            self.engine._audit(
+                runtime=rr.runtime, timestamp=obs.timestamp,
+                event_type="T5_TWO_OF_THREE_EXIT_CANDIDATE",
+                direction=lifecycle.direction, result="SHADOW_EXIT_CANDIDATE",
+                reason="TWO_OF_THREE_HEALTH_FAILURES",
+                state_before=lifecycle.state.value, state_after=lifecycle.state.value,
+                observation=obs, directional_points=points, evidence=evidence,
+            )
+        if self.config.t5_combined_edge_candidate_enabled and decision["combined_edge"]:
+            self.engine._audit(
+                runtime=rr.runtime, timestamp=obs.timestamp,
+                event_type="T5_COMBINED_EDGE_EXIT_CANDIDATE",
+                direction=lifecycle.direction, result="SHADOW_EXIT_CANDIDATE",
+                reason="COMBINED_DIRECTIONAL_EDGE_NOT_POSITIVE",
+                state_before=lifecycle.state.value, state_after=lifecycle.state.value,
+                observation=obs, directional_points=points, evidence=evidence,
+            )
+
+    def _audit_continuous_health_records(
+        self,
+        rr: _ReferenceRuntime,
+        obs: FamilyBObservation,
+        records: list[HealthExitRecord],
+    ) -> None:
+        lifecycle = rr.runtime.lifecycle
+        if lifecycle is None:
+            return
+        for record in records:
+            self.engine._audit(
+                runtime=rr.runtime,
+                timestamp=obs.timestamp,
+                event_type=f"{record.policy}_EXIT_CANDIDATE",
+                direction=lifecycle.direction,
+                result="SHADOW_EXIT_CANDIDATE",
+                reason=record.reason,
+                state_before=lifecycle.state.value,
+                state_after="CANDIDATE_CLOSED",
+                observation=obs,
+                directional_points=record.directional_points,
+                evidence={
+                    "policy": record.policy,
+                    "armed_reason": record.armed_reason,
+                    "health": record.health,
+                    "unhealthy_streak": record.unhealthy_streak,
+                    "valuation_basis": "OBSERVED_COMPLETED_CANDLE_CLOSE",
+                    "valuation_price": obs.close,
+                    "candidate_only": True,
+                    "baseline_lifecycle_unchanged": True,
+                    "observation_only": True,
+                    "execution_enabled": False,
+                    "paper_order_enabled": False,
+                    "quantity": None,
+                    "order_sent": False,
+                },
+            )
+
+    def _observe_continuous_health_close(
+        self,
+        rr: _ReferenceRuntime,
+        obs: FamilyBObservation,
+        health_raw: dict | None,
+    ) -> None:
+        if not self.config.continuous_health_exit_candidate_enabled:
+            return
+        lifecycle = rr.runtime.lifecycle
+        if lifecycle is None:
+            return
+        if rr.continuous_health is None:
+            rr.continuous_health = ContinuousHealthExitV1()
+        snapshot = (
+            {"available": False, "warmup_bars": None}
+            if health_raw is None
+            else self.entry_health.directional_snapshot(health_raw, lifecycle.direction)
+        )
+        label = entry_health_label(snapshot)
+        points = self._directional_points(rr, obs.close)
+        records = rr.continuous_health.observe_close(
+            timestamp=datetime.fromisoformat(obs.timestamp),
+            directional_points=points,
+            health=label["health"],
+        )
+        self.engine._audit(
+            runtime=rr.runtime,
+            timestamp=obs.timestamp,
+            event_type="CONTINUOUS_HEALTH_CHECK",
+            direction=lifecycle.direction,
+            result=label["health"],
+            reason="COMPLETED_ONE_MINUTE_DIRECTIONAL_HEALTH",
+            state_before=lifecycle.state.value,
+            state_after=lifecycle.state.value,
+            observation=obs,
+            directional_points=points,
+            evidence={
+                **snapshot,
+                **label,
+                "dual_health": dual_directional_health(health_raw),
+                "immediate_armed_reason":
+                    rr.continuous_health.immediate.armed_reason,
+                "two_close_armed_reason":
+                    rr.continuous_health.two_close.armed_reason,
+                "two_close_unhealthy_streak":
+                    rr.continuous_health.two_close.unhealthy_streak,
+                "candidate_only": True,
+                "baseline_lifecycle_unchanged": True,
+                "order_sent": False,
+            },
+        )
+        self._audit_continuous_health_records(rr, obs, records)
+
+    def _arm_continuous_health_soft_exit(
+        self,
+        rr: _ReferenceRuntime,
+        obs: FamilyBObservation,
+        reason: str,
+    ) -> None:
+        overlay = rr.continuous_health
+        lifecycle = rr.runtime.lifecycle
+        if (
+            not self.config.continuous_health_exit_candidate_enabled
+            or overlay is None or lifecycle is None
+        ):
+            return
+        newly_armed = [p.policy for p in overlay.paths
+                       if not p.closed and p.armed_reason is None]
+        points = self._directional_points(rr, obs.close)
+        records = overlay.arm_soft_exit(
+            timestamp=datetime.fromisoformat(obs.timestamp),
+            reason=reason,
+            directional_points=points,
+        )
+        if newly_armed:
+            self.engine._audit(
+                runtime=rr.runtime,
+                timestamp=obs.timestamp,
+                event_type="CONTINUOUS_HEALTH_SOFT_EXIT_ARMED",
+                direction=lifecycle.direction,
+                result="ARMED",
+                reason=reason,
+                state_before=lifecycle.state.value,
+                state_after=lifecycle.state.value,
+                observation=obs,
+                directional_points=points,
+                evidence={
+                    "policies": newly_armed,
+                    "current_health": overlay.last_health,
+                    "candidate_only": True,
+                    "baseline_lifecycle_unchanged": True,
+                    "order_sent": False,
+                },
+            )
+        self._audit_continuous_health_records(rr, obs, records)
+
+    def _close_continuous_health_at_structure(
+        self,
+        rr: _ReferenceRuntime,
+        obs: FamilyBObservation,
+    ) -> None:
+        if rr.continuous_health is None:
+            return
+        records = rr.continuous_health.structural_fallback(
+            timestamp=datetime.fromisoformat(obs.timestamp),
+            directional_points=self._directional_points(rr, obs.close),
+        )
+        self._audit_continuous_health_records(rr, obs, records)
 
     def _process_management(
         self,
@@ -587,10 +1006,13 @@ class MidpointLiveShadowCoordinatorV1:
         obs: FamilyBObservation,
         prev_obs: FamilyBObservation | None,
         underlying,
+        health_raw: dict | None = None,
     ) -> bool:
         lifecycle = rr.runtime.lifecycle
         if lifecycle is None or rr.closed:
             return False
+
+        self._observe_continuous_health_close(rr, obs, health_raw)
 
         if self.config.be_rearm_enabled:
             self._observe_be_rearm_touch(rr, obs, underlying)
@@ -634,6 +1056,7 @@ class MidpointLiveShadowCoordinatorV1:
             self._observe_normal_b_proved(rr, obs, underlying)
 
         if self._terminal_invalidated(rr, obs.close):
+            self._close_continuous_health_at_structure(rr, obs)
             self._close_terminal(rr, obs, "MIDPOINT_INVALIDATION")
             return True
 
@@ -648,7 +1071,10 @@ class MidpointLiveShadowCoordinatorV1:
             rr.plus20_directional_vwap = self.engine.detector.directional_vwap_diff(
                 rr.reference, obs
             )
+            self._observe_t5_health(rr, obs, health_raw)
             return False
+
+        self._observe_t5_health(rr, obs, health_raw)
 
         if (
             lifecycle.plus20_timestamp is not None
@@ -772,6 +1198,9 @@ class MidpointLiveShadowCoordinatorV1:
                             "action_intent": "SHADOW_VALUATION_ONLY",
                             "order_sent": False,
                         },
+                    )
+                    self._arm_continuous_health_soft_exit(
+                        rr, obs, "FIRST_DEGRADED_STARTED_COMPLETED_CLOSE"
                     )
                 return False
 
@@ -1476,6 +1905,8 @@ class MidpointLiveShadowCoordinatorV1:
         futures_close: float,
         futures_vwap: float,
         underlying_by_ts: dict[datetime, Any],
+        futures_open: float | None = None,
+        futures_volume: float | None = None,
     ) -> None:
         assert self.state is not None
 
@@ -1492,15 +1923,46 @@ class MidpointLiveShadowCoordinatorV1:
         )
         prev_obs = self.state.observations[-1] if self.state.observations else None
         self.state.observations.append(obs)
+        preentry_health_raw = self.latest_entry_health_raw
+        health_raw = self.entry_health.update(
+            timestamp=ts,
+            open_=self._float(underlying, "open"),
+            high=self._float(underlying, "high"),
+            low=self._float(underlying, "low"),
+            close=self._float(underlying, "close"),
+            futures_open=futures_open,
+            futures_close=futures_close,
+            futures_vwap=futures_vwap,
+            futures_volume=futures_volume,
+        )
+        self.latest_entry_health_raw = health_raw
+        self._write_market_health_snapshot(
+            timestamp=ts,
+            health_raw=health_raw,
+            underlying_close=obs.close,
+            futures_close=futures_close,
+            futures_vwap=futures_vwap,
+        )
 
         terminal_this_minute = False
+
+        # Family A runs in an independent observation lane.  Its lifecycle
+        # cannot occupy active_reference_type or block canonical B/E entries.
+        for ref_type in tuple(self.state.a_reference_types):
+            a_rr = self.state.references.get(ref_type)
+            if a_rr is None or a_rr.closed:
+                self.state.a_reference_types.discard(ref_type)
+                continue
+            self._process_management(a_rr, obs, prev_obs, underlying, health_raw)
+            if a_rr.closed:
+                self.state.a_reference_types.discard(ref_type)
 
         active_type = self.state.active_reference_type
         if active_type is not None:
             active_rr = self.state.references.get(active_type)
             if active_rr is not None and active_rr.runtime.lifecycle is not None:
                 terminal_this_minute = self._process_management(
-                    active_rr, obs, prev_obs, underlying
+                    active_rr, obs, prev_obs, underlying, health_raw
                 )
                 if active_rr.closed:
                     self.state.active_reference_type = None
@@ -1558,6 +2020,8 @@ class MidpointLiveShadowCoordinatorV1:
 
                 if decision.owner == MidpointFamily.E.value:
                     rr.runtime.family = MidpointFamily.E
+                elif decision.owner == OTHER_FRESH_A:
+                    rr.runtime.family = MidpointFamily.A
                 else:
                     rr.runtime.family = MidpointFamily.B
 
@@ -1634,14 +2098,32 @@ class MidpointLiveShadowCoordinatorV1:
                     continue
 
                 if decision.owner == OTHER_FRESH_A:
-                    self.engine._audit(
-                        runtime=rr.runtime,
-                        timestamp=obs.timestamp,
-                        event_type="BOUNDARY_OWNER_OTHER",
-                        direction=rr.reference.direction,
-                        result="NO_B_OR_E_ENTRY",
-                        reason="FRESH_CANDIDATE_A_AT_BOUNDARY",
-                        observation=obs,
+                    if terminal_this_minute:
+                        self.engine._audit(
+                            runtime=rr.runtime, timestamp=obs.timestamp,
+                            event_type="A_ENTRY_BLOCKED",
+                            direction=rr.reference.direction, result="NO_ENTRY",
+                            reason="SAME_CANDLE_REVERSAL_BLOCKED",
+                            observation=obs,
+                            evidence={"parallel_lane": True, "order_sent": False},
+                        )
+                        continue
+                    if not self.config.family_a_enabled:
+                        self.engine._audit(
+                            runtime=rr.runtime, timestamp=obs.timestamp,
+                            event_type="A_SELECTED_BUT_DISABLED",
+                            direction=rr.reference.direction, result="NO_ENTRY",
+                            reason="FAMILY_A_DISABLED", observation=obs,
+                            evidence={"parallel_lane": True, "order_sent": False},
+                        )
+                        continue
+                    self.engine.start_a_entry(rr.runtime, obs)
+                    rr.running_close_mfe = 0.0
+                    self.state.a_reference_types.add(ref_type)
+                    self._observe_new_entry_health(
+                        ts=ts, obs=obs, previous_obs=prev_obs,
+                        previous_raw=preentry_health_raw,
+                        entry_raw=health_raw, rr_override=rr,
                     )
                     continue
 
@@ -1670,6 +2152,13 @@ class MidpointLiveShadowCoordinatorV1:
             prev_obs=prev_obs,
             terminal_this_minute=terminal_this_minute,
         )
+        self._observe_new_entry_health(
+            ts=ts,
+            obs=obs,
+            previous_obs=prev_obs,
+            previous_raw=preentry_health_raw,
+            entry_raw=health_raw,
+        )
 
     def process(self, now: datetime) -> dict[str, Any]:
         local = now.astimezone(IST)
@@ -1687,6 +2176,11 @@ class MidpointLiveShadowCoordinatorV1:
             if self._candle_ts(c) <= latest
         }
         futures_map = self._futures_vwap_map(futures, latest)
+        futures_by_ts: dict[datetime, Any] = {}
+        for candle in sorted(futures, key=self._candle_ts):
+            candle_ts = self._candle_ts(candle)
+            if candle_ts <= latest:
+                futures_by_ts.setdefault(candle_ts, candle)
 
         common = sorted(set(underlying_by_ts).intersection(futures_map))
 
@@ -1702,12 +2196,15 @@ class MidpointLiveShadowCoordinatorV1:
                 continue
 
             f_close, f_vwap = futures_map[ts]
+            future = futures_by_ts.get(ts)
             self._process_minute(
                 ts=ts,
                 underlying=underlying_by_ts[ts],
                 futures_close=f_close,
                 futures_vwap=f_vwap,
                 underlying_by_ts=underlying_by_ts,
+                futures_open=(self._float(future, "open") if future else None),
+                futures_volume=(self._volume(future) if future else None),
             )
             self._v621_observe_completed_minute(
                 ts=ts,
@@ -1735,6 +2232,9 @@ class MidpointLiveShadowCoordinatorV1:
             "quarantined_revised_futures_minutes": len(self.state.quarantined_revised_futures_minutes),
             "reference_types": sorted(self.state.references),
             "active_reference_type": active,
+            "active_parallel_a_reference_types": sorted(
+                self.state.a_reference_types
+            ),
             "active_state": active_state,
             "safety": {
                 "observation_only": self.config.observation_only,

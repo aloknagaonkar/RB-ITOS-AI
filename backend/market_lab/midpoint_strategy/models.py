@@ -7,6 +7,7 @@ from typing import Any, Mapping, Optional
 
 
 class MidpointFamily(str, Enum):
+    A = "A"
     B = "B"
     E = "E"
     C = "C"

@@ -55,6 +55,24 @@ def test_historical_directional_rows_preserve_bearish(tmp_path, monkeypatch):
     assert result["rows"][1]["owner_after"] == "BEARISH"
 
 
+def test_historical_falls_back_to_recorded_live_session(tmp_path, monkeypatch):
+    day = "2026-10-01"
+    monkeypatch.setattr(m, "HIST_ROOT", tmp_path / "missing")
+    monkeypatch.setattr(m, "build_live_directional_candles", lambda selected: {
+        "model": "HILEGA_DIRECTIONAL_CANDLE_UI_V1",
+        "mode": "LIVE",
+        "session_date": selected,
+        "row_count": 1,
+        "directional_row_count": 1,
+        "rows": [{"bar_timestamp": f"{day}T09:20:00+05:30"}],
+    })
+
+    result = m.build_historical_directional_candles(day)
+    assert result["mode"] == "HISTORICAL_LIVE_CAPTURE"
+    assert result["row_count"] == 1
+    assert "recorded directional live" in result["warning"]
+
+
 def test_live_merges_candle_and_directional_evidence(tmp_path, monkeypatch):
     day = "2026-09-24"
     bullish = tmp_path/"bullish.jsonl"

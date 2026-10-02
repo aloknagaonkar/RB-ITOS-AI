@@ -53,3 +53,22 @@ def test_directional_historical_dashboard_combines_ce_and_pe(tmp_path, monkeypat
     assert len(result["trades"][0]["legs"]) == 5
     assert result["trades"][1]["direction"] == "BEARISH"
     assert result["trades"][1]["option_side"] == "PE"
+
+
+def test_historical_dashboard_falls_back_to_live_directional_audit(tmp_path, monkeypatch):
+    day = "2026-10-01"
+    monkeypatch.setattr(m, "DIRECTIONAL_ROOT", tmp_path / "missing-replay")
+    monkeypatch.setattr(
+        m,
+        "_live_directional_dashboard",
+        lambda selected: {
+            "session_date": selected,
+            "historical_source": "DIRECTIONAL_LIVE_AUDIT",
+            "trade_count": 1,
+            "trades": [{"direction": "BEARISH", "option_side": "PE"}],
+        },
+    )
+
+    result = m.build_directional_historical_dashboard(day)
+    assert result["historical_source"] == "DIRECTIONAL_LIVE_AUDIT"
+    assert result["trades"][0]["option_side"] == "PE"
