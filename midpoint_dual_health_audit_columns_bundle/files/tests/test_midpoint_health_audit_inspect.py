@@ -189,6 +189,37 @@ def test_same_minute_health_updates_every_matching_signal():
     assert {row["health_event_id"] for row in projected} == {"h"}
 
 
+def test_compact_exit_candidate_keeps_latest_complete_health_votes():
+    from market_lab.midpoint_strategy.live_shadow_ui import (
+        _decision_timeline_projection,
+    )
+
+    common = {
+        "session_date": "2026-10-01",
+        "family": "E",
+        "direction": "BEARISH",
+        "reference_type": "RED",
+    }
+    rows = [
+        {**common, "event_id": "entry", "event_timestamp": "2026-10-01T12:10:00+05:30",
+         "event_type": "E_ENTRY", "evidence": {}},
+        {**common, "event_id": "health", "event_timestamp": "2026-10-01T13:33:00+05:30",
+         "event_type": "CONTINUOUS_HEALTH_CHECK",
+         "evidence": {"health": "UNHEALTHY", "support_count": 1}},
+        {**common, "event_id": "exit", "event_timestamp": "2026-10-01T13:33:00+05:30",
+         "event_type": "HEALTH_IMMEDIATE_CONFIRMATION_EXIT_CANDIDATE",
+         "evidence": {"health": "UNHEALTHY"}},
+    ]
+
+    projected = _decision_timeline_projection(rows)
+    exit_row = projected[-1]
+    assert exit_row["health"] == "UNHEALTHY"
+    assert exit_row["health_support_count"] == 1
+    assert exit_row["bearish_health"] == "UNHEALTHY"
+    assert exit_row["bearish_health_support_count"] == 1
+    assert exit_row["health_event_id"] == "health"
+
+
 def test_health_crosses_b_to_e_ownership_on_same_reference():
     from market_lab.midpoint_strategy.live_shadow_ui import (
         _decision_timeline_projection,

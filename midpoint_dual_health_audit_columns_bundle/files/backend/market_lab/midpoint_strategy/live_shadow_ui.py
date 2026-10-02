@@ -437,6 +437,21 @@ def _decision_timeline_projection(rows: list[dict[str, Any]]) -> list[dict[str, 
         projected = _timeline_projection([row])[0]
         if projected.get("health") is not None:
             payload = health_payload(row)
+            previous = latest_health.get(row_lane)
+            if (
+                previous is not None
+                and payload.get("health_support_count") is None
+            ):
+                # Compact exit-candidate events carry the health label but do
+                # not repeat the full vote evidence.  Preserve the latest
+                # already-observed same-lane snapshot instead of replacing it
+                # with an incomplete value.  The current label is retained;
+                # metrics and the inspect link remain tied to the causal
+                # completed health check.
+                payload = {
+                    **previous,
+                    "health": payload.get("health") or previous.get("health"),
+                }
             latest_health[row_lane] = payload
             projected.update(payload)
         elif row_lane in active_lanes and row_lane in latest_health:
