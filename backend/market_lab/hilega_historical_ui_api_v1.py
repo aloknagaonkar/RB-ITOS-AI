@@ -619,6 +619,11 @@ def _v2_report(row: dict) -> dict:
         "conditions": {
             "wma21_slope_required": True,
             "wma21_slope_change": row.get("wma21_slope_change"),
+            "wma21_slope_direction": row.get("wma21_slope_direction"),
+            "wma21_slope_gate_status": row.get("wma21_slope_gate_status"),
+            "wma21_current_candle": row.get("wma21_current_candle"),
+            "wma21_previous_candle": row.get("wma21_previous_candle"),
+            "wma21_slope_interval_minutes": row.get("wma21_slope_interval_minutes"),
             "bullish_wma21_rising": row.get("bullish_wma21_rising"),
             "bearish_wma21_falling": row.get("bearish_wma21_falling"),
             "bullish_wma21_slope_pass": row.get("bullish_wma21_slope_pass"),

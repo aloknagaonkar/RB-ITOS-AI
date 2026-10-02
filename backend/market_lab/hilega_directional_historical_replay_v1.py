@@ -135,12 +135,19 @@ def _pair_trade(
     )
 
 
-def _row_from_decision(bar, decision: DirectionalDecision, coordinator: HilegaDirectionalCoordinatorV1) -> dict[str, Any]:
+def _row_from_decision(
+    bar,
+    decision: DirectionalDecision,
+    coordinator: HilegaDirectionalCoordinatorV1,
+    strategy_version: str = "V1",
+) -> dict[str, Any]:
     ind = coordinator.bullish.previous_indicators
     bull = coordinator.bullish.last_decision_payload
     bear = coordinator.bearish.last_decision_payload
     accepted = _event_types(decision.accepted_events)
     suppressed = _event_types(decision.suppressed_events)
+    slope_required = strategy_version.upper() == "V2"
+    slope_change = bull.get("wma21_slope_change")
 
     action = "NO_ACTION"
     if any(x in BULLISH_ENTRY_EVENTS for x in accepted):
@@ -169,14 +176,30 @@ def _row_from_decision(bar, decision: DirectionalDecision, coordinator: HilegaDi
         "ema3_rsi": None if ind is None else ind.ema3_rsi,
         "wma21_rsi": None if ind is None else ind.wma21_rsi,
         "previous_wma21_rsi": bull.get("previous_wma21_rsi"),
-        "wma21_slope_change": bull.get("wma21_slope_change"),
+        "wma21_slope_change": slope_change,
+        "wma21_slope_direction": bull.get("wma21_slope_direction", "UNAVAILABLE"),
+        "wma21_current_candle": bull.get("wma21_current_candle", bar.ts.isoformat()),
+        "wma21_previous_candle": bull.get(
+            "wma21_previous_candle",
+            (bar.ts - timedelta(minutes=5)).isoformat()
+            if bar.ts.strftime("%H:%M") > "09:15" else None,
+        ),
+        "wma21_slope_interval_minutes": bull.get(
+            "wma21_slope_interval_minutes",
+            5 if bar.ts.strftime("%H:%M") > "09:15" else None,
+        ),
         "bullish_wma21_rising": bull.get("wma21_rising"),
         "bearish_wma21_falling": bear.get("wma21_falling"),
         "bullish_wma21_slope_pass": bull.get("wma21_slope_pass"),
         "bearish_wma21_slope_pass": bear.get("wma21_slope_pass"),
-        "wma21_slope_required": bull.get("wma21_slope_required", False),
-        "bullish_wma21_slope_rejection": "WMA21_NOT_RISING_OR_FLAT" if bull.get("wma21_slope_required") and not bull.get("wma21_rising") else "",
-        "bearish_wma21_slope_rejection": "WMA21_NOT_FALLING_OR_FLAT" if bear.get("wma21_slope_required") and not bear.get("wma21_falling") else "",
+        "wma21_slope_required": slope_required,
+        "wma21_slope_gate_status": (
+            "INFORMATIONAL_ONLY" if not slope_required
+            else "UNAVAILABLE" if slope_change is None
+            else "V2_ENFORCED"
+        ),
+        "bullish_wma21_slope_rejection": "WMA21_NOT_RISING_OR_FLAT" if slope_required and slope_change is not None and not bull.get("wma21_rising") else "",
+        "bearish_wma21_slope_rejection": "WMA21_NOT_FALLING_OR_FLAT" if slope_required and slope_change is not None and not bear.get("wma21_falling") else "",
         "owner_before": decision.trade_owner_before,
         "owner_after": decision.trade_owner_after,
         "bullish_state": decision.bullish_state,
@@ -334,7 +357,7 @@ def replay_directional_sessions(
 
         for bar in bars:
             decision = coordinator.on_bar(bar)
-            row = _row_from_decision(bar, decision, coordinator)
+            row = _row_from_decision(bar, decision, coordinator, strategy_version)
             rows.append(row)
 
             entry = _accepted_entry(decision)

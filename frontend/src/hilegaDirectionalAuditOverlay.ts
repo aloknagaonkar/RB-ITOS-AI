@@ -10,6 +10,20 @@ export type DirectionalCandleOverlayRow={
   rsi9?:number|null
   ema3_rsi?:number|null
   wma21_rsi?:number|null
+  previous_wma21_rsi?:number|null
+  wma21_slope_change?:number|null
+  wma21_slope_required?:boolean
+  wma21_slope_pass?:boolean|null
+  wma21_slope_direction?:string|null
+  wma21_current_candle?:string|null
+  wma21_previous_candle?:string|null
+  wma21_slope_interval_minutes?:number|null
+  bullish_wma21_rising?:boolean|null
+  bearish_wma21_falling?:boolean|null
+  bullish_wma21_slope_pass?:boolean|null
+  bearish_wma21_slope_pass?:boolean|null
+  bullish_wma21_slope_rejection?:string|null
+  bearish_wma21_slope_rejection?:string|null
   owner_before?:string|null
   owner_after?:string|null
   bullish_state?:string|null
@@ -241,6 +255,12 @@ export function overlayDirectionalAuditReports(
     const accepted=list(d.accepted_events)
     const suppressed=list(d.suppressed_events)
     const dir=direction(d)
+    const prior=previousByMinute.get(minuteKey(d.bar_timestamp)??'')
+    const currentWma=d.wma21_rsi??report.indicators?.wma21_rsi??null
+    const previousWma=d.previous_wma21_rsi??prior?.wma21_rsi??report.indicators?.previous_wma21_rsi??null
+    const change=currentWma==null||previousWma==null?null:Number(currentWma)-Number(previousWma)
+    const v2=Boolean(d.wma21_slope_required??report.conditions?.wma21_slope_required)
+    const slopePass=change==null||dir==null?null:dir==='BEARISH'?change<0:change>0
 
     const selectedRoute=
       relation(accepted)
@@ -287,6 +307,20 @@ export function overlayDirectionalAuditReports(
           d.wma21_rsi
           ?? report.indicators?.wma21_rsi
           ?? null,
+      },
+
+      conditions:{
+        ...(report.conditions??{}),
+        wma21_slope_change:change,
+        wma21_slope_direction:change==null?'UNAVAILABLE':change>0?'RISING':change<0?'FALLING':'FLAT',
+        wma21_slope_required:v2,
+        wma21_slope_pass:v2?slopePass:null,
+        wma21_slope_gate_status:v2?(slopePass?'PASS':slopePass===false?'FAIL':'UNAVAILABLE'):'INFORMATIONAL_ONLY',
+        bullish_wma21_rising:change==null?null:change>0,
+        bearish_wma21_falling:change==null?null:change<0,
+        wma21_current_candle:d.bar_timestamp,
+        wma21_previous_candle:d.wma21_previous_candle??prior?.bar_timestamp??null,
+        wma21_slope_interval_minutes:d.wma21_slope_interval_minutes??(prior?Math.round((new Date(d.bar_timestamp).getTime()-new Date(prior.bar_timestamp).getTime())/60000):null),
       },
 
       strategy:{
@@ -376,6 +410,12 @@ export function overlayDirectionalAuditReports(
 
     const dir=
       direction(d)
+    const prior=previousByMinute.get(minuteKey(d.bar_timestamp)??'')
+    const currentWma=d.wma21_rsi??null
+    const previousWma=d.previous_wma21_rsi??prior?.wma21_rsi??null
+    const slopeChange=currentWma==null||previousWma==null?null:Number(currentWma)-Number(previousWma)
+    const slopePass=slopeChange==null||dir==null?null:dir==='BEARISH'?slopeChange<0:slopeChange>0
+    const v2=Boolean(d.wma21_slope_required)
 
     const synthetic={
       checkpoint:
@@ -478,7 +518,20 @@ export function overlayDirectionalAuditReports(
           ?? null,
       },
 
-      conditions:{},
+      conditions:{
+        wma21_slope_change:slopeChange,
+        wma21_slope_direction:slopeChange==null?'UNAVAILABLE':slopeChange>0?'RISING':slopeChange<0?'FALLING':'FLAT',
+        wma21_slope_required:v2,
+        wma21_slope_gate_status:v2?(slopePass?'PASS':slopePass===false?'FAIL':'UNAVAILABLE'):'INFORMATIONAL_ONLY',
+        wma21_slope_pass:v2?slopePass:null,
+        bullish_wma21_rising:slopeChange==null?null:slopeChange>0,
+        bearish_wma21_falling:slopeChange==null?null:slopeChange<0,
+        bullish_wma21_slope_rejection:d.bullish_wma21_slope_rejection??null,
+        bearish_wma21_slope_rejection:d.bearish_wma21_slope_rejection??null,
+        wma21_current_candle:d.bar_timestamp,
+        wma21_previous_candle:d.wma21_previous_candle??prior?.bar_timestamp??null,
+        wma21_slope_interval_minutes:d.wma21_slope_interval_minutes??(prior?Math.round((new Date(d.bar_timestamp).getTime()-new Date(prior.bar_timestamp).getTime())/60000):null),
+      },
 
       route_a:{
         eligible:null,
@@ -554,4 +607,3 @@ export function overlayDirectionalAuditReports(
         )
   )
 }
-

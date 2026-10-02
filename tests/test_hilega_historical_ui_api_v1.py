@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import pytest
 from fastapi import HTTPException
-from market_lab.hilega_historical_ui_api_v1 import list_available, load_capture
+from market_lab.hilega_historical_ui_api_v1 import _v2_report, list_available, load_capture
 from market_lab.live_shadow_step_audit_v1 import ShadowStepAuditStoreV1
 
 
@@ -26,3 +26,21 @@ def test_read_only_capture(tmp_path: Path):
     with pytest.raises(HTTPException) as exc:
         load_capture('../../.env',tmp_path)
     assert exc.value.status_code==404
+
+
+def test_v2_report_preserves_wma_slope_candle_evidence():
+    report = _v2_report({
+        "bar_timestamp": "2026-09-24T09:20:00+05:30",
+        "wma21_slope_required": True,
+        "wma21_slope_change": 0.25,
+        "wma21_slope_direction": "RISING",
+        "wma21_slope_gate_status": "PASS",
+        "wma21_current_candle": "2026-09-24T09:20:00+05:30",
+        "wma21_previous_candle": "2026-09-24T09:15:00+05:30",
+        "wma21_slope_interval_minutes": 5,
+    })
+    assert report["conditions"]["wma21_slope_direction"] == "RISING"
+    assert report["conditions"]["wma21_slope_gate_status"] == "PASS"
+    assert report["conditions"]["wma21_current_candle"].endswith("09:20:00+05:30")
+    assert report["conditions"]["wma21_previous_candle"].endswith("09:15:00+05:30")
+    assert report["conditions"]["wma21_slope_interval_minutes"] == 5
