@@ -1,0 +1,58 @@
+diff --git a/backend/market_lab/historical_paper_replay_date_v1.py b/backend/market_lab/historical_paper_replay_date_v1.py
+--- a/backend/market_lab/historical_paper_replay_date_v1.py
++++ b/backend/market_lab/historical_paper_replay_date_v1.py
+@@
+ def build_historical_oi_features(
+     session: PositioningSession,
++    *,
++    option_oi_index=None,
+ ) -> list[OICheckpointFeature]:
++    if option_oi_index is not None:
++        from .fixed_strike_oi_fallback_v1 import (
++            select_exact_strikes_with_oi_fallback,
++        )
++
+     groups = timestamp_groups(session)
+@@
+-        current_fixed = _select_exact_strikes(current_rows, fixed_strikes)
++        if option_oi_index is None:
++            current_fixed = _select_exact_strikes(current_rows, fixed_strikes)
++        else:
++            current_fixed = select_exact_strikes_with_oi_fallback(
++                current_rows,
++                fixed_strikes,
++                timestamp=ts,
++                option_oi_index=option_oi_index,
++            )
+         ce_fixed, pe_fixed = _sum_oi(current_fixed)
+@@
+-        previous_fixed = _select_exact_strikes(previous_rows, fixed_strikes)
++        if option_oi_index is None:
++            previous_fixed = _select_exact_strikes(previous_rows, fixed_strikes)
++        else:
++            previous_fixed = select_exact_strikes_with_oi_fallback(
++                previous_rows,
++                fixed_strikes,
++                timestamp=previous_ts,
++                option_oi_index=option_oi_index,
++            )
+         ce_fixed_prev, pe_fixed_prev = _sum_oi(previous_fixed)
+@@
+ def replay_date(
+     session_date: str,
+@@
+     futures = load_historical_futures_5m(
+         session_date,
+         csv_path=futures_csv,
+     )
+-    features = build_historical_oi_features(positioning)
++    from .fixed_strike_oi_fallback_v1 import load_option_oi_index
++
++    _option_oi_source, option_oi_index = load_option_oi_index(
++        session_date,
++        data_root=data_root,
++    )
++    features = build_historical_oi_features(
++        positioning,
++        option_oi_index=option_oi_index,
++    )

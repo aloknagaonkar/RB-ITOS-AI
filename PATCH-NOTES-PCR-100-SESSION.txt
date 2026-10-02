@@ -1,0 +1,12 @@
+PCR 100-session expansion
+
+Adds:
+- OOS-C 20-session manifest: 2026-05-18 through 2026-06-15.
+- OOS-D 20-session manifest: 2026-04-17 through 2026-05-15.
+- Five-block Stage-2 comparator across TRAIN + OOS-A/B/C/D.
+- Combined event-level lead/lag, +15m direction and response-label summary.
+
+Stage-2 remains frozen as:
+Moving PCR 5m falling + 15m falling + 30m rising.
+
+No strategy or option-premium assumptions are added.

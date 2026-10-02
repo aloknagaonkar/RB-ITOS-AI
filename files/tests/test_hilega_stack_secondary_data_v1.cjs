@@ -1,0 +1,7 @@
+const fs=require('fs')
+const s=fs.readFileSync('frontend/src/hilegaDecisionTable.tsx','utf8')
+if(!s.includes('<th>Nifty Δ from entry</th>')) throw new Error('primary Nifty delta header missing')
+if(!s.includes("style={{display:'block'}}>{niftyPoints===null?'—'")) throw new Error('delta is not primary line')
+if(!s.includes("<small style={{display:'block'}}>O {money(r.bar?.open)} → C {money(r.bar?.close)}</small>")) throw new Error('O→C is not below delta')
+if(!s.includes("<span style={{display:'block'}}>{timing.window}</span>")) throw new Error('candle window not block')
+console.log('PASS: secondary timing and NIFTY O→C render beneath primary data')

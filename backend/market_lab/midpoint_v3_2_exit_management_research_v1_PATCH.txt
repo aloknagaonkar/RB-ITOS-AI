@@ -1,0 +1,22 @@
+# Patch instructions for midpoint_v3_2_exit_management_research_v1.py
+#
+# In analyze(), inside the row = {...} block created for every replay result,
+# retain the exact frozen entry timestamp from the economics source:
+#
+#     "entry_timestamp": trade.get("entry_timestamp"),
+#
+# The complete relevant row shape should be:
+#
+# row = {
+#     "policy_id": policy.policy_id,
+#     "block": block,
+#     "session_date": trade["session_date"],
+#     "entry_timestamp": trade.get("entry_timestamp"),
+#     "direction": trade.get("direction"),
+#     "oi_quality": trade.get("oi_quality"),
+#     "t1_observation_state": trade.get("t1_observation_state"),
+#     "outcome_family": trade.get("outcome_family"),
+#     **result,
+# }
+#
+# No research rule, threshold, policy, stop, or entry selection changes.

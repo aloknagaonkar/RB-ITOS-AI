@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+"""Install and validate automatic Midpoint Historical Replay publication."""
+
+from __future__ import annotations
+
+import shutil
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+BUNDLE = Path(__file__).resolve().parent
+ROOT = BUNDLE.parent
+FILES = (
+    Path("scripts/midpoint_append_live_dates_to_replay.py"),
+    Path("scripts/midpoint_auto_publish_historical.py"),
+    Path("scripts/restart.sh"),
+    Path("scripts/stop.sh"),
+    Path("scripts/status.sh"),
+    Path("tests/test_midpoint_auto_publish_historical.py"),
+)
+
+
+def run(command: list[str]) -> None:
+    print("Running:", " ".join(command), flush=True)
+    subprocess.run(command, cwd=ROOT, check=True)
+
+
+def main() -> int:
+    if not (ROOT / "pyproject.toml").exists():
+        raise SystemExit(f"STOP: place bundle directly inside repository: {ROOT}")
+    python = ROOT / ".venv/bin/python"
+    if not python.exists():
+        raise SystemExit(f"STOP: virtualenv Python missing: {python}")
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    backup_root = ROOT / "data/backups" / f"midpoint-history-publisher-{stamp}"
+    copied: list[Path] = []
+    try:
+        for relative in FILES:
+            source = BUNDLE / "files" / relative
+            target = ROOT / relative
+            if not source.is_file():
+                raise FileNotFoundError(source)
+            if target.exists():
+                backup = backup_root / relative
+                backup.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(target, backup)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+            copied.append(relative)
+
+        run([
+            str(python), "-m", "pytest", "-q",
+            "tests/test_midpoint_auto_publish_historical.py",
+            "tests/test_midpoint_m2_2_full_day_replay_ui.py",
+        ])
+        run([
+            str(python), "-m", "py_compile",
+            "scripts/midpoint_append_live_dates_to_replay.py",
+            "scripts/midpoint_auto_publish_historical.py",
+        ])
+        run(["bash", "-n", "scripts/restart.sh", "scripts/stop.sh", "scripts/status.sh"])
+        run(["git", "diff", "--check"])
+    except Exception:
+        for relative in reversed(copied):
+            target = ROOT / relative
+            backup = backup_root / relative
+            if backup.exists():
+                shutil.copy2(backup, target)
+            elif target.exists():
+                target.unlink()
+        print("STOP: validation failed; source files restored.", file=sys.stderr)
+        raise
+
+    print("PASS: automatic Midpoint Historical Replay publisher installed.")
+    print("Eligibility: audited sessions strictly earlier than current IST date.")
+    print("Safety: observation only; live audit, entries, exits and orders unchanged.")
+    print("Next: run the one-shot backfill, then restart to enable daily polling.")
+    if backup_root.exists():
+        print("Backup:", backup_root)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

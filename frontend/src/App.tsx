@@ -1,7 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import type { Config, Detail, Point, Result, State } from './types'
 import { fetchLatestPanelTrends, type PCRTrendResult } from './pcrTrends'
 import { fetchStrikePositioning, type PositioningClassification, type PositioningHorizon, type StrikePositioningResult } from './strikePositioning'
+const HistoricalResearch = lazy(() => import('./historicalResearch'))
+const LiveShadowMonitor = lazy(() => import('./liveShadow'))
+const HilegaMilegaShadow = lazy(() => import('./hilegaMilegaShadow'))
+const MidpointStrategyShadow = lazy(() => import('./midpointStrategyShadow'))
+const HistoricalReplay = lazy(() => import('./historicalReplay'))
 
 const number = (v: number|null|undefined, digits = 0) => v == null ? '—' : v.toLocaleString('en-IN', {maximumFractionDigits: digits})
 const time = (v: string) => new Date(v).toLocaleTimeString('en-IN', {timeZone: 'Asia/Kolkata', hour12: false})
@@ -52,9 +57,28 @@ function Chart({points, selected, onSelect}: {points: Point[]; selected: number|
 }
 
 export default function App() {
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try { return window.localStorage.getItem('market-lab-sidebar-collapsed') === 'true' }
+    catch { return false }
+  })
+  const toggleSidebar = () => setSidebarCollapsed(previous => {
+    const next = !previous
+    try { window.localStorage.setItem('market-lab-sidebar-collapsed', String(next)) } catch { /* optional preference */ }
+    return next
+  })
   const [state, setState] = useState<State|null>(null)
   const [draft, setDraft] = useState<Config|null>(null)
-  const [tab, setTab] = useState('PCR workspace')
+  const [tab, setTab] = useState(() => {
+    try { return window.localStorage.getItem('market-lab-workspace') || 'PCR workspace' }
+    catch { return 'PCR workspace' }
+  })
+  const tabRef = useRef(tab)
+  tabRef.current = tab
+  const chooseTab = (value:string) => {
+    tabRef.current = value
+    setTab(value)
+    try { window.localStorage.setItem('market-lab-workspace', value) } catch { /* optional preference */ }
+  }
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
@@ -100,20 +124,46 @@ export default function App() {
     refreshPcr(data)
   }
   useEffect(() => {
+    if (!['PCR workspace', 'Data health', 'Configuration', 'Historical research'].includes(tab)) return
     let active = true
+    let inFlight = false
     const poll = async () => {
+      if (inFlight) return
+      inFlight = true
       try {
-        const data = await api<State>('/state')
-        if (active) {setState(data); setDraft(old=>old ?? data.config); setError('')}
-        if (active) refreshPcr(data)
+        const data = await api<State>('/state?history_limit=1')
+        if (active) {
+          setState(previous => {
+            if (tabRef.current !== 'PCR workspace' || !previous || previous.config_id !== data.config_id || previous.history.length <= 1) return data
+            const newest = data.history[0]
+            return {...data, history: newest ? [...previous.history.filter(row => row.id !== newest.id), newest].slice(-240) : previous.history}
+          })
+          setDraft(old=>old ?? data.config); setError('')
+          if (tabRef.current === 'PCR workspace') refreshPcr(data)
+        }
       }
       catch (e) {if(active) setError((e as Error).message)}
+      finally {inFlight = false}
     }
     void poll()
     void api<{properties: typeof schema}>('/config-schema').then(s => {if(active) setSchema(s.properties)}).catch(()=>{})
-    const timer = setInterval(poll, 3000)
+    const timer = setInterval(poll, 15000)
     return () => {active = false; clearInterval(timer)}
-  }, [])
+  }, [tab])
+  useEffect(() => {
+    if (tab !== 'PCR workspace' || !state || state.history.length > 1) return
+    let active = true
+    const controller = new AbortController()
+    void fetch('/api/state', {signal:controller.signal}).then(response => {
+      if (!response.ok) throw new Error('PCR history request failed')
+      return response.json() as Promise<State>
+    }).then(data => {
+      if (active && tabRef.current === 'PCR workspace') setState(data)
+    }).catch(error => {
+      if (active && error?.name !== 'AbortError') setError(String(error))
+    })
+    return () => {active = false; controller.abort()}
+  }, [tab, state?.config_id, (state?.history.length ?? 0) > 1])
   const latest = state?.history.at(-1)
   const displayedPcr = pcrDisplay?.configId===state?.config_id ? pcrDisplay : null
   const pcrLatest = displayedPcr?.latest
@@ -124,7 +174,7 @@ export default function App() {
   const positioningKey = state ? [state.config_id,positioningHorizon,positioningView,requestedPositioningAtm??'none',positioningView==='full'?0:5].join('|') : ''
   const detailId = selected ?? latest?.id
   useEffect(() => {
-    if (!state) return
+    if (!state || tab !== 'PCR workspace') return
     if (positioningView==='fixed' && fixedPositioningAtm==null) {
       positioningRequestGeneration.current += 1
       positioningContext.current = positioningKey
@@ -144,13 +194,13 @@ export default function App() {
       .then(value => {if (active && generation===positioningRequestGeneration.current) {setPositioning(value); setPositioningState('ready')}})
       .catch(() => {if (active && generation===positioningRequestGeneration.current) setPositioningState('error')})
     return () => {active = false}
-  }, [state?.config_id, latest?.id, positioningHorizon, positioningView, requestedPositioningAtm, fixedPositioningAtm, positioningKey])
+  }, [tab, state?.config_id, latest?.id, positioningHorizon, positioningView, requestedPositioningAtm, fixedPositioningAtm, positioningKey])
   useEffect(() => {
     let active = true
     setDetail(null)
-    if (detailId) void api<Detail>('/observations/' + detailId).then(d=>{if(active) setDetail(d)}).catch(e=>{if(active) setError(e.message)})
+    if (detailId && (tab === 'PCR workspace' || tab === 'Data health')) void api<Detail>('/observations/' + detailId).then(d=>{if(active) setDetail(d)}).catch(e=>{if(active) setError(e.message)})
     return () => {active=false}
-  }, [detailId])
+  }, [detailId, tab])
   const action = async (work: ()=>Promise<void>) => {
     setBusy(true); setNotice(''); setError('')
     try {await work(); await refresh()} catch(e) {setError((e as Error).message)} finally {setBusy(false)}
@@ -170,21 +220,21 @@ export default function App() {
     const a = document.createElement('a'); a.href=url; a.download=`observation-${detail!.id}.json`; a.click()
     URL.revokeObjectURL(url)
   }
-  if (!state || !draft) return <main className="loading"><div className="brand-icon">M</div><h1>Market Strategy Lab</h1><p>{error || 'Connecting to the research workspace…'}</p><p>Start the local backend on port 8000.</p></main>
+  if (!state || !draft) return <div className={'shell'+(sidebarCollapsed?' sidebar-collapsed':'')}><aside className="workspace-sidebar"><button className="sidebar-toggle" type="button" onClick={toggleSidebar} aria-label={sidebarCollapsed?'Expand Workspace sidebar':'Collapse Workspace sidebar'} aria-expanded={!sidebarCollapsed} title={sidebarCollapsed?'Expand Workspace sidebar':'Collapse Workspace sidebar'}>{sidebarCollapsed?'☰':'‹'}</button><div className="sidebar-content"><div className="brand"><span className="brand-icon">M</span><div>MARKET LAB<small>STRATEGY RESEARCH</small></div></div><div className="nav-label">WORKSPACE</div><nav>{['PCR workspace','Live shadow','Hilega shadow','Midpoint Strategy','Historical replay','Historical research','Data health','Configuration'].map(label => <button key={label} className={tab===label?'active':''} onClick={()=>chooseTab(label)}>{label}</button>)}</nav></div></aside><main><header><div className="breadcrumb">Research / <b>{tab}</b></div></header><div className="page-heading"><h1>{tab}</h1></div>{error&&<div role="alert" className="banner error">{error}</div>}<Suspense fallback={<section className="panel"><div className="empty">Loading workspace…</div></section>}>{tab==='Live shadow'?<LiveShadowMonitor/>:tab==='Hilega shadow'?<HilegaMilegaShadow/>:tab==='Midpoint Strategy'?<MidpointStrategyShadow/>:tab==='Historical replay'?<HistoricalReplay/>:<section className="panel"><div className="empty">Loading PCR configuration…</div></section>}</Suspense></main></div>
   const isDemo = state.config.provider === 'demo'
-  return <div className="shell">
-    <aside><div className="brand"><span className="brand-icon">M</span><div>MARKET LAB<small>STRATEGY RESEARCH</small></div></div>
-      <div className="nav-label">WORKSPACE</div><nav>{['PCR workspace','Data health','Configuration'].map(label =>
-        <button key={label} className={tab===label ? 'active':''} onClick={()=>setTab(label)}><span>{label==='PCR workspace'?'◈':label==='Data health'?'◉':'⚙'}</span>{label}</button>)}</nav>
-      <div className="sidebar-bottom"><span className="dot"/><b>Research foundation</b><p>Record. Inspect. Reproduce.</p><small>Order execution is not enabled.</small></div>
+  return <div className={'shell'+(sidebarCollapsed?' sidebar-collapsed':'')}>
+    <aside className="workspace-sidebar"><button className="sidebar-toggle" type="button" onClick={toggleSidebar} aria-label={sidebarCollapsed?'Expand Workspace sidebar':'Collapse Workspace sidebar'} aria-expanded={!sidebarCollapsed} title={sidebarCollapsed?'Expand Workspace sidebar':'Collapse Workspace sidebar'}>{sidebarCollapsed?'☰':'‹'}</button><div className="sidebar-content"><div className="brand"><span className="brand-icon">M</span><div>MARKET LAB<small>STRATEGY RESEARCH</small></div></div>
+      <div className="nav-label">WORKSPACE</div><nav>{['PCR workspace','Live shadow','Hilega shadow','Midpoint Strategy','Historical replay','Historical research','Data health','Configuration'].map(label =>
+        <button key={label} className={tab===label ? 'active':''} onClick={()=>chooseTab(label)}><span>{label==='PCR workspace'?'◈':label==='Live shadow'?'◎':label==='Hilega shadow'?'◉':label==='Midpoint Strategy'?'◆':label==='Historical replay'?'↺':label==='Historical research'?'◫':label==='Data health'?'◉':'⚙'}</span>{label}</button>)}</nav>
+      <div className="sidebar-bottom"><span className="dot"/><b>Research foundation</b><p>Record. Inspect. Reproduce.</p><small>Order execution is not enabled.</small></div></div>
     </aside>
     <main>
       <header><div className="breadcrumb">Research / <b>{tab}</b></div><span className={'pill ' + (isDemo?'amber':'teal')}>{isDemo?'SYNTHETIC DEMO':'UPSTOX DATA'}</span></header>
-      <div className="page-heading"><div><div className="eyebrow">OPTIONS INTELLIGENCE</div><h1>{tab}</h1><p>{tab==='PCR workspace'?'One option chain. Two ATM perspectives. Every calculation traceable.':tab==='Data health'?'Connection health and data quality, with their limits visible.':'Versioned parameters for repeatable research.'}</p></div>
-        <button disabled={busy} className={state.enabled?'secondary':'primary'} onClick={()=>void action(async()=>{
+      <div className="page-heading"><div><div className="eyebrow">OPTIONS INTELLIGENCE</div><h1>{tab}</h1><p>{tab==='PCR workspace'?'One option chain. Two ATM perspectives. Every calculation traceable.':tab==='Live shadow'?'Observation-only strategy lifecycle, data health, entries, exits and P&L.':tab==='Hilega shadow'?'Hilega-Milega canonical live shadow with ATM±2 lifecycle and detailed audit drill-down.':tab==='Midpoint Strategy'?'Midpoint Strategy shadow workspace with Family B lifecycle and fully auditable decisions.':tab==='Historical replay'?'Replay the current Live Shadow strategy candle-by-candle with full causal audit.':tab==='Historical research'?'Reconstruct Fixed, Moving, and Full PCR from expired option candles.':tab==='Data health'?'Connection health and data quality, with their limits visible.':'Versioned parameters for repeatable research.'}</p></div>
+        {tab!=='Historical research' && tab!=='Live shadow' && tab!=='Hilega shadow' && tab!=='Midpoint Strategy' && tab!=='Historical replay' && <button disabled={busy} className={state.enabled?'secondary':'primary'} onClick={()=>void action(async()=>{
           await api('/collection',{enabled:!state.enabled})
           setNotice(state.enabled?'Pause requested. An in-flight observation may still finish.':'Collection requested. The separate worker must be running.')
-        })}>{state.enabled?'Pause collection':'Start collection'}</button></div>
+        })}>{state.enabled?'Pause collection':'Start collection'}</button>}</div>
       {error && <div role="alert" className="banner error">{error} Displayed observations may be outdated.</div>}
       {notice && <div role="status" className="banner">{notice}</div>}
       {isDemo && <div className="demo-strip"><span>DEMO ENVIRONMENT</span>Generated prices and OI · simulated session clock · no market connection</div>}
@@ -194,9 +244,16 @@ export default function App() {
         <div className="instrument-bar"><div><b>{state.config.underlying.split('|').at(-1)}</b><span>EXPIRY {state.config.expiry}</span></div>
           <div>ATM ±{state.config.wings} strikes <i/> Anchor {state.config.anchor_time} IST <i/> Configuration v{state.config_id}</div></div>
         <div className="metrics">{(['fixed','moving','full'] as const).map(mode=>{
-          const result = pcrLatest?.evaluation.results.find(r=>r.mode===mode)
-          const trendAt = (horizon: 300|900|1800) => trends.find(trend =>
-            trend.mode === mode && trend.requested_horizon_seconds === horizon)
+          const rawResult = pcrLatest?.evaluation.results.find(r=>r.mode===mode)
+          const result = mode==='fixed' ? displayFixedResult(pcrLatest,rawResult) : rawResult
+          const trendAt = (horizon: 300|900|1800) => {
+            const existing = trends.find(trend =>
+              trend.mode === mode && trend.requested_horizon_seconds === horizon)
+
+            return mode === 'fixed'
+              ? fixedSessionTrend(pcrLatest, horizon, existing)
+              : existing
+          }
           const fiveMinute = trendAt(300)
           const fifteenMinute = trendAt(900)
           const thirtyMinute = trendAt(1800)
@@ -224,12 +281,23 @@ export default function App() {
         <section className="panel"><div className="panel-heading"><div><h2>Observation inspector</h2><p>Select a chart point to inspect the exact inputs.</p></div><select aria-label="Observation" value={selected ?? ''} onChange={e=>setSelected(e.target.value?Number(e.target.value):null)}>
           <option value="">Follow latest observation</option>{[...state.history].reverse().map(p=><option key={p.id} value={p.id}>#{p.id} · {dateTime(p.evaluation.observed_at)}</option>)}</select></div>
           {detail ? <>
-            <div className="inspector-meta"><span>Spot <b>{number(detail.snapshot.spot,2)}</b></span><span>Observed <b>{dateTime(detail.snapshot.received_at)} IST</b></span><span>Anchor <b>{words(detail.evaluation.anchor_status)}</b></span><button onClick={exportDetail}>Export inputs ↓</button></div>
-            <div className="oi-sections">{detail.evaluation.results.map(result=><OISection key={result.mode} detail={detail} result={result}/>)}</div>
+            <div className="inspector-meta"><span>Spot <b>{number(detail.snapshot.spot,2)}</b></span><span>Observed <b>{dateTime(detail.snapshot.received_at)} IST</b></span><span>Anchor <b>{displayAnchorStatus(detail)}</b></span><button onClick={exportDetail}>Export inputs ↓</button></div>
+            <div className="oi-sections">{detail.evaluation.results.map(result=>
+              result.mode==='fixed' && fixedSessionUi(detail)
+                ? <FixedSessionOISection key={result.mode} detail={detail}/>
+                : <OISection key={result.mode} detail={detail} result={result}/>
+            )}</div>
             <div className="panel-foot">OI units: {detail.snapshot.oi_unit} · Engine {detail.evaluation.engine_version} · Configuration v{detail.config_id}</div>
           </> : <div className="empty">No observation selected.</div>}
         </section>
       </>}
+      <Suspense fallback={<section className="panel"><div className="empty">Loading workspace…</div></section>}>
+        {tab==='Live shadow' && <LiveShadowMonitor/>}
+        {tab==='Hilega shadow' && <HilegaMilegaShadow/>}
+        {tab==='Midpoint Strategy' && <MidpointStrategyShadow/>}
+        {tab==='Historical replay' && <HistoricalReplay/>}
+        {tab==='Historical research' && <HistoricalResearch defaultUnderlying={state.config.underlying} defaultExpiry={state.config.expiry} defaultWings={state.config.wings}/>}
+      </Suspense>
       {tab==='Data health' && <>
         <div className="health-grid">
           <Health label="Collector" value={state.worker.alive?words(state.worker.state):'Worker offline'} note="Heartbeat measures worker availability, not market freshness."/>
@@ -274,6 +342,49 @@ function Health({label,value,note}:{label:string;value:string;note:string}) {
 }
 
 const positioningLabels:Record<PositioningClassification,string> = {LONG_BUILDUP:'LB',SHORT_BUILDUP:'SB',LONG_UNWINDING:'LW',SHORT_COVERING:'SC',NEUTRAL:'N',UNAVAILABLE:'—'}
+
+type OiDirectionalStatus = 'BULLISH'|'BEARISH'|'MIXED'|'UNAVAILABLE'
+
+const oiDirectionalStatus = (
+  ce?: StrikePositioningResult,
+  pe?: StrikePositioningResult,
+): OiDirectionalStatus => {
+  const ceState = ce?.classification
+  const peState = pe?.classification
+
+  if (
+    !ceState || !peState ||
+    ceState === 'UNAVAILABLE' ||
+    peState === 'UNAVAILABLE'
+  ) return 'UNAVAILABLE'
+
+  if (
+    ceState === 'LONG_BUILDUP' &&
+    peState === 'SHORT_BUILDUP'
+  ) return 'BULLISH'
+
+  if (
+    ceState === 'SHORT_BUILDUP' &&
+    peState === 'LONG_BUILDUP'
+  ) return 'BEARISH'
+
+  return 'MIXED'
+}
+
+const oiDirectionalBadge = (
+  ce?: StrikePositioningResult,
+  pe?: StrikePositioningResult,
+) => {
+  const status = oiDirectionalStatus(ce, pe)
+  const label = status === 'UNAVAILABLE' ? '—' : status
+
+  return (
+    <span className={`oi-direction ${status.toLowerCase()}`}>
+      {label}
+    </span>
+  )
+}
+
 function StrikePositioning({records,status,view,horizon,movingAtm,fixedAtm,onView,onHorizon}:{
   records:StrikePositioningResult[]; status:'loading'|'refreshing'|'ready'|'error'; view:'moving'|'fixed'|'full'; horizon:PositioningHorizon
   movingAtm:number|null; fixedAtm:number|null; onView:(v:'moving'|'fixed'|'full')=>void; onHorizon:(h:PositioningHorizon)=>void
@@ -297,14 +408,60 @@ function StrikePositioning({records,status,view,horizon,movingAtm,fixedAtm,onVie
     {status==='loading'&&!records.length?<div className="positioning-message">Strike Positioning loading...</div>:status==='error'&&!records.length?<div className="positioning-message">Strike Positioning unavailable</div>:
       view==='fixed'&&fixedAtm==null?<div className="positioning-message">Fixed Morning ATM unavailable for this session.</div>:!strikes.length?<div className="positioning-message">No positioning data available</div>:
       <div className={'positioning-table-scroll '+(view==='full'?'full':'')}><table className="positioning-table"><thead>
-        <tr className="positioning-sides"><th colSpan={4}>CALL</th><th>STRIKE</th><th colSpan={4}>PUT</th></tr>
+        <tr className="positioning-sides"><th colSpan={4}>CALL</th><th>STRIKE</th><th>OI STATUS</th><th colSpan={4}>PUT</th></tr>
         <tr><th>LTP</th><th>ΔP%</th><th>ΔOI%</th><th>State</th><th>Strike</th><th>State</th><th>ΔOI%</th><th>ΔP%</th><th>LTP</th></tr>
       </thead><tbody>{strikes.map(strike=>{const pair=pairs.get(strike)??{},isAtm=atm===strike;return <tr key={strike} className={isAtm?'positioning-atm':''}>
         <td>{value(pair.CE?.current_ltp)}</td><td>{percent(pair.CE?.price_change_pct)}</td><td>{percent(pair.CE?.observed_oi_change_pct)}</td><td>{positionState(pair.CE)}</td>
         <th scope="row">{number(strike)}{isAtm&&<small>ATM</small>}</th>
-        <td>{positionState(pair.PE)}</td><td>{percent(pair.PE?.observed_oi_change_pct)}</td><td>{percent(pair.PE?.price_change_pct)}</td><td>{value(pair.PE?.current_ltp)}</td>
+        <td>{oiDirectionalBadge(pair.CE,pair.PE)}</td><td>{positionState(pair.PE)}</td><td>{percent(pair.PE?.observed_oi_change_pct)}</td><td>{percent(pair.PE?.price_change_pct)}</td><td>{value(pair.PE?.current_ltp)}</td>
       </tr>})}</tbody></table></div>}
     <div className="panel-foot">LB Long Buildup · SB Short Buildup · LW Long Unwinding · SC Short Covering · N Neutral</div>
+  </section>
+}
+
+
+function fixedSessionUi(record:any){
+  const value=record?.fixed_session_ui
+  return value?.status==='AVAILABLE' ? value : null
+}
+function displayFixedResult(record:any,result:any){
+  return fixedSessionUi(record)?.display_result ?? result
+}
+function displayAnchorStatus(detail:any){
+  const value=fixedSessionUi(detail)
+  if(!value) return words(detail?.evaluation?.anchor_status)
+  return value.provenance==='ANCHOR_LIVE' ? 'live' : 'recovered'
+}
+function fixedSessionTrend(record:any,horizon:number,existing:any){
+  return record?.fixed_session_trends?.[String(horizon)] ?? existing
+}
+function FixedSessionOISection({detail}:{detail:any}){
+  const value=fixedSessionUi(detail)
+  if(!value) return null
+  const result=value.display_result
+  const pct=(v:number|null|undefined)=>v==null?'—':`${signed(v,2)}%`
+  return <section className="oi-section fixed">
+    <div className="oi-heading">
+      <div>
+        <h2>Fixed morning ATM</h2>
+        <p>ATM {number(value.atm)} / {value.strikes.length} strikes / {result.received}/{result.expected} contracts · {value.label}</p>
+      </div>
+      <strong>{value.current_pcr==null?'—':Number(value.current_pcr).toFixed(3)} <small>PCR</small></strong>
+    </div>
+    <div className="table-scroll"><table>
+      <thead><tr><th>Strike</th><th>Call OI</th><th>Call ΔOI</th><th>Call Δ%</th><th>Put OI</th><th>Put ΔOI</th><th>Put Δ%</th><th>Strike PCR</th></tr></thead>
+      <tbody>{value.rows.map((row:any)=><tr key={row.strike}>
+        <td>{number(row.strike)}</td><td>{number(row.call_oi)}</td><td>{signed(row.call_change_oi)}</td><td>{pct(row.call_change_pct)}</td>
+        <td>{number(row.put_oi)}</td><td>{signed(row.put_change_oi)}</td><td>{pct(row.put_change_pct)}</td>
+        <td>{row.strike_pcr==null?'—':Number(row.strike_pcr).toFixed(3)}</td>
+      </tr>)}</tbody>
+      <tfoot><tr><th>Total</th><th>{number(value.current_ce_oi)}</th><th>{signed(value.ce_delta)}</th><th>{pct(result.call_change_pct)}</th>
+        <th>{number(value.current_pe_oi)}</th><th>{signed(value.pe_delta)}</th><th>{pct(result.put_change_pct)}</th>
+        <th>{value.current_pcr==null?'—':Number(value.current_pcr).toFixed(3)}</th></tr></tfoot>
+    </table></div>
+    <p className="oi-issue">{value.label}
+      {value.source_candle_time ? ` · source ${new Date(value.source_candle_time).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false})} completed 1m` : ''}
+    </p>
   </section>
 }
 

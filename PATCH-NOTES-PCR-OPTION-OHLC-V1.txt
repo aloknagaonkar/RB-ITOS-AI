@@ -1,0 +1,23 @@
+PCR Option OHLC Backtest v1
+
+Purpose
+- Preserve existing PCR and positioning caches.
+- Add a separate raw historical option OHLCV+OI sidecar keyed by exact instrument.
+- Backtest HIGH/VERY_HIGH PCR+positioning candidates using NEXT_MINUTE_OPEN.
+- Calculate true 15-minute MFE from HIGH and MAE from LOW.
+- Evaluate descriptive target/stop matrices: targets 5/10/15%, stops 5/10%.
+
+Safety / methodology
+- Signal confirmation uses the completed positioning candle.
+- Entry is the following one-minute candle OPEN; the confirmation candle price is never used as an executable entry.
+- The option contract is frozen at the confirmation-time moving ATM.
+- Future observations use the exact same instrument key even if that strike later leaves the moving ATM basket.
+- If target and stop are both touched in the same one-minute candle before either is previously resolved, result is AMBIGUOUS_SAME_BAR; ordering is never guessed.
+- No brokerage, taxes, spread, slippage, sizing, overlap suppression, or live execution.
+- Target/stop matrix is descriptive research only and is not an optimized strategy.
+
+Files
+- backend/market_lab/historical_option_ohlc_sidecar.py
+- backend/market_lab/pcr_option_ohlc_backtest.py
+- tests/test_historical_option_ohlc_sidecar.py
+- tests/test_pcr_option_ohlc_backtest.py

@@ -1,0 +1,30 @@
+PCR Option Realized Policy V2
+=============================
+
+Purpose
+-------
+Create a deterministic realized-P&L evaluator for PCR Research Methodology V2
+before untouched OOS-G is examined.
+
+Frozen primary policy
+---------------------
+- confidence profile: FROZEN_D5_D15
+- no confirmation-timing filter; use all first confirmations T0..T+5
+- contract: exact T0 ATM CE/PE instrument, no substitution
+- entry: next-minute OPEN
+- target: +5%
+- stop: -10%
+- same 1-minute bar hits both target and stop: assume STOP first
+- neither target nor stop within 15m: exit at +15m CLOSE
+- cost sensitivity: 0.00, 0.25, 0.50, 1.00 percentage points round-trip
+
+Leakage guard
+-------------
+This evaluator refuses inputs that are not PCR_RESEARCH_METHODOLOGY_V2,
+FROZEN_D5_D15, NEXT_MINUTE_OPEN, and EXACT_T0_ATM_INSTRUMENT_NO_SUBSTITUTION.
+It does not select or optimize confirmation timing.
+
+Expected use
+------------
+Run on OOS-E/F only as retrospective diagnostics. Freeze/commit this evaluator,
+then use exactly the same module once on untouched OOS-G.

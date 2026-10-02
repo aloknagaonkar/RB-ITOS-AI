@@ -1,12 +1,13 @@
 """Provider boundary. No strategies depend on Upstox response objects."""
 
 import math
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Protocol
+from urllib.parse import quote
 
 import httpx
 
-from .domain import Contract, PCRConfig, Quote, Snapshot
+from .domain import Contract, HistoricalCandle, HistoricalOptionContract, PCRConfig, Quote, Snapshot, IST
 
 UTC = timezone.utc
 
@@ -93,6 +94,96 @@ def normalize_upstox(config, catalog_body, chain_body, spot_body, started, recei
     )
 
 
+def normalize_upstox_historical_option_contracts(
+    underlying: str, expiry: date, body: dict
+) -> list[HistoricalOptionContract]:
+    """Normalize one Upstox option catalog without selecting a strike basket."""
+    if not isinstance(body, dict) or not isinstance(body.get("data"), list):
+        raise ValueError("Historical option contract response is invalid")
+    contracts = []
+    identities = set()
+    for value in body["data"]:
+        if not isinstance(value, dict):
+            raise ValueError("Historical option contract is invalid")
+        if value.get("underlying_key") != underlying or value.get("expiry") != expiry.isoformat():
+            continue
+        side = value.get("instrument_type")
+        if side not in ("CE", "PE"):
+            continue
+        lot_size = value.get("lot_size")
+        if lot_size is not None and (
+            type(lot_size) not in (int, float)
+            or not math.isfinite(lot_size)
+            or lot_size <= 0
+            or int(lot_size) != lot_size
+        ):
+            raise ValueError("Historical option contract lot size is invalid")
+        weekly = value.get("weekly")
+        if weekly is not None and type(weekly) is not bool:
+            raise ValueError("Historical option contract weekly metadata is invalid")
+        contract = HistoricalOptionContract(
+            instrument_key=value["instrument_key"],
+            underlying=underlying,
+            expiry=expiry,
+            strike=value["strike_price"],
+            side=side,
+            lot_size=int(lot_size) if lot_size is not None else None,
+            is_weekly=weekly,
+        )
+        identity = (contract.strike, contract.side)
+        if identity in identities:
+            raise ValueError("Duplicate historical option contract")
+        identities.add(identity)
+        contracts.append(contract)
+    return sorted(contracts, key=lambda contract: (contract.strike, 0 if contract.side == "CE" else 1))
+
+def normalize_upstox_historical_candles(
+    instrument_key: str, session_date: date, body: dict
+) -> list[HistoricalCandle]:
+    """Normalize Upstox V3 [time, O, H, L, C, volume?, OI?] candles."""
+
+    def number(value, field):
+        if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
+            raise ValueError(f"Historical candle {field} is invalid")
+        return float(value)
+
+    def optional_integer(values, index, field):
+        if index >= len(values) or values[index] is None:
+            return None
+        value = values[index]
+        if type(value) not in (int, float) or not math.isfinite(value) or value < 0 or int(value) != value:
+            raise ValueError(f"Historical candle {field} is invalid")
+        return int(value)
+
+    if not isinstance(body, dict) or not isinstance(body.get("data"), dict):
+        raise ValueError("Historical candle response data is invalid")
+    values = body["data"].get("candles")
+    if not isinstance(values, list):
+        raise ValueError("Historical candle collection is invalid")
+    candles = []
+    for value in values:
+        if not isinstance(value, list) or len(value) < 5:
+            raise ValueError("Historical candle is incomplete")
+        timestamp = parse_timestamp(value[0])
+        if timestamp is None:
+            raise ValueError("Historical candle timestamp is invalid")
+        candles.append(HistoricalCandle(
+            provider="upstox",
+            instrument_key=instrument_key,
+            session_date=session_date,
+            timestamp=timestamp,
+            open=number(value[1], "open"),
+            high=number(value[2], "high"),
+            low=number(value[3], "low"),
+            close=number(value[4], "close"),
+            volume=optional_integer(value, 5, "volume"),
+            open_interest=optional_integer(value, 6, "open interest"),
+        ))
+    candles.sort(key=lambda candle: candle.timestamp)
+    if len({candle.timestamp for candle in candles}) != len(candles):
+        raise ValueError("Historical candle timestamps are duplicated")
+    return candles
+
 class UpstoxGateway:
     def __init__(self, token: str, client: httpx.Client | None = None):
         if not token:
@@ -139,6 +230,79 @@ class UpstoxGateway:
             raise GatewayError(
                 "Upstox data failed contract/schema validation; observation rejected."
             ) from None
+
+    def historical_option_contracts(
+        self, underlying: str, expiry: date
+    ) -> list[HistoricalOptionContract]:
+        body = self._get(
+            "/v2/expired-instruments/option/contract",
+            {"instrument_key": underlying, "expiry_date": expiry.isoformat()},
+        )
+        try:
+            return normalize_upstox_historical_option_contracts(underlying, expiry, body)
+        except (ValueError, KeyError, TypeError):
+            raise GatewayError(
+                "Upstox historical option contract data failed schema validation."
+            ) from None
+    def historical_candles(
+        self, instrument_key: str, session_date: date
+    ) -> list[HistoricalCandle]:
+        encoded_key = quote(instrument_key, safe="")
+        requested_date = session_date.isoformat()
+        body = self._get(
+            f"/v3/historical-candle/{encoded_key}/minutes/1/{requested_date}/{requested_date}",
+            {},
+        )
+        try:
+            return normalize_upstox_historical_candles(instrument_key, session_date, body)
+        except (ValueError, KeyError, TypeError):
+            raise GatewayError(
+                "Upstox historical candle data failed schema validation."
+            ) from None
+
+    def historical_option_candles(
+        self, instrument_key: str, session_date: date
+    ) -> list[HistoricalCandle]:
+        encoded_key = quote(instrument_key, safe="")
+        requested_date = session_date.isoformat()
+        body = self._get(
+            f"/v2/expired-instruments/historical-candle/{encoded_key}/1minute/"
+            f"{requested_date}/{requested_date}",
+            {},
+        )
+        try:
+            return normalize_upstox_historical_candles(instrument_key, session_date, body)
+        except (ValueError, KeyError, TypeError):
+            raise GatewayError(
+                "Upstox expired historical option candle data failed schema validation."
+            ) from None
+
+    # Phase 7D.1: explicit provider sources. No fallback to a different date,
+    # strike or synthetic candle; record source names at the adapter boundary.
+    def active_option_contracts(self, underlying: str, expiry: date) -> list[HistoricalOptionContract]:
+        body = self._get('/v2/option/contract',
+                         {'instrument_key': underlying, 'expiry_date': expiry.isoformat()})
+        try:
+            return normalize_upstox_historical_option_contracts(underlying, expiry, body)
+        except (ValueError, KeyError, TypeError):
+            raise GatewayError('Upstox active option contract data failed schema validation.') from None
+
+    def intraday_candles(self, instrument_key: str, session_date: date) -> list[HistoricalCandle]:
+        if session_date != datetime.now(IST).date():
+            raise GatewayError('Intraday endpoint cannot retrieve a previous session.')
+        key = quote(instrument_key, safe='')
+        body = self._get(f'/v3/historical-candle/intraday/{key}/minutes/1', {})
+        try:
+            rows = normalize_upstox_historical_candles(instrument_key, session_date, body)
+            if any(row.timestamp.astimezone(IST).date() != session_date for row in rows):
+                raise ValueError('Intraday response contains a different session')
+            return rows
+        except (ValueError, KeyError, TypeError):
+            raise GatewayError('Intraday candles failed requested-session validation.') from None
+
+    def active_option_historical_candles(self, instrument_key: str, session_date: date) -> list[HistoricalCandle]:
+        # Active contracts use the normal V3 historical endpoint, not expired-instruments.
+        return self.historical_candles(instrument_key, session_date)
 
     def close(self):
         self.client.close()

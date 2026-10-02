@@ -1,0 +1,119 @@
+INFO:     Started server process [20912]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8123 (Press CTRL+C to quit)
+INFO:     103.211.112.178:61859 - "GET /api/live-shadow/hilega-milega/trade-dashboard HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     103.211.112.178:61857 - "GET /api/live-shadow/hilega-milega/status HTTP/1.1" 200 OK
+INFO:     103.211.112.178:61860 - "GET /api/live-shadow/hilega-milega/audit-index?limit=200 HTTP/1.1" 200 OK
+INFO:     103.211.112.178:61858 - "GET /api/state HTTP/1.1" 200 OK
+INFO:     Finished server process [20912]
+ERROR:    Traceback (most recent call last):
+  File "/usr/lib/python3.13/asyncio/runners.py", line 196, in run
+    return runner.run(main)
+           ~~~~~~~~~~^^^^^^
+  File "/usr/lib/python3.13/asyncio/runners.py", line 119, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/usr/lib/python3.13/asyncio/base_events.py", line 713, in run_until_complete
+    self.run_forever()
+    ~~~~~~~~~~~~~~~~^^
+  File "/usr/lib/python3.13/asyncio/base_events.py", line 684, in run_forever
+    self._run_once()
+    ~~~~~~~~~~~~~~^^
+  File "/usr/lib/python3.13/asyncio/base_events.py", line 2061, in _run_once
+    handle._run()
+    ~~~~~~~~~~~^^
+  File "/usr/lib/python3.13/asyncio/events.py", line 89, in _run
+    self._context.run(self._callback, *self._args)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/aloknagaonkar46/RB-ITOS-AI/.venv/lib/python3.13/site-packages/uvicorn/server.py", line 80, in serve
+    with self.capture_signals():
+         ~~~~~~~~~~~~~~~~~~~~^^
+  File "/usr/lib/python3.13/contextlib.py", line 148, in __exit__
+    next(self.gen)
+    ~~~~^^^^^^^^^^
+  File "/home/aloknagaonkar46/RB-ITOS-AI/.venv/lib/python3.13/site-packages/uvicorn/server.py", line 340, in capture_signals
+    signal.raise_signal(captured_signal)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.13/asyncio/runners.py", line 158, in _on_sigint
+    raise KeyboardInterrupt()
+KeyboardInterrupt
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/aloknagaonkar46/RB-ITOS-AI/.venv/lib/python3.13/site-packages/starlette/routing.py", line 655, in lifespan
+    await receive()
+  File "/home/aloknagaonkar46/RB-ITOS-AI/.venv/lib/python3.13/site-packages/uvicorn/lifespan/on.py", line 137, in receive
+    return await self.receive_queue.get()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.13/asyncio/queues.py", line 186, in get
+    await getter
+asyncio.exceptions.CancelledError
+
+INFO:     Started server process [20917]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8123 (Press CTRL+C to quit)
+INFO:     103.211.112.178:61863 - "GET /api/live-shadow/hilega-milega/trade-dashboard HTTP/1.1" 200 OK
+INFO:     103.211.112.178:61865 - "GET /api/live-shadow/hilega-milega/status HTTP/1.1" 200 OK
+INFO:     103.211.112.178:61862 - "GET /api/live-shadow/hilega-milega/audit-index?limit=200 HTTP/1.1" 200 OK
+INFO:     103.211.112.178:61864 - "GET /api/state HTTP/1.1" 200 OK
+INFO:     103.211.112.178:61864 - "GET /api/live-shadow/hilega-milega/trade-dashboard HTTP/1.1" 200 OK
+INFO:     103.211.112.178:61863 - "GET /api/live-shadow/hilega-milega/status HTTP/1.1" 200 OK
+INFO:     103.211.112.178:61865 - "GET /api/live-shadow/hilega-milega/audit-index?limit=200 HTTP/1.1" 200 OK
+INFO:     103.211.112.178:61862 - "GET /api/state HTTP/1.1" 200 OK
+INFO:     103.211.112.178:61865 - "GET /api/state HTTP/1.1" 200 OK
+INFO:     103.211.112.178:61863 - "GET /api/live-shadow/hilega-milega/trade-dashboard HTTP/1.1" 200 OK
+INFO:     103.211.112.178:61865 - "GET /api/live-shadow/hilega-milega/status HTTP/1.1" 200 OK
+INFO:     103.211.112.178:61862 - "GET /api/live-shadow/hilega-milega/audit-index?limit=200 HTTP/1.1" 200 OK
+INFO:     103.211.112.178:61864 - "GET /api/state HTTP/1.1" 200 OK
+INFO:     103.211.112.178:61864 - "GET /api/state HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for connections to close. (CTRL+C to force quit)
+INFO:     Finished server process [20917]
+ERROR:    Traceback (most recent call last):
+  File "/usr/lib/python3.13/asyncio/runners.py", line 196, in run
+    return runner.run(main)
+           ~~~~~~~~~~^^^^^^
+  File "/usr/lib/python3.13/asyncio/runners.py", line 119, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/usr/lib/python3.13/asyncio/base_events.py", line 713, in run_until_complete
+    self.run_forever()
+    ~~~~~~~~~~~~~~~~^^
+  File "/usr/lib/python3.13/asyncio/base_events.py", line 684, in run_forever
+    self._run_once()
+    ~~~~~~~~~~~~~~^^
+  File "/usr/lib/python3.13/asyncio/base_events.py", line 2061, in _run_once
+    handle._run()
+    ~~~~~~~~~~~^^
+  File "/usr/lib/python3.13/asyncio/events.py", line 89, in _run
+    self._context.run(self._callback, *self._args)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/aloknagaonkar46/RB-ITOS-AI/.venv/lib/python3.13/site-packages/uvicorn/server.py", line 80, in serve
+    with self.capture_signals():
+         ~~~~~~~~~~~~~~~~~~~~^^
+  File "/usr/lib/python3.13/contextlib.py", line 148, in __exit__
+    next(self.gen)
+    ~~~~^^^^^^^^^^
+  File "/home/aloknagaonkar46/RB-ITOS-AI/.venv/lib/python3.13/site-packages/uvicorn/server.py", line 340, in capture_signals
+    signal.raise_signal(captured_signal)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.13/asyncio/runners.py", line 158, in _on_sigint
+    raise KeyboardInterrupt()
+KeyboardInterrupt
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/aloknagaonkar46/RB-ITOS-AI/.venv/lib/python3.13/site-packages/starlette/routing.py", line 655, in lifespan
+    await receive()
+  File "/home/aloknagaonkar46/RB-ITOS-AI/.venv/lib/python3.13/site-packages/uvicorn/lifespan/on.py", line 137, in receive
+    return await self.receive_queue.get()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.13/asyncio/queues.py", line 186, in get
+    await getter
+asyncio.exceptions.CancelledError
+

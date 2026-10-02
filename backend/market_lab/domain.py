@@ -77,6 +77,196 @@ class PCRConfig(Model):
         return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
+class HistoricalCandle(Model):
+    provider: Literal["upstox"]
+    instrument_key: str = Field(min_length=1)
+    session_date: date
+    interval_seconds: int = Field(default=60, gt=0)
+    timestamp: AwareDatetime
+    open: float = Field(gt=0)
+    high: float = Field(gt=0)
+    low: float = Field(gt=0)
+    close: float = Field(gt=0)
+    volume: int | None = Field(default=None, ge=0)
+    open_interest: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def valid_candle(self):
+        if self.timestamp.astimezone(IST).date() != self.session_date:
+            raise ValueError("Historical candle timestamp is outside the requested IST session")
+        if self.low > min(self.open, self.close) or self.high < max(self.open, self.close):
+            raise ValueError("Historical candle OHLC range is inconsistent")
+        return self
+
+
+class HistoricalATM(Model):
+    timestamp: AwareDatetime
+    spot: float = Field(gt=0)
+    atm: float = Field(gt=0)
+
+class HistoricalOptionContract(Model):
+    instrument_key: str = Field(min_length=1)
+    underlying: str = Field(min_length=1)
+    expiry: date
+    strike: float = Field(gt=0)
+    side: Literal["CE", "PE"]
+    lot_size: int | None = Field(default=None, gt=0)
+    is_weekly: bool | None = None
+
+
+class HistoricalOptionCandleSeries(Model):
+    contract: HistoricalOptionContract
+    session_date: date
+    candles: list[HistoricalCandle] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def valid_series(self):
+        timestamps = [candle.timestamp for candle in self.candles]
+        if timestamps != sorted(timestamps) or len(timestamps) != len(set(timestamps)):
+            raise ValueError("Historical option candles must have unique chronological timestamps")
+        if any(
+            candle.instrument_key != self.contract.instrument_key
+            or candle.session_date != self.session_date
+            for candle in self.candles
+        ):
+            raise ValueError("Historical option candle identity mismatch")
+        return self
+
+class HistoricalOptionSideObservation(Model):
+    side: Literal["CE", "PE"]
+    instrument_key: str | None = None
+    close: float | None = Field(default=None, gt=0)
+    open_interest: int | None = Field(default=None, ge=0)
+    volume: int | None = Field(default=None, ge=0)
+    status: Literal[
+        "AVAILABLE",
+        "CONTRACT_UNAVAILABLE",
+        "CANDLE_UNAVAILABLE",
+        "OI_UNAVAILABLE",
+    ]
+
+    @model_validator(mode="after")
+    def valid_availability(self):
+        if self.status == "CONTRACT_UNAVAILABLE":
+            if any(value is not None for value in (
+                self.instrument_key, self.close, self.open_interest, self.volume
+            )):
+                raise ValueError("Unavailable historical contract cannot carry candle data")
+        elif self.status == "CANDLE_UNAVAILABLE":
+            if self.instrument_key is None or any(value is not None for value in (
+                self.close, self.open_interest, self.volume
+            )):
+                raise ValueError("Unavailable historical candle has inconsistent data")
+        elif self.status == "OI_UNAVAILABLE":
+            if self.instrument_key is None or self.close is None or self.open_interest is not None:
+                raise ValueError("Historical option OI availability is inconsistent")
+        elif self.instrument_key is None or self.close is None or self.open_interest is None:
+            raise ValueError("Available historical option side is incomplete")
+        return self
+
+
+class HistoricalStrikeObservation(Model):
+    provenance: Literal["HISTORICAL_CANDLE_RECONSTRUCTION"] = "HISTORICAL_CANDLE_RECONSTRUCTION"
+    strike: float = Field(gt=0)
+    ce: HistoricalOptionSideObservation
+    pe: HistoricalOptionSideObservation
+
+    @model_validator(mode="after")
+    def valid_sides(self):
+        if self.ce.side != "CE" or self.pe.side != "PE":
+            raise ValueError("Historical strike side identity is invalid")
+        return self
+
+
+class HistoricalReconstructedSnapshot(Model):
+    provenance: Literal["HISTORICAL_CANDLE_RECONSTRUCTION"] = "HISTORICAL_CANDLE_RECONSTRUCTION"
+    source_provider: str = Field(min_length=1)
+    underlying: str = Field(min_length=1)
+    expiry: date
+    session_date: date
+    timestamp: AwareDatetime
+    spot: float = Field(gt=0)
+    moving_atm: float = Field(gt=0)
+    fixed_anchor_timestamp: AwareDatetime | None = None
+    fixed_atm: float | None = Field(default=None, gt=0)
+    wings: int = Field(ge=0)
+    strike_interval: int = Field(gt=0)
+    strikes: list[HistoricalStrikeObservation]
+    fixed_strikes: list[HistoricalStrikeObservation] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def valid_snapshot(self):
+        if self.timestamp.astimezone(IST).date() != self.session_date:
+            raise ValueError("Historical snapshot timestamp is outside the requested IST session")
+        values = [row.strike for row in self.strikes]
+        if values != sorted(values) or len(values) != len(set(values)):
+            raise ValueError("Historical snapshot strikes must be unique and ordered")
+        if len(values) != 2 * self.wings + 1 or self.moving_atm not in values:
+            raise ValueError("Historical snapshot strike basket is incomplete")
+        fixed_values = [row.strike for row in self.fixed_strikes]
+        if fixed_values != sorted(fixed_values) or len(fixed_values) != len(set(fixed_values)):
+            raise ValueError("Historical fixed snapshot strikes must be unique and ordered")
+        if self.fixed_atm is None:
+            if self.fixed_anchor_timestamp is not None or fixed_values:
+                raise ValueError("Historical fixed basket metadata is inconsistent")
+        else:
+            if self.fixed_anchor_timestamp is None:
+                raise ValueError("Historical fixed ATM requires an anchor timestamp")
+            if len(fixed_values) != 2 * self.wings + 1 or self.fixed_atm not in fixed_values:
+                raise ValueError("Historical fixed snapshot strike basket is incomplete")
+            if self.timestamp < self.fixed_anchor_timestamp:
+                raise ValueError("Historical fixed basket cannot exist before its anchor")
+        return self
+
+class HistoricalPCRStrikeResult(Model):
+    provenance: Literal["HISTORICAL_CANDLE_RECONSTRUCTION"] = "HISTORICAL_CANDLE_RECONSTRUCTION"
+    strike: float = Field(gt=0)
+    call_oi: int | None = Field(default=None, ge=0)
+    put_oi: int | None = Field(default=None, ge=0)
+    previous_call_oi: int | None = Field(default=None, ge=0)
+    previous_put_oi: int | None = Field(default=None, ge=0)
+    call_oi_change: int | None = None
+    put_oi_change: int | None = None
+    call_oi_change_pct: float | None = None
+    put_oi_change_pct: float | None = None
+    pcr: float | None = Field(default=None, ge=0)
+    status: Literal["AVAILABLE", "UNAVAILABLE"]
+    issues: list[str] = Field(default_factory=list)
+
+
+class HistoricalPCRPanelResult(Model):
+    provenance: Literal["HISTORICAL_CANDLE_RECONSTRUCTION"] = "HISTORICAL_CANDLE_RECONSTRUCTION"
+    mode: Literal["fixed", "moving", "full_reconstructed"]
+    atm: float | None = Field(default=None, gt=0)
+    strikes: list[float] = Field(default_factory=list)
+    expected_contracts: int | None = Field(default=None, ge=0)
+    received_oi_contracts: int | None = Field(default=None, ge=0)
+    call_oi: int | None = Field(default=None, ge=0)
+    put_oi: int | None = Field(default=None, ge=0)
+    previous_call_oi: int | None = Field(default=None, ge=0)
+    previous_put_oi: int | None = Field(default=None, ge=0)
+    call_oi_change: int | None = None
+    put_oi_change: int | None = None
+    call_oi_change_pct: float | None = None
+    put_oi_change_pct: float | None = None
+    pcr: float | None = Field(default=None, ge=0)
+    status: Literal["AVAILABLE", "UNAVAILABLE"]
+    issues: list[str] = Field(default_factory=list)
+
+
+class HistoricalPCRObservation(Model):
+    provenance: Literal["HISTORICAL_CANDLE_RECONSTRUCTION"] = "HISTORICAL_CANDLE_RECONSTRUCTION"
+    timestamp: AwareDatetime
+    session_date: date
+    underlying: str = Field(min_length=1)
+    expiry: date
+    spot: float = Field(gt=0)
+    moving_atm: float = Field(gt=0)
+    strike_results: list[HistoricalPCRStrikeResult]
+    moving_panel: HistoricalPCRPanelResult
+    full_reconstructed_panel: HistoricalPCRPanelResult
+    fixed_panel: HistoricalPCRPanelResult
+
 class Contract(Model):
     key: str
     strike: float = Field(gt=0)
@@ -466,6 +656,23 @@ class RecordedSessionInventoryReport(Model):
     rows: list[RecordedSessionInventoryRow]
 
 
+def calculate_pcr_value(put_oi: int | None, call_oi: int | None) -> float | None:
+    """Provider-independent platform PCR definition."""
+    if put_oi is None or call_oi in (None, 0):
+        return None
+    return put_oi / call_oi
+
+
+def calculate_oi_change(
+    current_oi: int | None, previous_oi: int | None
+) -> tuple[int | None, float | None]:
+    """Return deterministic absolute and percentage OI change."""
+    if current_oi is None or previous_oi is None:
+        return None, None
+    change = current_oi - previous_oi
+    percentage = change / previous_oi * 100 if previous_oi != 0 else None
+    return change, percentage
+
 def in_session(at: datetime) -> bool:
     local = at.astimezone(IST)
     return local.weekday() < 5 and time(9, 15) <= local.time() < time(15, 30)
@@ -558,13 +765,13 @@ def evaluate(snapshot: Snapshot, config: PCRConfig, anchor: Anchor | None = None
             errors.append("zero_call_oi")
         previous_complete = previous_count == len(contracts)
         changes = {
-            side: totals[side] - previous[side] if previous_complete else None for side in ("CE", "PE")
+            side: calculate_oi_change(totals[side], previous[side])[0] if previous_complete else None for side in ("CE", "PE")
         }
 
         def change_pct(side):
             if not previous_complete or previous[side] == 0:
                 return None
-            return changes[side] / previous[side] * 100
+            return calculate_oi_change(totals[side], previous[side])[1]
 
         errors = list(dict.fromkeys(errors))
         return PCRResult(
@@ -582,7 +789,7 @@ def evaluate(snapshot: Snapshot, config: PCRConfig, anchor: Anchor | None = None
             call_change_oi=changes["CE"],
             put_change_pct=change_pct("PE"),
             call_change_pct=change_pct("CE"),
-            pcr=totals["PE"] / totals["CE"] if not errors else None,
+            pcr=calculate_pcr_value(totals["PE"], totals["CE"]) if not errors else None,
             issues=errors,
         )
 

@@ -1,0 +1,33 @@
+PCR Confidence + Positioning Timing Join v1
+==========================================
+
+Purpose
+-------
+Combine the already-frozen Stage-2 PCR state, fresh-OOS-confirmed severity
+features, and first same-strike positioning confirmation timing into one
+research matrix.
+
+What it DOES
+------------
+- Reads the 100-session discriminator JSON as the frozen bucket specification.
+- Reads the fresh-OOS validation JSON and keeps only severity features whose
+  expected monotonic direction survived untouched OOS.
+- Scores each surviving feature by its frozen quartile (0..3 favorable score).
+- Produces descriptive LOW/MEDIUM/HIGH/VERY_HIGH composite severity tiers.
+- Joins each Stage-2 T0 event to the first STRONG_BULLISH / STRONG_BEARISH
+  positioning confirmation from T0 through T+5 minutes.
+- Reports true-vs-false outcome rates by severity tier, confirmation arrival
+  group, and the full severity x timing matrix.
+
+What it DOES NOT do
+-------------------
+- It does not emit CE/PE BUY signals.
+- It does not choose a production entry time.
+- It does not calculate option premium P&L, stop, target, slippage or brokerage.
+- It does not retrain bucket cut points.
+
+Important limitation
+--------------------
+The composite severity+timing matrix is exploratory because the same OOS-E block
+was used to confirm the component severity relationships. A future untouched
+block or premium-level backtest is required before promotion.

@@ -1,0 +1,84 @@
+{
+  "sessions": [
+    {
+      "session_date": "2026-01-12",
+      "expiry": "2026-01-13"
+    },
+    {
+      "session_date": "2026-01-13",
+      "expiry": "2026-01-13"
+    },
+    {
+      "session_date": "2026-01-14",
+      "expiry": "2026-01-20"
+    },
+    {
+      "session_date": "2026-01-16",
+      "expiry": "2026-01-20"
+    },
+    {
+      "session_date": "2026-01-19",
+      "expiry": "2026-01-20"
+    },
+    {
+      "session_date": "2026-01-20",
+      "expiry": "2026-01-20"
+    },
+    {
+      "session_date": "2026-01-21",
+      "expiry": "2026-01-27"
+    },
+    {
+      "session_date": "2026-01-22",
+      "expiry": "2026-01-27"
+    },
+    {
+      "session_date": "2026-01-23",
+      "expiry": "2026-01-27"
+    },
+    {
+      "session_date": "2026-01-27",
+      "expiry": "2026-01-27"
+    },
+    {
+      "session_date": "2026-01-28",
+      "expiry": "2026-02-03"
+    },
+    {
+      "session_date": "2026-01-29",
+      "expiry": "2026-02-03"
+    },
+    {
+      "session_date": "2026-01-30",
+      "expiry": "2026-02-03"
+    },
+    {
+      "session_date": "2026-02-02",
+      "expiry": "2026-02-03"
+    },
+    {
+      "session_date": "2026-02-03",
+      "expiry": "2026-02-03"
+    },
+    {
+      "session_date": "2026-02-04",
+      "expiry": "2026-02-10"
+    },
+    {
+      "session_date": "2026-02-05",
+      "expiry": "2026-02-10"
+    },
+    {
+      "session_date": "2026-02-06",
+      "expiry": "2026-02-10"
+    },
+    {
+      "session_date": "2026-02-09",
+      "expiry": "2026-02-10"
+    },
+    {
+      "session_date": "2026-02-10",
+      "expiry": "2026-02-10"
+    }
+  ]
+}

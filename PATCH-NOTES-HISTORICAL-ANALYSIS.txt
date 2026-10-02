@@ -1,0 +1,24 @@
+Historical Statistical Evidence Analyzer
+
+Changed files:
+- backend/market_lab/historical_analysis.py
+- backend/market_lab/runtime.py
+- tests/test_historical_analysis.py
+
+New command:
+python -m market_lab.runtime historical-analyze --input <evidence.csv> --output <analysis.json>
+
+Design:
+- observational/descriptive only; no strategy signal generation
+- uses dataset-derived 20/40/60/80 percentile buckets
+- reports row counts and distinct-session counts
+- reports per-horizon mean/median/mean absolute move/stdev/directional percentages
+- reports per-session mean direction percentages to avoid treating minute rows as independent
+- reports Pearson feature/forward correlations
+- derives OI imbalance as Put OI change % minus Call OI change %
+- preserves missing values; no interpolation or synthetic zeros
+
+Tests:
+- new analyzer tests: 5 passed
+- analyzer + historical evidence + cache: 14 passed
+- full suite: 243 passed, 2 known unrelated failures in test_multi_session_evidence.py (2026-09-18 fixture vs 2026-09-19 source)

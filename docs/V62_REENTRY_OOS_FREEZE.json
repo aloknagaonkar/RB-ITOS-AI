@@ -1,0 +1,46 @@
+{
+  "model": "MIDPOINT_V62_REENTRY_OOS_FREEZE",
+  "status": "FROZEN_BEFORE_FORWARD_OOS",
+  "baseline": {
+    "name": "CAP20_ONLY_NO_REENTRY",
+    "description": "CAP20 rescue is final; no post-rescue re-entry."
+  },
+  "research_candidates": [
+    {
+      "id": "R1",
+      "name": "REENTRY_PROTECT10_AFTER20",
+      "reentry_trigger": "EXISTING_FROZEN_POST_CAP20_REENTRY_TRIGGER",
+      "second_leg_proof": "favorable intrabar excursion from re-entry >= 20 points",
+      "exit": "after proof, first completed 1m close with directional move <= +10 points from re-entry"
+    },
+    {
+      "id": "R2",
+      "name": "REENTRY_TRAIL20_AFTER20",
+      "reentry_trigger": "EXISTING_FROZEN_POST_CAP20_REENTRY_TRIGGER",
+      "second_leg_proof": "running favorable intrabar excursion from re-entry >= 20 points",
+      "exit": "after proof, first completed 1m close <= running second-leg MFE minus 20 points"
+    }
+  ],
+  "frozen_rules": [
+    "No change to B/E ownership.",
+    "No change to +20 proof.",
+    "No change to exact +10m runner classifier.",
+    "No change to DEGRADED.",
+    "No change to CAP20.",
+    "No change to post-CAP20 re-entry trigger.",
+    "No extra re-entry.",
+    "No option P&L.",
+    "Observation/research only."
+  ],
+  "promotion_gate": {
+    "minimum_comparable_reentry_events": 20,
+    "preferred_comparable_reentry_events": 30,
+    "requirements": [
+      "Candidate must beat CAP20-only on matched comparable re-entry events.",
+      "Result must not depend on session-end marking of unresolved trades.",
+      "Report total, mean, median, positive-rate and max drawdown on matched cases.",
+      "Report B and E separately when sample size allows.",
+      "No threshold tuning after forward OOS starts."
+    ]
+  }
+}

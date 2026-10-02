@@ -1,0 +1,14 @@
+{
+  "version": "B_FAMILY_RUNNER_FORWARD_V20",
+  "frozen_on": "2026-09-28",
+  "forward_start_date": "2026-09-29",
+  "minimum_forward_sessions": 20,
+  "proof_points": 20.0,
+  "observation_minutes": 10,
+  "classification": {
+    "RUNNER_STRENGTHENING": "net_directional_progress_from_plus20 > 0 AND directional_vwap_change > 0",
+    "NORMAL_B": "otherwise"
+  },
+  "exit_action_attached": false,
+  "research_only": true
+}

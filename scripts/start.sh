@@ -26,6 +26,21 @@ if ! grep -qE '^UPSTOX_ACCESS_TOKEN=.+' "$ROOT/.env"; then
     exit 1
 fi
 
+CURRENT_EXTERNAL_IP="$(
+    curl -fsS --max-time 2 \
+        -H "Metadata-Flavor: Google" \
+        http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip \
+        2>/dev/null || true
+)"
+
+if [[ -n "$CURRENT_EXTERNAL_IP" ]]; then
+    export MARKET_LAB_ALLOWED_HOSTS="localhost,127.0.0.1,testserver,$CURRENT_EXTERNAL_IP"
+    echo "allowed hosts: localhost, 127.0.0.1, testserver, $CURRENT_EXTERNAL_IP"
+else
+    export MARKET_LAB_ALLOWED_HOSTS="localhost,127.0.0.1,testserver"
+    echo "WARNING: GCE external IP could not be detected."
+fi
+
 service_running() {
     local service="$1"
     local pidfile="$RUNTIME_DIR/$service.json"

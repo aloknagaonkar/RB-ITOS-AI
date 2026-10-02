@@ -1,0 +1,84 @@
+from __future__ import annotations
+import json
+from datetime import datetime,timedelta
+from pathlib import Path
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+from .domain import IST,Snapshot
+from .live_normalized_feature_producer_v1 import LiveNormalizedFeatureProducerV1
+from .live_normalized_shadow_bridge_v1 import to_shadow_checkpoint
+from .live_observational_shadow_runtime_adapter_v1 import ExactNextMinuteOpen,ExactOptionResolution,LiveShadowRuntimeAdapterV1
+from .live_option_minute_source_v1 import LiveOptionMinuteSourceV1
+from .live_shadow_source_integration_v1 import to_shadow_option_minute
+from .storage import Observation
+from .live_shadow_step_audit_v1 import ShadowStepAuditStoreV1, normalized_checkpoint_payload
+MODEL="LIVE_SHADOW_PRODUCTION_WIRING_V1";FINAL={"CLOSED","REJECTED","INCOMPLETE"}
+
+def floor_5m(ts):
+    local=ts.astimezone(IST);m=local.minute-local.minute%5;return local.replace(minute=m,second=0,microsecond=0)
+
+def select_first_snapshot_at_or_after(engine,config_id,checkpoint,*,max_delay_seconds=30):
+    session_date=checkpoint.astimezone(IST).date().isoformat()
+    with Session(engine) as s:rows=s.scalars(select(Observation).where(Observation.config_id==config_id,Observation.session_date==session_date).order_by(Observation.id)).all()
+    candidates=[]
+    for row in rows:
+        snap=Snapshot.model_validate(row.snapshot)
+        if snap.received_at>=checkpoint and (snap.received_at-checkpoint).total_seconds()<=max_delay_seconds:candidates.append((snap.received_at,snap))
+    return min(candidates,key=lambda x:x[0])[1] if candidates else None
+class HealthJournal:
+    def __init__(self,path):self.path=Path(path);self.path.parent.mkdir(parents=True,exist_ok=True)
+    def append(self,payload):
+        with self.path.open('a') as f:f.write(json.dumps(payload,sort_keys=True,default=str)+'\n')
+class LiveShadowProductionCoordinatorV1:
+    def __init__(self,*,engine,config_id,market_sources,events_path,health_path, step_audit_path="data/live-observation/shadow-v1/step-audit.jsonl"):
+        self.engine=engine;self.config_id=config_id;self.sources=market_sources;self.adapter=LiveShadowRuntimeAdapterV1(events_path);self.features=LiveNormalizedFeatureProducerV1();self.health=HealthJournal(health_path);self._bootstrapped=False
+        self.step_audit = ShadowStepAuditStoreV1(step_audit_path)
+    def bootstrap(self,checkpoint,*,lookback_minutes=30):
+        if self._bootstrapped:return
+        t=checkpoint-timedelta(minutes=lookback_minutes)
+        while t<checkpoint:
+            snap=select_first_snapshot_at_or_after(self.engine,self.config_id,t)
+            if snap is not None:
+                try:self.features.add_snapshot(snap,checkpoint_timestamp=t);self.features.build_current()
+                except ValueError:pass
+            t+=timedelta(minutes=5)
+        self._bootstrapped=True
+    def process_checkpoint(self,checkpoint):
+        checkpoint=floor_5m(checkpoint);self.bootstrap(checkpoint);snap=select_first_snapshot_at_or_after(self.engine,self.config_id,checkpoint)
+        if snap is None:self.health.append({"model":MODEL,"checkpoint":checkpoint.isoformat(),"state":"MISSING","reason":"NO_SNAPSHOT_WITHIN_30S"});return {"status":"MISSING_SNAPSHOT"}
+        self.features.add_snapshot(snap,checkpoint_timestamp=checkpoint);cp=self.features.build_current();self.health.append({"model":MODEL,"checkpoint":checkpoint.isoformat(),"source_received_at":cp.source_received_at.isoformat(),"source_delay_ms":cp.source_delay_ms,"health_state":cp.health_state,"health_allowed":cp.health_allowed,"health_reason":cp.health_reason,"all3_state":cp.all3_state})
+        for oid,s in list(self.adapter.states().items()):
+            if s.status!="DETECTED" or not s.all3_candle1_timestamp:continue
+            c1=datetime.fromisoformat(s.all3_candle1_timestamp)
+            if c1+timedelta(minutes=5)!=checkpoint:continue
+            try:futures=self.sources.futures_oi_at_checkpoint(checkpoint);fstate=futures.state if futures.health_allowed else None
+            except Exception:self.adapter.shadow.incomplete(oid,checkpoint,"FUTURES_DATA_UNAVAILABLE");continue
+            outcome=self.adapter.on_candle2(oid,to_shadow_checkpoint(cp,futures_oi_state=fstate))
+            if outcome=="CLASSIFIED":
+                instrument=cp.ce_instrument_key if s.direction=="BULLISH" else cp.pe_instrument_key
+                if not instrument:self.adapter.shadow.incomplete(oid,checkpoint,"NO_EXACT_ATM_INSTRUMENT")
+                else:self.adapter.on_exact_option_resolved(oid,ExactOptionResolution(checkpoint,cp.moving_atm,instrument))
+        oid=self.adapter.on_new_all3(to_shadow_checkpoint(cp,futures_oi_state=None),cp.previous_directional_all3)
+        return {"status":"PROCESSED","checkpoint":checkpoint.isoformat(),"all3":cp.all3_state,"observation_id":oid}
+    def process_entries_and_open_trades(self,now):
+        now=now.astimezone(IST);results=[]
+        for oid,s in list(self.adapter.states().items()):
+            if s.status=="OPTION_RESOLVED" and s.confirmation_timestamp and s.option_instrument_key:
+                entry_ts=datetime.fromisoformat(s.confirmation_timestamp).astimezone(IST)+timedelta(minutes=1)
+                if now<entry_ts+timedelta(minutes=1):continue
+                bars=self.sources.option_intraday_1m(s.option_instrument_key);match=[b for b in bars if b.timestamp==entry_ts]
+                if len(match)==1:self.adapter.on_exact_next_minute_open(oid,ExactNextMinuteOpen(entry_ts,match[0].open))
+                elif now>=entry_ts+timedelta(minutes=2):self.adapter.shadow.incomplete(oid,now,"MISSING_EXACT_NEXT_MINUTE_OPEN")
+                results.append((oid,self.adapter.states()[oid].status))
+        for oid,s in list(self.adapter.states().items()):
+            if s.status not in {"OPEN","BE_ARMED","TRAIL_ARMED"} or not s.option_instrument_key or not s.entry_timestamp:continue
+            entry=datetime.fromisoformat(s.entry_timestamp).astimezone(IST);previous=datetime.fromisoformat(s.last_bar_timestamp).astimezone(IST) if s.last_bar_timestamp else entry
+            bars=self.sources.option_intraday_1m(s.option_instrument_key);completed=sorted([b for b in bars if b.timestamp>previous and b.timestamp+timedelta(minutes=1)<=now],key=lambda b:b.timestamp)
+            source=LiveOptionMinuteSourceV1(s.option_instrument_key,previous_timestamp=previous)
+            for bar in completed:
+                h=source.process(bar)
+                if not h.allowed:self.adapter.shadow.incomplete(oid,bar.timestamp,h.reason or "OPTION_MINUTE_UNHEALTHY");break
+                status=self.adapter.on_option_minute(oid,to_shadow_option_minute(bar,h))
+                if status in FINAL:break
+            results.append((oid,self.adapter.states()[oid].status))
+        return results

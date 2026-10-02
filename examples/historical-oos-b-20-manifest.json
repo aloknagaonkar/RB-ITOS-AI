@@ -1,0 +1,24 @@
+{
+  "sessions": [
+    {"session_date": "2026-06-16", "expiry": "2026-06-16"},
+    {"session_date": "2026-06-17", "expiry": "2026-06-23"},
+    {"session_date": "2026-06-18", "expiry": "2026-06-23"},
+    {"session_date": "2026-06-19", "expiry": "2026-06-23"},
+    {"session_date": "2026-06-22", "expiry": "2026-06-23"},
+    {"session_date": "2026-06-23", "expiry": "2026-06-23"},
+    {"session_date": "2026-06-24", "expiry": "2026-06-30"},
+    {"session_date": "2026-06-25", "expiry": "2026-06-30"},
+    {"session_date": "2026-06-29", "expiry": "2026-06-30"},
+    {"session_date": "2026-06-30", "expiry": "2026-06-30"},
+    {"session_date": "2026-07-01", "expiry": "2026-07-07"},
+    {"session_date": "2026-07-02", "expiry": "2026-07-07"},
+    {"session_date": "2026-07-03", "expiry": "2026-07-07"},
+    {"session_date": "2026-07-06", "expiry": "2026-07-07"},
+    {"session_date": "2026-07-07", "expiry": "2026-07-07"},
+    {"session_date": "2026-07-08", "expiry": "2026-07-14"},
+    {"session_date": "2026-07-09", "expiry": "2026-07-14"},
+    {"session_date": "2026-07-10", "expiry": "2026-07-14"},
+    {"session_date": "2026-07-13", "expiry": "2026-07-14"},
+    {"session_date": "2026-07-14", "expiry": "2026-07-14"}
+  ]
+}

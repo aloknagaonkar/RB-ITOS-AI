@@ -1,0 +1,6 @@
+.hri{border:1px solid #29404c;border-radius:14px;padding:16px;margin:0 0 16px}
+.hri-head{display:flex;justify-content:space-between;gap:16px}.hri-head h3{margin:0 0 4px}
+.hri-head p,.hri-note{opacity:.72;margin:0}.hri-summary{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}
+.hri-summary .active{font-weight:700}.hri-table-wrap{overflow:auto}.hri-table{width:100%;border-collapse:collapse}
+.hri-table th,.hri-table td{padding:9px 10px;border-bottom:1px solid #233845;text-align:left;white-space:nowrap}
+.hri-table tr.selected{outline:1px solid #5f7c8d}.hri-error{margin:10px 0}.hri-note{margin-top:10px;font-size:.86rem}

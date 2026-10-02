@@ -1,0 +1,7 @@
+def test_choose_shortest_nonexpired_expiry(tmp_path):
+    d = tmp_path / "historical-positioning-cache-x"
+    d.mkdir()
+    _write(d / "later.json", expiry="2026-09-01")
+    _write(d / "near.json", expiry="2026-08-25")
+    s = choose_positioning_session("2026-08-25", data_root=tmp_path)
+    assert s.expiry == "2026-08-25"

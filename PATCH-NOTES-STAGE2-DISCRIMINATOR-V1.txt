@@ -1,0 +1,23 @@
+PCR Stage-2 Success vs False-Warning Discriminator v1
+
+Purpose
+- Freeze Stage 2 unchanged: Moving PCR 5m/15m falling while 30m rising.
+- Join first-entry Stage-2 events back to exact T0 evidence rows.
+- Compare TRUE_BEARISH_REVERSAL vs FALSE_WARNING across TRAIN/OOS-A/B/C/D.
+- Rank descriptive feature separation without learning thresholds.
+
+Included T0 features
+- Fixed/Moving/Full PCR levels.
+- Fixed-Moving PCR spread.
+- 1m/5m/15m/30m PCR changes for each panel.
+- Fixed/Moving/Full call and put OI change percentages.
+- ATM divergence.
+
+Important limitation
+The current historical evidence CSV contains panel-level OI context but not per-strike
+option premium/close + OI history. Therefore same-strike CE/PE LONG_BUILDUP /
+SHORT_BUILDUP confirmation is NOT silently inferred in this patch. The next patch
+must extend historical evidence from reconstructed option candles and join that
+positioning evidence to these same frozen Stage-2 event timestamps.
+
+No BUY/SELL signal. No option P&L. No tuning of Stage 2.

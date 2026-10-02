@@ -1,0 +1,6 @@
+const fs=require('fs')
+const s=fs.readFileSync('frontend/src/hilegaDecisionTable.tsx','utf8')
+if(!s.includes('NIFTY O → C / Δ from entry')) throw new Error('header missing')
+if(!s.includes('O {money(r.bar?.open)} → C {money(r.bar?.close)}')) throw new Error('O→C rendering missing')
+if(!s.includes("timing.label==='recovered'?`recovered ${timing.processed}`:timing.processed")) throw new Error('processed label cleanup missing')
+console.log('PASS: clean timing + NIFTY O→C/Δ UI')

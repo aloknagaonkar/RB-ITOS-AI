@@ -1,0 +1,10 @@
+Bidirectional Stage-2 Discriminator v1
+
+- Keeps bullish and bearish Stage-2 definitions frozen.
+- Compares TRUE reversal vs FALSE warning using only T0 evidence.
+- Computes feature separation independently for bullish and bearish events.
+- Adds TRAIN-derived frozen quartile buckets for selected PCR intensity features.
+- TRAIN bucket cuts use feature distribution only, not outcome labels.
+- Applies identical cut points to OOS-A/B/C/D and reports per-bucket true-vs-false rates.
+- Does not create CE/PE trade signals or thresholds.
+- Explicitly notes that feature selection used the existing 100-session research, so fresh untouched OOS remains necessary before promotion.
