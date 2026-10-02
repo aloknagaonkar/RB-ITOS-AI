@@ -16,6 +16,7 @@ type Session={
 }
 type Response={
   session_date:string;source:string;source_id:string;evidence_level:string;ce_available:boolean
+  strategy_version?:string
   reports:HilegaAudit[];report_count:number;audit_chain_ok:boolean|null;audit_chain_issue:string|null
   manifest:Record<string,any>;warning:string;available_sources:string[]
 }
