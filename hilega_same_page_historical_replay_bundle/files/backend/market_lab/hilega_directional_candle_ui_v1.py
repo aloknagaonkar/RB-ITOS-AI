@@ -587,7 +587,7 @@ def build_historical_directional_candles(session_date: str) -> dict[str, Any]:
                 **live,
                 "mode": "HISTORICAL_LIVE_CAPTURE",
                 "warning": (
-                    "Historical view reconstructed from immutable directional live "
+                    "Historical view reconstructed from recorded directional live "
                     "audit/evidence for this session. No broker call or synthetic "
                     "strategy decision was made."
                 ),
