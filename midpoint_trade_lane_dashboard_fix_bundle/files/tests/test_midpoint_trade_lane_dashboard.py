@@ -1,4 +1,7 @@
-from market_lab.midpoint_strategy.live_shadow_ui import _selected_trade_view
+from market_lab.midpoint_strategy.live_shadow_ui import (
+    _selected_trade_view,
+    _with_nifty_points,
+)
 
 
 def row(event_id, timestamp, event_type, family, direction, reference, **extra):
@@ -63,3 +66,19 @@ def test_repeated_same_identity_opens_a_new_generation_after_terminal():
     assert trade["trade_id"] == "g1"
     assert trade["status"] == "ACTIVE"
     assert trade["event_count"] == 2
+
+
+def test_nifty_delta_is_independent_for_parallel_bullish_and_bearish_lanes():
+    rows = [
+        row("a", "09:30", "A_ENTRY", "A", "BULLISH", "GREEN", price=100),
+        row("e", "09:31", "E_ENTRY", "E", "BEARISH", "RED", price=200),
+        row("a-h", "09:32", "CONTINUOUS_HEALTH_CHECK", "A", "BULLISH", "GREEN", price=112,
+            evidence={"health": "HEALTHY", "support_count": 3}),
+        row("e-h", "09:33", "CONTINUOUS_HEALTH_CHECK", "E", "BEARISH", "RED", price=190,
+            evidence={"health": "HEALTHY", "support_count": 3}),
+    ]
+    projected = _with_nifty_points(rows)
+    assert projected[2]["nifty_entry_price"] == 100
+    assert projected[2]["nifty_points_from_entry"] == 12
+    assert projected[3]["nifty_entry_price"] == 200
+    assert projected[3]["nifty_points_from_entry"] == 10

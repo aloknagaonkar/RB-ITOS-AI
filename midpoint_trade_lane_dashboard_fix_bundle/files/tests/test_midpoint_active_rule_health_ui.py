@@ -11,6 +11,10 @@ def test_primary_audit_combines_requested_columns():
     assert "<th>Time / Session</th><th>Event</th><th>Owner</th>" not in source
     assert "<th>Direction</th><th>State</th><th>Result</th>" not in source
     assert "colSpan={8}" in source
+    assert "function NiftyDeltaCell" in source
+    assert "signedPoints(points)" in source
+    assert "E {num(entry)} → C {num(current)}" in source
+    assert "points>0?'positive':points<0?'negative'" in source
 
 
 def test_dashboard_is_active_rule_first_instead_of_empty_candidate_cards():

@@ -18,6 +18,8 @@ What changes
 - Closed views say "Latest completed trade" instead of "Current active rule".
 - Parallel A, canonical B/E, repeated B/E and PM evidence cannot mix.
 - Historical Replay receives the same correction through its status payload.
+- NIFTY / delta cells match Hilega: signed points first, then E entry -> C
+  current NIFTY, with green profit and red loss styling.
 
 What does not change
 --------------------

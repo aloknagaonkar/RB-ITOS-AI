@@ -293,34 +293,31 @@ def _timeline_health(row: dict[str, Any]) -> tuple[str | None, int | None]:
 
 
 def _with_nifty_points(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Presentation-only, close-based points for each event of an active B/E leg."""
-    active: dict[str, Any] | None = None
-    day: str | None = None
+    """Presentation-only close points, independently tracked per trade lane."""
+    active: dict[tuple[Any, ...], dict[str, Any]] = {}
     projected = []
     for original in rows:
         row = dict(original)
-        event_day = _row_day(row)
-        if event_day != day:
-            active = None
-            day = event_day
         kind = row.get("event_type")
-        if kind in (
-            "A_ENTRY", "B_ENTRY", "E_ENTRY", "C_ENTRY", "PM_B_ENTRY", "PM_E_ENTRY",
-            "B_REARM_ENTRY", "E_REARM_ENTRY",
-        ):
+        identity = _trade_identity(row)
+        if kind in _TRADE_ENTRY_TYPES:
             entry_price = _num(row.get("underlying_price"))
-            active = {"entry": entry_price, "direction": row.get("direction"),
-                      "family": row.get("family")} if entry_price is not None else None
+            if entry_price is not None:
+                active[identity] = {
+                    "entry": entry_price,
+                    "direction": row.get("direction"),
+                }
+        lane = active.get(identity)
         price = _num(row.get("underlying_price"))
         move = None
-        if active and price is not None and row.get("direction") == active["direction"] and row.get("family") == active["family"]:
-            sign = 1 if active["direction"] == "BULLISH" else -1
-            move = round(sign * (price - active["entry"]), 4)
+        if lane and price is not None:
+            sign = 1 if lane["direction"] == "BULLISH" else -1
+            move = round(sign * (price - lane["entry"]), 4)
         row["nifty_points_from_entry"] = move
-        row["nifty_entry_price"] = active["entry"] if move is not None else None
+        row["nifty_entry_price"] = lane["entry"] if move is not None else None
         projected.append(row)
-        if kind in ("CAP20_RESCUE_TRIGGERED", "CAP20_SHADOW_EXIT", "STRUCTURAL_TERMINAL"):
-            active = None
+        if kind in _TRADE_TERMINAL_TYPES:
+            active.pop(identity, None)
     return projected
 
 

@@ -15,6 +15,7 @@ ROOT = BUNDLE.parent
 FILES = (
     Path("backend/market_lab/midpoint_strategy/live_shadow_ui.py"),
     Path("frontend/src/midpointStrategyShadow.tsx"),
+    Path("frontend/src/midpointStrategyShadow.css"),
     Path("tests/test_midpoint_trade_lane_dashboard.py"),
     Path("tests/test_midpoint_active_rule_health_ui.py"),
 )
