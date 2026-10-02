@@ -580,6 +580,107 @@ def load_session(session_date: str, root: Path = ROOT, replay_root: Path = REPLA
     return result
 
 
+class _CacheOnlyUnderlyingGateway:
+    """Historical V2 testing may consume cached candles, never broker data."""
+
+    def __init__(self, cache_root: Path):
+        self.cache_root = cache_root
+
+    def historical_candles(self, instrument_key: str, session_date: date):
+        from .hilega_milega_historical_replay_v1 import _read_cache
+
+        return _read_cache(
+            self.cache_root / f"{session_date.isoformat()}.json",
+            instrument_key,
+            session_date,
+        ) or []
+
+
+def _v2_report(row: dict) -> dict:
+    checkpoint = row["bar_timestamp"]
+    accepted = [x for x in str(row.get("accepted_events") or "").split(",") if x]
+    suppressed = [x for x in str(row.get("suppressed_events") or "").split(",") if x]
+    transitions = [{
+        "event_type": event,
+        "event_time": checkpoint,
+        "price": row.get("close"),
+        "source": event,
+        "state_before": row.get("owner_before"),
+        "state_after": row.get("owner_after"),
+    } for event in accepted]
+    return {
+        "checkpoint": checkpoint,
+        "bar": {key: row.get(key) for key in ("open", "high", "low", "close", "volume")},
+        "indicators": {
+            "rsi9": row.get("rsi9"), "ema3_rsi": row.get("ema3_rsi"),
+            "wma21_rsi": row.get("wma21_rsi"),
+            "previous_wma21_rsi": row.get("previous_wma21_rsi"),
+        },
+        "conditions": {
+            "wma21_slope_required": True,
+            "wma21_slope_change": row.get("wma21_slope_change"),
+            "bullish_wma21_rising": row.get("bullish_wma21_rising"),
+            "bearish_wma21_falling": row.get("bearish_wma21_falling"),
+            "bullish_wma21_slope_pass": row.get("bullish_wma21_slope_pass"),
+            "bearish_wma21_slope_pass": row.get("bearish_wma21_slope_pass"),
+            "bullish_wma21_slope_rejection": row.get("bullish_wma21_slope_rejection"),
+            "bearish_wma21_slope_rejection": row.get("bearish_wma21_slope_rejection"),
+        },
+        "strategy": {
+            "strategy_id": "HILEGA_DIRECTIONAL_SHADOW_V2",
+            "strategy_version": "2.0.0",
+            "directional_action": row.get("action"),
+            "owner_before": row.get("owner_before"), "owner_after": row.get("owner_after"),
+            "state_before": row.get("owner_before"), "state_after": row.get("owner_after"),
+            "events_emitted": accepted, "suppressed_events": suppressed,
+            "note": row.get("note"),
+        },
+        "route_a": {"fail_reasons": [x for x in (row.get("bullish_wma21_slope_rejection"), row.get("bearish_wma21_slope_rejection")) if x]},
+        "route_b": {"fail_reasons": []},
+        "transitions": transitions,
+        "option_candidate": None, "option_market_snapshot": None, "option_lifecycle": {},
+        "audit_integrity": {"source": "CACHED_CANDLE_V2_OBSERVATION_TEST", "chain_ok": None, "canonical_step_audit_available": False},
+        "safety": {"observation_only": True, "execution_enabled": False, "paper_order_enabled": False},
+    }
+
+
+@router.get("/strategy-test")
+def strategy_test(session_date: str = Query(..., min_length=10, max_length=10)):
+    try:
+        day = date.fromisoformat(session_date)
+    except ValueError as exc:
+        raise HTTPException(422, "Invalid session date") from exc
+    from .hilega_directional_historical_replay_v1 import replay_directional_sessions
+
+    cache_root = ROOT / "hilega-milega-underlying-cache-v1"
+    try:
+        result = replay_directional_sessions(
+            gateway=_CacheOnlyUnderlyingGateway(cache_root),
+            dates=[day],
+            warmup_calendar_days=45,
+            cache_root=cache_root,
+            output_root=ROOT / "hilega-directional-replay-v2",
+            strategy_version="V2",
+        )
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(422, f"V2 observation replay failed: {exc}") from exc
+    if result["summary"]["sessions_passed"] != 1:
+        raise HTTPException(404, "V2 replay unavailable: exact cached candle data is missing for this session or its indicator warmup window")
+    rows_path = ROOT / "hilega-directional-replay-v2" / day.isoformat() / "directional-candle-by-candle.json"
+    rows = json.loads(rows_path.read_text(encoding="utf-8"))
+    reports = [_v2_report(row) for row in rows]
+    return {
+        "session_date": day.isoformat(), "source": "STRATEGY_V2_OBSERVATION_TEST",
+        "source_id": f"strategy-v2:{day.isoformat()}", "evidence_level": "STRATEGY",
+        "ce_available": False, "manifest": {}, "audit_chain_ok": None,
+        "audit_chain_issue": "V2 is a deterministic observation replay; no live audit chain or option execution is created.",
+        "reports": reports, "report_count": len(reports),
+        "strategy_id": result["strategy_id"], "strategy_version": result["strategy_version"],
+        "observation_only": True, "execution_enabled": False,
+        "warning": "Strategy V2 test on cached historical candles only. It does not modify live strategy behavior or place orders.",
+    }
+
+
 # Backward-compatible capture discovery remains available for old bookmarks/tests.
 def _candidate_dirs(root: Path = ROOT):
     return [(x["session_date"], x["path"].parent) for x in _phase7d_candidates(root)]

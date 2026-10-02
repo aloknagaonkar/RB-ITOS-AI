@@ -18,3 +18,18 @@ def test_canonical_audit_report_contains_strategy_reasons_option_lifecycle_and_i
     assert report["option_lifecycle"]["start"]["active"] is True
     assert report["audit_integrity"]["chain_ok"] is True
     assert report["safety"]["execution_enabled"] is False
+
+
+def test_v2_audit_report_exposes_wma_slope_decision_evidence():
+    cp="2026-09-23T10:15:00+05:30"
+    rows=[{"sequence":1,"checkpoint":cp,"stage":"STRATEGY_DECISION","status":"EVALUATED","payload":{
+        "strategy_id":"HILEGA_DIRECTIONAL_SHADOW_V2","strategy_version":"2.0.0",
+        "wma21_slope_required":True,"wma21_rising":False,"wma21_falling":False,
+        "wma21_slope_change":0.0,"wma21_slope_pass":False,
+        "previous_wma21_rsi":52.0,"wma21_rsi":52.0,
+    }}]
+    report=build_detailed_audit_report(rows,checkpoint=cp,mode="HISTORICAL_REPLAY")
+    assert report["strategy"]["strategy_version"]=="2.0.0"
+    assert report["conditions"]["wma21_slope_required"] is True
+    assert report["conditions"]["wma21_slope_pass"] is False
+    assert report["conditions"]["wma21_slope_change"]==0.0

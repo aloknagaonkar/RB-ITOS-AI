@@ -16,6 +16,7 @@ from .hilega_directional_coordinator_v1 import (
     BEARISH_ARM_EVENTS,
     DirectionalDecision,
     HilegaDirectionalCoordinatorV1,
+    HilegaDirectionalCoordinatorV2,
 )
 from .hilega_milega_historical_replay_v1 import (
     HistoricalUnderlyingGateway,
@@ -136,6 +137,8 @@ def _pair_trade(
 
 def _row_from_decision(bar, decision: DirectionalDecision, coordinator: HilegaDirectionalCoordinatorV1) -> dict[str, Any]:
     ind = coordinator.bullish.previous_indicators
+    bull = coordinator.bullish.last_decision_payload
+    bear = coordinator.bearish.last_decision_payload
     accepted = _event_types(decision.accepted_events)
     suppressed = _event_types(decision.suppressed_events)
 
@@ -165,6 +168,15 @@ def _row_from_decision(bar, decision: DirectionalDecision, coordinator: HilegaDi
         "rsi9": None if ind is None else ind.rsi9,
         "ema3_rsi": None if ind is None else ind.ema3_rsi,
         "wma21_rsi": None if ind is None else ind.wma21_rsi,
+        "previous_wma21_rsi": bull.get("previous_wma21_rsi"),
+        "wma21_slope_change": bull.get("wma21_slope_change"),
+        "bullish_wma21_rising": bull.get("wma21_rising"),
+        "bearish_wma21_falling": bear.get("wma21_falling"),
+        "bullish_wma21_slope_pass": bull.get("wma21_slope_pass"),
+        "bearish_wma21_slope_pass": bear.get("wma21_slope_pass"),
+        "wma21_slope_required": bull.get("wma21_slope_required", False),
+        "bullish_wma21_slope_rejection": "WMA21_NOT_RISING_OR_FLAT" if bull.get("wma21_slope_required") and not bull.get("wma21_rising") else "",
+        "bearish_wma21_slope_rejection": "WMA21_NOT_FALLING_OR_FLAT" if bear.get("wma21_slope_required") and not bear.get("wma21_falling") else "",
         "owner_before": decision.trade_owner_before,
         "owner_after": decision.trade_owner_after,
         "bullish_state": decision.bullish_state,
@@ -201,14 +213,15 @@ def _write_manual_validation(
         "=" * 132,
         "Combined bullish+bearish coordinator replay. No option selection and no live execution.",
         "",
-        "TIME   CLOSE      RSI9    EMA3   WMA21  OWNER BEFORE -> AFTER    BULL STATE            BEAR STATE               ACTION",
+        "TIME   CLOSE      RSI9    EMA3   WMA21  SLOPE Δ  UP DN  OWNER BEFORE -> AFTER    BULL STATE            BEAR STATE               ACTION",
         "-" * 132,
     ]
     def n(v: Any) -> str:
         return "NA" if v is None else f"{float(v):.2f}"
     for r in rows:
         lines.append(
-            f"{r['time']:5} {n(r['close']):>9} {n(r['rsi9']):>7} {n(r['ema3_rsi']):>7} {n(r['wma21_rsi']):>7}  "
+            f"{r['time']:5} {n(r['close']):>9} {n(r['rsi9']):>7} {n(r['ema3_rsi']):>7} {n(r['wma21_rsi']):>7} "
+            f"{n(r.get('wma21_slope_change')):>8} {str(r.get('bullish_wma21_rising'))[:1]:>2} {str(r.get('bearish_wma21_falling'))[:1]:>2} "
             f"{r['owner_before']:7} -> {r['owner_after']:7}  "
             f"{r['bullish_state'][:20]:20}  {r['bearish_state'][:22]:22}  {r['action']}"
         )
@@ -218,6 +231,11 @@ def _write_manual_validation(
             lines.append(f"      SUPPRESSED: {r['suppressed_events']}")
         if r["note"]:
             lines.append(f"      NOTE:       {r['note']}")
+        if r.get("wma21_slope_required"):
+            if r.get("bullish_wma21_slope_rejection"):
+                lines.append(f"      V2 BULLISH WMA GATE REJECTED: {r['bullish_wma21_slope_rejection']}")
+            if r.get("bearish_wma21_slope_rejection"):
+                lines.append(f"      V2 BEARISH WMA GATE REJECTED: {r['bearish_wma21_slope_rejection']}")
         if r["owner_after"] == "BULLISH" and r["bearish_armed"]:
             lines.append("      INFO:       BEARISH_ARMED while BULLISH_ACTIVE")
         if r["owner_after"] == "BEARISH" and r["bullish_armed"]:
@@ -245,6 +263,7 @@ def replay_directional_sessions(
     cache_root: str | Path = "data/historical-evidence/hilega-milega-underlying-cache-v1",
     output_root: str | Path = "data/historical-evidence/hilega-directional-replay-v1",
     refresh_cache: bool = False,
+    strategy_version: str = "V1",
 ) -> dict[str, Any]:
     if not dates:
         raise ValueError("at least one target date is required")
@@ -253,10 +272,15 @@ def replay_directional_sessions(
     target_set = set(targets)
     first, last = targets[0], targets[-1]
     begin = first - timedelta(days=warmup_calendar_days)
+    strategy_version = strategy_version.upper()
+    if strategy_version not in {"V1", "V2"}:
+        raise ValueError("strategy_version must be V1 or V2")
+    if strategy_version == "V2" and output_root == "data/historical-evidence/hilega-directional-replay-v1":
+        output_root = "data/historical-evidence/hilega-directional-replay-v2"
     out_root = Path(output_root)
     out_root.mkdir(parents=True, exist_ok=True)
 
-    coordinator = HilegaDirectionalCoordinatorV1()
+    coordinator = HilegaDirectionalCoordinatorV2() if strategy_version == "V2" else HilegaDirectionalCoordinatorV1()
     session_summaries: list[DirectionalSessionSummary] = []
     all_trades: list[DirectionalTradeRow] = []
     all_interesting: list[dict[str, Any]] = []
@@ -423,6 +447,9 @@ def replay_directional_sessions(
     missing = [s.session_date for s in session_summaries if s.status != "PASS"]
     payload = {
         "model": MODEL,
+        "strategy_id": "HILEGA_DIRECTIONAL_SHADOW_V2" if strategy_version == "V2" else "HILEGA_DIRECTIONAL_SHADOW_V1",
+        "strategy_version": "2.0.0" if strategy_version == "V2" else "1.0.0",
+        "strategy_rules": {"wma21_slope_required": strategy_version == "V2", "bullish_wma21": "strictly_rising_vs_previous_completed_5m" if strategy_version == "V2" else None, "bearish_wma21": "strictly_falling_vs_previous_completed_5m" if strategy_version == "V2" else None, "minimum_slope_threshold": None},
         "status": "PASS" if not missing else "PARTIAL",
         "underlying": underlying,
         "target_dates": [d.isoformat() for d in targets],
@@ -472,6 +499,15 @@ def replay_directional_sessions(
         "trades": [asdict(x) for x in all_trades],
         "data_availability": data_availability,
         "manual_validation_required": True,
+        "strategy_version": "2.0.0" if strategy_version == "V2" else "1.0.0",
+        "strategy_id": "HILEGA_DIRECTIONAL_SHADOW_V2" if strategy_version == "V2" else "HILEGA_DIRECTIONAL_SHADOW_V1",
+        "strategy_rules": {
+            "wma21_slope_required": strategy_version == "V2",
+            "bullish_entry_requires_wma21_rising": strategy_version == "V2",
+            "bearish_entry_requires_wma21_falling": strategy_version == "V2",
+            "comparison": "current completed 5m WMA21 vs immediately previous completed 5m WMA21",
+            "minimum_slope_threshold": None,
+        },
     }
 
     (out_root/"multi-session-directional-summary.json").write_text(

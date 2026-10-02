@@ -166,6 +166,11 @@ def build_detailed_audit_report(
         "ema_gt_wma": dp.get("ema_gt_wma"),
         "rsi_rising": dp.get("rsi_rising"),
         "ema_rising": dp.get("ema_rising"),
+        "wma21_rising": dp.get("wma21_rising"),
+        "wma21_falling": dp.get("wma21_falling"),
+        "wma21_slope_change": dp.get("wma21_slope_change"),
+        "wma21_slope_required": dp.get("wma21_slope_required"),
+        "wma21_slope_pass": dp.get("wma21_slope_pass"),
         "full_alignment": dp.get("full_alignment"),
     }
 

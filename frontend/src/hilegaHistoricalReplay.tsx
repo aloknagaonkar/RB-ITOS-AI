@@ -27,6 +27,7 @@ const shortTime=(v:string)=>{
 export default function HilegaHistoricalReplay(){
   const [sessions,setSessions]=useState<Session[]>([])
   const [selectedDate,setSelectedDate]=useState('')
+  const [strategyVersion,setStrategyVersion]=useState<'LIVE'|'V2'>('LIVE')
   const [data,setData]=useState<Response|null>(null)
   const [error,setError]=useState('')
   const [busy,setBusy]=useState(false)
@@ -80,8 +81,12 @@ export default function HilegaHistoricalReplay(){
     setBusy(true);setError('');setPlaying(false);setData(null);setCursor(0)
     try{
       const [r,dr]=await Promise.all([
-        fetch(`/api/live-shadow/hilega-historical/session?session_date=${encodeURIComponent(selectedDate)}`),
-        fetch(`/api/live-shadow/hilega-directional-candles/historical?session_date=${encodeURIComponent(selectedDate)}`),
+        fetch(strategyVersion==='V2'
+          ? `/api/live-shadow/hilega-historical/strategy-test?session_date=${encodeURIComponent(selectedDate)}`
+          : `/api/live-shadow/hilega-historical/session?session_date=${encodeURIComponent(selectedDate)}`),
+        strategyVersion==='V2'
+          ? Promise.resolve({ok:false} as globalThis.Response)
+          : fetch(`/api/live-shadow/hilega-directional-candles/historical?session_date=${encodeURIComponent(selectedDate)}`),
       ])
       if(!r.ok)throw new Error(`Session HTTP ${r.status}: ${await r.text()}`)
       const body=await r.json() as Response
@@ -98,15 +103,15 @@ export default function HilegaHistoricalReplay(){
     if(selectedDate)void load()
   // A selected date is a complete replay request; no separate Load click is required.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[selectedDate])
+  },[selectedDate,strategyVersion])
 
   useEffect(()=>{
-    if(!selectedDate||selected?.status==='COMPLETE')return
+    if(!selectedDate||strategyVersion==='V2'||selected?.status==='COMPLETE')return
     const id=window.setInterval(()=>void load(),60000)
     return()=>window.clearInterval(id)
   // Active/partial recorded evidence refreshes automatically; completed days are immutable.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[selectedDate,selected?.status])
+  },[selectedDate,selected?.status,strategyVersion])
 
   useEffect(()=>{
     if(!playing||!step||!reports.length)return
@@ -138,7 +143,7 @@ export default function HilegaHistoricalReplay(){
 
   return <section className="hime-replay" aria-label="Hilega historical replay">
     <h3>Hilega-Milega · Session Replay</h3>
-    <p>Choose one trading day. The registry uses the richest evidence already available and never starts a broker/replay worker.</p>
+    <p>Compare the recorded live baseline with an isolated V2 observation test. V2 reads cached candles only and never changes live behavior or submits orders.</p>
 
     <div className="hime-controls">
       <label>Session date <select aria-label="Hilega historical session" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)}>
@@ -146,6 +151,10 @@ export default function HilegaHistoricalReplay(){
         {sessions.map(s=><option value={s.session_date} key={s.session_date}>
           {s.session_date} · {s.evidence_level} · {s.source}{s.ce_available?' · CE':''}
         </option>)}
+      </select></label>
+      <label>Strategy <select aria-label="Hilega historical strategy" value={strategyVersion} onChange={e=>setStrategyVersion(e.target.value as 'LIVE'|'V2')}>
+        <option value="LIVE">Existing live strategy (recorded)</option>
+        <option value="V2">Strategy V2 (observation test)</option>
       </select></label>
       <button onClick={()=>void load()} disabled={!selectedDate||busy}>{busy?'Loading…':'Reload session'}</button>
       <button onClick={()=>void refreshSessions()} disabled={refreshing}>{refreshing?'Refreshing…':'Refresh sessions'}</button>
@@ -164,6 +173,7 @@ export default function HilegaHistoricalReplay(){
       <div className="hime-meta">
         <span>Session: {data.session_date}</span>
         <span>Loaded from: {data.source}</span>
+        <span>Strategy: {data.strategy_version??(strategyVersion==='LIVE'?'Recorded live baseline':'V2 observation')}</span>
         <span>Evidence: {data.evidence_level}</span>
         <span>CE: {data.ce_available?'AVAILABLE':'NOT RECORDED'}</span>
         <span>Checkpoints: {reports.length}</span>

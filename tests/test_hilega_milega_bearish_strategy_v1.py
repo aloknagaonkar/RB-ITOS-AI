@@ -9,6 +9,7 @@ from market_lab.hilega_milega_bearish_strategy_v1 import (
     OBSERVATION_ONLY,
     PAPER_ORDER_ENABLED,
     HilegaMilegaBearishEngineV1,
+    HilegaMilegaBearishEngineV2,
 )
 from market_lab.hilega_milega_strategy_v1 import FiveMinuteBar, IndicatorSnapshot
 from market_lab.live_shadow_step_audit_v1 import ShadowStepAuditStoreV1
@@ -51,6 +52,18 @@ def test_bearish_route_a_enters_on_fresh_cross_down_below_50_and_wma():
     assert e.session.active is True
     assert e.session.source == "BEARISH_ROUTE_A_CROSS_RSI50_BELOW_WMA21"
     assert e.session.entry_price == 99
+
+
+@pytest.mark.parametrize(("current_wma", "entry_expected"), [(54.99, True), (55.0, False), (55.01, False)])
+def test_v2_bearish_route_a_requires_strictly_falling_wma(current_wma, entry_expected):
+    e = HilegaMilegaBearishEngineV2()
+    e.process_enriched_bar_for_test(bar("10:00"), ind(52, 50, 55.0))
+    events = e.process_enriched_bar_for_test(bar("10:05", 99), ind(45, 48, current_wma))
+    assert any(x.startswith("ENTRY_BEARISH_ROUTE_A") for x in event_types(events)) is entry_expected
+    assert e.last_decision_payload["wma21_slope_pass"] is entry_expected
+    assert e.last_decision_payload["wma21_slope_change"] == pytest.approx(current_wma - 55.0)
+    if not entry_expected:
+        assert "WMA21_NOT_FALLING_OR_FLAT" in e._route_a_fail_reasons(e.last_decision_payload)
 
 
 def test_bearish_route_b_can_confirm_on_same_cross_candle_when_route_a_fails():
