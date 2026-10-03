@@ -46,7 +46,7 @@ PYTHONPATH=backend:. python \
 Outputs
 -------
 data/historical-evidence/
-  hilega-wma-delayed-confirmation-2026-09-30-2026-10-01-v1/
+  hilega-wma-delayed-confirmation-2026-09-30-2026-10-01-v2/
     report.json
     trade-validation.csv
     minute-by-minute-wma.csv

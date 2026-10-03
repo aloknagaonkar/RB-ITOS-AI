@@ -42,7 +42,7 @@ DEFAULT_TRADES = Path(
 )
 DEFAULT_OUTPUT = Path(
     "data/historical-evidence/"
-    "hilega-wma-delayed-confirmation-2026-09-30-2026-10-01-v1"
+    "hilega-wma-delayed-confirmation-2026-09-30-2026-10-01-v2"
 )
 
 
@@ -78,6 +78,14 @@ def confirmation_tier(value: float, threshold: float, strong: float) -> str:
     if value > 0.0:
         return "WAIT_DEVELOPING"
     return "WAIT_OPPOSING_OR_ZERO"
+
+
+def delayed_entry_decision(first_confirmed: dict[str, Any] | None) -> str:
+    return (
+        "DELAYED_ENTRY_CONFIRMED"
+        if first_confirmed is not None
+        else "NO_ENTRY_BY_T10"
+    )
 
 
 def full_alignment(snapshot: Any, direction: str) -> bool:
@@ -308,10 +316,7 @@ def validate_trade(
         "first_fully_aligned_wma_change": (
             None if first_aligned is None else first_aligned["directional_wma_change"]
         ),
-        "candidate_decision": (
-            "DELAYED_ENTRY_CONFIRMED" if first_aligned is not None
-            else "NO_ENTRY_BY_T10"
-        ),
+        "candidate_decision": delayed_entry_decision(first_confirmed),
         "delayed_entry_price": delayed_entry_price,
         "delayed_entry_to_canonical_exit_points": delayed_points,
         "difference_vs_canonical_points": (
@@ -406,7 +411,7 @@ def main() -> int:
         for day in sorted(selected_dates)
     }
     report = {
-        "model": "HILEGA_POST_SIGNAL_WMA_DELAYED_CONFIRMATION_V1",
+        "model": "HILEGA_POST_SIGNAL_WMA_DELAYED_CONFIRMATION_V2",
         "selected_dates": sorted(selected_dates),
         "rule": {
             "signal_source": "UNCHANGED_CANONICAL_HILEGA_STRATEGY",
@@ -444,7 +449,7 @@ def main() -> int:
             "direction": row["direction"],
             "wma_0.75": row["first_wma_075_timestamp"],
             "wma_1.00": row["first_wma_100_timestamp"],
-            "aligned_entry": row["first_fully_aligned_timestamp"],
+            "full_alignment_diagnostic": row["first_fully_aligned_timestamp"],
             "decision": row["candidate_decision"],
             "canonical_points": row["canonical_points"],
             "delayed_points": row["delayed_entry_to_canonical_exit_points"],
