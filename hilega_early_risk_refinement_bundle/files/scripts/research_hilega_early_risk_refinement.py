@@ -22,7 +22,7 @@ from typing import Any, Iterable
 
 DEFAULT_ROOT = Path("data/historical-evidence/hilega-alignment-points-490-v1")
 DEFAULT_OUTPUT = Path(
-    "data/historical-evidence/hilega-early-risk-refinement-490-v1"
+    "data/historical-evidence/hilega-early-risk-refinement-490-v2-flat-wait"
 )
 DIRECTIONS = ("BULLISH", "BEARISH")
 POLICIES = (
@@ -62,6 +62,7 @@ TIMELINE_NUMERIC_FIELDS = (
     *HEALTH_FIELDS,
 )
 EPSILON = 1e-9
+FLAT_WMA_EPSILON = 0.10
 
 
 def finite(value: Any) -> float | None:
@@ -119,6 +120,9 @@ def load_inputs(
             continue
         if row.get("direction") not in DIRECTIONS:
             raise ValueError(f"unsupported direction: {row.get('direction')!r}")
+        row["entry_wma21_rsi_slope_3"] = finite(
+            row.get("entry_wma21_rsi_slope_3")
+        )
         complete.append(row)
 
     grouped: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -180,6 +184,18 @@ def assign_evidence_blocks(
     }
 
 
+def directional_wma_state(value: float | None, direction: str) -> str:
+    if value is None:
+        return "UNAVAILABLE"
+    sign = 1.0 if direction == "BULLISH" else -1.0
+    directional = sign * value
+    if directional > FLAT_WMA_EPSILON:
+        return "SUPPORTING"
+    if directional < -FLAT_WMA_EPSILON:
+        return "OPPOSING"
+    return "FLAT_WAIT"
+
+
 def candle_health(row: dict[str, Any], direction: str) -> dict[str, Any]:
     missing = [field for field in HEALTH_FIELDS if row.get(field) is None]
     if missing:
@@ -190,25 +206,34 @@ def candle_health(row: dict[str, Any], direction: str) -> dict[str, Any]:
             "failure_reasons": "",
         }
     sign = 1.0 if direction == "BULLISH" else -1.0
+    wma_state = directional_wma_state(
+        float(row["wma21_rsi_slope_3"]), direction
+    )
     checks = {
         "EMA_WMA_ORDER": sign * (
             float(row["ema3_rsi"]) - float(row["wma21_rsi"])
         ) > 0.0,
         "RSI_SLOPE": sign * float(row["rsi9_slope_3"]) > 0.0,
         "EMA_SLOPE": sign * float(row["ema3_rsi_slope_3"]) > 0.0,
-        "WMA_SLOPE": sign * float(row["wma21_rsi_slope_3"]) > 0.0,
         "GAP_EXPANSION": sign * float(row["ema_minus_wma_slope_3"]) > 0.0,
     }
     failures = [name for name, supported in checks.items() if not supported]
+    # Flat is deliberately neutral. Only a slope beyond the opposite epsilon
+    # is counted as a WMA failure.
+    if wma_state == "OPPOSING":
+        failures.append("WMA_SLOPE_OPPOSING")
     return {
         "health_available": True,
         "missing_health_fields": "",
         "failure_count": len(failures),
         "failure_reasons": "|".join(failures),
+        "wma_state": wma_state,
         "ema_wma_order_support": checks["EMA_WMA_ORDER"],
         "rsi_slope_support": checks["RSI_SLOPE"],
         "ema_slope_support": checks["EMA_SLOPE"],
-        "wma_slope_support": checks["WMA_SLOPE"],
+        "wma_slope_support": wma_state == "SUPPORTING",
+        "wma_slope_opposing": wma_state == "OPPOSING",
+        "wma_flat_wait": wma_state == "FLAT_WAIT",
         "gap_expansion_support": checks["GAP_EXPANSION"],
     }
 
@@ -247,6 +272,7 @@ def base_result(trade: dict[str, Any], policy: str) -> dict[str, Any]:
         "mfe_at_signal": None,
         "failure_count": None,
         "failure_reasons": "",
+        "wma_state_at_signal": None,
         "valuation_basis": "CANONICAL_CONTROL_EXIT",
     }
 
@@ -277,7 +303,7 @@ def condition_c(row: dict[str, Any]) -> bool:
         and float(row["mfe_points"]) < 10.0
         and not row["ema_wma_order_support"]
         and not row["gap_expansion_support"]
-        and not row["wma_slope_support"]
+        and row["wma_slope_opposing"]
     )
 
 
@@ -331,6 +357,7 @@ def candidate_result(
             "mfe_at_signal": signal["mfe_points"],
             "failure_count": signal["failure_count"],
             "failure_reasons": signal["failure_reasons"],
+            "wma_state_at_signal": signal["wma_state"],
         }
 
     close = float(signal["close"])
@@ -348,6 +375,7 @@ def candidate_result(
         "mfe_at_signal": signal["mfe_points"],
         "failure_count": signal["failure_count"],
         "failure_reasons": signal["failure_reasons"],
+        "wma_state_at_signal": signal["wma_state"],
         "valuation_basis": "OBSERVED_COMPLETED_FIVE_MINUTE_CLOSE",
     }
 
@@ -654,7 +682,147 @@ def decision_ledger(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 ],
                 "failure_count": row[f"{prefix}_failure_count"],
                 "failure_reasons": row[f"{prefix}_failure_reasons"],
+                "wma_state_at_signal": row[f"{prefix}_wma_state_at_signal"],
             })
+    return output
+
+
+def checkpoint_ledger(
+    trades: list[dict[str, Any]],
+    timeline: dict[str, list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    """Expose every exact T+5/T+10 value used by the candidates."""
+    output: list[dict[str, Any]] = []
+    for trade in trades:
+        checkpoints = {
+            int(row["derived_minutes_from_entry"]): row
+            for row in eligible_checkpoints(
+                trade, timeline.get(str(trade["trade_id"]), [])
+            )
+        }
+        entry_wma_slope = finite(trade.get("entry_wma21_rsi_slope_3"))
+        entry_wma_state = directional_wma_state(
+            entry_wma_slope, str(trade["direction"])
+        )
+        for minute in (5, 10):
+            row = checkpoints.get(minute)
+            output.append({
+                "session_date": trade["session_date"],
+                "evidence_block": trade["evidence_block"],
+                "trade_id": trade["trade_id"],
+                "direction": trade["direction"],
+                "route": trade["route"],
+                "entry_timestamp": trade["entry_timestamp"],
+                "entry_price": trade["entry_price"],
+                "entry_wma21_rsi_slope_3": entry_wma_slope,
+                "entry_wma_state": entry_wma_state,
+                "checkpoint": f"T+{minute}",
+                "checkpoint_available": row is not None,
+                "checkpoint_timestamp": None if row is None else row["timestamp"],
+                "checkpoint_close": None if row is None else row["close"],
+                "directional_points_close": (
+                    None if row is None else row["directional_points_close"]
+                ),
+                "running_mfe_points": None if row is None else row["mfe_points"],
+                "rsi9": None if row is None else row["rsi9"],
+                "ema3_rsi": None if row is None else row["ema3_rsi"],
+                "wma21_rsi": None if row is None else row["wma21_rsi"],
+                "rsi9_slope_3": None if row is None else row["rsi9_slope_3"],
+                "ema3_rsi_slope_3": (
+                    None if row is None else row["ema3_rsi_slope_3"]
+                ),
+                "wma21_rsi_slope_3": (
+                    None if row is None else row["wma21_rsi_slope_3"]
+                ),
+                "wma_state": None if row is None else row.get("wma_state"),
+                "ema_minus_wma_slope_3": (
+                    None if row is None else row["ema_minus_wma_slope_3"]
+                ),
+                "ema_wma_order_support": (
+                    None if row is None else row.get("ema_wma_order_support")
+                ),
+                "gap_expansion_support": (
+                    None if row is None else row.get("gap_expansion_support")
+                ),
+                "wma_flat_wait": (
+                    None if row is None else row.get("wma_flat_wait")
+                ),
+                "wma_slope_opposing": (
+                    None if row is None else row.get("wma_slope_opposing")
+                ),
+                "failure_count": None if row is None else row.get("failure_count"),
+                "failure_reasons": (
+                    "" if row is None else row.get("failure_reasons", "")
+                ),
+                "control_exit_timestamp": trade["exit_timestamp"],
+                "control_exit_price": trade["exit_price"],
+                "control_points": trade["captured_points"],
+                "final_mfe_points": trade["mfe_points"],
+                "control_outcome": (
+                    "POSITIVE" if float(trade["captured_points"]) > 0.0
+                    else "NEGATIVE" if float(trade["captured_points"]) < 0.0
+                    else "FLAT"
+                ),
+                "reached_plus20": float(trade["mfe_points"]) >= 20.0,
+            })
+    return output
+
+
+def wma_transition_summary(
+    trades: list[dict[str, Any]],
+    timeline: dict[str, list[dict[str, Any]]],
+    thresholds: dict[str, float],
+) -> list[dict[str, Any]]:
+    groups: defaultdict[
+        tuple[str, str, str, str, str], list[dict[str, Any]]
+    ] = defaultdict(list)
+    for trade in trades:
+        checkpoints = {
+            int(row["derived_minutes_from_entry"]): row
+            for row in eligible_checkpoints(
+                trade, timeline.get(str(trade["trade_id"]), [])
+            )
+        }
+        entry_state = directional_wma_state(
+            finite(trade.get("entry_wma21_rsi_slope_3")),
+            str(trade["direction"]),
+        )
+        t5_state = (
+            checkpoints[5].get("wma_state", "UNAVAILABLE")
+            if 5 in checkpoints else "UNAVAILABLE"
+        )
+        t10_state = (
+            checkpoints[10].get("wma_state", "UNAVAILABLE")
+            if 10 in checkpoints else "UNAVAILABLE"
+        )
+        groups[(
+            str(trade["evidence_block"]), str(trade["direction"]),
+            entry_state, str(t5_state), str(t10_state),
+        )].append(trade)
+
+    output: list[dict[str, Any]] = []
+    for key, cohort in sorted(groups.items()):
+        points = [float(row["captured_points"]) for row in cohort]
+        output.append({
+            "evidence_block": key[0],
+            "direction": key[1],
+            "entry_wma_state": key[2],
+            "t5_wma_state": key[3],
+            "t10_wma_state": key[4],
+            "trades": len(cohort),
+            "total_control_points": sum(points),
+            "mean_control_points": fmean(points),
+            "positive": sum(value > 0.0 for value in points),
+            "negative": sum(value < 0.0 for value in points),
+            "win_rate_pct": 100.0 * sum(value > 0.0 for value in points) / len(points),
+            "plus20_moves": sum(
+                float(row["mfe_points"]) >= 20.0 for row in cohort
+            ),
+            "top_decile_moves": sum(
+                float(row["mfe_points"]) >= thresholds[row["direction"]]
+                for row in cohort
+            ),
+        })
     return output
 
 
@@ -703,8 +871,10 @@ def main() -> int:
     summary = policy_summary(results, thresholds)
     matrix = outcome_matrix(results)
     ledger = decision_ledger(results)
+    checkpoints = checkpoint_ledger(trades, timeline)
+    transitions = wma_transition_summary(trades, timeline, thresholds)
     selected = [
-        row for row in ledger
+        row for row in checkpoints
         if str(row["session_date"]) in set(args.validation_dates)
     ]
     fired = [row for row in ledger if row["candidate_fired"]]
@@ -723,7 +893,9 @@ def main() -> int:
     write_csv(args.output_root / "trade-policy-comparison.csv", results)
     write_csv(args.output_root / "candidate-exit-ledger.csv", fired)
     write_csv(args.output_root / "bad-trades-not-detected.csv", bad_missed)
-    write_csv(args.output_root / "selected-date-details.csv", selected)
+    write_csv(args.output_root / "checkpoint-values.csv", checkpoints)
+    write_csv(args.output_root / "wma-transition-summary.csv", transitions)
+    write_csv(args.output_root / "selected-date-checkpoints.csv", selected)
     write_csv(args.output_root / "top-decile-moves-destroyed.csv", major_destroyed)
 
     headline = [
@@ -732,7 +904,7 @@ def main() -> int:
         and row["direction"] == "ALL"
     ]
     report = {
-        "model": "HILEGA_EARLY_RISK_REFINEMENT_490_V1",
+        "model": "HILEGA_EARLY_RISK_REFINEMENT_490_V2_FLAT_WAIT",
         "session_universe": universe,
         "completed_trades": len(results),
         "excluded_unavailable_trades": unavailable,
@@ -740,18 +912,25 @@ def main() -> int:
         "candidate_definitions": {
             "A_T5_SEVERE_FAILURE": (
                 "Exact T+5 only: close progress <=0, causal running MFE <5, "
-                "and at least four of five health components fail."
+                "and at least four health components fail. A flat WMA is "
+                "neutral and is not counted as a failure."
             ),
             "B_T5_T10_PERSISTENT_FAILURE": (
                 "Both exact T+5 and T+10 must have close progress <=0 and at "
-                "least two health failures; causal running MFE at T+10 <10."
+                "least two health failures; causal running MFE at T+10 <10. "
+                "A flat WMA is neutral."
             ),
             "C_EARLY_PRICE_STRUCTURE_FAILURE": (
                 "At exact T+5 or T+10: close progress <=0, causal running MFE "
                 "<10, EMA/WMA order lost, gap not expanding, and WMA slope "
-                "opposes the trade."
+                "strictly opposes the trade beyond the flat epsilon."
             ),
             "hard_sunset": "No candidate can signal after T+10.",
+            "wma_states": {
+                "SUPPORTING": "directional slope > +0.10",
+                "FLAT_WAIT": "directional slope from -0.10 through +0.10",
+                "OPPOSING": "directional slope < -0.10",
+            },
         },
         "headline_summary": headline,
         "required_outcome_labels": [
@@ -766,6 +945,8 @@ def main() -> int:
             "Only sessions arriving after rule selection may be called untouched confirmation.",
             "Canonical Hilega entries and exits remain unchanged.",
             "Candidate valuation uses an observed completed five-minute close.",
+            "WMA21 means WMA21 of RSI9 on completed five-minute candles.",
+            "FLAT_WAIT is neutral and cannot by itself reject or exit a trade.",
             "Canonical exit retains priority on the same candle.",
             "Underlying points exclude option premiums, spread, charges and quantity.",
         ],
@@ -792,8 +973,21 @@ def main() -> int:
         print(row)
     print("SELECTED DATES")
     for row in selected:
-        if row["candidate_fired"]:
-            print(row)
+        print({
+            "date": row["session_date"],
+            "trade": row["trade_id"],
+            "direction": row["direction"],
+            "entry": row["entry_timestamp"],
+            "checkpoint": row["checkpoint"],
+            "time": row["checkpoint_timestamp"],
+            "points": row["directional_points_close"],
+            "mfe": row["running_mfe_points"],
+            "wma_slope": row["wma21_rsi_slope_3"],
+            "wma_state": row["wma_state"],
+            "failures": row["failure_count"],
+            "control_points": row["control_points"],
+            "plus20": row["reached_plus20"],
+        })
     print("Output:", args.output_root / "report.json")
     print("Read only: strategy, services, audits, orders and quantity untouched.")
     return 0

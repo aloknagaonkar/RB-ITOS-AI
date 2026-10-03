@@ -124,6 +124,58 @@ def test_candidate_c_requires_price_order_gap_and_wma_failure():
     assert result["candidate_fired"] is False
 
 
+def test_wma_flat_zone_is_neutral_for_bullish_and_bearish():
+    assert m.directional_wma_state(0.10, "BULLISH") == "FLAT_WAIT"
+    assert m.directional_wma_state(-0.10, "BULLISH") == "FLAT_WAIT"
+    assert m.directional_wma_state(0.10, "BEARISH") == "FLAT_WAIT"
+    assert m.directional_wma_state(-0.10, "BEARISH") == "FLAT_WAIT"
+    assert m.directional_wma_state(0.11, "BULLISH") == "SUPPORTING"
+    assert m.directional_wma_state(-0.11, "BULLISH") == "OPPOSING"
+    assert m.directional_wma_state(-0.11, "BEARISH") == "SUPPORTING"
+    assert m.directional_wma_state(0.11, "BEARISH") == "OPPOSING"
+
+
+def test_flat_wma_does_not_increment_failure_count():
+    row = bar(
+        5,
+        99.0,
+        failures=("EMA_WMA_ORDER", "RSI_SLOPE"),
+    )
+    row["wma21_rsi_slope_3"] = 0.05
+    health = m.candle_health(row, "BULLISH")
+    assert health["wma_state"] == "FLAT_WAIT"
+    assert health["wma_flat_wait"] is True
+    assert health["wma_slope_opposing"] is False
+    assert health["failure_count"] == 2
+    assert "WMA_SLOPE_OPPOSING" not in health["failure_reasons"]
+
+
+def test_candidate_c_cannot_exit_on_flat_wma():
+    row = bar(
+        5,
+        98.0,
+        mfe=3.0,
+        failures=("EMA_WMA_ORDER", "GAP_EXPANSION"),
+    )
+    row["wma21_rsi_slope_3"] = 0.0
+    result = m.candidate_result(
+        trade(), [row], "C_EARLY_PRICE_STRUCTURE_FAILURE"
+    )
+    assert result["candidate_fired"] is False
+
+
+def test_flat_at_t5_can_improve_to_supporting_at_t10_without_exit():
+    t5 = bar(5, 99.0, mfe=3.0, failures=("EMA_WMA_ORDER", "RSI_SLOPE"))
+    t5["wma21_rsi_slope_3"] = 0.04
+    t10 = bar(10, 108.0, mfe=12.0)
+    t10["wma21_rsi_slope_3"] = 0.21
+    assert m.candle_health(t5, "BULLISH")["wma_state"] == "FLAT_WAIT"
+    assert m.candle_health(t10, "BULLISH")["wma_state"] == "SUPPORTING"
+    for policy in m.POLICIES[1:]:
+        result = m.candidate_result(trade(), [t5, t10], policy)
+        assert result["candidate_fired"] is False
+
+
 def test_no_candidate_can_use_a_bar_after_t10():
     rows = [bar(15, 85.0, mfe=3.0, failures=ALL_FAILURES)]
     assert m.eligible_checkpoints(trade(), rows) == []
@@ -196,4 +248,3 @@ def test_simulation_marks_plus20_move_destroyed_by_early_exit():
     assert result["candidate_a_outcome_label"] == (
         "GOOD_TRADE_WRONGLY_EXITED_EARLY"
     )
-

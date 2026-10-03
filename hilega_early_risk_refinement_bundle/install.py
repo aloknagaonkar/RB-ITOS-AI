@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install and validate the Hilega hard-T+10 early-risk research."""
+"""Install Hilega V2 flat-wait, hard-T+10 early-risk research."""
 
 from __future__ import annotations
 
@@ -70,7 +70,8 @@ def main() -> int:
         print("STOP: validation failed; installed source restored.", file=sys.stderr)
         raise
 
-    print("PASS: installed Hilega hard-T+10 early-risk research.")
+    print("PASS: installed Hilega V2 flat-wait hard-T+10 research.")
+    print("WMA FLAT_WAIT is neutral; it cannot by itself reject or exit.")
     print("Candidates A/B/C are research-only; canonical lifecycle unchanged.")
     print("No live strategy, service, audit, order, paper order or quantity changed.")
     if backup_root.exists():

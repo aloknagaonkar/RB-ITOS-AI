@@ -1,11 +1,24 @@
-HILEGA EARLY-RISK REFINEMENT — HARD T+10 SUNSET
-================================================
+HILEGA EARLY-RISK REFINEMENT V2 — FLAT WAIT + HARD T+10 SUNSET
+===============================================================
 
 Purpose
 -------
 Compare three observation-only early-risk candidates against the unchanged
-canonical Hilega lifecycle. Every candidate is permanently disabled after
-T+10 so a normal later pullback cannot terminate a healthy trend.
+canonical Hilega lifecycle. WMA21 RSI flatness is neutral: it permits the
+trade to wait for improvement and cannot by itself reject or exit a trade.
+Every candidate is permanently disabled after T+10.
+
+WMA states
+----------
+
+The three-candle regression slope is direction-normalized:
+
+  SUPPORTING  directional slope > +0.10
+  FLAT_WAIT   -0.10 <= directional slope <= +0.10
+  OPPOSING    directional slope < -0.10
+
+For bullish trades, positive slope is directional. For bearish trades,
+negative slope is directional. FLAT_WAIT does not add to failure_count.
 
 Folder structure after installation
 -----------------------------------
@@ -16,24 +29,24 @@ RB-ITOS-AI/
 ├── tests/
 │   └── test_research_hilega_early_risk_refinement.py
 └── data/historical-evidence/
-    └── hilega-early-risk-refinement-490-v1/   (created by the research run)
+    └── hilega-early-risk-refinement-490-v2-flat-wait/
 
 Candidates
 ----------
 
 A_T5_SEVERE_FAILURE
   Exact T+5 only: directional close progress <= 0, causal running MFE < 5,
-  and at least four of five health components fail.
+  and at least four health components fail. Flat WMA is not a failure.
 
 B_T5_T10_PERSISTENT_FAILURE
   Both exact T+5 and T+10 must show non-positive progress and at least two
   failed health components. Running MFE at T+10 must remain below 10 points.
-  Exit valuation is the exact observed T+10 close.
+  Flat WMA is not a failure. Exit valuation is the exact observed T+10 close.
 
 C_EARLY_PRICE_STRUCTURE_FAILURE
   At exact T+5 or T+10: non-positive progress, causal running MFE < 10,
-  EMA/WMA ordering lost, EMA-WMA gap not expanding, and WMA slope opposing
-  the trade direction.
+  EMA/WMA ordering lost, EMA-WMA gap not expanding, and WMA slope strictly
+  opposing the trade direction. Flat WMA cannot trigger Candidate C.
 
 Evidence policy
 ---------------
@@ -66,7 +79,9 @@ Outputs
   trade-policy-comparison.csv
   candidate-exit-ledger.csv
   bad-trades-not-detected.csv
-  selected-date-details.csv
+  checkpoint-values.csv
+  wma-transition-summary.csv
+  selected-date-checkpoints.csv
   top-decile-moves-destroyed.csv
 
 The outcome files explicitly identify:
@@ -84,4 +99,3 @@ Safety
 
 Research only. No live strategy, service, audit, entry, exit, order, paper
 order, or quantity is changed.
-
