@@ -89,39 +89,6 @@ def _report(checkpoint: str, trade: dict[str, str], *, event: str,
         "state_after": state_after,
         "details": {"trade_id": trade.get("trade_id")},
     }
-
-
-def recorded_live_metrics(reports: list[dict[str, Any]]) -> dict[str, Any]:
-    """Pair authoritative recorded entry/exit transitions without synthesizing."""
-    active: dict[str, float] = {}
-    values: list[float] = []
-    seen: set[tuple[str, str, str]] = set()
-    signals = 0
-    for report in sorted(reports, key=lambda row: str(row.get("checkpoint") or "")):
-        for transition in report.get("transitions") or []:
-            event = str(transition.get("event_type") or "").upper()
-            stamp = str(transition.get("event_time") or report.get("checkpoint") or "")
-            price = _number(transition.get("price") or transition.get("entry_price"))
-            identity = (stamp, event, str(price))
-            if identity in seen:
-                continue
-            seen.add(identity)
-            direction = "BEARISH" if "BEARISH" in event else "BULLISH"
-            is_entry = event.startswith("ENTRY_") or event.endswith("_ENTRY")
-            is_exit = "EXIT" in event
-            if is_entry and price is not None and direction not in active:
-                active[direction] = price
-                signals += 1
-            elif is_exit and price is not None and direction in active:
-                entry = active.pop(direction)
-                values.append(price - entry if direction == "BULLISH" else entry - price)
-    result = _metrics("LIVE_RECORDED_V1", values, signals=signals,
-                      entries=signals, denied=0, available=bool(signals))
-    if active:
-        result["unresolved"] = len(active)
-    if not signals:
-        result["unavailable_reason"] = "No authoritative recorded live entry/exit lifecycle was available for this date."
-    return result
     return {
         "checkpoint": checkpoint,
         "linked_signal_bar": trade.get("entry_timestamp"),
@@ -163,6 +130,39 @@ def recorded_live_metrics(reports: list[dict[str, Any]]) -> dict[str, Any]:
         "safety": {"observation_only": True, "execution_enabled": False,
                    "paper_order_enabled": False, "quantity": None},
     }
+
+
+def recorded_live_metrics(reports: list[dict[str, Any]]) -> dict[str, Any]:
+    """Pair authoritative recorded entry/exit transitions without synthesizing."""
+    active: dict[str, float] = {}
+    values: list[float] = []
+    seen: set[tuple[str, str, str]] = set()
+    signals = 0
+    for report in sorted(reports, key=lambda row: str(row.get("checkpoint") or "")):
+        for transition in report.get("transitions") or []:
+            event = str(transition.get("event_type") or "").upper()
+            stamp = str(transition.get("event_time") or report.get("checkpoint") or "")
+            price = _number(transition.get("price") or transition.get("entry_price"))
+            identity = (stamp, event, str(price))
+            if identity in seen:
+                continue
+            seen.add(identity)
+            direction = "BEARISH" if "BEARISH" in event else "BULLISH"
+            is_entry = event.startswith("ENTRY_") or event.endswith("_ENTRY")
+            is_exit = "EXIT" in event
+            if is_entry and price is not None and direction not in active:
+                active[direction] = price
+                signals += 1
+            elif is_exit and price is not None and direction in active:
+                entry = active.pop(direction)
+                values.append(price - entry if direction == "BULLISH" else entry - price)
+    result = _metrics("LIVE_RECORDED_V1", values, signals=signals,
+                      entries=signals, denied=0, available=bool(signals))
+    if active:
+        result["unresolved"] = len(active)
+    if not signals:
+        result["unavailable_reason"] = "No authoritative recorded live entry/exit lifecycle was available for this date."
+    return result
 
 
 def build_wma_gap_session(session_date: str, root: Path = ROOT) -> dict[str, Any]:
