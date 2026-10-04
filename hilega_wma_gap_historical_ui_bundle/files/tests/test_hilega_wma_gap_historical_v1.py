@@ -157,6 +157,61 @@ def test_recorded_live_metrics_pair_directional_points():
     assert result["net_points"] == 20
 
 
+def test_recorded_live_metrics_falls_back_to_authoritative_owner_changes():
+    reports = [
+        {
+            "checkpoint": "2026-10-01T10:00:00+05:30",
+            "bar": {"close": 100},
+            "strategy": {"state_before": "NONE", "state_after": "BULLISH"},
+            "transitions": [],
+        },
+        {
+            "checkpoint": "2026-10-01T10:20:00+05:30",
+            "bar": {"close": 112},
+            "strategy": {"state_before": "BULLISH", "state_after": "NONE"},
+            "transitions": [],
+        },
+    ]
+
+    result = recorded_live_metrics(reports)
+
+    assert result["available"] is True
+    assert result["signals"] == 1
+    assert result["entries"] == 1
+    assert result["winning_trades"] == 1
+    assert result["net_points"] == 12
+
+
+def test_recorded_live_metrics_owner_reversal_closes_then_opens():
+    reports = [
+        {
+            "checkpoint": "2026-10-01T10:00:00+05:30",
+            "bar": {"close": 100},
+            "strategy": {"state_before": "NONE", "state_after": "BULLISH"},
+            "transitions": [],
+        },
+        {
+            "checkpoint": "2026-10-01T10:20:00+05:30",
+            "bar": {"close": 110},
+            "strategy": {"state_before": "BULLISH", "state_after": "BEARISH"},
+            "transitions": [],
+        },
+        {
+            "checkpoint": "2026-10-01T10:40:00+05:30",
+            "bar": {"close": 90},
+            "strategy": {"state_before": "BEARISH", "state_after": "NONE"},
+            "transitions": [],
+        },
+    ]
+
+    result = recorded_live_metrics(reports)
+
+    assert result["signals"] == 2
+    assert result["entries"] == 2
+    assert result["winning_trades"] == 2
+    assert result["net_points"] == 30
+
+
 def test_complete_timeline_populates_every_condition_and_indicator(tmp_path):
     day = "2026-10-03"
     write(tmp_path / "trade-results.csv", [{

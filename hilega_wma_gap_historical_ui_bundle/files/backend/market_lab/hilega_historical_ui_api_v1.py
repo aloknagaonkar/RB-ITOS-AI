@@ -379,6 +379,7 @@ def _directional_report(row: dict) -> dict:
         },
         "conditions": {},
         "strategy": {
+            "directional_action": row.get("action"),
             "state_before": row.get("owner_before"),
             "state_after": row.get("owner_after"),
             "selected_route": selected_route,

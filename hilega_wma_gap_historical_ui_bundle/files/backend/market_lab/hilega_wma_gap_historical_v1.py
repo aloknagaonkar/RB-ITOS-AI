@@ -134,12 +134,40 @@ def _report(checkpoint: str, trade: dict[str, str], *, event: str,
 
 
 def recorded_live_metrics(reports: list[dict[str, Any]]) -> dict[str, Any]:
-    """Pair authoritative recorded entry/exit transitions without synthesizing."""
+    """Pair authoritative recorded entry/exit transitions without synthesizing.
+
+    Directional live captures do not always repeat the lifecycle event in the
+    projected transition list.  In that case the recorded owner transition is
+    authoritative: NONE -> direction is an entry and direction -> NONE is an
+    exit.  Explicit events remain the first-choice source.
+    """
     active: dict[str, float] = {}
     values: list[float] = []
     seen: set[tuple[str, str, str]] = set()
     signals = 0
+    def owner(value: Any) -> str | None:
+        text = str(value or "").upper()
+        if "BEARISH" in text:
+            return "BEARISH"
+        if "BULLISH" in text:
+            return "BULLISH"
+        return None
+
+    def enter(direction: str, price: float | None) -> None:
+        nonlocal signals
+        if price is not None and direction not in active:
+            active[direction] = price
+            signals += 1
+
+    def leave(direction: str, price: float | None) -> None:
+        if price is not None and direction in active:
+            entry = active.pop(direction)
+            values.append(
+                price - entry if direction == "BULLISH" else entry - price
+            )
+
     for report in sorted(reports, key=lambda row: str(row.get("checkpoint") or "")):
+        explicit_entry_or_exit = False
         for transition in report.get("transitions") or []:
             event = str(transition.get("event_type") or "").upper()
             stamp = str(transition.get("event_time") or report.get("checkpoint") or "")
@@ -151,12 +179,28 @@ def recorded_live_metrics(reports: list[dict[str, Any]]) -> dict[str, Any]:
             direction = "BEARISH" if "BEARISH" in event else "BULLISH"
             is_entry = event.startswith("ENTRY_") or event.endswith("_ENTRY")
             is_exit = "EXIT" in event
-            if is_entry and price is not None and direction not in active:
-                active[direction] = price
-                signals += 1
-            elif is_exit and price is not None and direction in active:
-                entry = active.pop(direction)
-                values.append(price - entry if direction == "BULLISH" else entry - price)
+            if is_entry:
+                explicit_entry_or_exit = True
+                enter(direction, price)
+            elif is_exit:
+                explicit_entry_or_exit = True
+                leave(direction, price)
+
+        if explicit_entry_or_exit:
+            continue
+
+        strategy = report.get("strategy") or {}
+        before = owner(strategy.get("state_before"))
+        after = owner(strategy.get("state_after"))
+        price = _number((report.get("bar") or {}).get("close"))
+
+        # State transitions also preserve same-candle reversals. Close the old
+        # owner before opening the new owner at the recorded candle close.
+        if before != after:
+            if before is not None:
+                leave(before, price)
+            if after is not None:
+                enter(after, price)
     result = _metrics("LIVE_RECORDED_V1", values, signals=signals,
                       entries=signals, denied=0, available=bool(signals))
     if active:
