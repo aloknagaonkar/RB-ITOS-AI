@@ -15,6 +15,8 @@ RELATIVE = (
     "frontend/src/hilegaDecisionTable.tsx",
     "frontend/src/hilegaHistoricalReplay.tsx",
     "frontend/src/hilegaHistoricalReplay.css",
+    "scripts/validate_hilega_wma_delayed_confirmation.py",
+    "scripts/backtest_hilega_wma_gap_490.py",
     "tests/test_hilega_wma_gap_historical_v1.py",
 )
 
@@ -47,11 +49,16 @@ def main() -> int:
         python = ROOT / ".venv/bin/python"
         run([str(python), "-m", "pytest", "-q",
              "tests/test_hilega_wma_gap_historical_v1.py",
+             "tests/test_validate_hilega_wma_delayed_confirmation.py",
+             "tests/test_backtest_hilega_wma_gap_490.py",
              "tests/test_hilega_historical_ui_api_v1.py",
              "tests/test_hilega_same_page_historical_replay.py"])
         run([str(python), "-m", "py_compile",
              "backend/market_lab/hilega_wma_gap_historical_v1.py",
              "backend/market_lab/hilega_historical_ui_api_v1.py"])
+        run([str(python), "-m", "py_compile",
+             "scripts/validate_hilega_wma_delayed_confirmation.py",
+             "scripts/backtest_hilega_wma_gap_490.py"])
         run(["npm", "--prefix", "frontend", "run", "build"])
         run(["git", "diff", "--check"])
     except Exception as exc:

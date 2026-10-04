@@ -10,6 +10,7 @@ from typing import Any
 ROOT = Path("data/historical-evidence/hilega-wma-gap-490-v1")
 RESULTS = ROOT / "trade-results.csv"
 ATTEMPTS = ROOT / "confirmation-attempts.csv"
+TIMELINE = ROOT / "candidate-timeline.csv"
 STRATEGY_ID = "HILEGA_WMA_GAP_V2_REPLAY"
 STRATEGY_VERSION = "wma-gap-v1"
 
@@ -174,6 +175,10 @@ def build_wma_gap_session(session_date: str, root: Path = ROOT) -> dict[str, Any
     for row in _rows(root / ATTEMPTS.name):
         if row.get("session_date") == session_date:
             attempts_by_trade[str(row.get("trade_id"))].append(row)
+    timeline_by_trade: dict[str, list[dict[str, str]]] = defaultdict(list)
+    for row in _rows(root / TIMELINE.name):
+        if row.get("session_date") == session_date:
+            timeline_by_trade[str(row.get("trade_id"))].append(row)
 
     reports: list[dict[str, Any]] = []
     canonical_values: list[float] = []
@@ -200,7 +205,81 @@ def build_wma_gap_session(session_date: str, root: Path = ROOT) -> dict[str, Any
                                close=_number(trade.get("entry_price")), steps=base_steps))
         attempts = sorted(attempts_by_trade.get(trade_id, []),
                           key=lambda row: str(row.get("confirmation_timestamp") or ""))
-        for attempt in attempts:
+        timeline = sorted(timeline_by_trade.get(trade_id, []),
+                          key=lambda row: str(row.get("minute_timestamp") or ""))
+        confirmed_at = str(trade.get("candidate_entry_timestamp") or "")
+        previous: dict[str, str] | None = None
+        for minute in timeline:
+            stamp = str(minute.get("minute_timestamp") or "")
+            direction_sign = 1.0 if direction == "BULLISH" else -1.0
+            strength = _number(minute.get("directional_wma_change"))
+            ema = _number(minute.get("provisional_ema3_rsi"))
+            wma = _number(minute.get("provisional_wma21_rsi"))
+            gap = None if ema is None or wma is None else (ema - wma) * direction_sign
+            previous_ema = _number((previous or {}).get("provisional_ema3_rsi"))
+            previous_wma = _number((previous or {}).get("provisional_wma21_rsi"))
+            previous_gap = (
+                None if previous_ema is None or previous_wma is None
+                else (previous_ema - previous_wma) * direction_sign
+            )
+            gap_delta = None if gap is None or previous_gap is None else gap - previous_gap
+            ema_delta = None if ema is None or previous_ema is None else (ema - previous_ema) * direction_sign
+            in_window = _bool(minute.get("within_confirmation_window"))
+            armed = strength is not None and strength >= .75
+            maintained = bool(previous) and armed and (_number(previous.get("directional_wma_change")) or -999) >= .75
+            gap_positive = gap is not None and gap > 0
+            gap_expanding = gap_delta is not None and gap_delta > 0
+            ema_continuing = ema_delta is not None and ema_delta > 0
+            aligned = _bool(minute.get("full_directional_alignment"))
+            if confirmed_at and stamp == confirmed_at:
+                event, before, after = "WMA_GAP_ENTRY", "WAITING_FOR_CONFIRMATION", "ACTIVE"
+            elif confirmed_at and stamp > confirmed_at:
+                event, before, after = "WMA_GAP_CONTINUATION", "ACTIVE", "ACTIVE"
+            elif not in_window:
+                event, before, after = "WMA_GAP_POST_T10_OBSERVATION", "DENIED", "DENIED"
+            else:
+                event, before, after = "WMA_GAP_WAIT", "WAITING_FOR_CONFIRMATION", "WAITING_FOR_CONFIRMATION"
+            steps = [
+                _step("Canonical Hilega signal", "PASS", direction, "Canonical directional signal", "The existing strategy produced the setup."),
+                _step("T+10 confirmation window", "PASS" if in_window else "CLOSED", minute.get("minutes_observed"), "Minutes 1 through 10", "New entries are forbidden after this window."),
+                _step("Directional WMA21 strength", "PASS" if armed else "WAIT", strength, ">= 0.75", "Opposite or flat values continue waiting."),
+                _step("Later one-minute persistence", "PASS" if maintained else "WAIT", strength, "Previous and current minute >= 0.75", "The arm candle cannot confirm itself."),
+                _step("Directional EMA3-WMA21 gap", "PASS" if gap_positive else "FAIL", gap, "> 0", "Bullish uses EMA-WMA; bearish uses WMA-EMA."),
+                _step("EMA3-WMA21 gap expansion", "PASS" if gap_expanding else "FAIL", gap_delta, "> 0 vs prior minute", "Confirms that separation is increasing."),
+                _step("EMA3 continuation", "PASS" if ema_continuing else "FAIL", ema_delta, "> 0 directionally", "EMA3 must continue in the signal direction."),
+                _step("RSI9 / EMA3 / WMA21 alignment", "PASS" if aligned else "FAIL", aligned, "Directionally aligned", "Uses the same provisional indicator snapshot."),
+            ]
+            report = _report(stamp, trade, event=event, state_before=before,
+                             state_after=after,
+                             close=_number(minute.get("observed_close")), steps=steps)
+            report["bar"] = {
+                "open": _number(minute.get("observed_open")),
+                "high": _number(minute.get("observed_high")),
+                "low": _number(minute.get("observed_low")),
+                "close": _number(minute.get("observed_close")),
+                "volume": _number(minute.get("observed_volume")),
+            }
+            report["indicators"] = {
+                "rsi9": _number(minute.get("provisional_rsi9")),
+                "ema3_rsi": ema,
+                "wma21_rsi": wma,
+                "previous_ema3_rsi": previous_ema,
+                "previous_wma21_rsi": previous_wma,
+            }
+            report["conditions"].update({
+                "directional_wma_change": strength,
+                "directional_gap": gap,
+                "directional_gap_delta": gap_delta,
+                "directional_ema_delta": ema_delta,
+                "within_confirmation_window": in_window,
+                "confirmation_tier": minute.get("confirmation_tier"),
+                "points_from_original_entry": _number(minute.get("points_from_original_entry")),
+            })
+            reports.append(report)
+            previous = minute
+
+        if not timeline:
+          for attempt in attempts:
             passed = _bool(attempt.get("passed"))
             strength = _number(attempt.get("confirmation_wma_strength"))
             gap = _number(attempt.get("confirmation_directional_gap"))

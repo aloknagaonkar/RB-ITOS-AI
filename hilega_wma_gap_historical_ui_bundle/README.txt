@@ -16,6 +16,10 @@ Prerequisite:
   data/historical-evidence/hilega-wma-gap-490-v1/trade-results.csv
   data/historical-evidence/hilega-wma-gap-490-v1/confirmation-attempts.csv
 
+The updated backtest also publishes candidate-timeline.csv. This is required
+for the complete minute-by-minute candle, indicator and condition inspection.
+After installation, rerun the backtest once to create it.
+
 If absent, run:
   PYTHONPATH=backend:. python scripts/backtest_hilega_wma_gap_490.py
 

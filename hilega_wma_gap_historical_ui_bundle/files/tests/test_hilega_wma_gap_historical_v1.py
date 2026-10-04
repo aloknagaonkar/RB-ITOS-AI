@@ -101,3 +101,58 @@ def test_recorded_live_metrics_pair_directional_points():
     result = recorded_live_metrics(reports)
     assert result["available"] is True
     assert result["net_points"] == 20
+
+
+def test_complete_timeline_populates_every_condition_and_indicator(tmp_path):
+    day = "2026-10-03"
+    write(tmp_path / "trade-results.csv", [{
+        "trade_id": "one", "session_date": day, "direction": "BULLISH",
+        "route": "ROUTE_B", "entry_timestamp": f"{day}T10:00:00+05:30",
+        "entry_price": "100", "exit_timestamp": f"{day}T10:20:00+05:30",
+        "exit_price": "115", "canonical_points": "15", "mfe_points": "25",
+        "mae_points": "-3", "candidate_decision": "ENTRY",
+        "candidate_entry_timestamp": f"{day}T10:06:00+05:30",
+        "candidate_points": "13",
+    }])
+    write(tmp_path / "confirmation-attempts.csv", [{
+        "trade_id": "one", "session_date": day, "direction": "BULLISH",
+        "confirmation_timestamp": f"{day}T10:06:00+05:30",
+        "confirmation_close": "102", "armed_wma_strength": ".8",
+        "confirmation_wma_strength": ".9", "threshold_maintained": "True",
+        "confirmation_directional_gap": "2", "directional_gap_delta": ".2",
+        "directional_gap_positive": "True", "directional_gap_expanding": "True",
+        "passed": "True", "failure_reasons": "",
+    }])
+    write(tmp_path / "candidate-timeline.csv", [
+        {"trade_id": "one", "session_date": day, "direction": "BULLISH",
+         "minute_timestamp": f"{day}T10:05:00+05:30", "minutes_observed": "1",
+         "within_confirmation_window": "True", "provisional_rsi9": "55",
+         "provisional_ema3_rsi": "53", "provisional_wma21_rsi": "52",
+         "directional_wma_change": ".8", "confirmation_tier": "CONFIRMED",
+         "full_directional_alignment": "True", "observed_open": "100",
+         "observed_high": "102", "observed_low": "99", "observed_close": "101",
+         "observed_volume": "1000", "points_from_original_entry": "1"},
+        {"trade_id": "one", "session_date": day, "direction": "BULLISH",
+         "minute_timestamp": f"{day}T10:06:00+05:30", "minutes_observed": "2",
+         "within_confirmation_window": "True", "provisional_rsi9": "57",
+         "provisional_ema3_rsi": "55", "provisional_wma21_rsi": "52.5",
+         "directional_wma_change": ".9", "confirmation_tier": "CONFIRMED",
+         "full_directional_alignment": "True", "observed_open": "101",
+         "observed_high": "103", "observed_low": "100", "observed_close": "102",
+         "observed_volume": "1100", "points_from_original_entry": "2"},
+    ])
+    result = build_wma_gap_session(day, tmp_path)
+    entry = next(row for row in result["reports"]
+                 if row["strategy"]["directional_action"] == "WMA_GAP_ENTRY")
+    assert entry["bar"] == {
+        "open": 101.0, "high": 103.0, "low": 100.0,
+        "close": 102.0, "volume": 1100.0,
+    }
+    assert entry["indicators"]["rsi9"] == 57.0
+    assert entry["indicators"]["ema3_rsi"] == 55.0
+    assert entry["indicators"]["wma21_rsi"] == 52.5
+    statuses = {step["label"]: step["status"]
+                for step in entry["conditions"]["strategy_steps"]}
+    assert statuses["Later one-minute persistence"] == "PASS"
+    assert statuses["EMA3-WMA21 gap expansion"] == "PASS"
+    assert statuses["EMA3 continuation"] == "PASS"
