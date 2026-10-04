@@ -14,6 +14,7 @@ from decimal import Decimal
 from typing import Any
 
 import httpx
+from dotenv import load_dotenv
 
 
 LIVE_API_BASE = "https://api.upstox.com"
@@ -224,42 +225,48 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Match the repository services: local credentials live in .env and are
+    # never accepted as CLI arguments or printed in audit output.
+    load_dotenv()
     args = _parser().parse_args(argv)
-    if args.profile:
-        token = os.getenv("UPSTOX_ACCESS_TOKEN", "")
-        print(json.dumps(UpstoxLiveReadinessClient(token).validate_nfo_readiness(), indent=2))
-        return 0
-    if args.sandbox_roundtrip:
-        missing = [name for name in ("trade_id", "session_date", "direction", "instrument_token", "quantity", "price") if getattr(args, name) in (None, "")]
-        if missing:
-            raise SystemExit(f"STOP: missing arguments: {', '.join(missing)}")
-        intent = SandboxOrderIntent(
-            strategy_trade_id=args.trade_id,
-            strategy_version="HILEGA_BROKER_TEST_V1",
-            session_date=args.session_date,
-            direction=args.direction,
-            option_type="CE" if args.direction == "BULLISH" else "PE",
-            instrument_token=args.instrument_token,
-            quantity=args.quantity,
-            product=args.product,
-            price=args.price,
-        )
-        client = UpstoxSandboxOrderClient(
-            os.getenv("UPSTOX_SANDBOX_ACCESS_TOKEN", ""), confirmation=args.confirm
-        )
-        order_id = client.place_limit_buy(intent)
-        modified_id = client.modify_limit(order_id, quantity=intent.quantity, price=intent.price)
-        cancelled_id = client.cancel(modified_id)
-        print(json.dumps({
-            "model": MODEL,
-            "scope": "UPSTOX_SANDBOX",
-            "intent": {**asdict(intent), "price": str(intent.price), "trigger_price": str(intent.trigger_price)},
-            "order_id": order_id,
-            "modified_order_id": modified_id,
-            "cancelled_order_id": cancelled_id,
-            "live_order_sent": False,
-        }, indent=2))
-        return 0
+    try:
+        if args.profile:
+            token = os.getenv("UPSTOX_ACCESS_TOKEN", "")
+            print(json.dumps(UpstoxLiveReadinessClient(token).validate_nfo_readiness(), indent=2))
+            return 0
+        if args.sandbox_roundtrip:
+            missing = [name for name in ("trade_id", "session_date", "direction", "instrument_token", "quantity", "price") if getattr(args, name) in (None, "")]
+            if missing:
+                raise BrokerPreflightError(f"missing arguments: {', '.join(missing)}")
+            intent = SandboxOrderIntent(
+                strategy_trade_id=args.trade_id,
+                strategy_version="HILEGA_BROKER_TEST_V1",
+                session_date=args.session_date,
+                direction=args.direction,
+                option_type="CE" if args.direction == "BULLISH" else "PE",
+                instrument_token=args.instrument_token,
+                quantity=args.quantity,
+                product=args.product,
+                price=args.price,
+            )
+            client = UpstoxSandboxOrderClient(
+                os.getenv("UPSTOX_SANDBOX_ACCESS_TOKEN", ""), confirmation=args.confirm
+            )
+            order_id = client.place_limit_buy(intent)
+            modified_id = client.modify_limit(order_id, quantity=intent.quantity, price=intent.price)
+            cancelled_id = client.cancel(modified_id)
+            print(json.dumps({
+                "model": MODEL,
+                "scope": "UPSTOX_SANDBOX",
+                "intent": {**asdict(intent), "price": str(intent.price), "trigger_price": str(intent.trigger_price)},
+                "order_id": order_id,
+                "modified_order_id": modified_id,
+                "cancelled_order_id": cancelled_id,
+                "live_order_sent": False,
+            }, indent=2))
+            return 0
+    except BrokerPreflightError as exc:
+        raise SystemExit(f"STOP: {exc}") from None
     print(json.dumps(capability_manifest(), indent=2))
     return 0
 

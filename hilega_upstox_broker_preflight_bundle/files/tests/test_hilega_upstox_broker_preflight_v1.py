@@ -9,6 +9,7 @@ from market_lab.hilega_upstox_broker_preflight_v1 import (
     UpstoxLiveReadinessClient,
     UpstoxSandboxOrderClient,
     capability_manifest,
+    main,
 )
 
 
@@ -70,3 +71,10 @@ def test_manifest_does_not_overclaim_sandbox_fills():
     manifest = capability_manifest()
     assert manifest["live_order_endpoint_present"] is False
     assert "EXCHANGE_FILL" in manifest["not_claimed_by_sandbox"]
+
+
+def test_missing_profile_token_stops_cleanly(monkeypatch):
+    monkeypatch.delenv("UPSTOX_ACCESS_TOKEN", raising=False)
+    monkeypatch.setattr("market_lab.hilega_upstox_broker_preflight_v1.load_dotenv", lambda: False)
+    with pytest.raises(SystemExit, match="STOP: required Upstox token is missing"):
+        main(["--profile"])

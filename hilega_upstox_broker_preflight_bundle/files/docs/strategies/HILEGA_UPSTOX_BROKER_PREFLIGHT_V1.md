@@ -29,6 +29,9 @@ Check the live account read-only profile:
 PYTHONPATH=backend:. python -m market_lab.hilega_upstox_broker_preflight_v1 --profile
 ```
 
+The CLI loads `UPSTOX_ACCESS_TOKEN` from the repository `.env` automatically.
+It never accepts or prints the token as a command-line value.
+
 Required PASS checks are active account, NFO enabled, I or D product, and LIMIT
 orders available.
 
