@@ -1,4 +1,4 @@
-HILEGA WMA-GAP LOSS ATTRIBUTION V1
+HILEGA WMA-GAP LOSS ATTRIBUTION V2
 =================================
 
 Purpose
@@ -15,8 +15,13 @@ data/historical-evidence/hilega-wma-gap-490-v1/confirmation-attempts.csv
 
 Fixed diagnostic buckets
 ------------------------
-Confirmation latency from canonical signal to candidate entry:
+Operational confirmation latency from the time the canonical five-minute signal
+becomes actionable to candidate entry:
   0-2m, 3-5m, 6-10m, >10m
+
+The output also preserves label latency from the five-minute candle's timestamp.
+For a signal labelled HH:MM, actionable time is HH:MM+5 minutes. This prevents
+the candle label from being misread as a tradable decision time.
 
 Confirmation WMA strength:
   0.75-0.99, >=1.00

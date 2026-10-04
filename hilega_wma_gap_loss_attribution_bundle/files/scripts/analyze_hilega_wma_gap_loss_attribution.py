@@ -8,7 +8,7 @@ import csv
 import json
 import math
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from statistics import median
 from typing import Any, Iterable
@@ -141,9 +141,13 @@ def enrich(
         if attempt is None:
             raise ValueError(f"passed confirmation unavailable for accepted trade: {key}")
         signal_at = datetime.fromisoformat(str(raw["entry_timestamp"]))
+        # Canonical Hilega timestamps label the start of a five-minute candle.
+        # Its completed-candle signal becomes actionable only at label +5m.
+        actionable_at = signal_at + timedelta(minutes=5)
         entry_at = datetime.fromisoformat(entry_timestamp)
-        latency = (entry_at - signal_at).total_seconds() / 60.0
-        if latency < 0:
+        label_latency = (entry_at - signal_at).total_seconds() / 60.0
+        actionable_latency = (entry_at - actionable_at).total_seconds() / 60.0
+        if actionable_latency < 0:
             raise ValueError(f"negative confirmation latency: {key}")
         candidate = float(raw["candidate_points"])
         delta = candidate - canonical
@@ -158,8 +162,10 @@ def enrich(
             "route": raw.get("route"),
             "signal_timestamp": raw["entry_timestamp"],
             "candidate_entry_timestamp": entry_timestamp,
-            "confirmation_latency_minutes": latency,
-            "latency_bucket": latency_bucket(latency),
+            "signal_actionable_timestamp": actionable_at.isoformat(),
+            "label_to_entry_minutes": label_latency,
+            "actionable_to_entry_minutes": actionable_latency,
+            "latency_bucket": latency_bucket(actionable_latency),
             "confirmation_wma_strength": wma,
             "wma_tier": wma_bucket(wma),
             "confirmation_directional_gap": gap,
@@ -315,12 +321,12 @@ def main() -> int:
     ]
     denial_summary = [denial_metrics(denied, direction) for direction in DIRECTIONS]
     output = {
-        "model": "HILEGA_WMA_GAP_LOSS_ATTRIBUTION_V1",
+        "model": "HILEGA_WMA_GAP_LOSS_ATTRIBUTION_V2",
         "input_root": str(args.input_root),
         "accepted_entries": len(accepted),
         "denied_signals": len(denied),
         "fixed_buckets": {
-            "latency": ["0-2m", "3-5m", "6-10m", ">10m"],
+            "actionable_latency": ["0-2m", "3-5m", "6-10m", ">10m"],
             "wma": ["0.75-0.99", ">=1.00"],
             "gap_expansion": ["0-0.25", ">0.25-0.75", ">0.75"],
             "absolute_gap": ["0-3", "3-6", ">=6"],
@@ -367,7 +373,8 @@ def main() -> int:
             "direction": row["direction"],
             "signal": row["signal_timestamp"],
             "entry": row["candidate_entry_timestamp"],
-            "latency": row["confirmation_latency_minutes"],
+            "label_latency": row["label_to_entry_minutes"],
+            "actionable_latency": row["actionable_to_entry_minutes"],
             "wma": round(float(row["confirmation_wma_strength"]), 4),
             "gap": round(float(row["confirmation_directional_gap"]), 4),
             "gap_delta": round(float(row["directional_gap_delta"]), 4),

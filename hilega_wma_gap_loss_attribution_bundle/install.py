@@ -58,7 +58,7 @@ def main() -> int:
                 destination.unlink()
         print(f"STOP: validation failed; installed source restored: {exc}")
         return 1
-    print("PASS: installed Hilega WMA-gap loss-attribution research.")
+    print("PASS: installed Hilega WMA-gap loss-attribution V2 research.")
     if backup.exists():
         print("Backup:", backup)
     print("No live strategy, service, audit, order, paper order or quantity changed.")

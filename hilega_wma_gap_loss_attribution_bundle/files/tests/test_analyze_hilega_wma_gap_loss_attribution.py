@@ -33,7 +33,7 @@ def sample_trade(decision="ENTRY", candidate="8"):
         "entry_timestamp": "2026-10-01T10:00:00+05:30",
         "candidate_decision": decision,
         "candidate_entry_timestamp": (
-            "2026-10-01T10:04:00+05:30" if decision == "ENTRY" else ""
+            "2026-10-01T10:09:00+05:30" if decision == "ENTRY" else ""
         ),
         "canonical_points": "10",
         "candidate_points": candidate if decision == "ENTRY" else "",
@@ -45,7 +45,7 @@ def sample_trade(decision="ENTRY", candidate="8"):
 def sample_attempt():
     return {
         "trade_id": "T1",
-        "confirmation_timestamp": "2026-10-01T10:04:00+05:30",
+        "confirmation_timestamp": "2026-10-01T10:09:00+05:30",
         "passed": "True",
         "confirmation_wma_strength": "1.2",
         "confirmation_directional_gap": "4.0",
@@ -60,7 +60,9 @@ def test_enrich_attributes_accepted_trade_without_future_information():
     assert not denied
     assert len(accepted) == 1
     row = accepted[0]
-    assert row["confirmation_latency_minutes"] == 4
+    assert row["label_to_entry_minutes"] == 9
+    assert row["actionable_to_entry_minutes"] == 4
+    assert row["signal_actionable_timestamp"] == "2026-10-01T10:05:00+05:30"
     assert row["latency_bucket"] == "01_3_TO_5_MIN"
     assert row["wma_tier"] == "01_GE_1_00"
     assert row["gap_expansion_tier"] == "01_MEDIUM_0_25_TO_0_75"
