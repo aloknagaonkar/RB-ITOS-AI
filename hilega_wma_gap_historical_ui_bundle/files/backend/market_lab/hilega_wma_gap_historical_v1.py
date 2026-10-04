@@ -300,7 +300,46 @@ def build_wma_gap_session(session_date: str, root: Path = ROOT) -> dict[str, Any
                           key=lambda row: str(row.get("confirmation_timestamp") or ""))
         timeline = sorted(timeline_by_trade.get(trade_id, []),
                           key=lambda row: str(row.get("minute_timestamp") or ""))
+        if timeline:
+            reference = timeline[0]
+            signal_report = reports[-1]
+            signal_report["indicators"].update({
+                "rsi9": _number(reference.get("reference_rsi9")),
+                "ema3_rsi": _number(reference.get("reference_ema3_rsi")),
+                "wma21_rsi": _number(reference.get("reference_wma21_rsi")),
+            })
+            signal_report["conditions"].update({
+                "reference_5m_timestamp": reference.get("reference_5m_timestamp"),
+                "evaluation_starts_at": reference.get("minute_timestamp"),
+                "directional_wma_change": 0.0,
+                "directional_gap": (
+                    None if _number(reference.get("reference_ema3_rsi")) is None
+                    or _number(reference.get("reference_wma21_rsi")) is None
+                    else (
+                        _number(reference.get("reference_ema3_rsi"))
+                        - _number(reference.get("reference_wma21_rsi"))
+                    ) * (1.0 if direction == "BULLISH" else -1.0)
+                ),
+            })
+            signal_report["conditions"]["strategy_steps"] = [
+                _step("Canonical Hilega signal", "PASS", direction,
+                      "BULLISH or BEARISH canonical signal",
+                      "This completed five-minute signal starts the observation window."),
+                _step("Signal RSI9", "OBSERVED", reference.get("reference_rsi9"),
+                      "Recorded at canonical signal", "Entry-time indicator evidence."),
+                _step("Signal EMA3(RSI)", "OBSERVED", reference.get("reference_ema3_rsi"),
+                      "Recorded at canonical signal", "Entry-time indicator evidence."),
+                _step("Signal WMA21(RSI)", "OBSERVED", reference.get("reference_wma21_rsi"),
+                      "Reference for directional change", "Every later minute is compared with this WMA21 value."),
+                _step("First one-minute evaluation", "PENDING", reference.get("minute_timestamp"),
+                      "After the signal candle completes", "No WMA-gap entry occurs on the signal row itself."),
+            ]
         confirmed_at = str(trade.get("candidate_entry_timestamp") or "")
+        last_window_stamp = next((
+            str(row.get("minute_timestamp") or "")
+            for row in reversed(timeline)
+            if _bool(row.get("within_confirmation_window"))
+        ), "")
         previous: dict[str, str] | None = None
         for minute in timeline:
             stamp = str(minute.get("minute_timestamp") or "")
@@ -311,6 +350,8 @@ def build_wma_gap_session(session_date: str, root: Path = ROOT) -> dict[str, Any
             gap = None if ema is None or wma is None else (ema - wma) * direction_sign
             previous_ema = _number((previous or {}).get("provisional_ema3_rsi"))
             previous_wma = _number((previous or {}).get("provisional_wma21_rsi"))
+            previous_rsi = _number((previous or {}).get("provisional_rsi9"))
+            previous_strength = _number((previous or {}).get("directional_wma_change"))
             previous_gap = (
                 None if previous_ema is None or previous_wma is None
                 else (previous_ema - previous_wma) * direction_sign
@@ -328,6 +369,8 @@ def build_wma_gap_session(session_date: str, root: Path = ROOT) -> dict[str, Any
                 event, before, after = "WMA_GAP_ENTRY", "WAITING_FOR_CONFIRMATION", "ACTIVE"
             elif confirmed_at and stamp > confirmed_at:
                 event, before, after = "WMA_GAP_CONTINUATION", "ACTIVE", "ACTIVE"
+            elif not confirmed_at and stamp == last_window_stamp:
+                event, before, after = "WMA_GAP_NO_ENTRY_BY_T10", "WAITING_FOR_CONFIRMATION", "DENIED"
             elif not in_window:
                 event, before, after = "WMA_GAP_POST_T10_OBSERVATION", "DENIED", "DENIED"
             else:
@@ -335,13 +378,31 @@ def build_wma_gap_session(session_date: str, root: Path = ROOT) -> dict[str, Any
             steps = [
                 _step("Canonical Hilega signal", "PASS", direction, "Canonical directional signal", "The existing strategy produced the setup."),
                 _step("T+10 confirmation window", "PASS" if in_window else "CLOSED", minute.get("minutes_observed"), "Minutes 1 through 10", "New entries are forbidden after this window."),
-                _step("Directional WMA21 strength", "PASS" if armed else "WAIT", strength, ">= 0.75", "Opposite or flat values continue waiting."),
-                _step("Later one-minute persistence", "PASS" if maintained else "WAIT", strength, "Previous and current minute >= 0.75", "The arm candle cannot confirm itself."),
-                _step("Directional EMA3-WMA21 gap", "PASS" if gap_positive else "FAIL", gap, "> 0", "Bullish uses EMA-WMA; bearish uses WMA-EMA."),
-                _step("EMA3-WMA21 gap expansion", "PASS" if gap_expanding else "FAIL", gap_delta, "> 0 vs prior minute", "Confirms that separation is increasing."),
-                _step("EMA3 continuation", "PASS" if ema_continuing else "FAIL", ema_delta, "> 0 directionally", "EMA3 must continue in the signal direction."),
-                _step("RSI9 / EMA3 / WMA21 alignment", "PASS" if aligned else "FAIL", aligned, "Directionally aligned", "Uses the same provisional indicator snapshot."),
+                _step("Directional WMA21 strength", "PASS" if armed else "FAIL",
+                      f"reference {minute.get('reference_wma21_rsi')} → current {wma}; directional change {strength}",
+                      ">= 0.75", "Opposite or flat values continue waiting."),
+                _step("Later one-minute persistence", "PASS" if maintained else "FAIL",
+                      f"previous strength {previous_strength} → current strength {strength}",
+                      "Previous and current minute >= 0.75", "The arm candle cannot confirm itself."),
+                _step("Directional EMA3-WMA21 gap", "PASS" if gap_positive else "FAIL",
+                      f"EMA3 {ema} · WMA21 {wma} · directional gap {gap}",
+                      "> 0", "Bullish uses EMA-WMA; bearish uses WMA-EMA."),
+                _step("EMA3-WMA21 gap expansion", "PASS" if gap_expanding else "FAIL",
+                      f"previous gap {previous_gap} → current gap {gap} · delta {gap_delta}",
+                      "> 0 vs prior minute", "Confirms that separation is increasing."),
+                _step("EMA3 continuation", "PASS" if ema_continuing else "FAIL",
+                      f"previous EMA3 {previous_ema} → current EMA3 {ema} · directional delta {ema_delta}",
+                      "> 0 directionally", "EMA3 continuation is displayed as diagnostic evidence."),
+                _step("RSI9 / EMA3 / WMA21 alignment", "PASS" if aligned else "FAIL",
+                      f"RSI9 {minute.get('provisional_rsi9')} · EMA3 {ema} · WMA21 {wma}",
+                      "Directionally aligned", "Alignment is displayed as diagnostic evidence."),
             ]
+            if event == "WMA_GAP_NO_ENTRY_BY_T10":
+                steps.append(_step(
+                    "Confirmation deadline", "FAIL", "NO_ENTRY_BY_T10",
+                    "All mandatory confirmation gates must pass by T+10",
+                    "This is the final evaluated minute; failed values above explain the denial.",
+                ))
             report = _report(stamp, trade, event=event, state_before=before,
                              state_after=after,
                              close=_number(minute.get("observed_close")), steps=steps)
@@ -356,6 +417,7 @@ def build_wma_gap_session(session_date: str, root: Path = ROOT) -> dict[str, Any
                 "rsi9": _number(minute.get("provisional_rsi9")),
                 "ema3_rsi": ema,
                 "wma21_rsi": wma,
+                "previous_rsi9": previous_rsi,
                 "previous_ema3_rsi": previous_ema,
                 "previous_wma21_rsi": previous_wma,
             }
@@ -402,7 +464,7 @@ def build_wma_gap_session(session_date: str, root: Path = ROOT) -> dict[str, Any
                                        _step("Entry confirmed", "PASS", trade.get("candidate_entry_timestamp"), "WMA arm + later positive expanding gap", "Candidate entered at the confirmation close."),
                                        _step("Exit policy", "PASS", value, "Unchanged canonical v1 exit", "No experimental exit rule is applied."),
                                    ], points=value))
-        else:
+        elif not timeline:
             reports.append(_report(str(trade.get("exit_timestamp")), trade,
                                    event="WMA_GAP_NO_ENTRY_BY_T10",
                                    state_before="WAITING_FOR_CONFIRMATION", state_after="DENIED",

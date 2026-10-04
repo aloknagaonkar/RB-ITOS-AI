@@ -254,6 +254,8 @@ def validate_trade(
             "minutes_observed": int((minute - actionable_at).total_seconds() // 60) + 1,
             "within_confirmation_window": minute <= expires_at,
             "reference_5m_timestamp": reference_label.isoformat(),
+            "reference_rsi9": reference.rsi9,
+            "reference_ema3_rsi": reference.ema3_rsi,
             "reference_wma21_rsi": float(reference.wma21_rsi),
             "provisional_rsi9": provisional.rsi9,
             "provisional_ema3_rsi": provisional.ema3_rsi,

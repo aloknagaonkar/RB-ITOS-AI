@@ -210,3 +210,52 @@ def test_complete_timeline_populates_every_condition_and_indicator(tmp_path):
     assert statuses["Later one-minute persistence"] == "PASS"
     assert statuses["EMA3-WMA21 gap expansion"] == "PASS"
     assert statuses["EMA3 continuation"] == "PASS"
+
+
+def test_rejected_signal_keeps_final_previous_and_current_evidence(tmp_path):
+    day = "2026-10-04"
+    write(tmp_path / "trade-results.csv", [{
+        "trade_id": "denied", "session_date": day, "direction": "BULLISH",
+        "route": "ROUTE_B", "entry_timestamp": f"{day}T10:00:00+05:30",
+        "entry_price": "100", "exit_timestamp": f"{day}T10:30:00+05:30",
+        "exit_price": "90", "canonical_points": "-10", "mfe_points": "2",
+        "mae_points": "-10", "candidate_decision": "NO_ENTRY",
+        "candidate_entry_timestamp": "", "candidate_points": "",
+    }])
+    write(tmp_path / "confirmation-attempts.csv", [{
+        "trade_id": "denied", "session_date": day, "direction": "BULLISH",
+        "confirmation_timestamp": f"{day}T10:10:00+05:30",
+        "confirmation_close": "99", "armed_wma_strength": ".6",
+        "confirmation_wma_strength": ".4", "threshold_maintained": "False",
+        "confirmation_directional_gap": "1", "directional_gap_delta": "-.2",
+        "directional_gap_positive": "True", "directional_gap_expanding": "False",
+        "passed": "False", "failure_reasons": "WMA_THRESHOLD_NOT_MAINTAINED",
+    }])
+    write(tmp_path / "candidate-timeline.csv", [
+        {"trade_id": "denied", "session_date": day, "direction": "BULLISH",
+         "minute_timestamp": f"{day}T10:09:00+05:30", "minutes_observed": "9",
+         "within_confirmation_window": "True", "reference_wma21_rsi": "50",
+         "provisional_rsi9": "52", "provisional_ema3_rsi": "51",
+         "provisional_wma21_rsi": "50.6", "directional_wma_change": ".6",
+         "confirmation_tier": "WAIT", "full_directional_alignment": "True",
+         "observed_open": "100", "observed_high": "101", "observed_low": "98",
+         "observed_close": "99", "observed_volume": "100", "points_from_original_entry": "-1"},
+        {"trade_id": "denied", "session_date": day, "direction": "BULLISH",
+         "minute_timestamp": f"{day}T10:10:00+05:30", "minutes_observed": "10",
+         "within_confirmation_window": "True", "reference_wma21_rsi": "50",
+         "provisional_rsi9": "49", "provisional_ema3_rsi": "50.2",
+         "provisional_wma21_rsi": "50.4", "directional_wma_change": ".4",
+         "confirmation_tier": "WAIT", "full_directional_alignment": "False",
+         "observed_open": "99", "observed_high": "100", "observed_low": "97",
+         "observed_close": "98", "observed_volume": "120", "points_from_original_entry": "-2"},
+    ])
+    result = build_wma_gap_session(day, tmp_path)
+    rejected = next(r for r in result["reports"]
+                    if r["strategy"]["directional_action"] == "WMA_GAP_NO_ENTRY_BY_T10")
+    assert rejected["checkpoint"] == f"{day}T10:10:00+05:30"
+    assert rejected["bar"]["close"] == 98
+    assert rejected["indicators"]["previous_rsi9"] == 52
+    assert rejected["indicators"]["rsi9"] == 49
+    observed = {x["label"]: x["value"] for x in rejected["conditions"]["strategy_steps"]}
+    assert "previous strength 0.6 → current strength 0.4" == observed["Later one-minute persistence"]
+    assert "previous gap" in observed["EMA3-WMA21 gap expansion"]
