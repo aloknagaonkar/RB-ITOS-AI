@@ -166,6 +166,99 @@ def recorded_live_metrics(reports: list[dict[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def build_v1_session(session_date: str, root: Path = ROOT) -> dict[str, Any]:
+    """Present the canonical outcomes used as the WMA-gap control.
+
+    This is intentionally sourced from the same frozen trade-results artifact as
+    the candidate comparison.  It must never fall back to recorded live rows.
+    """
+    trades = [row for row in _rows(root / RESULTS.name)
+              if row.get("session_date") == session_date]
+    if not trades:
+        raise FileNotFoundError(session_date)
+    reports: list[dict[str, Any]] = []
+    values: list[float] = []
+    for trade in trades:
+        direction = str(trade.get("direction") or "")
+        route = str(trade.get("route") or "CANONICAL")
+        entry = _report(
+            str(trade.get("entry_timestamp") or ""), trade,
+            event="HILEGA_V1_CANONICAL_ENTRY", state_before="IDLE",
+            state_after="ACTIVE", close=_number(trade.get("entry_price")),
+            steps=[
+                _step("Canonical directional signal", "PASS", direction,
+                      "Canonical BULLISH or BEARISH signal",
+                      "The frozen v1 control accepted this signal."),
+                _step("Canonical route", "PASS", route,
+                      "Opening, Route A or Route B",
+                      "No WMA-gap delay or T+10 confirmation is applied."),
+                _step("Entry timing", "PASS", trade.get("entry_timestamp"),
+                      "Enter on the canonical signal",
+                      "V1 enters immediately at its recorded control price."),
+            ],
+        )
+        entry["strategy"].update({
+            "strategy_id": "HILEGA_V1_REPLAY",
+            "strategy_version": "canonical-v1",
+            "directional_action": "HILEGA_V1_CANONICAL_ENTRY",
+        })
+        entry["transitions"][0]["source"] = "HILEGA_V1_REPLAY"
+        entry["audit_integrity"]["source"] = "FROZEN_CANONICAL_CONTROL_ARTIFACT"
+        reports.append(entry)
+
+        value = _number(trade.get("canonical_points"))
+        if value is not None:
+            values.append(value)
+        exit_row = _report(
+            str(trade.get("exit_timestamp") or ""), trade,
+            event="HILEGA_V1_CANONICAL_EXIT", state_before="ACTIVE",
+            state_after="CLOSED", close=_number(trade.get("exit_price")),
+            points=value, steps=[
+                _step("Canonical exit", "PASS", trade.get("exit_timestamp"),
+                      "Existing v1 exit lifecycle",
+                      "The control exit is unchanged and contains no WMA-gap rule."),
+                _step("NIFTY result", "PASS", value,
+                      "Direction-normalized entry-to-exit points",
+                      "Positive supports the trade direction; negative opposes it."),
+            ],
+        )
+        exit_row["strategy"].update({
+            "strategy_id": "HILEGA_V1_REPLAY",
+            "strategy_version": "canonical-v1",
+            "directional_action": "HILEGA_V1_CANONICAL_EXIT",
+        })
+        exit_row["transitions"][0]["source"] = "HILEGA_V1_REPLAY"
+        exit_row["audit_integrity"]["source"] = "FROZEN_CANONICAL_CONTROL_ARTIFACT"
+        reports.append(exit_row)
+
+    reports.sort(key=lambda row: (
+        str(row.get("checkpoint") or ""),
+        str((row.get("audit_integrity") or {}).get("trade_id") or ""),
+    ))
+    control = _metrics("HILEGA_V1_REPLAY", values, signals=len(trades),
+                       entries=len(trades), denied=0)
+    candidate_session = build_wma_gap_session(session_date, root)
+    return {
+        **candidate_session,
+        "source": "WMA_GAP_490_CANONICAL_CONTROL",
+        "source_id": f"hilega-v1:{session_date}",
+        "reports": reports,
+        "report_count": len(reports),
+        "strategy_id": "HILEGA_V1_REPLAY",
+        "strategy_version": "canonical-v1",
+        "warning": (
+            "Canonical Hilega v1 control reconstructed from the same frozen "
+            "historical outcomes used by the WMA-gap comparison. Live rows are "
+            "never substituted."
+        ),
+        "performance_summary": [
+            candidate_session["performance_summary"][0],
+            control,
+            candidate_session["performance_summary"][2],
+        ],
+    }
+
+
 def build_wma_gap_session(session_date: str, root: Path = ROOT) -> dict[str, Any]:
     trades = [row for row in _rows(root / RESULTS.name)
               if row.get("session_date") == session_date]

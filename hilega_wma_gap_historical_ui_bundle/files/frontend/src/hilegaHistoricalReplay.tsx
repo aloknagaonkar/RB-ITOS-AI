@@ -85,7 +85,7 @@ export default function HilegaHistoricalReplay(){
     try{
       const strategyTestUrl=`/api/live-shadow/hilega-historical/strategy-test?session_date=${encodeURIComponent(selectedDate)}`
       const sessionUrl=`/api/live-shadow/hilega-historical/session?session_date=${encodeURIComponent(selectedDate)}`
-      const v1Url=`${sessionUrl}&source=SESSION_REPLAY`
+      const v1Url=`${strategyTestUrl}&strategy=V1`
       const [r,dr,mr]=await Promise.all([
         fetch(strategyVersion==='V2' ? strategyTestUrl : strategyVersion==='V1' ? v1Url : sessionUrl),
         strategyVersion==='V2'

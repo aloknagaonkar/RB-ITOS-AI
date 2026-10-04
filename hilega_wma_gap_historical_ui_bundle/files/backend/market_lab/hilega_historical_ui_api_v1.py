@@ -653,17 +653,21 @@ def _v2_report(row: dict) -> dict:
 
 
 @router.get("/strategy-test")
-def strategy_test(session_date: str = Query(..., min_length=10, max_length=10)):
+def strategy_test(session_date: str = Query(..., min_length=10, max_length=10),
+                  strategy: str = Query("V2", max_length=20)):
     try:
         day = date.fromisoformat(session_date)
     except ValueError as exc:
         raise HTTPException(422, "Invalid session date") from exc
     try:
         from .hilega_wma_gap_historical_v1 import (
+            build_v1_session,
             build_wma_gap_session,
             recorded_live_metrics,
         )
-        result = build_wma_gap_session(day.isoformat())
+        result = (build_v1_session(day.isoformat())
+                  if strategy.strip().upper() == "V1"
+                  else build_wma_gap_session(day.isoformat()))
         try:
             recorded = load_session(day.isoformat())
         except HTTPException:

@@ -2,9 +2,37 @@ import csv
 from pathlib import Path
 
 from market_lab.hilega_wma_gap_historical_v1 import (
+    build_v1_session,
     build_wma_gap_session,
     recorded_live_metrics,
 )
+
+
+def test_v1_view_never_substitutes_live_and_uses_canonical_points(tmp_path):
+    day = "2026-10-04"
+    write(tmp_path / "trade-results.csv", [{
+        "trade_id": "v1", "session_date": day, "direction": "BEARISH",
+        "route": "ROUTE_B", "entry_timestamp": f"{day}T10:00:00+05:30",
+        "entry_price": "110", "exit_timestamp": f"{day}T10:20:00+05:30",
+        "exit_price": "100", "canonical_points": "10", "mfe_points": "15",
+        "mae_points": "-2", "candidate_decision": "NO_ENTRY",
+        "candidate_entry_timestamp": "", "candidate_points": "",
+    }])
+    write(tmp_path / "confirmation-attempts.csv", [{
+        "trade_id": "v1", "session_date": day, "direction": "BEARISH",
+        "confirmation_timestamp": f"{day}T10:05:00+05:30",
+        "confirmation_close": "108", "armed_wma_strength": ".5",
+        "confirmation_wma_strength": ".4", "threshold_maintained": "False",
+        "confirmation_directional_gap": "1", "directional_gap_delta": "-.1",
+        "directional_gap_positive": "True", "directional_gap_expanding": "False",
+        "passed": "False", "failure_reasons": "WMA_THRESHOLD_NOT_MAINTAINED",
+    }])
+    result = build_v1_session(day, tmp_path)
+    assert result["source"] == "WMA_GAP_490_CANONICAL_CONTROL"
+    assert result["strategy_id"] == "HILEGA_V1_REPLAY"
+    assert result["report_count"] == 2
+    assert result["performance_summary"][1]["net_points"] == 10
+    assert {r["strategy"]["strategy_id"] for r in result["reports"]} == {"HILEGA_V1_REPLAY"}
 
 
 def test_performance_summary_contains_all_three_strategies(tmp_path):
