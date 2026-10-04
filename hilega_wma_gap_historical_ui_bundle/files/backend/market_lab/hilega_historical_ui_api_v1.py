@@ -555,7 +555,8 @@ def _load_research_summary(candidate: dict, research_root: Path = RESEARCH_ROOT)
 
 def load_session(session_date: str, root: Path = ROOT, replay_root: Path = REPLAY_ROOT,
                  research_root: Path = RESEARCH_ROOT, live_path: Path = LIVE_AUDIT,
-                 directional_live_path: Path = DIRECTIONAL_LIVE_AUDIT):
+                 directional_live_path: Path = DIRECTIONAL_LIVE_AUDIT,
+                 preferred_source: str | None = None):
     try:
         day = date.fromisoformat(session_date).isoformat()
     except ValueError as exc:
@@ -569,7 +570,9 @@ def load_session(session_date: str, root: Path = ROOT, replay_root: Path = REPLA
     ]
     if not candidates:
         raise HTTPException(404, "Hilega session not found")
-    best = _best_for_day(candidates)
+    preferred = str(preferred_source or "").strip().upper()
+    matches = [x for x in candidates if str(x.get("source") or "").upper() == preferred]
+    best = _best_for_day(matches or candidates)
     if best["source"] == "RESEARCH_120":
         result = _load_research_summary(best, research_root)
     elif best["source"] == "DIRECTIONAL_LIVE_SHADOW":
@@ -716,8 +719,9 @@ def sessions():
 
 
 @router.get("/session")
-def session(session_date: str = Query(..., min_length=10, max_length=10)):
-    return load_session(session_date)
+def session(session_date: str = Query(..., min_length=10, max_length=10),
+            source: str | None = Query(None, max_length=40)):
+    return load_session(session_date, preferred_source=source)
 
 
 @router.get("/capture")

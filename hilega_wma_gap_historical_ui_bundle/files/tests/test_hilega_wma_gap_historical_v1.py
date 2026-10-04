@@ -7,6 +7,32 @@ from market_lab.hilega_wma_gap_historical_v1 import (
 )
 
 
+def test_performance_summary_contains_all_three_strategies(tmp_path):
+    day = "2026-10-04"
+    write(tmp_path / "trade-results.csv", [{
+        "trade_id": "one", "session_date": day, "direction": "BULLISH",
+        "route": "ROUTE_A", "entry_timestamp": f"{day}T10:00:00+05:30",
+        "entry_price": "100", "exit_timestamp": f"{day}T10:20:00+05:30",
+        "exit_price": "110", "canonical_points": "10", "mfe_points": "12",
+        "mae_points": "-2", "candidate_decision": "ENTRY",
+        "candidate_entry_timestamp": f"{day}T10:05:00+05:30",
+        "candidate_points": "8",
+    }])
+    write(tmp_path / "confirmation-attempts.csv", [{
+        "trade_id": "one", "session_date": day, "direction": "BULLISH",
+        "confirmation_timestamp": f"{day}T10:05:00+05:30",
+        "confirmation_close": "102", "armed_wma_strength": ".8",
+        "confirmation_wma_strength": ".9", "threshold_maintained": "True",
+        "confirmation_directional_gap": "2", "directional_gap_delta": ".2",
+        "directional_gap_positive": "True", "directional_gap_expanding": "True",
+        "passed": "True", "failure_reasons": "",
+    }])
+    result = build_wma_gap_session(day, tmp_path)
+    assert [row["strategy_id"] for row in result["performance_summary"]] == [
+        "LIVE_RECORDED_V1", "HILEGA_V1_REPLAY", "HILEGA_WMA_GAP_V2_REPLAY",
+    ]
+
+
 def write(path: Path, rows: list[dict]):
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as handle:
