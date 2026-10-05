@@ -19,6 +19,8 @@ type Response={
   strategy_version?:string
   reports:HilegaAudit[];report_count:number;audit_chain_ok:boolean|null;audit_chain_issue:string|null
   manifest:Record<string,any>;warning:string;available_sources:string[]
+  performance_summary?:Array<Record<string,any>>
+  comparison?:Record<string,any>
 }
 const shortTime=(v:string)=>{
   const d=new Date(v)
@@ -28,7 +30,7 @@ const shortTime=(v:string)=>{
 export default function HilegaHistoricalReplay(){
   const [sessions,setSessions]=useState<Session[]>([])
   const [selectedDate,setSelectedDate]=useState('')
-  const [strategyVersion,setStrategyVersion]=useState<'LIVE'|'V2'>('LIVE')
+  const [strategyVersion,setStrategyVersion]=useState<'LIVE'|'V1'|'V2'>('LIVE')
   const [data,setData]=useState<Response|null>(null)
   const [error,setError]=useState('')
   const [busy,setBusy]=useState(false)
@@ -81,13 +83,15 @@ export default function HilegaHistoricalReplay(){
     if(!selectedDate)return
     setBusy(true);setError('');setPlaying(false);setData(null);setCursor(0)
     try{
-      const [r,dr]=await Promise.all([
-        fetch(strategyVersion==='V2'
-          ? `/api/live-shadow/hilega-historical/strategy-test?session_date=${encodeURIComponent(selectedDate)}`
-          : `/api/live-shadow/hilega-historical/session?session_date=${encodeURIComponent(selectedDate)}`),
+      const strategyTestUrl=`/api/live-shadow/hilega-historical/strategy-test?session_date=${encodeURIComponent(selectedDate)}`
+      const sessionUrl=`/api/live-shadow/hilega-historical/session?session_date=${encodeURIComponent(selectedDate)}`
+      const v1Url=`${strategyTestUrl}&strategy=V1`
+      const [r,dr,mr]=await Promise.all([
+        fetch(strategyVersion==='V2' ? strategyTestUrl : strategyVersion==='V1' ? v1Url : sessionUrl),
         strategyVersion==='V2'
           ? Promise.resolve({ok:false} as globalThis.Response)
           : fetch(`/api/live-shadow/hilega-directional-candles/historical?session_date=${encodeURIComponent(selectedDate)}`),
+        strategyVersion==='V2' ? Promise.resolve({ok:false} as globalThis.Response) : fetch(strategyTestUrl),
       ])
       if(!r.ok)throw new Error(`Session HTTP ${r.status}: ${await r.text()}`)
       const body=await r.json() as Response
@@ -96,6 +100,14 @@ export default function HilegaHistoricalReplay(){
         body.reports=overlayDirectionalAuditReports(body.reports??[],directional.rows??[])
         body.report_count=body.reports.length
       }
+      if(mr.ok){
+        const metrics=await mr.json() as Response
+        body.performance_summary=metrics.performance_summary
+        body.comparison=metrics.comparison
+      }
+      body.strategy_version=strategyVersion==='LIVE'
+        ? 'LIVE_RECORDED_V1'
+        : strategyVersion==='V1' ? 'HILEGA_V1_REPLAY' : 'HILEGA_WMA_GAP_V2_REPLAY'
       setData(body)
     }catch(e){setError(String(e))}finally{setBusy(false)}
   }
@@ -107,7 +119,7 @@ export default function HilegaHistoricalReplay(){
   },[selectedDate,strategyVersion])
 
   useEffect(()=>{
-    if(!selectedDate||strategyVersion==='V2'||selected?.status==='COMPLETE')return
+    if(!selectedDate||strategyVersion!=='LIVE'||selected?.status==='COMPLETE')return
     const id=window.setInterval(()=>void load(),60000)
     return()=>window.clearInterval(id)
   // Active/partial recorded evidence refreshes automatically; completed days are immutable.
@@ -144,7 +156,7 @@ export default function HilegaHistoricalReplay(){
 
   return <section className="hime-replay" aria-label="Hilega historical replay">
     <h3>Hilega-Milega · Session Replay</h3>
-    <p>Compare the recorded live baseline with an isolated V2 observation test. V2 reads cached candles only and never changes live behavior or submits orders.</p>
+    <p>Compare three independent views: recorded live decisions, canonical Hilega v1 replay, and the isolated WMA-gap v2 observation test. Replay views never change live behavior or submit orders.</p>
 
     <div className="hime-controls">
       <label>Session date <select aria-label="Hilega historical session" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)}>
@@ -153,9 +165,10 @@ export default function HilegaHistoricalReplay(){
           {s.session_date} · {s.evidence_level} · {s.source}{s.ce_available?' · CE':''}
         </option>)}
       </select></label>
-      <label>Strategy <select aria-label="Hilega historical strategy" value={strategyVersion} onChange={e=>setStrategyVersion(e.target.value as 'LIVE'|'V2')}>
+      <label>Strategy <select aria-label="Hilega historical strategy" value={strategyVersion} onChange={e=>setStrategyVersion(e.target.value as 'LIVE'|'V1'|'V2')}>
         <option value="LIVE">Existing live strategy (recorded)</option>
-        <option value="V2">Strategy V2 (observation test)</option>
+        <option value="V1">Hilega v1 (canonical historical replay)</option>
+        <option value="V2">WMA-gap V2 (historical observation)</option>
       </select></label>
       <button onClick={()=>void load()} disabled={!selectedDate||busy}>{busy?'Loading…':'Reload session'}</button>
       <button onClick={()=>void refreshSessions()} disabled={refreshing}>{refreshing?'Refreshing…':'Refresh sessions'}</button>
@@ -174,13 +187,21 @@ export default function HilegaHistoricalReplay(){
       <div className="hime-meta">
         <span>Session: {data.session_date}</span>
         <span>Loaded from: {data.source}</span>
-        <span>Strategy: {data.strategy_version??(strategyVersion==='LIVE'?'Recorded live baseline':'V2 observation')}</span>
+        <span>Strategy: {data.strategy_version??strategyVersion}</span>
         <span>Evidence: {data.evidence_level}</span>
         <span>CE: {data.ce_available?'AVAILABLE':'NOT RECORDED'}</span>
         <span>Checkpoints: {reports.length}</span>
         <span>Audit chain: {data.audit_chain_ok===null?'N/A':data.audit_chain_ok?'PASS':'FAIL'}</span>
       </div>
       <p className="hime-warning">{data.warning} {data.audit_chain_issue??''}</p>
+
+      {data.performance_summary&&<section className="hime-performance" aria-label="Daily Nifty points performance">
+        <h4>Daily strategy performance · Nifty points</h4>
+        <div className="hime-performance-scroll"><table><thead><tr><th>Strategy</th><th>Signals</th><th>Entries</th><th>Denied</th><th>Wins / Losses</th><th>Points gained</th><th>Points lost</th><th>Net points</th><th>Gain / Loss</th><th>Win rate</th></tr></thead><tbody>
+          {data.performance_summary.map((m:any)=><tr key={m.strategy_id}><td><strong>{m.strategy_id}</strong>{m.available===false&&<small>Unavailable: {m.unavailable_reason}</small>}</td><td>{m.available===false?'—':m.signals}</td><td>{m.available===false?'—':m.entries}</td><td>{m.available===false?'—':m.denied}</td><td>{m.available===false?'—':`${m.winning_trades} / ${m.losing_trades}`}</td><td className="hime-gain">{m.available===false?'—':Number(m.gross_points_gained).toFixed(2)}</td><td className="hime-loss">{m.available===false?'—':Number(m.gross_points_lost).toFixed(2)}</td><td>{m.available===false?'—':`${Number(m.net_points)>0?'+':''}${Number(m.net_points).toFixed(2)}`}</td><td>{m.available===false?'—':m.gain_loss_ratio===null?'∞':Number(m.gain_loss_ratio).toFixed(3)}</td><td>{m.available===false?'—':`${Number(m.win_rate_pct).toFixed(2)}%`}</td></tr>)}
+        </tbody></table></div>
+        {data.comparison&&<p><strong>WMA-gap vs v1:</strong> {Number(data.comparison.candidate_net_delta_vs_v1)>=0?'+':''}{Number(data.comparison.candidate_net_delta_vs_v1).toFixed(2)} points · Losses avoided {data.comparison.losses_avoided} · Winners denied {data.comparison.winners_denied}</p>}
+      </section>}
 
       {data.evidence_level==='SUMMARY'&&<p className="hime-warning">
         This 120-session research day contains entry/exit summary evidence only. It is selectable now, but full five-minute conditions and exact CE lifecycle require a richer recorded replay for that date.

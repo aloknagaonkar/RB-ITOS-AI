@@ -379,6 +379,7 @@ def _directional_report(row: dict) -> dict:
         },
         "conditions": {},
         "strategy": {
+            "directional_action": row.get("action"),
             "state_before": row.get("owner_before"),
             "state_after": row.get("owner_after"),
             "selected_route": selected_route,
@@ -555,7 +556,8 @@ def _load_research_summary(candidate: dict, research_root: Path = RESEARCH_ROOT)
 
 def load_session(session_date: str, root: Path = ROOT, replay_root: Path = REPLAY_ROOT,
                  research_root: Path = RESEARCH_ROOT, live_path: Path = LIVE_AUDIT,
-                 directional_live_path: Path = DIRECTIONAL_LIVE_AUDIT):
+                 directional_live_path: Path = DIRECTIONAL_LIVE_AUDIT,
+                 preferred_source: str | None = None):
     try:
         day = date.fromisoformat(session_date).isoformat()
     except ValueError as exc:
@@ -569,7 +571,9 @@ def load_session(session_date: str, root: Path = ROOT, replay_root: Path = REPLA
     ]
     if not candidates:
         raise HTTPException(404, "Hilega session not found")
-    best = _best_for_day(candidates)
+    preferred = str(preferred_source or "").strip().upper()
+    matches = [x for x in candidates if str(x.get("source") or "").upper() == preferred]
+    best = _best_for_day(matches or candidates)
     if best["source"] == "RESEARCH_120":
         result = _load_research_summary(best, research_root)
     elif best["source"] == "DIRECTIONAL_LIVE_SHADOW":
@@ -650,40 +654,55 @@ def _v2_report(row: dict) -> dict:
 
 
 @router.get("/strategy-test")
-def strategy_test(session_date: str = Query(..., min_length=10, max_length=10)):
+def strategy_test(session_date: str = Query(..., min_length=10, max_length=10),
+                  strategy: str = Query("V2", max_length=20)):
     try:
         day = date.fromisoformat(session_date)
     except ValueError as exc:
         raise HTTPException(422, "Invalid session date") from exc
-    from .hilega_directional_historical_replay_v1 import replay_directional_sessions
-
-    cache_root = ROOT / "hilega-milega-underlying-cache-v1"
     try:
-        result = replay_directional_sessions(
-            gateway=_CacheOnlyUnderlyingGateway(cache_root),
-            dates=[day],
-            warmup_calendar_days=45,
-            cache_root=cache_root,
-            output_root=ROOT / "hilega-directional-replay-v2",
-            strategy_version="V2",
+        from .hilega_wma_gap_historical_v1 import (
+            build_v1_session,
+            build_wma_gap_session,
+            recorded_live_metrics,
         )
-    except (ValueError, RuntimeError) as exc:
-        raise HTTPException(422, f"V2 observation replay failed: {exc}") from exc
-    if result["summary"]["sessions_passed"] != 1:
-        raise HTTPException(404, "V2 replay unavailable: exact cached candle data is missing for this session or its indicator warmup window")
-    rows_path = ROOT / "hilega-directional-replay-v2" / day.isoformat() / "directional-candle-by-candle.json"
-    rows = json.loads(rows_path.read_text(encoding="utf-8"))
-    reports = [_v2_report(row) for row in rows]
-    return {
-        "session_date": day.isoformat(), "source": "STRATEGY_V2_OBSERVATION_TEST",
-        "source_id": f"strategy-v2:{day.isoformat()}", "evidence_level": "STRATEGY",
-        "ce_available": False, "manifest": {}, "audit_chain_ok": None,
-        "audit_chain_issue": "V2 is a deterministic observation replay; no live audit chain or option execution is created.",
-        "reports": reports, "report_count": len(reports),
-        "strategy_id": result["strategy_id"], "strategy_version": result["strategy_version"],
-        "observation_only": True, "execution_enabled": False,
-        "warning": "Strategy V2 test on cached historical candles only. It does not modify live strategy behavior or place orders.",
-    }
+        result = (build_v1_session(day.isoformat())
+                  if strategy.strip().upper() == "V1"
+                  else build_wma_gap_session(day.isoformat()))
+        try:
+            recorded = load_session(day.isoformat())
+        except HTTPException:
+            recorded = None
+        if recorded and recorded.get("source") in {
+            "LIVE_SHADOW", "DIRECTIONAL_LIVE_SHADOW"
+        }:
+            result["performance_summary"][0] = recorded_live_metrics(
+                recorded.get("reports") or []
+            )
+        return result
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            404,
+            "WMA-gap replay unavailable. Frozen evidence is preserved; the "
+            "completed session is waiting for automatic forward-confirmation publication.",
+        ) from exc
+
+
+@router.get("/wma-gap-forward-status")
+def wma_gap_forward_status():
+    path = ROOT / "hilega-wma-gap-forward-confirmation-v1" / "report.json"
+    if not path.is_file():
+        return {
+            "model": "HILEGA_WMA_GAP_FORWARD_CONFIRMATION_V1",
+            "available": False,
+            "forward_sessions": 0,
+            "selected_dates": [],
+            "observation_only": True,
+            "execution_enabled": False,
+        }
+    result = _json_file(path)
+    result["available"] = True
+    return result
 
 
 # Backward-compatible capture discovery remains available for old bookmarks/tests.
@@ -723,8 +742,9 @@ def sessions():
 
 
 @router.get("/session")
-def session(session_date: str = Query(..., min_length=10, max_length=10)):
-    return load_session(session_date)
+def session(session_date: str = Query(..., min_length=10, max_length=10),
+            source: str | None = Query(None, max_length=40)):
+    return load_session(session_date, preferred_source=source)
 
 
 @router.get("/capture")
