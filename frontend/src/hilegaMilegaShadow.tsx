@@ -3,6 +3,8 @@ import HilegaDecisionTable,{type HilegaAudit} from './hilegaDecisionTable'
 import {overlayDirectionalTradeMarkers} from './hilegaDirectionalTradeMarkerOverlay'
 import {augmentDirectionalRowsWithTrades,overlayDirectionalAuditReports} from './hilegaDirectionalAuditOverlay'
 import HilegaHistoricalReplay from './hilegaHistoricalReplay'
+import HilegaUpstoxSandboxDashboard from './hilegaUpstoxSandboxDashboard'
+import './liveShadow.css'
 
 type Direction='BULLISH'|'BEARISH'|'NONE'|string
 
@@ -301,6 +303,8 @@ export default function HilegaMilegaShadow(){
   return <div className="shadow-page hilega-page">
     {modeSelector}
     {error&&<div className="banner error">{error}</div>}
+
+    <HilegaUpstoxSandboxDashboard/>
 
     <div className="shadow-safety">
       <b>HILEGA-MILEGA · OBSERVATION ONLY</b>

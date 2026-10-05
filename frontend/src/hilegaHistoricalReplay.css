@@ -8,3 +8,11 @@
 .hime-replay details{margin:8px 0;border:1px solid #8885;border-radius:7px;padding:8px}
 .hime-replay pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:350px;overflow:auto;font-size:12px}
 .hime-review textarea{display:block;min-height:70px;width:min(100%,700px);margin:10px 0}
+.hime-performance{margin:1rem 0;padding:1rem;border:1px solid #d8dee9;border-radius:12px;background:#fff}
+.hime-performance h4{margin:0 0 .75rem}
+.hime-performance-scroll{overflow-x:auto}
+.hime-performance table{width:100%;border-collapse:collapse;white-space:nowrap}
+.hime-performance th,.hime-performance td{padding:.55rem .7rem;border-bottom:1px solid #e5e7eb;text-align:right}
+.hime-performance th:first-child,.hime-performance td:first-child{text-align:left}
+.hime-performance small{display:block;white-space:normal;color:#6b7280;max-width:18rem}
+.hime-gain{color:#08783e}.hime-loss{color:#b42318}

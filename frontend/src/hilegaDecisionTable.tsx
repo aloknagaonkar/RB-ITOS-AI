@@ -62,7 +62,7 @@ const candleTiming=(r:HilegaAudit)=>{
   }
 }
 const json=(v:unknown)=>JSON.stringify(v??{},null,2)
-const isEntry=(x:any)=>String(x?.event_type??'').startsWith('ENTRY_')
+const isEntry=(x:any)=>String(x?.event_type??'').startsWith('ENTRY_')||String(x?.event_type??'')==='WMA_GAP_ENTRY'
 const isExit=(x:any)=>String(x?.event_type??'').includes('EXIT')
 const transitions=(r:HilegaAudit)=>list(r.transitions)
 const sameInstant=(a:any,b:any):boolean=>{
@@ -119,6 +119,8 @@ export function eventKind(r:HilegaAudit):Kind {
 
   if(t.some(isEntry)||events.some(x=>x.startsWith('ENTRY_')))return 'ENTRY'
   if(t.some(isExit)||events.some(x=>x.includes('EXIT')))return 'EXIT'
+  if(events.some(x=>x.includes('NO_ENTRY_BY_T10')))return 'REJECTED'
+  if(events.some(x=>x.startsWith('WMA_GAP_SIGNAL')||x==='WMA_GAP_WAIT'||x.includes('POST_T10')))return 'DETECTED'
 
   // Informational ARMED/candidate evidence may coexist with the opposite active
   // trade owner. Detect it before ACTIVE so it is not flattened into a
@@ -213,6 +215,18 @@ export function shortRuleText(
   const path=pathText(r).toUpperCase()
   const at=clock(r.checkpoint)
   const direction=reportDirection(r)
+  const wmaGap=String(r.strategy?.strategy_id??'')==='HILEGA_WMA_GAP_V2_REPLAY'
+
+  if(wmaGap){
+    const action=String(r.strategy?.directional_action??'')
+    if(action==='WMA_GAP_ENTRY')return `${direction} WMA-GAP ENTRY · WMA≥0.75 PERSISTED + GAP POSITIVE/EXPANDING`
+    if(action==='WMA_GAP_CONTINUATION')return `${direction} WMA-GAP · ACTIVE CANDLE MONITORING`
+    if(action==='WMA_GAP_CANONICAL_EXIT')return `${direction} EXIT · UNCHANGED CANONICAL V1 EXIT`
+    if(action==='WMA_GAP_NO_ENTRY_BY_T10')return `${direction} DENIED · NO CONFIRMATION BY T+10`
+    if(action==='WMA_GAP_POST_T10_OBSERVATION')return `${direction} DENIED · POST-T+10 OBSERVATION ONLY`
+    if(action==='WMA_GAP_WAIT')return `${direction} WMA-GAP · WAITING FOR COMPLETE CONFIRMATION`
+    if(action==='WMA_GAP_SIGNAL_RECEIVED')return `${direction} CANONICAL SIGNAL · T+10 WATCH STARTED`
+  }
 
   if(kind==='ENTRY'){
     if(path.includes('OPENING')){
@@ -625,7 +639,8 @@ function directionalAuditChecks(r:HilegaAudit,reports:HilegaAudit[]):Directional
 function Detail({r,reports,allowedUntil,origin,originRoute,displayKind,lifecycleIssue}:{r:HilegaAudit;reports:HilegaAudit[];allowedUntil?:string;origin?:string|null;originRoute?:string|null;displayKind:DisplayKind;lifecycleIssue?:string|null}){
   const cand=r.bar??{},ind=r.indicators??{},direction=reportDirection(r),side=direction==='BEARISH'?'PE':'CE'
   const entry=checkpointTransitions(r).find(isEntry),exit=checkpointTransitions(r).find(isExit)
-  const checks=directionalAuditChecks(r,reports)
+  const checks=String(r.strategy?.strategy_id??'')==='HILEGA_WMA_GAP_V2_REPLAY'
+    ? [] : directionalAuditChecks(r,reports)
   const reasons=[...list(r.route_a?.fail_reasons),...list(r.route_b?.fail_reasons)]
   const snapshotTime=r.option_market_snapshot?.signal_boundary
   const visibleSnapshot=allowedUntil===undefined||reached(snapshotTime,allowedUntil)
@@ -640,9 +655,10 @@ function Detail({r,reports,allowedUntil,origin,originRoute,displayKind,lifecycle
     {displayKind==='ACTIVE'&&<div className="hd-continuation-reason"><b>{displayDecisionText('ACTIVE',direction)}</b><p>Recorded owner/state remains active and no directional exit was emitted for this candle.</p></div>}
     {displayKind==='EXIT'&&<div className="hd-exit-reason"><b>{displayDecisionText('EXIT',direction)}</b><p>Recorded exit: {val(exit?.exit_reason??exit?.event_type??list(r.strategy?.events_emitted).find((x:any)=>String(x).includes('EXIT')))}. Original entry signal: {origin?clock(origin):'not available in current timeline'}.</p></div>}
     {displayKind==='REVIEW'&&<div className="hd-review-reason"><b>REVIEW_REQUIRED</b><p>{val(lifecycleIssue)}. Raw evidence is preserved; UI does not promote unsupported lifecycle state.</p></div>}
-    <h4>{direction} {pathText(r)} validation</h4>
+    {list(r.conditions?.strategy_steps).length>0&&<><h4>WMA-gap strategy inspection</h4><div className="hd-scroll"><table className="hd-table"><thead><tr><th>Monitored step</th><th>Status</th><th>Observed value</th><th>Required rule</th><th>Explanation</th></tr></thead><tbody>{list(r.conditions?.strategy_steps).map((x:any,i:number)=><tr key={`${x.label}-${i}`}><td>{val(x.label)}</td><td><span className={`hd-badge ${x.status==='PASS'?'hd-pass':x.status==='FAIL'?'hd-fail':'hd-neutral'}`}>{val(x.status)}</span></td><td>{val(x.value)}</td><td>{val(x.requirement)}</td><td>{val(x.explanation)}</td></tr>)}</tbody></table></div></>}
+    {String(r.strategy?.strategy_id??'')!=='HILEGA_WMA_GAP_V2_REPLAY'&&<><h4>{direction} {pathText(r)} validation</h4>
     {checks.length?<div className="hd-scroll"><table className="hd-table"><thead><tr><th>Check</th><th>Result</th><th>Canonical evidence</th></tr></thead><tbody>{checks.map((x,i)=><tr key={`${x.label}-${i}`}><td>{x.label}</td><td><span className={`hd-badge ${x.result===true?'hd-pass':x.result===false?'hd-fail':'hd-neutral'}`}>{score(x.result)}</span></td><td>{x.evidence}</td></tr>)}</tbody></table></div>:<p className="hd-muted">No additional route-specific validation is required for this checkpoint.</p>}
-    {reasons.length>0&&<p className="hd-muted">Recorded rejection reasons: {reasons.map(String).join(' · ')}</p>}
+    {reasons.length>0&&<p className="hd-muted">Recorded rejection reasons: {reasons.map(String).join(' · ')}</p>}</>}
     <h4>Five independent {side} contracts — exact historical/live observations</h4>
     <p>Expiry {val(r.option_candidate?.expiry)} · ATM {val(r.option_candidate?.atm)} · Lifecycle {val(r.option_lifecycle?.start?.status??r.option_candidate?.status)} · Entry boundary {clock(r.option_lifecycle?.start?.signal_boundary??r.option_candidate?.signal_boundary)}</p>
     {(r.option_lifecycle?.start?.issue??r.option_candidate?.issue)&&<p className="hd-muted"><b>Exact option data issue:</b> {val(r.option_lifecycle?.start?.issue??r.option_candidate?.issue)}</p>}

@@ -112,6 +112,14 @@ def ordered_gap_confirmation(
     ordered = sorted(trace, key=lambda row: row["minute_timestamp"])
     attempts: list[dict[str, Any]] = []
     for armed, current in zip(ordered, ordered[1:]):
+        armed_window = armed.get("within_confirmation_window")
+        current_window = current.get("within_confirmation_window")
+        if (
+            armed_window not in (None, "") and not truthy(armed_window)
+        ) or (
+            current_window not in (None, "") and not truthy(current_window)
+        ):
+            continue
         armed_strength = float(armed["directional_wma_change"])
         current_strength = float(current["directional_wma_change"])
         if armed_strength < threshold or not exact_next_minute(armed, current):
@@ -242,6 +250,7 @@ def simulate(
     threshold: float,
     strong_threshold: float,
     timeout_minutes: int,
+    timeline_out: list[dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
     grouped: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
     for trade in trades:
@@ -290,6 +299,8 @@ def simulate(
             if not trace:
                 unavailable += 1
                 continue
+            if timeline_out is not None:
+                timeline_out.extend(trace)
             confirmed, trade_attempts = ordered_gap_confirmation(trace, threshold)
             attempts.extend(trade_attempts)
             exit_price = float(trade["exit_price"])
@@ -418,12 +429,14 @@ def main() -> int:
     session_summary = assign_evidence_blocks(
         trades, args.observed_forward_sessions
     )
+    timeline: list[dict[str, Any]] = []
     results, attempts, unavailable_indicator = simulate(
         trades=trades,
         cache_root=args.cache_root,
         threshold=args.threshold,
         strong_threshold=args.strong_threshold,
         timeout_minutes=args.timeout_minutes,
+        timeline_out=timeline,
     )
     development = [
         row for row in results
@@ -466,6 +479,7 @@ def main() -> int:
     args.output_root.mkdir(parents=True, exist_ok=True)
     write_csv(args.output_root / "trade-results.csv", results)
     write_csv(args.output_root / "confirmation-attempts.csv", attempts)
+    write_csv(args.output_root / "candidate-timeline.csv", timeline)
     report = {
         "model": "HILEGA_ORDERED_WMA_GAP_490_V1",
         "sessions": session_summary,

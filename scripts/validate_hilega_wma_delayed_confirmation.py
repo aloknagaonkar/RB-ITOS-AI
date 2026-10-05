@@ -225,7 +225,7 @@ def validate_trade(
 
     for candle in candles:
         minute = candle.timestamp.astimezone(IST).replace(second=0, microsecond=0)
-        if minute < actionable_at or minute > expires_at:
+        if minute < actionable_at:
             continue
         if minute >= canonical_exit_close:
             continue
@@ -252,7 +252,10 @@ def validate_trade(
             "strategy_signal_timestamp": trade["entry_timestamp"],
             "minute_timestamp": minute.isoformat(),
             "minutes_observed": int((minute - actionable_at).total_seconds() // 60) + 1,
+            "within_confirmation_window": minute <= expires_at,
             "reference_5m_timestamp": reference_label.isoformat(),
+            "reference_rsi9": reference.rsi9,
+            "reference_ema3_rsi": reference.ema3_rsi,
             "reference_wma21_rsi": float(reference.wma21_rsi),
             "provisional_rsi9": provisional.rsi9,
             "provisional_ema3_rsi": provisional.ema3_rsi,
@@ -262,16 +265,22 @@ def validate_trade(
             "confirmation_tier": tier,
             "full_directional_alignment": aligned,
             "observed_close": float(candle.close),
+            "observed_open": float(candle.open),
+            "observed_high": float(candle.high),
+            "observed_low": float(candle.low),
+            "observed_volume": (
+                None if candle.volume is None else float(candle.volume)
+            ),
             "points_from_original_entry": directional_points(
                 direction, entry_price, float(candle.close)
             ),
         }
         trace.append(row)
-        if first_confirmed is None and directional >= threshold:
+        if minute <= expires_at and first_confirmed is None and directional >= threshold:
             first_confirmed = row
-        if first_strong is None and directional >= strong_threshold:
+        if minute <= expires_at and first_strong is None and directional >= strong_threshold:
             first_strong = row
-        if first_aligned is None and directional >= threshold and aligned:
+        if minute <= expires_at and first_aligned is None and directional >= threshold and aligned:
             first_aligned = row
 
     # The original canonical Hilega signal/lifecycle supplies the strategy
