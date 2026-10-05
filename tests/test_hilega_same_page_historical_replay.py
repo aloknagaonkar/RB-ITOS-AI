@@ -16,3 +16,8 @@ def test_historical_selection_loads_without_second_click():
     source = (ROOT / "frontend/src/hilegaHistoricalReplay.tsx").read_text(encoding="utf-8")
     assert "if(selectedDate)void load()" in source
     assert "Reload session" in source
+
+
+def test_frontend_api_proxy_targets_runtime_api_port():
+    source = (ROOT / "frontend/vite.config.ts").read_text(encoding="utf-8")
+    assert "'/api': 'http://127.0.0.1:8123'" in source
