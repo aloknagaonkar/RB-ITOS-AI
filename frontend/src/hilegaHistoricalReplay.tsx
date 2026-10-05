@@ -93,7 +93,14 @@ export default function HilegaHistoricalReplay(){
           : fetch(`/api/live-shadow/hilega-directional-candles/historical?session_date=${encodeURIComponent(selectedDate)}`),
         strategyVersion==='V2' ? Promise.resolve({ok:false} as globalThis.Response) : fetch(strategyTestUrl),
       ])
-      if(!r.ok)throw new Error(`Session HTTP ${r.status}: ${await r.text()}`)
+      if(!r.ok){
+        let message=`Session HTTP ${r.status}`
+        try{
+          const payload=await r.json()
+          if(typeof payload.detail==='string')message=payload.detail
+        }catch{}
+        throw new Error(message)
+      }
       const body=await r.json() as Response
       if(dr.ok){
         const directional=await dr.json()

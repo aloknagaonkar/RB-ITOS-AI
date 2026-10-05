@@ -21,3 +21,9 @@ def test_historical_selection_loads_without_second_click():
 def test_frontend_api_proxy_targets_runtime_api_port():
     source = (ROOT / "frontend/vite.config.ts").read_text(encoding="utf-8")
     assert "'/api': 'http://127.0.0.1:8123'" in source
+
+
+def test_historical_error_displays_api_detail_without_raw_json():
+    source = (ROOT / "frontend/src/hilegaHistoricalReplay.tsx").read_text(encoding="utf-8")
+    assert "const payload=await r.json()" in source
+    assert "if(typeof payload.detail==='string')message=payload.detail" in source

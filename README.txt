@@ -1,36 +1,33 @@
-NORMAL_B_PROVED OBSERVATION-ONLY LIVE SHADOW
-============================================
+HILEGA HISTORICAL REPLAY 404 FIX
 
-Repository branch: feature/pcr-foundation
+Copy the backend/, frontend/, and tests/ files in this package into the root of
+your project, allowing these files to replace the existing files at those paths.
 
-Install from the repository root:
+Changed files:
+  backend/market_lab/hilega_historical_ui_api_v1.py
+  frontend/src/hilegaHistoricalReplay.tsx
+  frontend/vite.config.ts
+  tests/test_hilega_historical_ui_api_v1.py
+  tests/test_hilega_same_page_historical_replay.py
 
-  cd ~/RB-ITOS-AI
-  source .venv/bin/activate
-  python normal_b_proved_live_shadow_bundle/install.py
+This corrects the misleading WMA-gap error shown when canonical Hilega v1
+evidence is missing, and displays API error details as plain text. It does not
+create replay data or substitute recorded live trades. The selected date will
+remain unavailable for V1/V2 until its canonical trade row is present in the
+published frozen or forward-confirmation evidence.
 
-After PASS, restart before market or during an approved maintenance window:
+From the project root, run the focused regression tests:
+  python -m pytest tests/test_hilega_same_page_historical_replay.py tests/test_hilega_historical_ui_api_v1.py tests/test_hilega_wma_gap_historical_v1.py -q
 
-  ./scripts/restart.sh
-  ./scripts/status.sh
-  curl -fsS http://127.0.0.1:8123/api/health
+For the UI, start the backend API on port 8123 in one terminal:
+  python -m market_lab.runtime api
 
-Safety contract
----------------
+Then start the frontend in another terminal:
+  npm --prefix frontend run dev
 
-This is a parallel observation-only candidate. It cannot close the existing
-B/E baseline lifecycle, send an order, create a paper order, set quantity, or
-permit re-entry. It only writes candidate audit events and exposes them in the
-Midpoint live-shadow UI/status response.
+To invoke the Hilega-Milega historical replay CLI directly (requires the
+project environment and an Upstox access token in .env):
+  PYTHONPATH=backend python -m market_lab.hilega_milega_historical_replay_cli_v1 --dates YYYY-MM-DD
 
-Candidate events
-----------------
-
-  NORMAL_B_PROVED_STARTED
-  NORMAL_B_PROVED_TIER2
-  NORMAL_B_PROVED_TIER3
-  NORMAL_B_PROVED_EXIT_CANDIDATE
-  NORMAL_B_PROVED_UNAVAILABLE
-
-The candidate activates only after +20 proof and an exact proof+10-minute
-NORMAL_B classification. RUNNER_STRENGTHENING trades remain on the baseline.
+The Vite proxy change fixes frontend API requests in development mode. These
+changes do not alter strategy rules or historical replay calculations.

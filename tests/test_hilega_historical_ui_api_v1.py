@@ -3,7 +3,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 import pytest
 from fastapi import HTTPException
-from market_lab.hilega_historical_ui_api_v1 import _v2_report, list_available, load_capture
+from market_lab import hilega_wma_gap_historical_v1
+from market_lab.hilega_historical_ui_api_v1 import (
+    _v2_report,
+    list_available,
+    load_capture,
+    strategy_test,
+)
 from market_lab.live_shadow_step_audit_v1 import ShadowStepAuditStoreV1
 
 
@@ -44,3 +50,37 @@ def test_v2_report_preserves_wma_slope_candle_evidence():
     assert report["conditions"]["wma21_current_candle"].endswith("09:20:00+05:30")
     assert report["conditions"]["wma21_previous_candle"].endswith("09:15:00+05:30")
     assert report["conditions"]["wma21_slope_interval_minutes"] == 5
+
+
+def test_v1_missing_canonical_evidence_has_strategy_specific_error(monkeypatch):
+    def missing_session(session_date):
+        raise FileNotFoundError(session_date)
+
+    monkeypatch.setattr(hilega_wma_gap_historical_v1, "build_v1_session", missing_session)
+
+    with pytest.raises(HTTPException) as exc:
+        strategy_test("2026-10-01", "V1")
+
+    assert exc.value.status_code == 404
+    assert exc.value.detail == (
+        "Canonical Hilega v1 replay unavailable for 2026-10-01: no published "
+        "canonical trade evidence is available for this date. Live records "
+        "are not substituted."
+    )
+
+
+def test_wma_gap_missing_evidence_keeps_wma_gap_error(monkeypatch):
+    def missing_session(session_date):
+        raise FileNotFoundError(session_date)
+
+    monkeypatch.setattr(hilega_wma_gap_historical_v1, "build_wma_gap_session", missing_session)
+
+    with pytest.raises(HTTPException) as exc:
+        strategy_test("2026-10-01", "V2")
+
+    assert exc.value.status_code == 404
+    assert exc.value.detail == (
+        "WMA-gap replay unavailable for 2026-10-01: no matching canonical "
+        "trade evidence was found in the published frozen or "
+        "forward-confirmation artifacts."
+    )

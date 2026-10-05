@@ -660,6 +660,7 @@ def strategy_test(session_date: str = Query(..., min_length=10, max_length=10),
         day = date.fromisoformat(session_date)
     except ValueError as exc:
         raise HTTPException(422, "Invalid session date") from exc
+    is_v1 = strategy.strip().upper() == "V1"
     try:
         from .hilega_wma_gap_historical_v1 import (
             build_v1_session,
@@ -667,7 +668,7 @@ def strategy_test(session_date: str = Query(..., min_length=10, max_length=10),
             recorded_live_metrics,
         )
         result = (build_v1_session(day.isoformat())
-                  if strategy.strip().upper() == "V1"
+                  if is_v1
                   else build_wma_gap_session(day.isoformat()))
         try:
             recorded = load_session(day.isoformat())
@@ -681,10 +682,18 @@ def strategy_test(session_date: str = Query(..., min_length=10, max_length=10),
             )
         return result
     except FileNotFoundError as exc:
+        detail = (
+            f"Canonical Hilega v1 replay unavailable for {day.isoformat()}: "
+            "no published canonical trade evidence is available for this date. "
+            "Live records are not substituted."
+            if is_v1
+            else f"WMA-gap replay unavailable for {day.isoformat()}: no matching "
+                 "canonical trade evidence was found in the published frozen or "
+                 "forward-confirmation artifacts."
+        )
         raise HTTPException(
             404,
-            "WMA-gap replay unavailable. Frozen evidence is preserved; the "
-            "completed session is waiting for automatic forward-confirmation publication.",
+            detail,
         ) from exc
 
 
