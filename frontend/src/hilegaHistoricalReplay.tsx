@@ -21,6 +21,9 @@ type Response={
   manifest:Record<string,any>;warning:string;available_sources:string[]
   performance_summary?:Array<Record<string,any>>
   comparison?:Record<string,any>
+  parity?:Record<string,any>
+  forward_confirmation_eligible?:boolean
+  zero_trade_session?:boolean
 }
 const shortTime=(v:string)=>{
   const d=new Date(v)
@@ -93,14 +96,7 @@ export default function HilegaHistoricalReplay(){
           : fetch(`/api/live-shadow/hilega-directional-candles/historical?session_date=${encodeURIComponent(selectedDate)}`),
         strategyVersion==='V2' ? Promise.resolve({ok:false} as globalThis.Response) : fetch(strategyTestUrl),
       ])
-      if(!r.ok){
-        let message=`Session HTTP ${r.status}`
-        try{
-          const payload=await r.json()
-          if(typeof payload.detail==='string')message=payload.detail
-        }catch{}
-        throw new Error(message)
-      }
+      if(!r.ok)throw new Error(`Session HTTP ${r.status}: ${await r.text()}`)
       const body=await r.json() as Response
       if(dr.ok){
         const directional=await dr.json()
@@ -202,6 +198,14 @@ export default function HilegaHistoricalReplay(){
       </div>
       <p className="hime-warning">{data.warning} {data.audit_chain_issue??''}</p>
 
+      {data.parity?.status==='PARITY_MISMATCH'&&<section className="hime-performance" aria-label="Forward replay parity diagnostic">
+        <h4>Forward replay parity · ACTION REQUIRED</h4>
+        <p>Recorded live evidence contains {data.parity.recorded_live_signals} signals / {data.parity.recorded_live_completed} completed trades, while final-candle replay contains {data.parity.canonical_replay_signals} signals / {data.parity.canonical_replay_completed} completed trades. This session is diagnostic and is not counted as a valid zero-trade V1/V2 result.</p>
+        <div className="hime-performance-scroll"><table><thead><tr><th>Recorded time</th><th>Direction</th><th>Recorded live event</th><th>Replay match</th></tr></thead><tbody>
+          {(data.parity.recorded_live_entries??[]).map((row:any,index:number)=><tr key={`${row.timestamp}-${row.event_type}-${index}`}><td>{shortTime(row.timestamp)}</td><td>{row.direction}</td><td>{row.event_type}</td><td className="hime-loss">MISSING FROM FINAL-CANDLE REPLAY</td></tr>)}
+        </tbody></table></div>
+      </section>}
+
       {data.performance_summary&&<section className="hime-performance" aria-label="Daily Nifty points performance">
         <h4>Daily strategy performance · Nifty points</h4>
         <div className="hime-performance-scroll"><table><thead><tr><th>Strategy</th><th>Signals</th><th>Entries</th><th>Denied</th><th>Wins / Losses</th><th>Points gained</th><th>Points lost</th><th>Net points</th><th>Gain / Loss</th><th>Win rate</th></tr></thead><tbody>
@@ -231,7 +235,9 @@ export default function HilegaHistoricalReplay(){
 
       <HilegaDecisionTable key={`${selectedDate}-${data.source}-${step?'step':'full'}`} reports={reports}
         mode="HISTORICAL" visibleUntil={until}
-        emptyMessage="No Hilega strategy rows were recorded for this session."
+        emptyMessage={data.parity?.status==='PARITY_MISMATCH'
+          ? 'WMA-gap decision audit is blocked: recorded live signals were not materialized into the forward V1 control. Rebuild this forward session from authoritative recorded-live lifecycles.'
+          : 'No Hilega strategy rows were recorded for this session.'}
         onSelected={setReviewCheckpoint}/>
 
       <div className="hime-review"><h4>Manual review (separate from immutable audit)</h4>

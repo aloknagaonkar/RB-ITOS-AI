@@ -1,4 +1,5 @@
 import csv
+import json
 from pathlib import Path
 
 from market_lab.hilega_wma_gap_historical_v1 import (
@@ -63,6 +64,9 @@ def test_performance_summary_contains_all_three_strategies(tmp_path):
 
 def write(path: Path, rows: list[dict]):
     path.parent.mkdir(parents=True, exist_ok=True)
+    if not rows:
+        path.write_text("", encoding="utf-8")
+        return
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
         writer.writeheader()
@@ -314,3 +318,72 @@ def test_rejected_signal_keeps_final_previous_and_current_evidence(tmp_path):
     observed = {x["label"]: x["value"] for x in rejected["conditions"]["strategy_steps"]}
     assert "previous strength 0.6 → current strength 0.4" == observed["Later one-minute persistence"]
     assert "previous gap" in observed["EMA3-WMA21 gap expansion"]
+
+
+def test_first_minute_uses_signal_reference_but_persistence_waits(tmp_path):
+    day = "2026-10-05"
+    write(tmp_path / "trade-results.csv", [{
+        "trade_id": "first", "session_date": day, "direction": "BULLISH",
+        "route": "ROUTE_A", "entry_timestamp": f"{day}T10:00:00+05:30",
+        "entry_price": "100", "exit_timestamp": f"{day}T10:20:00+05:30",
+        "exit_price": "110", "canonical_points": "10", "mfe_points": "20",
+        "candidate_decision": "NO_ENTRY", "candidate_entry_timestamp": "",
+        "candidate_points": "",
+    }])
+    write(tmp_path / "confirmation-attempts.csv", [])
+    write(tmp_path / "candidate-timeline.csv", [{
+        "trade_id": "first", "session_date": day, "direction": "BULLISH",
+        "minute_timestamp": f"{day}T10:01:00+05:30", "minutes_observed": "1",
+        "within_confirmation_window": "True", "reference_rsi9": "50",
+        "reference_ema3_rsi": "44", "reference_wma21_rsi": "40",
+        "provisional_rsi9": "52", "provisional_ema3_rsi": "47",
+        "provisional_wma21_rsi": "40", "directional_wma_change": ".8",
+        "full_directional_alignment": "True", "observed_close": "102",
+    }])
+    result = build_wma_gap_session(day, tmp_path)
+    minute = next(row for row in result["reports"]
+                  if row["checkpoint"] == f"{day}T10:01:00+05:30")
+    statuses = {step["label"]: step["status"]
+                for step in minute["conditions"]["strategy_steps"]}
+    assert statuses["Later one-minute persistence"] == "WAIT"
+    assert statuses["EMA3-WMA21 gap expansion"] == "PASS"
+    assert statuses["EMA3 continuation"] == "PASS"
+    assert minute["conditions"]["comparison_source"] == "COMPLETED_SIGNAL_BAR_REFERENCE"
+    assert minute["conditions"]["directional_gap_delta"] == 3
+
+
+def test_default_builder_prefers_separate_forward_session(tmp_path, monkeypatch):
+    import market_lab.hilega_wma_gap_historical_v1 as module
+    frozen = tmp_path / "frozen"
+    forward = tmp_path / "forward"
+    day = "2026-10-06"
+    write(forward / "trade-results.csv", [{
+        "trade_id":"forward-one", "session_date":day, "direction":"BULLISH",
+        "route":"ROUTE_A", "entry_timestamp":f"{day}T10:00:00+05:30",
+        "entry_price":"100", "exit_timestamp":f"{day}T10:20:00+05:30",
+        "exit_price":"110", "canonical_points":"10", "mfe_points":"20",
+        "candidate_decision":"NO_ENTRY", "candidate_points":"",
+    }])
+    write(forward / "confirmation-attempts.csv", [])
+    write(forward / "candidate-timeline.csv", [])
+    monkeypatch.setattr(module, "ROOT", frozen)
+    monkeypatch.setattr(module, "FORWARD_ROOT", forward)
+    result = module.build_wma_gap_session(day)
+    assert result["evidence_cohort"] == "NEW_FORWARD_CONFIRMATION"
+
+
+def test_zero_trade_forward_manifest_is_available(tmp_path, monkeypatch):
+    import market_lab.hilega_wma_gap_historical_v1 as module
+    frozen = tmp_path / "frozen"; forward = tmp_path / "forward"; day = "2026-10-05"
+    session = forward / "sessions" / day; session.mkdir(parents=True)
+    (session / "manifest.json").write_text(json.dumps({
+        "model":"HILEGA_WMA_GAP_FORWARD_SESSION_V1", "session_date":day,
+        "signals":0, "candidate_entries":0, "candidate_denied":0,
+        "canonical_points":0, "candidate_points":0,
+    }))
+    monkeypatch.setattr(module, "ROOT", frozen)
+    monkeypatch.setattr(module, "FORWARD_ROOT", forward)
+    result = module.build_wma_gap_session(day)
+    assert result["zero_trade_session"] is True
+    assert result["evidence_cohort"] == "NEW_FORWARD_CONFIRMATION"
+    assert result["performance_summary"][2]["signals"] == 0

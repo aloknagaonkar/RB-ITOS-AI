@@ -148,6 +148,7 @@ def cache_sessions(cache_root: Path, through: date) -> list[tuple[date, Path]]:
 def build_indicator_states(
     cache_root: Path,
     selected_dates: set[str],
+    strategy_cutoff_only: bool = False,
 ) -> tuple[
     dict[tuple[str, datetime], Any],
     dict[tuple[str, datetime], Any],
@@ -164,13 +165,25 @@ def build_indicator_states(
         candles = _read_cache(path, UNDERLYING, day)
         if not candles:
             continue
+        if strategy_cutoff_only and day.isoformat() in selected_dates:
+            # The delayed-entry candidate ends at the 14:55-labelled bar.
+            # Post-cutoff incompleteness (for example a missing 15:29 minute)
+            # is outside the tested rule and must not block indicator states.
+            candles = [
+                candle for candle in candles
+                if candle.timestamp.astimezone(IST).strftime("%H:%M") <= "14:59"
+            ]
         try:
-            bars = aggregate_exact_5m(candles, day, require_full_session=True)
+            bars = aggregate_exact_5m(candles, day, require_full_session=not strategy_cutoff_only)
         except ValueError:
             if day.isoformat() in selected_dates:
                 raise
             continue
-        if len(bars) != 75:
+        if strategy_cutoff_only and day.isoformat() in selected_dates:
+            bars = [bar for bar in bars if bar.ts.strftime("%H:%M") <= "14:55"]
+            if len(bars) != 69:
+                raise ValueError(f"{day}: incomplete strategy window through 14:55")
+        elif len(bars) != 75:
             raise ValueError(f"{day}: expected 75 five-minute bars")
         for bar in bars:
             snapshot = engine.update(float(bar.close))

@@ -660,7 +660,6 @@ def strategy_test(session_date: str = Query(..., min_length=10, max_length=10),
         day = date.fromisoformat(session_date)
     except ValueError as exc:
         raise HTTPException(422, "Invalid session date") from exc
-    is_v1 = strategy.strip().upper() == "V1"
     try:
         from .hilega_wma_gap_historical_v1 import (
             build_v1_session,
@@ -668,7 +667,7 @@ def strategy_test(session_date: str = Query(..., min_length=10, max_length=10),
             recorded_live_metrics,
         )
         result = (build_v1_session(day.isoformat())
-                  if is_v1
+                  if strategy.strip().upper() == "V1"
                   else build_wma_gap_session(day.isoformat()))
         try:
             recorded = load_session(day.isoformat())
@@ -677,23 +676,60 @@ def strategy_test(session_date: str = Query(..., min_length=10, max_length=10),
         if recorded and recorded.get("source") in {
             "LIVE_SHADOW", "DIRECTIONAL_LIVE_SHADOW"
         }:
-            result["performance_summary"][0] = recorded_live_metrics(
-                recorded.get("reports") or []
+            recorded_reports = recorded.get("reports") or []
+            live_metrics = recorded_live_metrics(recorded_reports)
+            result["performance_summary"][0] = live_metrics
+            canonical_metrics = next(
+                (row for row in result["performance_summary"]
+                 if row.get("strategy_id") == "HILEGA_V1_REPLAY"),
+                {"signals": 0, "completed": 0},
             )
+            live_entries = []
+            for report in recorded_reports:
+                for transition in report.get("transitions") or []:
+                    event = str(transition.get("event_type") or "")
+                    if not event.startswith("ENTRY_"):
+                        continue
+                    live_entries.append({
+                        "timestamp": transition.get("event_time") or report.get("checkpoint"),
+                        "direction": "BEARISH" if "BEARISH" in event else "BULLISH",
+                        "event_type": event,
+                    })
+            replay_entries = []
+            for report in result.get("reports") or []:
+                event = str((report.get("strategy") or {}).get("directional_action") or "")
+                if event not in {"HILEGA_V1_CANONICAL_ENTRY", "WMA_GAP_SIGNAL_RECEIVED"}:
+                    continue
+                replay_entries.append({
+                    "timestamp": report.get("checkpoint"),
+                    "direction": str((report.get("strategy") or {}).get("direction") or
+                                     (report.get("conditions") or {}).get("direction") or ""),
+                    "event_type": event,
+                })
+            live_count = int(live_metrics.get("signals") or 0)
+            replay_count = int(canonical_metrics.get("signals") or 0)
+            parity_ok = live_count == replay_count
+            result["parity"] = {
+                "status": "PASS" if parity_ok else "PARITY_MISMATCH",
+                "recorded_live_signals": live_count,
+                "recorded_live_completed": int(live_metrics.get("completed") or 0),
+                "canonical_replay_signals": replay_count,
+                "canonical_replay_completed": int(canonical_metrics.get("completed") or 0),
+                "recorded_live_entries": live_entries,
+                "canonical_replay_entries": replay_entries,
+            }
+            result["forward_confirmation_eligible"] = parity_ok
+            if not parity_ok:
+                result["warning"] = (
+                    "PARITY_MISMATCH: recorded live and canonical replay signal counts differ. "
+                    "This session is diagnostic only and is excluded from forward confirmation."
+                )
         return result
     except FileNotFoundError as exc:
-        detail = (
-            f"Canonical Hilega v1 replay unavailable for {day.isoformat()}: "
-            "no published canonical trade evidence is available for this date. "
-            "Live records are not substituted."
-            if is_v1
-            else f"WMA-gap replay unavailable for {day.isoformat()}: no matching "
-                 "canonical trade evidence was found in the published frozen or "
-                 "forward-confirmation artifacts."
-        )
         raise HTTPException(
             404,
-            detail,
+            "WMA-gap replay unavailable. Frozen evidence is preserved; the "
+            "completed session is waiting for automatic forward-confirmation publication.",
         ) from exc
 
 

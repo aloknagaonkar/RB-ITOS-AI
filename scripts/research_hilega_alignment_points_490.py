@@ -19,6 +19,7 @@ from datetime import date, datetime
 from pathlib import Path
 from statistics import fmean, median
 from typing import Any, Iterable
+from zoneinfo import ZoneInfo
 
 from market_lab.hilega_directional_coordinator_v1 import (
     BEARISH_ENTRY_EVENTS,
@@ -44,6 +45,7 @@ DEFAULT_FEATURES = Path(
 DEFAULT_OUTPUT = Path(
     "data/historical-evidence/hilega-alignment-points-490-v1"
 )
+IST = ZoneInfo("Asia/Kolkata")
 
 
 @dataclass
@@ -250,6 +252,7 @@ def replay(
     analysis_sessions: list[str],
     feature_lookup: dict[tuple[str, str], dict[str, Any]],
     flat_epsilon: float,
+    strategy_cutoff_only: bool = False,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     selected = set(analysis_sessions)
     split_at = int(len(analysis_sessions) * 0.70)
@@ -266,8 +269,20 @@ def replay(
         candles = _read_cache(path, UNDERLYING, day)
         if not candles:
             continue
-        bars = aggregate_exact_5m(candles, day, require_full_session=True)
-        if len(bars) != 75:
+        if strategy_cutoff_only:
+            # Validate only evidence consumed by the strategy. A missing minute
+            # in the post-cutoff 15:25 bar must not invalidate the complete
+            # 09:15-14:59 decision window, and no candle is synthesized.
+            candles = [
+                candle for candle in candles
+                if candle.timestamp.astimezone(IST).strftime("%H:%M") <= "14:59"
+            ]
+        bars = aggregate_exact_5m(candles, day, require_full_session=not strategy_cutoff_only)
+        if strategy_cutoff_only:
+            bars = [bar for bar in bars if bar.ts.strftime("%H:%M") <= "14:55"]
+            if len(bars) != 69:
+                raise ValueError(f"{session}: incomplete strategy window through 14:55")
+        elif len(bars) != 75:
             raise ValueError(f"{session}: expected 75 five-minute bars, got {len(bars)}")
 
         for bar in bars:

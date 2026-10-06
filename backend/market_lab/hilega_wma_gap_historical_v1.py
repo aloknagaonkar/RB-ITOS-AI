@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import json
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -28,12 +29,46 @@ def _root_for_session(session_date: str, requested: Path | None) -> tuple[Path, 
         requested = ROOT
     if requested != ROOT:
         return requested, "EXPLICIT_ROOT"
-    if any(
+    if (FORWARD_ROOT / "sessions" / session_date / "manifest.json").is_file() or any(
         row.get("session_date") == session_date
         for row in _rows(FORWARD_ROOT / RESULTS.name)
     ):
         return FORWARD_ROOT, "NEW_FORWARD_CONFIRMATION"
     return ROOT, "FROZEN_490_RESEARCH"
+
+
+def _zero_trade_forward_session(session_date: str, root: Path) -> dict[str, Any] | None:
+    path = root / "sessions" / session_date / "manifest.json"
+    if not path.is_file():
+        return None
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    if int(manifest.get("signals") or 0) != 0:
+        return None
+    live = _metrics("LIVE_RECORDED_V1", [], signals=0, entries=0, denied=0, available=False)
+    live["unavailable_reason"] = "Recorded live metrics contain no completed trade lifecycle for this date."
+    v1 = _metrics("HILEGA_V1_REPLAY", [], signals=0, entries=0, denied=0)
+    candidate = _metrics(STRATEGY_ID, [], signals=0, entries=0, denied=0)
+    return {
+        "session_date": session_date,
+        "source": "WMA_GAP_FORWARD_CONFIRMATION",
+        "source_id": f"wma-gap-forward:{session_date}",
+        "evidence_level": "STRATEGY",
+        "ce_available": False,
+        "manifest": manifest,
+        "audit_chain_ok": None,
+        "audit_chain_issue": None,
+        "reports": [],
+        "report_count": 0,
+        "strategy_id": STRATEGY_ID,
+        "strategy_version": STRATEGY_VERSION,
+        "evidence_cohort": "NEW_FORWARD_CONFIRMATION",
+        "performance_summary": [live, v1, candidate],
+        "comparison": {"candidate_net_delta_vs_v1": 0.0, "losses_avoided": 0, "winners_denied": 0},
+        "zero_trade_session": True,
+        "observation_only": True,
+        "execution_enabled": False,
+        "warning": "Completed forward-confirmation session; canonical Hilega produced no completed trades.",
+    }
 
 
 def _number(value: Any) -> float | None:
@@ -234,6 +269,12 @@ def build_v1_session(session_date: str, root: Path | None = None) -> dict[str, A
     trades = [row for row in _rows(root / RESULTS.name)
               if row.get("session_date") == session_date]
     if not trades:
+        empty = _zero_trade_forward_session(session_date, root)
+        if empty is not None:
+            empty["strategy_id"] = "HILEGA_V1_REPLAY"
+            empty["strategy_version"] = "canonical-v1"
+            empty["source"] = "WMA_GAP_490_CANONICAL_CONTROL"
+            return empty
         raise FileNotFoundError(session_date)
     reports: list[dict[str, Any]] = []
     values: list[float] = []
@@ -324,6 +365,9 @@ def build_wma_gap_session(session_date: str, root: Path | None = None) -> dict[s
     trades = [row for row in _rows(root / RESULTS.name)
               if row.get("session_date") == session_date]
     if not trades:
+        empty = _zero_trade_forward_session(session_date, root)
+        if empty is not None:
+            return empty
         raise FileNotFoundError(session_date)
     attempts_by_trade: dict[str, list[dict[str, str]]] = defaultdict(list)
     for row in _rows(root / ATTEMPTS.name):
@@ -409,9 +453,18 @@ def build_wma_gap_session(session_date: str, root: Path | None = None) -> dict[s
             ema = _number(minute.get("provisional_ema3_rsi"))
             wma = _number(minute.get("provisional_wma21_rsi"))
             gap = None if ema is None or wma is None else (ema - wma) * direction_sign
+            # On the first observed minute the completed signal-bar snapshot is
+            # the causal prior indicator state. This makes gap/EMA expansion
+            # measurable without pretending that WMA persistence already exists.
             previous_ema = _number((previous or {}).get("provisional_ema3_rsi"))
             previous_wma = _number((previous or {}).get("provisional_wma21_rsi"))
             previous_rsi = _number((previous or {}).get("provisional_rsi9"))
+            comparison_source = "PRIOR_OBSERVED_1M"
+            if previous is None:
+                previous_ema = _number(minute.get("reference_ema3_rsi"))
+                previous_wma = _number(minute.get("reference_wma21_rsi"))
+                previous_rsi = _number(minute.get("reference_rsi9"))
+                comparison_source = "COMPLETED_SIGNAL_BAR_REFERENCE"
             previous_strength = _number((previous or {}).get("directional_wma_change"))
             previous_gap = (
                 None if previous_ema is None or previous_wma is None
@@ -421,7 +474,8 @@ def build_wma_gap_session(session_date: str, root: Path | None = None) -> dict[s
             ema_delta = None if ema is None or previous_ema is None else (ema - previous_ema) * direction_sign
             in_window = _bool(minute.get("within_confirmation_window"))
             armed = strength is not None and strength >= .75
-            maintained = bool(previous) and armed and (_number(previous.get("directional_wma_change")) or -999) >= .75
+            persistence_measurable = previous is not None
+            maintained = persistence_measurable and armed and (_number(previous.get("directional_wma_change")) or -999) >= .75
             gap_positive = gap is not None and gap > 0
             gap_expanding = gap_delta is not None and gap_delta > 0
             ema_continuing = ema_delta is not None and ema_delta > 0
@@ -442,18 +496,18 @@ def build_wma_gap_session(session_date: str, root: Path | None = None) -> dict[s
                 _step("Directional WMA21 strength", "PASS" if armed else "FAIL",
                       f"reference {minute.get('reference_wma21_rsi')} → current {wma}; directional change {strength}",
                       ">= 0.75", "Opposite or flat values continue waiting."),
-                _step("Later one-minute persistence", "PASS" if maintained else "FAIL",
+                _step("Later one-minute persistence", "PASS" if maintained else "FAIL" if persistence_measurable else "WAIT",
                       f"previous strength {previous_strength} → current strength {strength}",
-                      "Previous and current minute >= 0.75", "The arm candle cannot confirm itself."),
+                      "Previous and current minute >= 0.75", "WAIT means this is the first observed minute; the arm candle cannot confirm itself."),
                 _step("Directional EMA3-WMA21 gap", "PASS" if gap_positive else "FAIL",
                       f"EMA3 {ema} · WMA21 {wma} · directional gap {gap}",
                       "> 0", "Bullish uses EMA-WMA; bearish uses WMA-EMA."),
                 _step("EMA3-WMA21 gap expansion", "PASS" if gap_expanding else "FAIL",
                       f"previous gap {previous_gap} → current gap {gap} · delta {gap_delta}",
-                      "> 0 vs prior minute", "Confirms that separation is increasing."),
+                      "> 0 vs causal prior state", f"Confirms that separation is increasing; baseline {comparison_source}."),
                 _step("EMA3 continuation", "PASS" if ema_continuing else "FAIL",
                       f"previous EMA3 {previous_ema} → current EMA3 {ema} · directional delta {ema_delta}",
-                      "> 0 directionally", "EMA3 continuation is displayed as diagnostic evidence."),
+                      "> 0 directionally", f"EMA3 continuation baseline {comparison_source}."),
                 _step("RSI9 / EMA3 / WMA21 alignment", "PASS" if aligned else "FAIL",
                       f"RSI9 {minute.get('provisional_rsi9')} · EMA3 {ema} · WMA21 {wma}",
                       "Directionally aligned", "Alignment is displayed as diagnostic evidence."),
@@ -486,6 +540,8 @@ def build_wma_gap_session(session_date: str, root: Path | None = None) -> dict[s
                 "directional_wma_change": strength,
                 "directional_gap": gap,
                 "directional_gap_delta": gap_delta,
+                "comparison_source": comparison_source,
+                "persistence_measurable": persistence_measurable,
                 "directional_ema_delta": ema_delta,
                 "within_confirmation_window": in_window,
                 "confirmation_tier": minute.get("confirmation_tier"),
