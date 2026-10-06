@@ -8,7 +8,12 @@ BUNDLE = Path(__file__).resolve().parent
 FILES = BUNDLE / "files"
 STAMP = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 BACKUP = ROOT / "data" / "backups" / f"hilega-wma-forward-cache-fix-{STAMP}"
-COPIES = ["scripts/hilega_wma_gap_forward_publisher.py", "tests/test_hilega_wma_gap_forward_publisher.py"]
+COPIES = [
+    "scripts/hilega_wma_gap_forward_publisher.py",
+    "scripts/research_hilega_alignment_points_490.py",
+    "scripts/validate_hilega_wma_delayed_confirmation.py",
+    "tests/test_hilega_wma_gap_forward_publisher.py",
+]
 
 def backup(path):
     if path.exists():
@@ -32,7 +37,9 @@ def main():
         (ROOT / COPIES[0]).chmod(0o755)
         python = str(ROOT / ".venv/bin/python")
         run([python, "-m", "pytest", "-q", "tests/test_hilega_wma_gap_forward_publisher.py", "tests/test_hilega_wma_gap_historical_v1.py", "tests/test_hilega_historical_ui_api_v1.py", "tests/test_backtest_hilega_wma_gap_490.py"])
-        run([python, "-m", "py_compile", "scripts/hilega_wma_gap_forward_publisher.py"])
+        run([python, "-m", "py_compile", "scripts/hilega_wma_gap_forward_publisher.py",
+             "scripts/research_hilega_alignment_points_490.py",
+             "scripts/validate_hilega_wma_delayed_confirmation.py"])
         run(["git", "diff", "--check"])
     except Exception as exc:
         restore(touched); print(f"STOP: validation failed; installed source restored: {exc}"); return 1

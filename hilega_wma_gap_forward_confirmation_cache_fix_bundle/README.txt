@@ -4,7 +4,8 @@ Fixes the NOOP where completed live sessions were detected but not published.
 
 Changes
 - Materializes replay cache from immutable directional one-minute evidence.
-- Requires exactly 75 complete five-minute bars before publication.
+- For forward sessions, requires the complete 69-bar strategy window through
+  the locked 14:55 cutoff; missing post-cutoff candles never get fabricated.
 - Uses report.sessions.last_session as the frozen 490-session cutoff.
 - Produces short date-specific cache blockers instead of a global exclusion dump.
 - Writes only the separate immutable forward-confirmation report.

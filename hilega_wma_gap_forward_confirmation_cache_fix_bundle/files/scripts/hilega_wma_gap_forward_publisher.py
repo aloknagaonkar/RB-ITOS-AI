@@ -163,8 +163,12 @@ def ensure_recorded_cache(day: str, cache_root: Path, evidence_root: Path) -> di
 
     if target.is_file():
         minute_count, bar_count, issues = validate(target)
-        if not issues and bar_count == 75:
-            return {"source": "EXISTING_CACHE", "minutes": minute_count, "five_minute_bars": bar_count}
+        minutes, _ = audit.load_minutes(target)
+        bars, _ = audit.aggregate_five_minute(minutes, date.fromisoformat(day))
+        strategy_bars = [bar for bar in bars if bar.timestamp.strftime("%H:%M") <= "14:55"]
+        if len(strategy_bars) == 69:
+            return {"source": "EXISTING_CACHE", "minutes": minute_count, "five_minute_bars": bar_count,
+                    "strategy_five_minute_bars": 69, "strategy_window_complete_through": "14:55"}
 
     evidence = evidence_root / f"{day}.jsonl"
     rows, resolution = final_recorded_minutes(day, evidence)
@@ -172,18 +176,23 @@ def ensure_recorded_cache(day: str, cache_root: Path, evidence_root: Path) -> di
     temporary = target.with_suffix(f".json.tmp-{os.getpid()}")
     temporary.write_text(json.dumps({"candles": rows}, indent=2) + "\n", encoding="utf-8")
     minute_count, bar_count, issues = validate(temporary)
-    if issues or bar_count != 75:
+    minutes, _ = audit.load_minutes(temporary)
+    bars, _ = audit.aggregate_five_minute(minutes, date.fromisoformat(day))
+    strategy_bars = [bar for bar in bars if bar.timestamp.strftime("%H:%M") <= "14:55"]
+    if len(strategy_bars) != 69:
         temporary.unlink(missing_ok=True)
         issue_names = ",".join(str(item) for item in issues[:3]) or "BAR_COUNT"
         raise ValueError(
             f"RECORDED_CACHE_INCOMPLETE:{day}:minutes={minute_count}:"
-            f"five_minute_bars={bar_count}:issues={issue_names}"
+            f"five_minute_bars={bar_count}:strategy_bars={len(strategy_bars)}:issues={issue_names}"
         )
     os.replace(temporary, target)
     return {
         "source": "RECORDED_LIVE_1M_EVIDENCE",
         "minutes": minute_count,
         "five_minute_bars": bar_count,
+        "strategy_five_minute_bars": 69,
+        "strategy_window_complete_through": "14:55",
         **resolution,
     }
 
@@ -203,24 +212,48 @@ def generate_session(day: str, cache_root: Path) -> tuple[list[dict], list[dict]
     alignment = load_script("forward_alignment", "research_hilega_alignment_points_490.py")
     delayed = load_script("forward_delayed", "validate_hilega_wma_delayed_confirmation.py")
     backtest = load_script("forward_wma_gap", "backtest_hilega_wma_gap_490.py")
-    date_validation = load_script("forward_date_validation", "validate_hilega_entry_filters_dates.py")
-
-    sessions, feature_lookup, excluded, _ = date_validation.build_feature_lookup(
-        cache_root, day, audit
+    bars_by_day = {}
+    for path in sorted(cache_root.glob("*.json")):
+        try:
+            session = date.fromisoformat(path.stem).isoformat()
+        except ValueError:
+            continue
+        if session > day:
+            continue
+        source_minutes, _ = audit.load_minutes(path)
+        bars, issues = audit.aggregate_five_minute(source_minutes, date.fromisoformat(session))
+        if session == day:
+            bars = [bar for bar in bars if bar.timestamp.strftime("%H:%M") <= "14:55"]
+            complete = len(bars) == 69
+        else:
+            complete = not issues and len(bars) == 75
+        if complete:
+            bars_by_day[session] = bars
+    if day not in bars_by_day:
+        raise ValueError(f"COMPLETE_STRATEGY_WINDOW_UNAVAILABLE:{day}:required_through=14:55")
+    features, _ = audit.feature_rows(
+        bars_by_day, slope_window=3, flat_epsilon=0.10,
+        label_horizon=3, atr_multiple=0.50,
     )
-    if day not in sessions:
-        raise ValueError(f"complete cached NIFTY session unavailable: {day}; excluded={excluded}")
+    feature_lookup = {
+        (str(row["session_date"]), str(row["timestamp"])[11:16]): row
+        for row in features
+    }
+    sessions = sorted(bars_by_day)
     trades, _ = alignment.replay(
         cache_root=cache_root,
         all_sessions=sessions,
         analysis_sessions=[day],
         feature_lookup=feature_lookup,
         flat_epsilon=0.10,
+        strategy_cutoff_only=True,
     )
     trades = [row for row in trades if row["session_date"] == day]
     if not trades:
         raise ValueError(f"canonical replay produced no completed trades: {day}")
-    states, snapshots, minutes = delayed.build_indicator_states(cache_root, {day})
+    states, snapshots, minutes = delayed.build_indicator_states(
+        cache_root, {day}, strategy_cutoff_only=True
+    )
     results: list[dict] = []
     attempts: list[dict] = []
     timeline: list[dict] = []
