@@ -19,6 +19,8 @@ type DirectionalStatus = {
   step_audit_chain_ok:boolean|null
   step_audit_chain_issue:string|null
   current:{
+    session_date:string
+    state_available:boolean
     trade_owner:Direction
     bullish_state:string|null
     bearish_state:string|null
@@ -28,6 +30,7 @@ type DirectionalStatus = {
   }
   latest_accepted_record:Record<string,any>|null
   latest_suppressed_record:Record<string,any>|null
+  latest_state_session_date:string|null
 }
 
 type AuditReport = {
@@ -314,13 +317,17 @@ export default function HilegaMilegaShadow(){
       <span>Audit chain {status?.step_audit_chain_ok===null?'verification deferred':status?.step_audit_chain_ok?'healthy':'check'}</span>
     </div>
 
+    {status?.current.state_available===false&&<div className="hilega-dashboard-warning">
+      No live decision has been recorded for {status.current.session_date}. The panels below retain saved records; the latest state is from {status.latest_state_session_date??'an earlier session'} and is not today's state. Check that today's worker and market-data feed are running.
+    </div>}
+
     <div className="shadow-metrics hilega-dashboard-summary">
       <article><span>Trade owner</span><b>{words(status?.current.trade_owner??'NONE')}</b><small>Exclusive directional owner</small></article>
       <article><span>Bullish state</span><b>{words(status?.current.bullish_state)}</b><small>Armed {status?.current.bullish_armed?'YES':'NO'}</small></article>
       <article><span>Bearish state</span><b>{words(status?.current.bearish_state)}</b><small>Armed {status?.current.bearish_armed?'YES':'NO'}</small></article>
-      <article><span>Last accepted event</span><b>{latestAccepted(status)}</b><small>{tm(status?.latest_accepted_record?.event_time)}</small></article>
-      <article><span>Last entry detected</span><b>{latestEntry?tm(latestEntry.t.event_time??latestEntry.r.checkpoint):'—'}</b><small>{latestEntry?`Route ${words(latestEntry.r.strategy.selected_route)} · NIFTY ${num(latestEntry.t.price)}`:'No bullish audit entry recorded'}</small></article>
-      <article><span>Last exit detected</span><b>{latestExit?tm(latestExit.t.event_time??latestExit.r.checkpoint):'—'}</b><small>{latestExit?`${words(latestExit.t.exit_reason??latestExit.t.event_type)} · NIFTY ${num(latestExit.t.price)}`:'No bullish audit exit recorded'}</small></article>
+      <article><span>Last accepted event</span><b>{latestAccepted(status)}</b><small>{dt(status?.latest_accepted_record?.event_time)}</small></article>
+      <article><span>Last entry detected</span><b>{latestEntry?dt(latestEntry.t.event_time??latestEntry.r.checkpoint):'—'}</b><small>{latestEntry?`Route ${words(latestEntry.r.strategy.selected_route)} · NIFTY ${num(latestEntry.t.price)}`:'No bullish audit entry recorded'}</small></article>
+      <article><span>Last exit detected</span><b>{latestExit?dt(latestExit.t.event_time??latestExit.r.checkpoint):'—'}</b><small>{latestExit?`${words(latestExit.t.exit_reason??latestExit.t.event_type)} · NIFTY ${num(latestExit.t.price)}`:'No bullish audit exit recorded'}</small></article>
       <article><span>Completed 5-leg lifecycles</span><b>{dashboard?.complete_closed_count??'—'}</b><small>{dashboard?`${dashboard.active_count} active · ${dashboard.pending_exit_count??0} pending exact exit · ${dashboard.incomplete_count} incomplete`:'Dashboard loading'}</small></article>
     </div>
 
