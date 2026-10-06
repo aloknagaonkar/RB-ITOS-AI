@@ -104,13 +104,56 @@ def frozen_last_session(root: Path) -> str | None:
     return max(dates) if dates else None
 
 
+def final_recorded_minutes(day: str, evidence_path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Resolve revised candles by verified journal order; final recording wins."""
+    evidence = __import__("market_lab.hilega_market_evidence_v1", fromlist=["verify_journal"])
+    recovery = __import__(
+        "market_lab.hilega_current_day_directional_recovery_v1", fromlist=["_walk_dicts"]
+    )
+    if not evidence_path.is_file():
+        raise ValueError(f"RECORDED_1M_EVIDENCE_UNAVAILABLE:{day}")
+    records = evidence.verify_journal(evidence_path)
+    selected: dict[str, dict[str, Any]] = {}
+    revisions: set[str] = set()
+    observations = 0
+    for record in records:
+        if record.get("kind") != "underlying" or record.get("status") != "OK":
+            continue
+        for obj in recovery._walk_dicts(record.get("response")):
+            if obj.get("session_date") != day:
+                continue
+            if obj.get("instrument_key") != "NSE_INDEX|Nifty 50":
+                continue
+            if int(obj.get("interval_seconds") or 0) != 60:
+                continue
+            required = ("timestamp", "open", "high", "low", "close")
+            if any(obj.get(key) is None for key in required):
+                continue
+            timestamp = str(obj["timestamp"])
+            row = {
+                "timestamp": timestamp,
+                "open": float(obj["open"]), "high": float(obj["high"]),
+                "low": float(obj["low"]), "close": float(obj["close"]),
+                "volume": None if obj.get("volume") is None else int(obj["volume"]),
+            }
+            observations += 1
+            if timestamp in selected and selected[timestamp] != row:
+                revisions.add(timestamp)
+            selected[timestamp] = row
+    if not selected:
+        raise ValueError(f"RECORDED_1M_EVIDENCE_UNAVAILABLE:{day}")
+    return [selected[key] for key in sorted(selected)], {
+        "resolution_policy": "FINAL_RECORDED_REVISION_BY_VERIFIED_JOURNAL_SEQUENCE",
+        "journal_records": len(records),
+        "candle_observations": observations,
+        "unique_minutes": len(selected),
+        "revised_minutes": len(revisions),
+    }
+
+
 def ensure_recorded_cache(day: str, cache_root: Path, evidence_root: Path) -> dict[str, Any]:
     """Materialize an exact replay cache from immutable live one-minute evidence."""
     audit = load_script("forward_cache_audit", "audit_hilega_indicator_dataset_v2.py")
-    recovery = __import__(
-        "market_lab.hilega_current_day_directional_recovery_v1",
-        fromlist=["extract_underlying_1m_from_market_evidence"],
-    )
     target = cache_root / f"{day}.json"
 
     def validate(path: Path) -> tuple[int, int, list[str]]:
@@ -124,22 +167,7 @@ def ensure_recorded_cache(day: str, cache_root: Path, evidence_root: Path) -> di
             return {"source": "EXISTING_CACHE", "minutes": minute_count, "five_minute_bars": bar_count}
 
     evidence = evidence_root / f"{day}.jsonl"
-    candles = recovery.extract_underlying_1m_from_market_evidence(
-        evidence, date.fromisoformat(day)
-    )
-    if not candles:
-        raise ValueError(f"RECORDED_1M_EVIDENCE_UNAVAILABLE:{day}")
-    rows = [
-        {
-            "timestamp": candle.timestamp.isoformat(),
-            "open": candle.open,
-            "high": candle.high,
-            "low": candle.low,
-            "close": candle.close,
-            "volume": candle.volume,
-        }
-        for candle in candles
-    ]
+    rows, resolution = final_recorded_minutes(day, evidence)
     cache_root.mkdir(parents=True, exist_ok=True)
     temporary = target.with_suffix(f".json.tmp-{os.getpid()}")
     temporary.write_text(json.dumps({"candles": rows}, indent=2) + "\n", encoding="utf-8")
@@ -152,7 +180,12 @@ def ensure_recorded_cache(day: str, cache_root: Path, evidence_root: Path) -> di
             f"five_minute_bars={bar_count}:issues={issue_names}"
         )
     os.replace(temporary, target)
-    return {"source": "RECORDED_LIVE_1M_EVIDENCE", "minutes": minute_count, "five_minute_bars": bar_count}
+    return {
+        "source": "RECORDED_LIVE_1M_EVIDENCE",
+        "minutes": minute_count,
+        "five_minute_bars": bar_count,
+        **resolution,
+    }
 
 
 def file_sha256(path: Path) -> str | None:

@@ -69,6 +69,22 @@ def test_frozen_zero_trade_dates_are_excluded_by_report_cutoff(tmp_path, monkeyp
     assert [x["session_date"] for x in result["published"]] == ["2026-10-02"]
 
 
+def test_final_recorded_revision_is_selected(monkeypatch, tmp_path):
+    path = tmp_path / "2026-10-05.jsonl"; path.write_text("placeholder")
+    base = {"session_date":"2026-10-05", "instrument_key":"NSE_INDEX|Nifty 50", "interval_seconds":60,
+            "timestamp":"2026-10-05T09:15:00+05:30", "open":100, "high":102, "low":99, "close":101, "volume":10}
+    records = [
+        {"kind":"underlying", "status":"OK", "response":[base]},
+        {"kind":"underlying", "status":"OK", "response":[{**base, "close":101.5, "high":102.5}]},
+    ]
+    import market_lab.hilega_market_evidence_v1 as evidence
+    monkeypatch.setattr(evidence, "verify_journal", lambda _: records)
+    rows, diagnostics = m.final_recorded_minutes("2026-10-05", path)
+    assert rows[0]["close"] == 101.5
+    assert diagnostics["revised_minutes"] == 1
+    assert diagnostics["resolution_policy"].startswith("FINAL_RECORDED_REVISION")
+
+
 def test_historical_builder_prefers_separate_forward_session(tmp_path, monkeypatch):
     import market_lab.hilega_wma_gap_historical_v1 as module
     frozen = tmp_path / "frozen"; forward = tmp_path / "forward"; day = "2026-10-06"
