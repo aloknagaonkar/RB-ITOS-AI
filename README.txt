@@ -1,25 +1,19 @@
-HILEGA LIVE SESSION STATUS FIX
+HILEGA CURRENT SESSION DATA CHECK
 
-Copy the backend/, frontend/, and tests/ files in this package into the root of
-your project, allowing them to replace the files at those paths.
+Copy backend/market_lab/hilega_current_session_data_check_cli_v1.py and
+tests/test_hilega_current_session_data_check_cli_v1.py into the matching paths
+in your project.
 
-Changed files:
-  backend/market_lab/hilega_directional_live_shadow_ui_v1.py
-  frontend/src/hilegaMilegaShadow.tsx
-  tests/test_hilega_directional_live_shadow_ui_v1.py
+With the backend API running, from the project root run:
+  PYTHONPATH=backend python -m market_lab.hilega_current_session_data_check_cli_v1
 
-The live status API previously used the last audit state across all dates as
-today's state. After the 14:55 cutoff, that could make yesterday's
-SESSION_LOCKED appear current the next morning. This fix scopes the state card
-to today's date in India Standard Time, while retaining saved audit and trade
-records. Their timestamps are shown so prior-session data is not mistaken for
-today's activity. When no decision has arrived for today, the page warns and
-identifies the date of the last recorded state.
+The command checks that the status API reports today's India-time session, a
+state record for today, and a completed 5-minute bar dated today. Exit code 0
+means both today's state and bar are returned. Exit code 1 means current data
+is missing or incomplete. Exit code 2 means the API could not be checked or
+does not return the expected status fields.
 
-The fix does not start the live worker or restore missing market data. If the
-warning still appears after applying the files, check that today's worker
-bootstrap completed and the current market-data feed is producing bars.
-Execution and paper orders remain disabled.
+For a different API address:
+  PYTHONPATH=backend python -m market_lab.hilega_current_session_data_check_cli_v1 --url "http://127.0.0.1:8123/api/live-shadow/hilega-directional/status?fast=true"
 
-From the project root, run:
-  python -m pytest tests/test_hilega_directional_live_shadow_ui_v1.py -q
+The check is read-only. It does not start or restart the worker.
