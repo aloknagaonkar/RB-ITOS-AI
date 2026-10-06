@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import os
 from collections import Counter
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException
 
@@ -13,6 +15,7 @@ from .hilega_market_evidence_v1 import verify_journal
 from .live_shadow_step_audit_v1 import ShadowStepAuditStoreV1
 
 MODEL = "HILEGA_DIRECTIONAL_LIVE_SHADOW_UI_V1"
+IST = ZoneInfo("Asia/Kolkata")
 DATA_DIR = Path("data/live-observation/hilega-directional-v1")
 STEP_AUDIT_PATH = DATA_DIR / "step-audit.jsonl"
 EVIDENCE_ROOT = Path("data/live-observation/hilega-directional-market-evidence-v1")
@@ -267,8 +270,13 @@ def status(fast: bool = False):
     rows = _rows()
     chain_ok, chain_issue = ((None, "VERIFICATION_DEFERRED") if fast else
                              _store().verify_chain() if STEP_AUDIT_PATH.exists() else (True, None))
-    current, latest_state = _state_payload(rows)
-    latest_accepted, latest_suppressed = _latest_event_rows(rows)
+    today = datetime.now(IST).date().isoformat()
+    today_rows = [row for row in rows if _record_session(row) == today]
+    current, today_state = _state_payload(today_rows)
+    current["session_date"] = today
+    current["state_available"] = today_state is not None
+    _, latest_state = _state_payload(rows)
+    latest_accepted, latest_suppressed = _latest_event_rows(today_rows)
     counts = Counter(row.get("stage") for row in rows)
     selected = os.getenv("LIVE_SHADOW_STRATEGY", "").strip().upper()
     return {
@@ -288,6 +296,7 @@ def status(fast: bool = False):
         "step_audit_chain_issue": chain_issue,
         "record_counts": dict(counts),
         "current": current,
+        "latest_state_session_date": _record_session(latest_state) if latest_state else None,
         "operational": _operational_payload(rows, fast=fast),
         "latest_state_record": latest_state,
         "latest_accepted_record": latest_accepted,
@@ -325,4 +334,6 @@ def events(limit: int = 200):
 
 @router.get("/trade-dashboard")
 def trade_dashboard():
-    return project_directional_shadow_dashboard(_rows())
+    today = datetime.now(IST).date().isoformat()
+    rows = [row for row in _rows() if _record_session(row) == today]
+    return project_directional_shadow_dashboard(rows)

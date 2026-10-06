@@ -19,6 +19,8 @@ type DirectionalStatus = {
   step_audit_chain_ok:boolean|null
   step_audit_chain_issue:string|null
   current:{
+    session_date:string
+    state_available:boolean
     trade_owner:Direction
     bullish_state:string|null
     bearish_state:string|null
@@ -28,6 +30,7 @@ type DirectionalStatus = {
   }
   latest_accepted_record:Record<string,any>|null
   latest_suppressed_record:Record<string,any>|null
+  latest_state_session_date:string|null
 }
 
 type AuditReport = {
@@ -269,6 +272,7 @@ export default function HilegaMilegaShadow(){
     }
     merged=overlayDirectionalTradeMarkers(merged,d.trades??[])
     merged=attachDirectionalTradeAuditMetadata(merged,d.trades??[])
+    merged=merged.filter(r=>r.checkpoint.slice(0,10)===s.current.session_date)
     if(active())setRows(merged as AuditReport[])
   }
 
@@ -313,6 +317,10 @@ export default function HilegaMilegaShadow(){
       <span>No CE/PE selector</span>
       <span>Audit chain {status?.step_audit_chain_ok===null?'verification deferred':status?.step_audit_chain_ok?'healthy':'check'}</span>
     </div>
+
+    {status?.current.state_available===false&&<div className="hilega-dashboard-warning">
+      No live decision has been recorded for {status.current.session_date}. The last recorded state is from {status.latest_state_session_date??'an earlier session'}; check that today's worker and market-data feed are running.
+    </div>}
 
     <div className="shadow-metrics hilega-dashboard-summary">
       <article><span>Trade owner</span><b>{words(status?.current.trade_owner??'NONE')}</b><small>Exclusive directional owner</small></article>
