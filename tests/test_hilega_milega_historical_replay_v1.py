@@ -57,6 +57,26 @@ def test_exact_5m_aggregation_fails_on_partial_bar():
         aggregate_exact_5m(rows, sd)
 
 
+def test_directional_replay_skips_only_incomplete_final_bar():
+    sd = date(2026, 9, 17)
+    rows = [candle(sd, 15, minute, 100 + minute) for minute in range(20, 29)]
+
+    with pytest.raises(ValueError, match="incomplete exact 5m candle 15:25"):
+        aggregate_exact_5m(rows, sd)
+
+    bars = aggregate_exact_5m(rows, sd, skip_incomplete_final_bar=True)
+
+    assert [bar.ts.strftime("%H:%M") for bar in bars] == ["15:20"]
+
+
+def test_directional_replay_still_rejects_other_final_bar_gaps():
+    sd = date(2026, 9, 17)
+    rows = [candle(sd, 15, minute, 100 + minute) for minute in (25, 26, 28)]
+
+    with pytest.raises(ValueError, match="incomplete exact 5m candle 15:25"):
+        aggregate_exact_5m(rows, sd, skip_incomplete_final_bar=True)
+
+
 def test_complete_session_policy_rejects_entire_missing_tail():
     sd = date(2026, 9, 17)
     rows = [candle(sd, 9, 15 + i, 100 + i) for i in range(10)]

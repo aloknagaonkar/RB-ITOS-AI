@@ -333,7 +333,11 @@ def replay_directional_sessions(
             current += timedelta(days=1)
             continue
 
-        bars = aggregate_exact_5m(candles, current)
+        bars = aggregate_exact_5m(
+            candles,
+            current,
+            skip_incomplete_final_bar=True,
+        )
 
         # Warm indicator histories only. Strategy comparisons and session states
         # must start fresh on the target session.

@@ -164,7 +164,11 @@ def load_or_fetch_1m(
 
 
 def aggregate_exact_5m(
-    candles: Iterable[HistoricalCandle], session_date: date, *, require_full_session: bool = False
+    candles: Iterable[HistoricalCandle],
+    session_date: date,
+    *,
+    require_full_session: bool = False,
+    skip_incomplete_final_bar: bool = False,
 ) -> list[FiveMinuteBar]:
     by_minute: dict[datetime, HistoricalCandle] = {}
     for c in candles:
@@ -188,9 +192,18 @@ def aggregate_exact_5m(
                 raise ValueError(f"missing exact 5m candle {label.strftime('%H:%M')} for {session_date}")
             continue
         if any(x is None for x in present):
+            if (
+                skip_incomplete_final_bar
+                and not require_full_session
+                and label.time() == time(15, 25)
+                and all(x is not None for x in present[:-1])
+                and present[-1] is None
+            ):
+                continue
             missing = [ts.strftime("%H:%M") for ts, x in zip(needed, present) if x is None]
             raise ValueError(
-                f"incomplete exact 5m candle {label.strftime('%H:%M')}; missing 1m: {','.join(missing)}"
+                f"incomplete exact 5m candle {label.strftime('%H:%M')} for {session_date}; "
+                f"missing 1m: {','.join(missing)}"
             )
         xs = [x for x in present if x is not None]
         bars.append(
