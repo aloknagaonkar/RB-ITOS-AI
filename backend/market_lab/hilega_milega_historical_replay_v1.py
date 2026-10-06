@@ -151,14 +151,19 @@ def load_or_fetch_1m(
     refresh_cache: bool = False,
 ) -> list[HistoricalCandle]:
     path = _cache_path(cache_root, session_date)
-    if not refresh_cache:
+    today = datetime.now(IST).date()
+    if not refresh_cache and session_date != today:
         cached = _read_cache(path, underlying, session_date)
         if cached is not None:
             return cached
-    candles = sorted(
-        gateway.historical_candles(underlying, session_date),
-        key=lambda c: c.timestamp,
-    )
+
+    candles: list[HistoricalCandle] = []
+    intraday_candles = getattr(gateway, "intraday_candles", None)
+    if session_date == today and callable(intraday_candles):
+        candles = intraday_candles(underlying, session_date)
+    if not candles:
+        candles = gateway.historical_candles(underlying, session_date)
+    candles = sorted(candles, key=lambda c: c.timestamp)
     _write_cache(path, underlying, session_date, candles)
     return candles
 

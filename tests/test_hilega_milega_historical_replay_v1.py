@@ -9,7 +9,9 @@ import pytest
 from market_lab.domain import HistoricalCandle, IST
 from market_lab.hilega_milega_historical_replay_v1 import (
     _decision_reason_rows,
+    _write_cache,
     aggregate_exact_5m,
+    load_or_fetch_1m,
     replay_sessions,
 )
 from market_lab.hilega_milega_strategy_v1 import (
@@ -75,6 +77,31 @@ def test_directional_replay_still_rejects_other_final_bar_gaps():
 
     with pytest.raises(ValueError, match="incomplete exact 5m candle 15:25"):
         aggregate_exact_5m(rows, sd, skip_incomplete_final_bar=True)
+
+
+def test_current_day_empty_cache_uses_intraday_endpoint(tmp_path):
+    today = datetime.now(IST).date()
+    cached_path = tmp_path / f"{today.isoformat()}.json"
+    _write_cache(cached_path, "NSE_INDEX|Nifty 50", today, [])
+    row = candle(today, 9, 15, 100)
+
+    class Gateway:
+        def intraday_candles(self, instrument_key, session_date):
+            assert instrument_key == "NSE_INDEX|Nifty 50"
+            assert session_date == today
+            return [row]
+
+        def historical_candles(self, instrument_key, session_date):
+            raise AssertionError("intraday data should be preferred for today")
+
+    candles = load_or_fetch_1m(
+        Gateway(),
+        underlying="NSE_INDEX|Nifty 50",
+        session_date=today,
+        cache_root=tmp_path,
+    )
+
+    assert candles == [row]
 
 
 def test_complete_session_policy_rejects_entire_missing_tail():
