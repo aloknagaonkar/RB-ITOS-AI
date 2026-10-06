@@ -12,7 +12,9 @@ COPIES = [
     "scripts/hilega_wma_gap_forward_publisher.py",
     "scripts/research_hilega_alignment_points_490.py",
     "scripts/validate_hilega_wma_delayed_confirmation.py",
+    "backend/market_lab/hilega_wma_gap_historical_v1.py",
     "tests/test_hilega_wma_gap_forward_publisher.py",
+    "tests/test_hilega_wma_gap_historical_v1.py",
 ]
 
 def backup(path):
@@ -39,7 +41,8 @@ def main():
         run([python, "-m", "pytest", "-q", "tests/test_hilega_wma_gap_forward_publisher.py", "tests/test_hilega_wma_gap_historical_v1.py", "tests/test_hilega_historical_ui_api_v1.py", "tests/test_backtest_hilega_wma_gap_490.py"])
         run([python, "-m", "py_compile", "scripts/hilega_wma_gap_forward_publisher.py",
              "scripts/research_hilega_alignment_points_490.py",
-             "scripts/validate_hilega_wma_delayed_confirmation.py"])
+             "scripts/validate_hilega_wma_delayed_confirmation.py",
+             "backend/market_lab/hilega_wma_gap_historical_v1.py"])
         run(["git", "diff", "--check"])
     except Exception as exc:
         restore(touched); print(f"STOP: validation failed; installed source restored: {exc}"); return 1
