@@ -250,7 +250,10 @@ def generate_session(day: str, cache_root: Path) -> tuple[list[dict], list[dict]
     )
     trades = [row for row in trades if row["session_date"] == day]
     if not trades:
-        raise ValueError(f"canonical replay produced no completed trades: {day}")
+        # A completed live session with no closed canonical trade is still a
+        # valid forward-confirmation observation. Publish the zero-trade day
+        # so it is counted and never retried indefinitely.
+        return [], [], []
     states, snapshots, minutes = delayed.build_indicator_states(
         cache_root, {day}, strategy_cutoff_only=True
     )

@@ -44,6 +44,21 @@ def test_session_publication_is_immutable_and_indexes_are_rebuilt(tmp_path, monk
     assert len(m.csv_rows(output / "trade-results.csv")) == 1
 
 
+def test_zero_trade_completed_session_is_published(tmp_path, monkeypatch):
+    day = "2026-10-05"; output = tmp_path / "forward"
+    monkeypatch.setattr(m, "ensure_recorded_cache", lambda *_: {
+        "source":"TEST", "minutes":374, "five_minute_bars":74,
+        "strategy_five_minute_bars":69,
+    })
+    monkeypatch.setattr(m, "generate_session", lambda *_: ([], [], []))
+    monkeypatch.setattr(m, "FROZEN_ROOT", tmp_path / "frozen")
+    result = m.publish_session(day, tmp_path / "cache", output)
+    assert result["status"] == "PUBLISHED"
+    assert result["signals"] == 0
+    assert result["candidate_entries"] == 0
+    assert (output / "sessions" / day / "manifest.json").is_file()
+
+
 def test_frozen_dates_are_never_selected_for_forward_publication(tmp_path, monkeypatch):
     frozen = tmp_path / "frozen"
     write_csv(frozen / "trade-results.csv", [{"session_date":"2026-10-01"}])
