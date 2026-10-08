@@ -65,6 +65,11 @@ def entry(row,policy):
     if row.get(prefix+'_points') is None:return None
     return prefix,stamp(row[prefix+'_entry_timestamp']),float(row[prefix+'_entry_price'])
 
+class InvalidEntryTiming(ValueError):
+    def __init__(self, detail):
+        self.detail=detail
+        super().__init__(detail["reason"])
+
 def exit_trade(row,bars,mins,entered):
     prefix,entry_time,price=entered;sign=1 if row['direction']=='BULLISH' else -1
     warning_label=stamp(row['exit_timestamp']);cutoff=stamp(row['session_date']+'T14:55:00+05:30')
@@ -77,7 +82,13 @@ def exit_trade(row,bars,mins,entered):
         if warning_bar is None:raise ValueError(f'Missing warning candle {row["trade_id"]}')
         if not math.isclose(float(row['exit_price']),warning_bar['close'],abs_tol=1e-6):raise ValueError(f'Warning close parity mismatch {row["trade_id"]}')
         warning_time=warning_bar['available']
-    if entry_time>warning_time:raise ValueError(f'Entry after warning {row["trade_id"]}')
+    reason = ('ENTRY_AT_OR_AFTER_SESSION_CUTOFF' if entry_time>=cutoff else
+              'ENTRY_AFTER_CANONICAL_WARNING' if entry_time>warning_time else None)
+    if reason:
+        raise InvalidEntryTiming(dict(reason=reason,entry_path=prefix,
+            entry_timestamp=entry_time.isoformat(),entry_price=price,
+            warning_candle_label=warning_label.isoformat(),warning_decision_time=warning_time.isoformat(),
+            cutoff_timestamp=cutoff.isoformat(),source_points=float(row[prefix+'_points'])))
     chosen=None;audit=[]
     if not is_cutoff:
         for b in bars:
@@ -115,12 +126,18 @@ def metrics(rows,field):
     return dict(max_drawdown=round(drawdown,2),entries=len(values),winners=sum(v>0 for v in values),losers=sum(v<0 for v in values),gains=round(g,2),losses=round(loss,2),net=round(g-loss,2),gain_loss_ratio=g/loss if loss else None)
 
 def analyze(report,bars,minutes):
-    details=[];dates=sorted({r['session_date'] for r in report['trades']})
+    details=[];excluded=[];dates=sorted({r['session_date'] for r in report['trades']})
     for row in report['trades']:
         for policy in ('WAITING_ENTRY','EARLIER_ADJACENT_GAP','BULLISH_EXPANSION_HYBRID'):
             entered=entry(row,policy)
             if entered is None:continue
-            details.append(dict(trade_id=row['trade_id'],session_date=row['session_date'],direction=row['direction'],entry_policy=policy,**exit_trade(row,bars[row['session_date']],minutes[row['session_date']],entered)))
+            identity=dict(trade_id=row['trade_id'],session_date=row['session_date'],direction=row['direction'],entry_policy=policy)
+            try:
+                evaluated=exit_trade(row,bars[row['session_date']],minutes[row['session_date']],entered)
+            except InvalidEntryTiming as exc:
+                excluded.append(dict(**identity,**exc.detail))
+                continue
+            details.append(dict(**identity,**evaluated))
     # Extended exits can overlap later fixed entries; this paired study never claims portfolio feasibility.
     for policy in ('WAITING_ENTRY','EARLIER_ADJACENT_GAP','BULLISH_EXPANSION_HYBRID'):
         selected=sorted([r for r in details if r['entry_policy']==policy],key=lambda r:r['entry_timestamp'])
@@ -137,7 +154,8 @@ def analyze(report,bars,minutes):
         for direction in ('ALL','BULLISH','BEARISH'):
             for policy in ('WAITING_ENTRY','EARLIER_ADJACENT_GAP','BULLISH_EXPANSION_HYBRID'):
                 rs=[r for r in details if r['session_date'] in days and r['entry_policy']==policy and (direction=='ALL' or r['direction']==direction)]
-                summaries.append(dict(cohort=cohort,direction=direction,entry_policy=policy,current=metrics(rs,'current_points'),ema10=metrics(rs,'ema10_points'),
+                invalid=[r for r in excluded if r['session_date'] in days and r['entry_policy']==policy and (direction=='ALL' or r['direction']==direction)]
+                summaries.append(dict(excluded_timing_entries=len(invalid),excluded_source_points=round(sum(r['source_points'] for r in invalid),2),cohort=cohort,direction=direction,entry_policy=policy,current=metrics(rs,'current_points'),ema10=metrics(rs,'ema10_points'),
                     delta_points=round(sum(r['delta_points'] for r in rs),2),improved=sum(r['delta_points']>0 for r in rs),worsened=sum(r['delta_points']<0 for r in rs),
                     winner_to_loser=sum(r['current_points']>0 and r['ema10_points']<0 for r in rs),loser_to_winner=sum(r['current_points']<0 and r['ema10_points']>0 for r in rs),
                     overlapping_extended_entries=sum(r.get('overlaps_previous_extended_trade',False) for r in rs),
@@ -146,8 +164,8 @@ def analyze(report,bars,minutes):
                     for label in sorted({fn(r[dimension]) for r in rs}):
                         subset=[r for r in rs if fn(r[dimension])==label]
                         bands.append(dict(cohort=cohort,direction=direction,entry_policy=policy,dimension=dimension,band=label,current=metrics(subset,'current_points'),ema10=metrics(subset,'ema10_points')))
-    return dict(model='HILEGA_CURRENT_WARNING_EMA10_EXIT_V1',sessions=len(dates),summary=summaries,gap_bands=bands,trades=details,execution_enabled=False,
-        warning='Paired trade research, not full sequential portfolio replay: extended exits may overlap later original entries. Current exit warning is latched; EMA10 before warning is ignored, equality does not confirm, same warning candle may confirm. Cutoff takes precedence at 14:55 open. EMA10 is SMA-seeded from first 10 five-minute PRICE closes and carries across sessions. Current canonical exit labels are candle OPEN labels; structural warnings become available five minutes later. Entry price/timestamps retained from source research. Minute high/low excursions exclude exit decision minute. Waiting-entry gap is not inferred from a different earlier timestamp. No fee or option fill model; no production changes.')
+    return dict(model='HILEGA_CURRENT_WARNING_EMA10_EXIT_V1',sessions=len(dates),excluded_entries=excluded,excluded_entry_count=len(excluded),summary=summaries,gap_bands=bands,trades=details,execution_enabled=False,
+        warning='Entries after the canonical warning or at/after session cutoff are excluded from BOTH paired exit metrics and listed separately; totals describe the eligible subset, not the full source strategy. Paired trade research, not full sequential portfolio replay: extended exits may overlap later original entries. Current exit warning is latched; EMA10 before warning is ignored, equality does not confirm, same warning candle may confirm. Cutoff takes precedence at 14:55 open. EMA10 is SMA-seeded from first 10 five-minute PRICE closes and carries across sessions. Current canonical exit labels are candle OPEN labels; structural warnings become available five minutes later. Entry price/timestamps retained from source research. Minute high/low excursions exclude exit decision minute. Waiting-entry gap is not inferred from a different earlier timestamp. No fee or option fill model; no production changes.')
 
 def self_test():
     day='2026-01-01';t=lambda hh:stamp(day+'T'+hh+':00+05:30')
@@ -163,7 +181,17 @@ def self_test():
     row.update(direction='BEARISH',candidate_points=-5);bars[0]['ema10']=104
     assert exit_trade(row,bars,mins,('candidate',t('10:00'),100))['hold_after_warning_minutes']==0
     assert gap_band(10)=='10_TO_20' and expansion_band(.25)=='0.25_TO_0.5'
-    print('PASS: warning latch, bullish/bearish signs, same-candle exit, equality wait, cutoff and bands')
+    row.update(direction='BULLISH',candidate_points=5)
+    report={'trades':[dict(row,candidate_entry_timestamp=t('10:06').isoformat(),candidate_entry_price=100,control_points=None)]}
+    analyzed=analyze(report,{day:bars},{day:mins})
+    assert not analyzed['trades'] and analyzed['excluded_entry_count']==1
+    assert analyzed['excluded_entries'][0]['reason']=='ENTRY_AFTER_CANONICAL_WARNING'
+    row['candidate_points']=5
+    assert exit_trade(row,bars,mins,('candidate',t('10:05'),100))['entry_timestamp']==t('10:05').isoformat()
+    try:exit_trade(row,bars,mins,('candidate',t('14:55'),100))
+    except InvalidEntryTiming as exc:assert exc.detail['reason']=='ENTRY_AT_OR_AFTER_SESSION_CUTOFF'
+    else:raise AssertionError('Cutoff entry must be excluded')
+    print('PASS: timing exclusions, zero eligible entries, warning latch, bullish/bearish signs, same-candle exit, equality wait, cutoff and bands')
 
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--self-test',action='store_true');p.add_argument('--report',type=Path,default=Path('data/historical-evidence/hilega-adjacent-gap-reconciled-490-v1/report.json'));p.add_argument('--cache-root',type=Path,default=Path('data/historical-evidence/hilega-milega-underlying-cache-v1'));p.add_argument('--expected-sessions',type=int,default=490);p.add_argument('--output-root',type=Path,default=Path('data/historical-evidence/hilega-warning-ema10-exit-v1'));a=p.parse_args()
@@ -175,7 +203,11 @@ if __name__=='__main__':
     a.output_root.mkdir(parents=True);(a.output_root/'report.json').write_text(json.dumps(result,indent=2))
     flat=[{k:v for k,v in r.items() if k!='audit'} for r in result['trades']]
     with (a.output_root/'trade-exits.csv').open('w',newline='') as f:
-        w=csv.DictWriter(f,fieldnames=list(flat[0]));w.writeheader();w.writerows(flat)
+        w=csv.DictWriter(f,fieldnames=list(flat[0]) if flat else ['trade_id','session_date','entry_policy']);w.writeheader();w.writerows(flat)
+    excluded=result['excluded_entries']
+    with (a.output_root/'excluded-entries.csv').open('w',newline='') as f:
+        w=csv.DictWriter(f,fieldnames=list(excluded[0]) if excluded else ['trade_id','session_date','entry_policy','reason']);w.writeheader();w.writerows(excluded)
+    print('Excluded timing entries (policy-specific):',len(excluded))
     for name in ('summary','gap_bands'):
         flattened=[]
         for r in result[name]:
@@ -184,7 +216,7 @@ if __name__=='__main__':
                 item.update({method+'_'+k:v for k,v in r[method].items()})
             flattened.append(item)
         with (a.output_root/(name+'.csv')).open('w',newline='') as f:
-            w=csv.DictWriter(f,fieldnames=list(flattened[0]));w.writeheader();w.writerows(flattened)
+            w=csv.DictWriter(f,fieldnames=list(flattened[0]) if flattened else ['cohort','direction','entry_policy']);w.writeheader();w.writerows(flattened)
     for r in result['summary']:
         if r['direction']!='ALL':print(json.dumps(r))
     print('Output:',a.output_root/'report.json');print('No strategy, audit, broker or source-cache changes.')
