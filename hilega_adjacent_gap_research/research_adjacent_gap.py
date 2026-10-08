@@ -29,6 +29,31 @@ def gap(ema, wma, direction):
 def passes(strength, current_gap, previous_gap):
     return strength >= .75 and current_gap > 0 and current_gap > previous_gap
 
+def gap_status(previous_gap, current_gap):
+    if previous_gap is None or current_gap is None:
+        return 'DATA_UNAVAILABLE'
+    if current_gap < 0:
+        return 'NEGATIVE_IMPROVING' if current_gap > previous_gap else 'NEGATIVE_NOT_IMPROVING'
+    if current_gap == 0:
+        return 'ZERO_GAP'
+    if previous_gap <= 0:
+        return 'CROSSED_POSITIVE'
+    if current_gap > previous_gap:
+        return 'POSITIVE_WIDENING'
+    return 'POSITIVE_UNCHANGED' if current_gap == previous_gap else 'POSITIVE_NARROWING'
+
+def decision_reasons(strength, previous_gap, current_gap):
+    if previous_gap is None or current_gap is None:
+        return ['WAIT_PREVIOUS_OR_CURRENT_DATA_UNAVAILABLE']
+    reasons = []
+    if strength < .75:
+        reasons.append('WAIT_WMA_BELOW_0_75')
+    if current_gap <= 0:
+        reasons.append('WAIT_GAP_NOT_POSITIVE')
+    if current_gap <= previous_gap:
+        reasons.append('WAIT_GAP_NOT_EXPANDING')
+    return reasons or ['FIRST_TOUCH_ENTRY_ELIGIBLE']
+
 def quantile(values, proportion):
     ordered = sorted(values); index = (len(ordered) - 1) * proportion
     lower = math.floor(index); upper = math.ceil(index)
@@ -87,6 +112,7 @@ def run(evidence, cache, output, expected_sessions):
         if not trace:
             raise ValueError('No control timeline for trade: ' + trade['trade_id'])
         chosen = None
+        first_observation_status = None
         for row in trace:
             if str(row['within_confirmation_window']).lower() not in {'true', '1'}:
                 continue
@@ -94,8 +120,12 @@ def run(evidence, cache, output, expected_sessions):
             current = observe(day, stamp)
             previous = observe(day, stamp - timedelta(minutes=1))
             if current is None or previous is None:
+                if first_observation_status is None:
+                    first_observation_status = 'DATA_UNAVAILABLE'
                 missing_comparisons += 1
                 checks.append({'trade_id': trade['trade_id'], 'timestamp': stamp.isoformat(),
+                    'gap_status': 'DATA_UNAVAILABLE',
+                    'decision_reasons': ['WAIT_PREVIOUS_OR_CURRENT_DATA_UNAVAILABLE'],
                     'status': 'DATA_UNAVAILABLE_WAIT', 'previous_timestamp': (stamp - timedelta(minutes=1)).isoformat()})
                 continue
             # Prove reconstructed warmup/indicator values match the frozen control.
@@ -107,12 +137,17 @@ def run(evidence, cache, output, expected_sessions):
             previous_gap = gap(previous['ema3'], previous['wma21'], direction)
             strength = float(row['directional_wma_change'])
             passed = passes(strength, current_gap, previous_gap)
+            category = gap_status(previous_gap, current_gap)
+            if first_observation_status is None:
+                first_observation_status = category
             check = {'trade_id': trade['trade_id'], 'session_date': day, 'direction': direction,
                 'signal_timestamp': trade['entry_timestamp'], 'current': current, 'previous': previous,
                 'directional_wma_strength': strength, 'previous_gap': previous_gap,
                 'current_gap': current_gap, 'gap_delta': current_gap - previous_gap,
                 'wma_pass': strength >= .75, 'positive_gap_pass': current_gap > 0,
                 'expansion_pass': current_gap > previous_gap,
+                'gap_status': category,
+                'decision_reasons': decision_reasons(strength, previous_gap, current_gap),
                 'passed': passed, 'status': 'ENTRY' if passed else 'WAIT'}
             checks.append(check)
             if passed:
@@ -121,6 +156,7 @@ def run(evidence, cache, output, expected_sessions):
         sign = 1 if direction == 'BULLISH' else -1
         points = None if chosen is None else sign * (float(trade['exit_price']) - chosen['current']['close'])
         comparisons.append({'trade_id': trade['trade_id'], 'session_date': day, 'direction': direction,
+            'first_observation_gap_status': first_observation_status or 'NO_ELIGIBLE_OBSERVATION',
             'signal_timestamp': trade['entry_timestamp'], 'canonical_entry_price': float(trade['entry_price']),
             'exit_timestamp': trade['exit_timestamp'], 'exit_price': float(trade['exit_price']),
             'exit_event': trade.get('exit_event'), 'canonical_points': float(trade['canonical_points']),
@@ -152,10 +188,21 @@ def run(evidence, cache, output, expected_sessions):
             daily.append({'session_date': day, 'direction': direction,
                 'control': summarize(subset, 'control_points', thresholds),
                 'candidate': summarize(subset, 'candidate_points', thresholds)})
-    report = {'model': 'ACTUAL_ADJACENT_MINUTE_GAP_RESEARCH_V1', 'sessions': len(dates),
+    gap_categories = []
+    for direction in ['ALL', 'BULLISH', 'BEARISH']:
+        selected = comparisons if direction == 'ALL' else [r for r in comparisons if r['direction'] == direction]
+        for category in sorted({r['first_observation_gap_status'] for r in selected}):
+            subset = [r for r in selected if r['first_observation_gap_status'] == category]
+            gap_categories.append({'direction': direction, 'first_observation_gap_status': category,
+                'grouping': 'One first actionable observation per signal; outcomes follow the complete waiting window',
+                'control': summarize(subset, 'control_points', thresholds),
+                'candidate': summarize(subset, 'candidate_points', thresholds)})
+    report = {'model': 'ACTUAL_ADJACENT_MINUTE_GAP_RESEARCH_V2', 'sessions': len(dates),
         'dates': dates, 'frozen_input_sha256': hashlib.sha256(trades_path.read_bytes()).hexdigest(),
         'verified_indicator_comparisons': verified, 'missing_comparisons': missing_comparisons,
         'top_decile_mfe_thresholds': thresholds, 'headline': headline, 'daily': daily,
+        'gap_categories': gap_categories,
+        'gap_classification_only': True,
         'trades': comparisons, 'minute_checks': checks, 'execution_enabled': False,
         'warning': 'Development research only. Prior minute reconstructed from its own completed close, without future candles. No EMA continuation/alignment gate. Original confirmation window and canonical exit retained. Missing comparison means WAIT. Denied-MFE counts measure denied setups, not post-entry MFE retention; fees, option P&L, and broker fill modelling excluded.'}
     output.mkdir(parents=True)
@@ -172,6 +219,17 @@ def self_test():
     assert not passes(.8, -.1, -.2)
     assert gap(40, 47, 'BEARISH') == 7
     assert quantile([0, 10], .9) == 9
+    assert gap_status(6.0, 6.55) == 'POSITIVE_WIDENING'
+    assert gap_status(6.55, 6.55) == 'POSITIVE_UNCHANGED'
+    assert gap_status(7.0, 6.55) == 'POSITIVE_NARROWING'
+    assert gap_status(-.2, .3) == 'CROSSED_POSITIVE'
+    assert gap_status(-2, -1) == 'NEGATIVE_IMPROVING'
+    assert gap_status(-1, -2) == 'NEGATIVE_NOT_IMPROVING'
+    assert gap_status(1, 0) == 'ZERO_GAP'
+    assert gap_status(None, 6.55) == 'DATA_UNAVAILABLE'
+    assert decision_reasons(.45, 6, 6.55) == ['WAIT_WMA_BELOW_0_75']
+    assert decision_reasons(.75, 6, 6.55) == ['FIRST_TOUCH_ENTRY_ELIGIBLE']
+    assert len(decision_reasons(.45, 7, -1)) == 3
     print('PASS: directional threshold, positive gap, expansion, equality and bearish sign checks')
 
 if __name__ == '__main__':

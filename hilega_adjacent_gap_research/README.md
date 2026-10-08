@@ -22,6 +22,34 @@ The preceding minute is reconstructed with its own close and the state before
 its five-minute slot; this includes the minute before the first existing trace.
 It is not a five-minute reference substituted for an adjacent minute.
 
+V2 adds `gap_status` and `decision_reasons` to each minute check, plus a
+`gap_categories` summary grouped by the first actionable observation per signal.
+Categories: positive widening, unchanged, narrowing, crossed positive, negative
+improving/not improving, zero, and data unavailable. These are diagnostic labels,
+not newly optimized width thresholds or profitability guarantees. Category
+outcomes include later entries within the existing window; they do not mean
+entry occurred immediately at the first categorized observation.
+The full VM run is currently blocked by frozen indicator parity divergence
+first seen September 25 after the last matching September 23 observation.
+This update deliberately retains that guard; no valid 490-session result is claimed.
+
+## Reconcile the observed September divergence
+
+The optional read-only reconciliation runner tests whether September 24 was
+absent from the original warmup cohort. It creates temporary symlinks, never
+removes a cache, refuses to exclude a date containing frozen trades, and compares
+all frozen trace prices, RSI, EMA and WMA states. It runs the first-touch research
+only after complete observation parity, recording input hashes and the omitted
+date in `history-reconciliation.json`. If it fails, no comparison is published.
+
+```bash
+PYTHONPATH=backend:. python hilega_adjacent_gap_research/reconcile_frozen_history.py --run-if-parity-matches
+```
+
+This is historical cohort reproduction, not a recommendation to ignore
+September 24 in live trading. Any future current-data comparison needs a
+separately regenerated canonical signal/control cohort.
+
 All rebuilt current values must match frozen control indicator values. Missing
 previous observation means WAIT, not contraction. Parity mismatch stops the run.
 The script checks for 490 trade-bearing dates; if this differs from your frozen
