@@ -1,0 +1,46 @@
+{
+  "backend/market_lab/hilega_wma_gap_live_v2.py": {
+    "before_sha256": null,
+    "installed_sha256": "f3a07b95e69e0e26f8c19acdd8991d8f01c8765213907a6116527019209f4318"
+  },
+  "backend/market_lab/live_shadow_worker_v1.py": {
+    "before_sha256": "ff0b539fcf50e23ad8e8171346c6198f0f3a2c50ff5cc9224ca3fad73dbb5db8",
+    "installed_sha256": "8127cdc37b80dd961c1490c319875cc034cccd684cf6a18671fd9388cdac30dd"
+  },
+  "backend/market_lab/hilega_sandbox_event_bridge_v1.py": {
+    "before_sha256": "3136e0591e5c1be23f71dd0efc4e602341717bbddd143c3f04364f80d528d300",
+    "installed_sha256": "0941cb7fb2211d7b3f9aeea1fa2645faef7aa4acfa60a16cc6bc55123c0f5a9a"
+  },
+  "backend/market_lab/hilega_upstox_sandbox_basket_v2.py": {
+    "before_sha256": "439050eec2452348ea0c76a16e295fcaf067d83e7b360dc4b2b21357b5e6af12",
+    "installed_sha256": "64e569d53d091a79dc5dc94993ffb34969c369f3e81cc6008ed8c536614d4b5d"
+  },
+  "backend/market_lab/hilega_directional_live_shadow_ui_v1.py": {
+    "before_sha256": "e56d951079c5786b0b7b0e9a947b713c036f9161b8d42edcaa190de169de8400",
+    "installed_sha256": "09e70999ef42a371931c2bf0576305706f97b64bd7b2ed79e8400ab2e38dd405"
+  },
+  "backend/market_lab/hilega_directional_live_shadow_v1.py": {
+    "before_sha256": "5310e303cb9c30fa13671c2651d82a5bf1b34e34c660faf6254168ce3c89281d",
+    "installed_sha256": "6ca4f10113618084c1a747344a82062372204e9efc9016b1d5151cc54e76e35c"
+  },
+  "backend/market_lab/hilega_milega_option_shadow_lifecycle_v1.py": {
+    "before_sha256": "d94fa3dd6d4a7db44dd2914da5b69498e1e539572b09acdb9174e116aebfbb16",
+    "installed_sha256": "a8eda639b80a8e35cb2223b467150b5a09317a38210db122cc0d970eea907053"
+  },
+  "backend/market_lab/hilega_milega_pe_option_shadow_lifecycle_v1.py": {
+    "before_sha256": "f5e6141677fabd07ef3fe0f4e52fb8ca179f0c6b6daf6032a450070bba730550",
+    "installed_sha256": "34746295b72eb931523ff5ded2f8754e916766941dfc91f642219e3895d10156"
+  },
+  "frontend/src/hilegaMilegaShadow.tsx": {
+    "before_sha256": "2c33abd45ec0ceababb35284b323fba576d503ea4a3fe6e6a0f99eddc5049d6a",
+    "installed_sha256": "0f9f81ab18025881668870a83bd88a19859507f3de5a8d9dc22bc03ea3b10161"
+  },
+  "tests/test_hilega_wma_gap_live_v2.py": {
+    "before_sha256": null,
+    "installed_sha256": "d1d11246a4ede8b1a3f80db01493e9e7a155f038a510c665935d34b79a39fbd2"
+  },
+  "scripts/hilega_wma_gap_forward_publisher.py": {
+    "before_sha256": "283ceebe0ec18bbc70b9ab229eafb537f7d300b80383f065af5e4b5d4a17767f",
+    "installed_sha256": "46bd01b9849418e03c1b38a7fc7e6dea6af5b848c5ac6a36c90993ba426ada83"
+  }
+}

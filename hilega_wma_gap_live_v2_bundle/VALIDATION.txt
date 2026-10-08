@@ -1,0 +1,8 @@
+Local validation: 70 targeted pytest tests passed.
+Python compilation passed for changed backend/scripts/tests.
+TypeScript compilation and Vite production build passed.
+Installer smoke test: source checks, backups, tests, build and .env strategy switch passed in an isolated local copy.
+Activation config tests: unrelated environment settings preserved.
+Broker scenarios used mocks only. No broker call or order was sent.
+Validation runtime: Python 3.12; installer repeats tests in the VM's own venv.
+No profitability claim is made for the new exit-boundary entry policy.
