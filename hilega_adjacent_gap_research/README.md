@@ -89,3 +89,13 @@ expansion bands describe the candidate entry, with development-block breakdowns.
 The trades section retains entry checks, previous/current indicators, both
 entry times/prices, common exit and results, sorted by worst policy difference.
 Bands are descriptive; they are not validated thresholds or live changes.
+
+## Entry condition diagnostics
+
+Run `python hilega_adjacent_gap_research/analyze_entry_conditions.py --self-test`
+then `python hilega_adjacent_gap_research/analyze_entry_conditions.py`.
+Reads the reconciled report; writes a separate entry-condition-diagnostics report.
+Displays fixed gap, expansion and WMA strength bands and RSI/EMA/WMA alignment
+and EMA continuation, separately for bullish/bearish, shared/additional trades,
+and the three development blocks. These are entry-time descriptive groups, not
+a backtested new policy or independent validation. Keep the live rule unchanged.
