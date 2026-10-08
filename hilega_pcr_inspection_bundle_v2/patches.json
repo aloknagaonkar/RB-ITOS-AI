@@ -1,0 +1,62 @@
+{
+  "backend/market_lab/api.py": [
+    [
+      "from .historical_replay_data_api_v1 import router as historical_replay_data_router",
+      "from .hilega_pcr_context_v1 import router as hilega_pcr_context_router\nfrom .historical_replay_data_api_v1 import router as historical_replay_data_router"
+    ],
+    [
+      "    app.include_router(live_shadow_router)",
+      "    app.include_router(hilega_pcr_context_router)\n    app.include_router(live_shadow_router)"
+    ]
+  ],
+  "frontend/src/hilegaDecisionTable.tsx": [
+    [
+      "import { Fragment, useEffect, useMemo, useState } from 'react'",
+      "import HilegaPcrAuditCard from './hilegaPcrContext'\nimport { Fragment, useEffect, useMemo, useState } from 'react'"
+    ],
+    [
+      "  return <div className=\"hd-audit\">",
+      "  return <div className=\"hd-audit\">\n    <HilegaPcrAuditCard at={String(r.audit_integrity?.decision_timestamp??allowedUntil??candleBoundary(r.checkpoint))}/>"
+    ]
+  ],
+  "frontend/src/hilegaUpstoxSandboxDashboard.tsx": [
+    [
+      "import {useEffect,useState} from 'react'",
+      "import {usePcrContext,strikeBias} from './hilegaPcrContext'\nimport {useEffect,useState} from 'react'"
+    ],
+    [
+      "function Basket({trade}:{trade:any}){return",
+      "function Basket({trade}:{trade:any}){const pcr=usePcrContext(undefined,trade.expiry);const active=trade.status!=='CLOSED_ACKNOWLEDGED';return"
+    ],
+    [
+      "<th>Submission status</th>",
+      "{active&&<th>Combined bias</th>}<th>Submission status</th>"
+    ],
+    [
+      "    <td>{leg.status}",
+      "    {active&&<td>{strikeBias(pcr,leg.strike,leg.instrument_key)}</td>}<td>{leg.status}"
+    ]
+  ],
+  "frontend/src/hilegaMilegaShadow.tsx": [
+    [
+      "import HilegaExpiryWorkspace from './hilegaExpiryWorkspace'",
+      "import HilegaPcrAuditCard,{usePcrContext,strikeBias} from './hilegaPcrContext'\nimport HilegaExpiryWorkspace from './hilegaExpiryWorkspace'"
+    ],
+    [
+      "  const activeTrades=useMemo",
+      "  const activePcr=usePcrContext()\n  const activeTrades=useMemo"
+    ],
+    [
+      "<th>Current %</th><th>MFE</th>",
+      "<th>Current %</th><th>Combined bias</th><th>MFE</th>"
+    ],
+    [
+      "<td>{l.current_return_pct==null?'\u2014':`${signed(l.current_return_pct)}%`}</td>",
+      "<td>{l.current_return_pct==null?'\u2014':`${signed(l.current_return_pct)}%`}</td><td>{strikeBias(activePcr,l.strike,l.instrument_key)}</td>"
+    ],
+    [
+      "  return <div className=\"hilega-audit-body\">",
+      "  return <div className=\"hilega-audit-body\">\n    <HilegaPcrAuditCard at={new Date(new Date(r.checkpoint).getTime()+300000).toISOString()}/>"
+    ]
+  ]
+}
