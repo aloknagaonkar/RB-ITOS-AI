@@ -273,6 +273,9 @@ def status(fast: bool = False):
     today = datetime.now(IST).date().isoformat()
     session_rows = [row for row in rows if _record_session(row) == today]
     current, latest_state = _state_payload(session_rows)
+    # Keep the nested current-state contract even before today's first audit.
+    # An absent bootstrap is not yesterday's state and is not a trading lock.
+    current["session_date"] = today
     latest_accepted, latest_suppressed = _latest_event_rows(session_rows)
     counts = Counter(row.get("stage") for row in rows)
     selected = os.getenv("LIVE_SHADOW_STRATEGY", "").strip().upper()
