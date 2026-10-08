@@ -74,3 +74,18 @@ Local validation used supplied reconstructed October 6–7 evidence (23 trades):
 Earlier preliminary analysis omitted six initial comparisons; these results now
 include their reconstructed preceding minute. They do not constitute a 490-session
 result. Full 490-session files are on your VM and must be tested there.
+
+## Loss attribution after the reconciled run
+
+Run `python hilega_adjacent_gap_research/analyze_gap_losses.py --self-test`, then
+`python hilega_adjacent_gap_research/analyze_gap_losses.py` from the repository root.
+This reads the already generated reconciled report without rebuilding indicators.
+Output: `data/historical-evidence/hilega-adjacent-gap-loss-diagnostics-v1/report.json`.
+
+Groups separate BOTH_ENTERED (entry timing), EARLIER_RULE_ONLY (additional
+setups), WAITING_RULE_ONLY (lost opportunities), and BOTH_DENIED. Each group
+shows bullish/bearish gains, losses, net and gain/loss ratio. Gap width and
+expansion bands describe the candidate entry, with development-block breakdowns.
+The trades section retains entry checks, previous/current indicators, both
+entry times/prices, common exit and results, sorted by worst policy difference.
+Bands are descriptive; they are not validated thresholds or live changes.
