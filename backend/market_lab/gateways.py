@@ -253,6 +253,13 @@ class UpstoxGateway:
             f"/v3/historical-candle/{encoded_key}/minutes/1/{requested_date}/{requested_date}",
             {},
         )
+        if not body.get("data", {}).get("candles"):
+            today_ist = datetime.now(IST).date()
+            if session_date == today_ist:
+                body = self._get(
+                    f"/v3/historical-candle/intraday/{encoded_key}/minutes/1",
+                    {},
+                )
         try:
             return normalize_upstox_historical_candles(instrument_key, session_date, body)
         except (ValueError, KeyError, TypeError):
@@ -270,6 +277,13 @@ class UpstoxGateway:
             f"{requested_date}/{requested_date}",
             {},
         )
+        if not body.get("data", {}).get("candles"):
+            today_ist = datetime.now(IST).date()
+            if session_date == today_ist:
+                body = self._get(
+                    f"/v3/historical-candle/intraday/{encoded_key}/minutes/1",
+                    {},
+                )
         try:
             return normalize_upstox_historical_candles(instrument_key, session_date, body)
         except (ValueError, KeyError, TypeError):
