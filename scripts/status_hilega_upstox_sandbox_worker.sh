@@ -10,4 +10,4 @@ if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
 else
   echo "Hilega sandbox worker: STOPPED"
 fi
-PYTHONPATH=backend:. .venv/bin/python -m market_lab.hilega_upstox_sandbox_live_worker_v1 --status
+PYTHONPATH=backend:. .venv/bin/python -m market_lab.hilega_upstox_sandbox_basket_v2 --status

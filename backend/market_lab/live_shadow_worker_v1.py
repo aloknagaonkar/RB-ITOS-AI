@@ -1,5 +1,7 @@
 """Observation-only shadow worker; run alongside market_lab.worker."""
 import os,time
+import json
+from pathlib import Path
 from datetime import date,datetime
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
@@ -17,19 +19,41 @@ from .midpoint_strategy.live_shadow_v1 import MidpointLiveShadowCoordinatorV1
 from .midpoint_strategy.config import live_shadow_config_from_env
 
 HILEGA_UNDERLYING = "NSE_INDEX|Nifty 50"
+_component_retry_after = {}
+
+
+def process_isolated_tick(now, tasks):
+    """One observation failure must not starve another strategy. Retry next tick."""
+    outcomes = {}
+    for name, callback in tasks:
+        if now.timestamp() < _component_retry_after.get(name, 0):
+            outcomes[name] = "RETRY_BACKOFF"
+            continue
+        try:
+            callback(now)
+            outcomes[name] = "OK"
+            _component_retry_after.pop(name, None)
+        except Exception as exc:
+            outcomes[name] = type(exc).__name__
+            _component_retry_after[name] = now.timestamp() + 30
+            # Do not log broker exception strings, credentials or response bodies.
+            print(json.dumps({"stage": "SHADOW_COMPONENT_ERROR", "component": name,
+                              "session_date": now.date().isoformat(),
+                              "timestamp": now.isoformat(), "error_type": type(exc).__name__}), flush=True)
+    path = Path("data/live-observation/shadow-worker-health.json")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps({"timestamp": now.isoformat(),
+                                   "session_date": now.date().isoformat(),
+                                   "components": outcomes}), encoding="utf-8")
+    temporary.replace(path)
+    return outcomes
 
 
 def _resolve_hilega_option_expiry(sources, *, session_date: date, configured_raw: str):
-    configured_raw = configured_raw.strip()
+    from .hilega_expiry_rollover_v1 import resolve_expiry
+    return resolve_expiry(sources, session_date=session_date, configured_raw=configured_raw)
 
-    if configured_raw:
-        return date.fromisoformat(configured_raw), "CONFIGURED_ENV"
-
-    expiry = sources.resolve_option_expiry(
-        HILEGA_UNDERLYING,
-        today=session_date,
-    )
-    return expiry, "AUTO_UPSTOX_INSTRUMENT_SEARCH"
 
 def run():
     load_dotenv('.env');engine=make_engine();initialize(engine)
@@ -93,6 +117,12 @@ def run():
                             "coordinator_source_sha256":hashlib.sha256(Path(coordinator_module.__file__).read_bytes()).hexdigest(),
                         })
                         coord=HilegaMilegaLiveShadowCoordinatorV1(market_sources=evidence,option_expiry=option_expiry)
+                    # AUTO_EXPIRY_DAILY_GUARD — independent of evidence recording.
+                    if getattr(coord, '_expiry_session_date', None) != now.date():
+                        option_expiry, option_expiry_source = _resolve_hilega_option_expiry(
+                            sources, session_date=now.date(), configured_raw=expiry_raw)
+                        coord.option_expiry = option_expiry
+                        coord._expiry_session_date = now.date()
                     if now.second>=30:
                         if evidence is not None:
                             evidence.tick(now)
@@ -156,11 +186,19 @@ def run():
                             "live_directional_source_sha256":hashlib.sha256(Path(live_directional_module.__file__).read_bytes()).hexdigest(),
                         })
                         coord=HilegaDirectionalLiveShadowCoordinatorV1(market_sources=evidence,option_expiry=option_expiry)
+                    # AUTO_EXPIRY_DAILY_GUARD — independent of evidence recording.
+                    if getattr(coord, '_expiry_session_date', None) != now.date():
+                        option_expiry, option_expiry_source = _resolve_hilega_option_expiry(
+                            sources, session_date=now.date(), configured_raw=expiry_raw)
+                        coord.option_expiry = option_expiry
+                        coord._expiry_session_date = now.date()
                     if now.second>=30:
-                        if evidence is not None:evidence.tick(now)
-                        coord.process(now)
+                        tasks = []
+                        if evidence is not None:tasks.append(("market_evidence", evidence.tick))
+                        tasks.append(("hilega", coord.process))
                         if midpoint_coord is not None:
-                            midpoint_coord.process(now)
+                            tasks.append(("midpoint", midpoint_coord.process))
+                        process_isolated_tick(now, tasks)
                     time.sleep(5)
             finally:
                 if evidence is not None:evidence.close()

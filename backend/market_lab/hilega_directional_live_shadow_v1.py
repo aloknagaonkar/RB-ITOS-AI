@@ -1093,8 +1093,9 @@ class HilegaDirectionalLiveShadowCoordinatorV1:
             if hasattr(self.sources, "warmup_candles"):
                 candles = self.sources.warmup_candles(d, self.cache_root)
             else:
-                candles = load_or_fetch_1m(self.sources, underlying=UNDERLYING, session_date=d,
-                                           cache_root=self.cache_root, refresh_cache=False)
+                from .hilega_milega_historical_replay_v1 import load_validated_warmup_1m
+                candles = load_validated_warmup_1m(self.sources, underlying=UNDERLYING,
+                                                  session_date=d, cache_root=self.cache_root)
             if candles:
                 for bar in aggregate_exact_5m(candles, d):
                     self.directional.on_bar(bar)

@@ -98,7 +98,7 @@ export default function HilegaHistoricalReplay(){
       ])
       if(!r.ok)throw new Error(`Session HTTP ${r.status}: ${await r.text()}`)
       const body=await r.json() as Response
-      if(dr.ok){
+      if(dr.ok && body.source!=='RECOVERED_HISTORICAL_REPLAY'){
         const directional=await dr.json()
         body.reports=overlayDirectionalAuditReports(body.reports??[],directional.rows??[])
         body.report_count=body.reports.length
@@ -231,7 +231,7 @@ export default function HilegaHistoricalReplay(){
         </>}
       </div>
 
-      <HilegaDirectionalReplayTrades sessionDate={selectedDate} />
+      {data?.source==='RECOVERED_HISTORICAL_REPLAY' ? <section className="panel"><h4>Recovered NIFTY trades · no option fills</h4><div style={{overflowX:'auto'}}><table><thead><tr><th>Direction</th><th>Signal candle</th><th>Decision</th><th>Entry time</th><th>Entry NIFTY</th><th>Exit candle</th><th>Exit NIFTY</th><th>Points</th><th>Canonical points</th></tr></thead><tbody>{((data as any).recovered_trades??[]).map((r:any)=><tr key={r.trade_id}><td>{r.direction}</td><td>{shortTime(r.entry_timestamp)}</td><td>{strategyVersion==='V1'?'ENTRY':r.candidate_decision}</td><td>{strategyVersion==='V1'?shortTime(r.entry_timestamp):r.candidate_entry_timestamp?shortTime(r.candidate_entry_timestamp):'—'}</td><td>{strategyVersion==='V1'?Number(r.entry_price).toFixed(2):r.candidate_entry_price==null?'—':Number(r.candidate_entry_price).toFixed(2)}</td><td>{shortTime(r.exit_timestamp)}</td><td>{Number(r.exit_price).toFixed(2)}</td><td>{strategyVersion==='V1'?Number(r.canonical_points).toFixed(2):r.candidate_points==null?'Not entered':Number(r.candidate_points).toFixed(2)}</td><td>{Number(r.canonical_points).toFixed(2)}</td></tr>)}</tbody></table></div><p>Denied V2 rows show the original canonical exit for comparison, not a V2 exit. Times are candle labels; no fees or slippage included.</p></section> : <HilegaDirectionalReplayTrades sessionDate={selectedDate} />}
 
       <HilegaDecisionTable key={`${selectedDate}-${data.source}-${step?'step':'full'}`} reports={reports}
         mode="HISTORICAL" visibleUntil={until}

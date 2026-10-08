@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import os
-from collections import Counter
+import json
 from datetime import datetime
+from .domain import IST
+from collections import Counter
 from pathlib import Path
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException
 
@@ -15,7 +16,6 @@ from .hilega_market_evidence_v1 import verify_journal
 from .live_shadow_step_audit_v1 import ShadowStepAuditStoreV1
 
 MODEL = "HILEGA_DIRECTIONAL_LIVE_SHADOW_UI_V1"
-IST = ZoneInfo("Asia/Kolkata")
 DATA_DIR = Path("data/live-observation/hilega-directional-v1")
 STEP_AUDIT_PATH = DATA_DIR / "step-audit.jsonl"
 EVIDENCE_ROOT = Path("data/live-observation/hilega-directional-market-evidence-v1")
@@ -271,14 +271,20 @@ def status(fast: bool = False):
     chain_ok, chain_issue = ((None, "VERIFICATION_DEFERRED") if fast else
                              _store().verify_chain() if STEP_AUDIT_PATH.exists() else (True, None))
     today = datetime.now(IST).date().isoformat()
-    today_rows = [row for row in rows if _record_session(row) == today]
-    current, today_state = _state_payload(today_rows)
+    session_rows = [row for row in rows if _record_session(row) == today]
+    current, latest_state = _state_payload(session_rows)
+    # Keep the nested current-state contract even before today's first audit.
+    # An absent bootstrap is not yesterday's state and is not a trading lock.
     current["session_date"] = today
-    current["state_available"] = today_state is not None
-    _, latest_state = _state_payload(rows)
-    latest_accepted, latest_suppressed = _latest_event_rows(rows)
+    current["state_available"] = latest_state is not None
+    _, latest_saved_state = _state_payload(rows)
+    latest_accepted, latest_suppressed = _latest_event_rows(session_rows)
     counts = Counter(row.get("stage") for row in rows)
     selected = os.getenv("LIVE_SHADOW_STRATEGY", "").strip().upper()
+    try:
+        worker_health = json.loads(Path("data/live-observation/shadow-worker-health.json").read_text())
+    except (OSError, ValueError):
+        worker_health = None
     return {
         "model": MODEL,
         "strategy_id": STRATEGY_ID,
@@ -296,9 +302,13 @@ def status(fast: bool = False):
         "step_audit_chain_issue": chain_issue,
         "record_counts": dict(counts),
         "current": current,
-        "latest_state_session_date": _record_session(latest_state) if latest_state else None,
+        "current_session_date": today,
+        "current_session_ready": latest_state is not None,
+        "worker_component_health": worker_health,
+        "session_warning": None if latest_state is not None else "WAITING_FOR_CURRENT_SESSION_BOOTSTRAP",
         "operational": _operational_payload(rows, fast=fast),
         "latest_state_record": latest_state,
+        "latest_state_session_date": _record_session(latest_saved_state) if latest_saved_state else None,
         "latest_accepted_record": latest_accepted,
         "latest_suppressed_record": latest_suppressed,
     }

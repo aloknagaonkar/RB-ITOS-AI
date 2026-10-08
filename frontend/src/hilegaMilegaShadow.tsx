@@ -1,3 +1,4 @@
+import HilegaExpiryWorkspace from './hilegaExpiryWorkspace'
 import { useEffect, useMemo, useState } from 'react'
 import HilegaDecisionTable,{type HilegaAudit} from './hilegaDecisionTable'
 import {overlayDirectionalTradeMarkers} from './hilegaDirectionalTradeMarkerOverlay'
@@ -306,6 +307,8 @@ export default function HilegaMilegaShadow(){
   return <div className="shadow-page hilega-page">
     {modeSelector}
     {error&&<div className="banner error">{error}</div>}
+
+    <HilegaExpiryWorkspace/>
 
     <HilegaUpstoxSandboxDashboard/>
 

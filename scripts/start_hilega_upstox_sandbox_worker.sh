@@ -14,7 +14,7 @@ if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
 fi
 
 nohup env PYTHONPATH="$ROOT/backend${PYTHONPATH:+:$PYTHONPATH}" \
-  "$ROOT/.venv/bin/python" -m market_lab.hilega_upstox_sandbox_live_worker_v1 \
+  "$ROOT/.venv/bin/python" -m market_lab.hilega_upstox_sandbox_basket_v2 \
   --serve --interval-seconds 10 \
   >> "$LOG_FILE" 2>&1 < /dev/null &
 

@@ -119,7 +119,8 @@ def test_auto_resolver_fails_closed_when_none_valid():
         )
 
 
-def test_configured_expiry_is_exact_override():
+def test_configured_expiry_is_exact_override(monkeypatch):
+    monkeypatch.setenv("HILEGA_OPTION_EXPIRY_MODE", "MANUAL")
     class Sources:
         def resolve_option_expiry(self, *args, **kwargs):
             raise AssertionError(
@@ -133,7 +134,7 @@ def test_configured_expiry_is_exact_override():
     )
 
     assert expiry == date(2026, 9, 29)
-    assert source_name == "CONFIGURED_ENV"
+    assert source_name == "EXPLICIT_MANUAL_EXPIRY"
 
 
 def test_missing_config_uses_provider_resolution():

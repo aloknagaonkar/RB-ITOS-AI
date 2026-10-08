@@ -68,6 +68,9 @@ def build_dashboard(
     env_path: Path = Path(".env"),
     pid_path: Path = DEFAULT_PID,
 ) -> dict[str, Any]:
+    from .hilega_upstox_sandbox_basket_v2 import CONTROL as BASKET_CONTROL, build_dashboard as basket_dashboard
+    if control_path == DEFAULT_CONTROL and dispatch_path == DEFAULT_DISPATCH and BASKET_CONTROL.exists():
+        return basket_dashboard(env_path)
     control = JsonControl(control_path).read()
     store = DispatchStore(dispatch_path)
     day = str(control.get("session_date") or datetime.now(IST).date().isoformat())
@@ -158,7 +161,7 @@ def build_dashboard(
             "win_rate_pct": wins * 100 / (wins + losses) if wins + losses else None,
         },
         "active_trade": opened[0] if opened else None,
-        "completed_trades": sorted(closed, key=lambda x: str(x["exit_time"]), reverse=True),
+        "completed_trades": sorted([x for x in trades if x["status"] == "CLOSED"], key=lambda x: str(x["exit_time"]), reverse=True),
         "blocked_events": blocked[-50:][::-1],
         "last_refresh": datetime.now(IST).isoformat(),
         "safety": {"sandbox_only": True, "live_execution_enabled": False},

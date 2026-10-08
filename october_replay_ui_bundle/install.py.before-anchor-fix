@@ -19,7 +19,7 @@ def once(text, old, new):
 def patches():
     api = ROOT / 'backend/market_lab/hilega_historical_ui_api_v1.py'
     text = api.read_text()
-    text = once(text, '        from .hilega_wma_gap_historical_v1 import (\n', '        from .recovered_replay_ui_v1 import load_hilega\n        recovered = load_hilega(day.isoformat(), "V1" if strategy.strip().upper() == "V1" else "V2")\n        if recovered is not None:\n            return recovered\n        from .hilega_wma_gap_historical_v1 import (\n')
+    text = once(text, '    is_v1 = strategy.strip().upper() == "V1"\n', '    is_v1 = strategy.strip().upper() == "V1"\n    from .recovered_replay_ui_v1 import load_hilega\n    recovered = load_hilega(day.isoformat(), "V1" if is_v1 else "V2")\n    if recovered is not None:\n        return recovered\n')
     text = once(text, '    return sorted(sessions, key=lambda x: x["session_date"], reverse=True)', '    from .recovered_replay_ui_v1 import hilega_sessions\n    return hilega_sessions(sorted(sessions, key=lambda x: x["session_date"], reverse=True))')
     api.write_text(text)
     mp = ROOT / 'backend/market_lab/midpoint_strategy/live_shadow_ui.py'

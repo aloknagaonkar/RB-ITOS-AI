@@ -151,29 +151,48 @@ def load_or_fetch_1m(
     refresh_cache: bool = False,
 ) -> list[HistoricalCandle]:
     path = _cache_path(cache_root, session_date)
-    today = datetime.now(IST).date()
-    if not refresh_cache and session_date != today:
+    if not refresh_cache:
         cached = _read_cache(path, underlying, session_date)
         if cached is not None:
             return cached
-
-    candles: list[HistoricalCandle] = []
-    intraday_candles = getattr(gateway, "intraday_candles", None)
-    if session_date == today and callable(intraday_candles):
-        candles = intraday_candles(underlying, session_date)
-    if not candles:
-        candles = gateway.historical_candles(underlying, session_date)
-    candles = sorted(candles, key=lambda c: c.timestamp)
+    candles = sorted(
+        gateway.historical_candles(underlying, session_date),
+        key=lambda c: c.timestamp,
+    )
     _write_cache(path, underlying, session_date, candles)
     return candles
 
 
+def load_validated_warmup_1m(gateway, *, underlying, session_date, cache_root):
+    """Repair incomplete operational warmup caches without inventing candles.
+
+    Fetch and validate BEFORE replacing a corrupt cache; keep its original bytes.
+    This helper is live-bootstrap only and does not alter frozen replay evidence.
+    """
+    candles = load_or_fetch_1m(gateway, underlying=underlying,
+                              session_date=session_date, cache_root=cache_root)
+    if not candles:
+        return candles
+    try:
+        aggregate_exact_5m(candles, session_date, require_full_session=True)
+        return candles
+    except ValueError:
+        repaired = sorted(gateway.historical_candles(underlying, session_date),
+                          key=lambda candle: candle.timestamp)
+        if not repaired:
+            raise ValueError("WARMUP_REPAIR_EMPTY")
+        aggregate_exact_5m(repaired, session_date, require_full_session=True)
+        path = _cache_path(cache_root, session_date)
+        if path.exists():
+            backup = path.with_name(path.name + ".pre-warmup-repair-" +
+                                    datetime.now().strftime("%Y%m%dT%H%M%S%f"))
+            backup.write_bytes(path.read_bytes())
+        _write_cache(path, underlying, session_date, repaired)
+        return repaired
+
+
 def aggregate_exact_5m(
-    candles: Iterable[HistoricalCandle],
-    session_date: date,
-    *,
-    require_full_session: bool = False,
-    skip_incomplete_final_bar: bool = False,
+    candles: Iterable[HistoricalCandle], session_date: date, *, require_full_session: bool = False
 ) -> list[FiveMinuteBar]:
     by_minute: dict[datetime, HistoricalCandle] = {}
     for c in candles:
@@ -197,18 +216,9 @@ def aggregate_exact_5m(
                 raise ValueError(f"missing exact 5m candle {label.strftime('%H:%M')} for {session_date}")
             continue
         if any(x is None for x in present):
-            if (
-                skip_incomplete_final_bar
-                and not require_full_session
-                and label.time() == time(15, 25)
-                and all(x is not None for x in present[:-1])
-                and present[-1] is None
-            ):
-                continue
             missing = [ts.strftime("%H:%M") for ts, x in zip(needed, present) if x is None]
             raise ValueError(
-                f"incomplete exact 5m candle {label.strftime('%H:%M')} for {session_date}; "
-                f"missing 1m: {','.join(missing)}"
+                f"incomplete exact 5m candle {label.strftime('%H:%M')}; missing 1m: {','.join(missing)}"
             )
         xs = [x for x in present if x is not None]
         bars.append(

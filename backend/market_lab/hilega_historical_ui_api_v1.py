@@ -315,7 +315,8 @@ def list_sessions(root: Path = ROOT, replay_root: Path = REPLAY_ROOT,
             "expiry": (best.get("manifest") or {}).get("expiry"),
             "available_sources": alternatives,
         })
-    return sorted(sessions, key=lambda x: x["session_date"], reverse=True)
+    from .recovered_replay_ui_v1 import hilega_sessions
+    return hilega_sessions(sorted(sessions, key=lambda x: x["session_date"], reverse=True))
 
 
 def _load_audit_candidate(candidate: dict):
@@ -661,6 +662,10 @@ def strategy_test(session_date: str = Query(..., min_length=10, max_length=10),
     except ValueError as exc:
         raise HTTPException(422, "Invalid session date") from exc
     try:
+        from .recovered_replay_ui_v1 import load_hilega
+        recovered = load_hilega(day.isoformat(), "V1" if strategy.strip().upper() == "V1" else "V2")
+        if recovered is not None:
+            return recovered
         from .hilega_wma_gap_historical_v1 import (
             build_v1_session,
             build_wma_gap_session,

@@ -122,14 +122,9 @@ def _combined_live_timeline(audit_path: Path = AUDIT_PATH) -> list[dict[str, Any
     decisions = _decision_timeline_projection(
         _with_nifty_points(_recent_rows(_all_rows(audit_path), keep=2))
     )
-    minutes = _market_health_timeline(audit_path)
-    combined = [*decisions, *minutes]
-    combined.sort(key=lambda row: (
-        str(row.get("timestamp") or ""),
-        0 if row.get("is_health_minute") else 1,
-        str(row.get("event_id") or ""),
-    ))
-    return combined
+    # Health is projected into columns; never interleave synthetic minute events
+    # or reorder the immutable strategy event stream.
+    return decisions
 
 
 def _row_day(row: dict[str, Any]) -> str | None:
@@ -1260,7 +1255,7 @@ def option_observation(session_date: str, as_of: str):
         raise HTTPException(422, "Exact option observation tape unreadable") from exc
 
 
-def _manifest():
+def _base_manifest_recovered_adapter():
     if not HIST_MANIFEST.exists():
         return {"model": "MIDPOINT_UI_REPLAY_MANIFEST_V1", "sessions": []}
     try:
@@ -1269,7 +1264,16 @@ def _manifest():
         raise HTTPException(422, f"Midpoint historical manifest unreadable: {type(exc).__name__}") from exc
 
 
+def _manifest():
+    from ..recovered_replay_ui_v1 import midpoint_manifest
+    return midpoint_manifest(_base_manifest_recovered_adapter())
+
+
 def _historical_session_dir(session_date: str) -> Path:
+    from ..recovered_replay_ui_v1 import midpoint_dir
+    recovered = midpoint_dir(session_date)
+    if recovered is not None:
+        return recovered
     allowed = {str(x.get("session_date")) for x in _manifest().get("sessions", [])}
     if session_date not in allowed:
         raise HTTPException(404, "Midpoint historical session not found")

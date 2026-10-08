@@ -260,6 +260,21 @@ class HilegaUpstoxSandboxLiveWorkerV1:
         skipped = 0
         executor = self.executor_factory(sandbox)
         for intent in eligible:
+            from .hilega_sandbox_prearm_exit_guard_v1 import is_prearm_exit
+            if is_prearm_exit(intent, intents, control, self.dispatch.rows()):
+                self.dispatch.append({
+                    "model": MODEL, "intent_id": intent["intent_id"],
+                    "trade_id": intent["trade_id"], "event_type": "EXIT",
+                    "event_timestamp": intent["event_timestamp"],
+                    "direction": intent["direction"], "session_date": session_date,
+                    "source_sequence": intent["source_sequence"],
+                    "status": "SKIPPED_PRE_ARM_TRADE_EXIT", "terminal": True,
+                    "reason": "Matching shadow entry preceded arming; no Sandbox submission exists",
+                    "sandbox_only": True, "broker_called": False,
+                    "live_order_sent": False, "timestamp": now.isoformat(),
+                })
+                skipped += 1
+                continue
             accepted = self.dispatch.accepted_orders(session_date)
             if len(accepted) >= int(control["max_orders"]):
                 self._engage_kill_switch(control, "SESSION_ORDER_LIMIT_REACHED")

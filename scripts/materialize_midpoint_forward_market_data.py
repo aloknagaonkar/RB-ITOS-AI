@@ -193,6 +193,20 @@ def write_jsonl(path: Path, rows: list[dict]) -> None:
             handle.write(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n")
 
 
+def resolve_required_september_future(client, days):
+    """Legacy September guard applies only when a requested date uses it."""
+    september_days = [day for day in days if date(2026, 9, 9) <= day <= SEPTEMBER_EXPIRY]
+    if not september_days:
+        return None
+    contract = resolve_expired_future(client, min(september_days), [SEPTEMBER_EXPIRY])
+    if contract is None:
+        raise RuntimeError("SEPTEMBER_29_EXPIRED_FUTURE_NOT_AVAILABLE_FROM_UPSTOX. "
+                           "No forward evidence was written.")
+    if contract.expiry != SEPTEMBER_EXPIRY:
+        raise AssertionError(f"SEPTEMBER_EXPIRY_MISMATCH_{contract}")
+    return contract
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dates", nargs="+", type=date.fromisoformat, default=DEFAULT_DATES)
@@ -239,27 +253,11 @@ def main() -> int:
         try:
             with _client() as client:
                 expiries = available_expiries(client)
-                september_expired = resolve_expired_future(
-                    client,
-                    min(missing),
-                    [SEPTEMBER_EXPIRY],
-                )
-                if september_expired is None:
-                    raise RuntimeError(
-                        "SEPTEMBER_29_EXPIRED_FUTURE_NOT_AVAILABLE_FROM_UPSTOX. "
-                        "The provider has not published the expired contract yet; "
-                        "no forward evidence was written."
-                    )
-                if september_expired.expiry != SEPTEMBER_EXPIRY:
-                    raise AssertionError(
-                        f"SEPTEMBER_EXPIRY_MISMATCH_{september_expired}"
-                    )
-                print(
-                    "RESOLVED SEPTEMBER EXPIRED FUTURE",
-                    september_expired.instrument_key,
-                    "expiry", september_expired.expiry,
-                    "live_key", SEPTEMBER_LIVE_INSTRUMENT_KEY,
-                )
+                september_expired = resolve_required_september_future(client, missing)
+                if september_expired is not None:
+                    print("RESOLVED SEPTEMBER EXPIRED FUTURE",
+                          september_expired.instrument_key, "expiry", september_expired.expiry,
+                          "live_key", SEPTEMBER_LIVE_INSTRUMENT_KEY)
                 for day in missing:
                     index_rows = sources.historical_candles(INDEX, day)
                     contract = (
@@ -267,7 +265,7 @@ def main() -> int:
                         if date(2026, 9, 9) <= day <= date(2026, 9, 29)
                         else resolve_active_future(client, day, expiries)
                     )
-                    if day <= date(2026, 9, 29) and (
+                    if date(2026, 9, 9) <= day <= SEPTEMBER_EXPIRY and (
                         contract.expiry != SEPTEMBER_EXPIRY
                         or contract.source != "EXPIRED_FUTURE_API"
                     ):
@@ -307,7 +305,7 @@ def main() -> int:
         write_jsonl(folder / "minutes.jsonl", rows)
         session_metadata = {
             "session_date": day.isoformat(),
-            "block": "FORWARD_OOS_2026-09",
+            "block": "FORWARD_OOS_2026-09" if date(2026, 9, 9) <= day <= SEPTEMBER_EXPIRY else "HISTORICAL_MARKET_RECOVERY",
             "minute_count": len(rows),
             "first_minute": rows[0]["timestamp"],
             "last_minute": rows[-1]["timestamp"],
