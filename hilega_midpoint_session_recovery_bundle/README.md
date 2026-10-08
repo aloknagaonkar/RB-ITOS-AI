@@ -1,9 +1,11 @@
 # Hilega / Midpoint session recovery
 
-Revision 2: restores the nested `current.session_date` response contract when
-today has no bootstrap. A fixed-date regression covers yesterday's lock and
-today's empty state. Local installer-selected suite: 37 tests passed. Your VM
-has additional tests; the installer runs those existing test files as well.
+Revision 3: restores the complete supplied stale-session status contract:
+`current.session_date`, `current.state_available`, and
+`latest_state_session_date`. Yesterday's saved data remains accessible, but
+its lock is never treated as today's active state. The fixed-date regression
+checks all supplied backend assertions. Local installer-selected suite:
+37 tests passed. Your VM has additional tests; those remain untouched.
 
 Based on the supplied repository ZIP, commit d0e6de4d492a751bcf447ca020c87a8b4449d500.
 

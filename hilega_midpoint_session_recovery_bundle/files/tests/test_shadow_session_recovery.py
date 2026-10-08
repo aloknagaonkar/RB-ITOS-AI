@@ -65,6 +65,9 @@ def test_previous_lock_returns_today_empty_state(tmp_path, monkeypatch):
         }}])
     result = directional_ui.status(fast=True)
     assert result["current"]["session_date"] == "2026-10-06"
+    assert result["current"]["state_available"] is False
+    assert result["latest_state_session_date"] == "2026-10-05"
+    assert result["latest_accepted_record"] is None
     assert result["current"]["bullish_state"] is None
     assert result["current"]["bearish_state"] is None
     assert result["current"]["last_completed_bar"] is None

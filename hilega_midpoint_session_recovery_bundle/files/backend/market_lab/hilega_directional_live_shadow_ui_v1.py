@@ -276,6 +276,8 @@ def status(fast: bool = False):
     # Keep the nested current-state contract even before today's first audit.
     # An absent bootstrap is not yesterday's state and is not a trading lock.
     current["session_date"] = today
+    current["state_available"] = latest_state is not None
+    _, latest_saved_state = _state_payload(rows)
     latest_accepted, latest_suppressed = _latest_event_rows(session_rows)
     counts = Counter(row.get("stage") for row in rows)
     selected = os.getenv("LIVE_SHADOW_STRATEGY", "").strip().upper()
@@ -306,6 +308,7 @@ def status(fast: bool = False):
         "session_warning": None if latest_state is not None else "WAITING_FOR_CURRENT_SESSION_BOOTSTRAP",
         "operational": _operational_payload(rows, fast=fast),
         "latest_state_record": latest_state,
+        "latest_state_session_date": _record_session(latest_saved_state) if latest_saved_state else None,
         "latest_accepted_record": latest_accepted,
         "latest_suppressed_record": latest_suppressed,
     }
