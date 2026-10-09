@@ -1,0 +1,18 @@
+{
+  "backend/market_lab/hilega_pcr_context_v1.py": {
+    "previous": "dac4048b21f488ac9e4373d524c71e3ff136bdad327aaeb409e2aca53502a1cb",
+    "updated": "d47e11db850ae4d33483525c458f123b4b7e817b48de92f9ca42bd9c0b0d8d5a"
+  },
+  "frontend/src/hilegaPcrContext.tsx": {
+    "previous": "29c384bf3ebbcad88be43bdb7342df6772935cf6199b027a88d0feff21ef14e3",
+    "updated": "1ba4d14ed45c87e8ac12d56fcd2074bdb11503eb1aa9e3897e5fd3a1e5221d6b"
+  },
+  "frontend/src/hilegaPcrWorkspace.tsx": {
+    "previous": "aba4b0f014595cfd05b82418425e6f09c351b92dd055156212a9811c2652235e",
+    "updated": "7171e76a149ac7e8dd0f8dbb7ea0be92e326302527d9792fcf53f286261b3d5c"
+  },
+  "tests/test_hilega_pcr_context_v1.py": {
+    "previous": "485add6bc637cb5454d828bc8d22e080cd0f48bec1c488e02bc7a22015aa21d7",
+    "updated": "27986c56b5694c76f6a942a8118265fbf0dda23e900b74ec3b10eca4a4d3c197"
+  }
+}
