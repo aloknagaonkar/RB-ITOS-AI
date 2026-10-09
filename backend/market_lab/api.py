@@ -4,6 +4,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request, Query
+from .hilega_pcr_context_v1 import router as hilega_pcr_context_router
 from .historical_replay_data_api_v1 import router as historical_replay_data_router
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -60,12 +61,13 @@ def create_app(engine=None, historical_gateway_factory=None):
         yield
 
     app = FastAPI(title="Market Strategy Lab", version="0.1.0", lifespan=lifespan)
+    app.include_router(hilega_pcr_context_router)
     app.include_router(live_shadow_router)
     app.include_router(hilega_milega_live_shadow_router)
     app.include_router(midpoint_strategy_live_shadow_router)
     app.include_router(hilega_directional_live_shadow_router)
     app.include_router(hilega_upstox_sandbox_dashboard_router)
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "testserver", "35.234.215.131"])
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "testserver", "35.200.172.52"])
     app.add_middleware(GZipMiddleware, minimum_size=1000)
     app.add_middleware(
         CORSMiddleware,

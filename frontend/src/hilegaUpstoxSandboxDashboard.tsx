@@ -1,13 +1,14 @@
+import {usePcrContext,strikeBias} from './hilegaPcrContext'
 import {useEffect,useState} from 'react'
 const n=(v:any)=>v==null?'—':Number(v).toLocaleString('en-IN',{maximumFractionDigits:2})
 const money=(v:any)=>v==null?'Unavailable':`₹${n(v)}`
 const t=(v:any)=>v?new Date(v).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',hour12:false}):'—'
 const cls=(v:any)=>v==null?'':Number(v)>=0?'positive':'negative'
-function Basket({trade}:{trade:any}){return <article className="panel shadow-panel">
+function Basket({trade}:{trade:any}){const pcr=usePcrContext(undefined,trade.expiry);const active=trade.status!=='CLOSED_ACKNOWLEDGED';return <article className="panel shadow-panel">
   <div className="panel-heading"><div><h3>{trade.direction} · {trade.trade_id}</h3><p>Signal {t(trade.signal_time)} · Expiry {trade.expiry} · {trade.status}</p><p>{trade.partial_basket?'PARTIAL BASKET: inspect per-leg acknowledgements.':'Five Sandbox contracts'} · {trade.missing_pnl_legs} legs with unavailable P&amp;L</p></div><b className={cls(trade.pnl_rupees)}>{money(trade.pnl_rupees)} {trade.missing_pnl_legs?'known-price subtotal':'estimated'}</b></div>
-  <div className="shadow-table-scroll"><table className="shadow-table"><thead><tr><th>Contract</th><th>Submission status</th><th>Quantity</th><th>Entry time / price</th><th>Current quote / time</th><th>Exit time / price</th><th>Estimated points / P&amp;L</th><th>BUY / SELL order IDs</th></tr></thead><tbody>{trade.legs.map((leg:any)=><tr key={leg.role}>
+  <div className="shadow-table-scroll"><table className="shadow-table"><thead><tr><th>Contract</th>{active&&<th>Combined bias</th>}<th>Submission status</th><th>Quantity</th><th>Entry time / price</th><th>Current quote / time</th><th>Exit time / price</th><th>Estimated points / P&amp;L</th><th>BUY / SELL order IDs</th></tr></thead><tbody>{trade.legs.map((leg:any)=><tr key={leg.role}>
     <td>ATM{leg.role===0?'':leg.role>0?`+${leg.role}`:leg.role} · {n(leg.strike)} {leg.option_type}<small>{leg.instrument_key}</small></td>
-    <td>{leg.status}<small>Order acknowledgement is not a fill confirmation</small></td><td>{leg.quantity}</td>
+    {active&&<td>{strikeBias(pcr,leg.strike,leg.instrument_key)}</td>}<td>{leg.status}<small>Order acknowledgement is not a fill confirmation</small></td><td>{leg.quantity}</td>
     <td>{t(leg.entry_time)}<small>{n(leg.entry_price)}</small></td><td>{leg.exit_order_id?'—':n(leg.current_price)}<small>{t(leg.quote_timestamp)}</small></td>
     <td>{t(leg.exit_time)}<small>{n(leg.exit_price)}</small></td><td className={cls(leg.pnl_rupees)}>{n(leg.points)}<small>{money(leg.pnl_rupees)}</small></td>
     <td>{leg.entry_order_id??'Not acknowledged'}<small>{leg.exit_order_id??'Not acknowledged'}</small></td>

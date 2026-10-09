@@ -1,3 +1,5 @@
+import HilegaPcrWorkspace from './hilegaPcrWorkspace'
+import HilegaPcrAuditCard,{usePcrContext,strikeBias} from './hilegaPcrContext'
 import HilegaExpiryWorkspace from './hilegaExpiryWorkspace'
 import { useEffect, useMemo, useState } from 'react'
 import HilegaDecisionTable,{type HilegaAudit} from './hilegaDecisionTable'
@@ -128,6 +130,7 @@ function AuditDetail({r}:{r:AuditReport}){
   const entry=firstEntry(r)
   const exit=firstExit(r)
   return <div className="hilega-audit-body">
+    <HilegaPcrAuditCard at={new Date(new Date(r.checkpoint).getTime()+300000).toISOString()}/>
     <div className="shadow-detail-grid" style={{gridTemplateColumns:'repeat(auto-fit,minmax(210px,1fr))'}}>
       <span>Checkpoint <b>{dt(r.checkpoint)}</b></span><span>Route <b>{words(r.strategy.selected_route)}</b></span>
       <span>State <b>{words(r.strategy.state_before)} → {words(r.strategy.state_after)}</b></span>
@@ -253,14 +256,16 @@ export default function HilegaMilegaShadow(){
   const [detail,setDetail]=useState<AuditReport|null>(null)
   const [auditLoading,setAuditLoading]=useState(false)
   const [error,setError]=useState('')
+  const [gapChecks,setGapChecks]=useState<Record<string,any>[]>([])
 
   const refresh=async(active:()=>boolean)=>{
-    const [s,d]=await Promise.all([
+    const [s,d,g]=await Promise.all([
       getDirectional<DirectionalStatus>('/status?fast=true'),
       getDirectional<Dashboard>('/trade-dashboard'),
+      getDirectional<{rows:Record<string,any>[]}>('/wma-gap-evaluations?limit=100'),
     ])
     if(!active())return
-    setStatus(s);setDashboard(d);setError('')
+    setStatus(s);setDashboard(d);setGapChecks(g.rows);setError('')
     const [a,dr]=await Promise.all([
       getBullish<AuditReport[]>('/audit-index?limit=200'),
       fetch('/api/live-shadow/hilega-directional-candles/live?audit_only=true'),
@@ -276,13 +281,14 @@ export default function HilegaMilegaShadow(){
     if(active())setRows(merged as AuditReport[])
   }
 
-  useEffect(()=>{let active=true;let inFlight=false;const poll=async()=>{if(!active||inFlight||document.hidden)return;inFlight=true;try{await refresh(()=>active)}catch(e){if(active)setError((e as Error).message)}finally{inFlight=false}};void poll();const t=setInterval(()=>void poll(),5000);return()=>{active=false;clearInterval(t)}},[])
+  useEffect(()=>{let active=true;let inFlight=false;const poll=async()=>{if(!active||inFlight||document.hidden)return;inFlight=true;try{await refresh(()=>active)}catch(e){if(active)setError((e as Error).message)}finally{inFlight=false}};void poll();const t=setInterval(()=>void poll(),15000);return()=>{active=false;clearInterval(t)}},[])
 
   const activity=useMemo(()=>rows.filter(r=>r.transitions.length>0||(r.strategy.events_emitted||[]).length>0),[rows])
   const entries=useMemo(()=>activity.flatMap(r=>r.transitions.filter(isEntry).map(t=>({r,t}))),[activity])
   const exits=useMemo(()=>activity.flatMap(r=>r.transitions.filter(isExit).map(t=>({r,t}))),[activity])
   const latestEntry=entries[0]??null
   const latestExit=exits[0]??null
+  const activePcr=usePcrContext()
   const activeTrades=useMemo(()=>dashboard?.trades.filter(t=>String(t.status).toUpperCase()==='ACTIVE')??[],[dashboard])
   const exitedTrades=useMemo(()=>dashboard?.trades.filter(t=>String(t.status).toUpperCase()!=='ACTIVE')??[],[dashboard])
 
@@ -308,7 +314,16 @@ export default function HilegaMilegaShadow(){
     {modeSelector}
     {error&&<div className="banner error">{error}</div>}
 
+    <div className="shadow-safety"><b>Active strategy: {status?.selected_live_shadow_strategy??'Loading'}</b><span>Structural exit · exit-first processing</span></div>
+    {status?.selected_live_shadow_strategy==='HILEGA_WMA_GAP_V2_LIVE_SHADOW'&&<section className="panel">
+      <h2>WMA-gap V2 · minute decision audit</h2>
+      <p>Previous and current are actual adjacent completed minutes. A replacement entry on the exit boundary requires both minutes to satisfy WMA strength.</p>
+      <div style={{overflowX:'auto'}}><table><thead><tr><th>Decision time</th><th>Direction</th><th>Previous gap</th><th>Current gap</th><th>Expansion</th><th>Previous WMA strength</th><th>Current WMA strength</th><th>Persistence</th><th>Decision / reason</th></tr></thead>
+      <tbody>{gapChecks.slice().reverse().map((r,i)=>{const p=r.payload??{};return <tr key={r.record_hash??i}><td>{tm(p.decision_timestamp)}</td><td>{p.direction}</td><td>{num(p.previous_gap,4)}</td><td>{num(p.current_gap,4)}</td><td>{num(p.gap_delta,4)}</td><td>{num(p.previous_directional_wma_strength,4)}</td><td>{num(p.directional_wma_strength,4)}</td><td>{p.persistence_pass?'PASS':'WAIT'}</td><td>{p.status} · {(p.reasons??[]).join(', ')||'All conditions passed'}</td></tr>})}</tbody></table></div>
+      {!gapChecks.length&&<p>No current-session V2 evaluations yet.</p>}
+    </section>}
     <HilegaExpiryWorkspace/>
+    <HilegaPcrWorkspace/>
 
     <HilegaUpstoxSandboxDashboard/>
 
@@ -347,7 +362,7 @@ export default function HilegaMilegaShadow(){
               <small>Decision boundary {tm(t.signal_boundary??plusMinutes(t.signal_bar,5))} · {side} entry {tm(entryTime)} · Expiry {t.expiry??'—'} · ATM {num(t.atm,0)} · Signal NIFTY {num(t.signal_spot)}</small>
             </div>{t.direction==='BULLISH'&&<button onClick={()=>void openTradeAudit(t.signal_bar)}>{isOpen?'Hide audit':'Audit ▾'}</button>}</div>
             {t.issue&&<div className="hilega-dashboard-warning">Data limitation: {t.issue}</div>}
-            {t.legs.length>0&&<div className="shadow-table-scroll"><table className="shadow-table hilega-economics-table"><thead><tr><th>{side}</th><th>Entry time</th><th>Entry premium</th><th>Latest premium</th><th>Current pts</th><th>Current %</th><th>MFE</th><th>MAE</th></tr></thead><tbody>{t.legs.map(l=><tr key={l.instrument_key}><td>{role(l.relation_to_atm)} · {num(l.strike,0)} {side}</td><td>{tm(l.entry_timestamp)}</td><td>{num(l.entry_open)}</td><td>{num(l.latest_close)}</td><td className={l.current_points==null?'':l.current_points>=0?'positive':'negative'}>{signed(l.current_points)}</td><td>{l.current_return_pct==null?'—':`${signed(l.current_return_pct)}%`}</td><td>{num(l.mfe_points)}</td><td>{num(l.mae_points)}</td></tr>)}</tbody></table></div>}
+            {t.legs.length>0&&<div className="shadow-table-scroll"><table className="shadow-table hilega-economics-table"><thead><tr><th>{side}</th><th>Entry time</th><th>Entry premium</th><th>Latest premium</th><th>Current pts</th><th>Current %</th><th>Combined bias</th><th>MFE</th><th>MAE</th></tr></thead><tbody>{t.legs.map(l=><tr key={l.instrument_key}><td>{role(l.relation_to_atm)} · {num(l.strike,0)} {side}</td><td>{tm(l.entry_timestamp)}</td><td>{num(l.entry_open)}</td><td>{num(l.latest_close)}</td><td className={l.current_points==null?'':l.current_points>=0?'positive':'negative'}>{signed(l.current_points)}</td><td>{l.current_return_pct==null?'—':`${signed(l.current_return_pct)}%`}</td><td>{strikeBias(activePcr,l.strike,l.instrument_key)}</td><td>{num(l.mfe_points)}</td><td>{num(l.mae_points)}</td></tr>)}</tbody></table></div>}
             {isOpen&&<div className="hilega-inline-audit"><h3>Full detailed bullish audit · {t.signal_bar}</h3>{auditLoading&&<p>Refreshing detailed audit…</p>}{detail&&<AuditDetail r={detail}/>}</div>}
           </article>
         })}

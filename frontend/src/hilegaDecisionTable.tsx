@@ -1,3 +1,4 @@
+import HilegaPcrAuditCard from './hilegaPcrContext'
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import './hilegaDecisionTable.css'
 
@@ -645,6 +646,7 @@ function Detail({r,reports,allowedUntil,origin,originRoute,displayKind,lifecycle
   const snapshotTime=r.option_market_snapshot?.signal_boundary
   const visibleSnapshot=allowedUntil===undefined||reached(snapshotTime,allowedUntil)
   return <div className="hd-audit">
+    <HilegaPcrAuditCard at={String(r.audit_integrity?.decision_timestamp??allowedUntil??candleBoundary(r.checkpoint))}/>
     <div className="hd-cards">
       <article><b>Nifty candle</b><span>{clock(r.checkpoint)} IST</span><span>O {val(cand.open)} · H {val(cand.high)} · L {val(cand.low)} · C {val(cand.close)}</span><span>Volume {val(cand.volume)}</span></article>
       <article><b>Indicators</b><span>RSI9 {money(ind.rsi9)} (prev {money(ind.previous_rsi9)})</span><span>EMA3(RSI) {money(ind.ema3_rsi)} (prev {money(ind.previous_ema3_rsi)})</span><span>WMA21(RSI) {money(ind.wma21_rsi)} (prev {money(ind.previous_wma21_rsi)})</span>{r.conditions?.wma21_slope_change!==undefined&&<><span>WMA21 change {money(r.conditions.wma21_slope_change)} · {val(r.conditions.wma21_slope_direction)}</span><span>Compared candle timestamps: {shortDateTime(r.conditions.wma21_previous_candle)} → {shortDateTime(r.conditions.wma21_current_candle)} ({val(r.conditions.wma21_slope_interval_minutes)} min)</span><span>WMA slope rule: {r.conditions.wma21_slope_required===true?`${val(r.conditions.wma21_slope_gate_status)} · V2 enforced`:'INFORMATIONAL ONLY · V1 does not gate entries'}</span>{r.conditions.wma21_slope_required===true&&<><span>No minimum slope threshold</span><span>Directional gate: {score(direction==='BULLISH'?r.conditions.bullish_wma21_slope_pass:r.conditions.bearish_wma21_slope_pass)}</span><span>Rejection: {val(direction==='BULLISH'?r.conditions.bullish_wma21_slope_rejection:r.conditions.bearish_wma21_slope_rejection)}</span></>}</>}</article>

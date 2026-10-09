@@ -76,7 +76,8 @@ class IntentStore:
 def _timestamp(record: dict[str, Any]) -> str:
     payload = record.get("payload") or {}
     candidate = (
-        record.get("checkpoint")
+        payload.get("decision_timestamp")
+        or record.get("checkpoint")
         or payload.get("bar_timestamp")
         or payload.get("cutoff_timestamp")
         or record.get("event_time")
@@ -133,81 +134,87 @@ class HilegaSandboxEventBridgeV1:
         with self.store.lock:
             existing = self.store.rows()
             existing_ids = {row["intent_id"] for row in existing}
-            active = self._active_trades(existing)
+            active_by_strategy = {}
+            for existing_strategy in {(r.get("strategy_id") or "HILEGA_DIRECTIONAL_SHADOW_V1") for r in existing}:
+                active_by_strategy[existing_strategy] = self._active_trades([r for r in existing if (r.get("strategy_id") or "HILEGA_DIRECTIONAL_SHADOW_V1") == existing_strategy])
+            active = {}
             written = 0
             ignored = 0
             blocked = 0
 
             for record in self.source.read_all():
+                record_strategy = (record.get("payload") or {}).get("strategy_id") or "HILEGA_DIRECTIONAL_SHADOW_V1"
                 names = self._accepted_events(record)
                 if not names:
                     continue
-                if len(names) > 1:
-                    raise BridgeError(
-                        f"ambiguous accepted execution events at source sequence {record.get('sequence')}: {names}"
-                    )
-                name = names[0]
-                intent_id = hashlib.sha256(
-                    f"{record['record_hash']}|{name}".encode()
-                ).hexdigest()
-                if intent_id in existing_ids:
-                    ignored += 1
-                    continue
+                if len(names) > 1 and not (record_strategy == "HILEGA_WMA_GAP_V2_LIVE_SHADOW" and len(names)==2 and sum(n in EXIT_EVENTS for n in names)==1 and sum(n in ENTRY_EVENTS for n in names)==1):
+                    raise BridgeError(f"ambiguous accepted execution events: {names}")
+                active = active_by_strategy.setdefault(record_strategy, {})
+                # Causal ordering within one record: SELL intent before BUY intent.
+                for name in sorted(names, key=lambda n: 0 if n in EXIT_EVENTS else 1):
+                    intent_id = hashlib.sha256(
+                        f"{record['record_hash']}|{name}".encode()
+                    ).hexdigest()
+                    if intent_id in existing_ids:
+                        ignored += 1
+                        continue
 
-                direction = EVENT_DIRECTION[name]
-                event_type = "ENTRY" if name in ENTRY_EVENTS else "EXIT"
-                timestamp = _timestamp(record)
-                open_trade = active.get(direction)
+                    direction = EVENT_DIRECTION[name]
+                    event_type = "ENTRY" if name in ENTRY_EVENTS else "EXIT"
+                    timestamp = _timestamp(record)
+                    open_trade = active.get(direction)
 
-                if event_type == "ENTRY":
-                    if open_trade is not None:
-                        decision = "WOULD_NOT_SUBMIT"
-                        reason_code = "DIRECTION_ALREADY_OPEN"
-                        trade_id = open_trade["trade_id"]
-                        blocked += 1
+                    if event_type == "ENTRY":
+                        if open_trade is not None:
+                            decision = "WOULD_NOT_SUBMIT"
+                            reason_code = "DIRECTION_ALREADY_OPEN"
+                            trade_id = open_trade["trade_id"]
+                            blocked += 1
+                        else:
+                            decision = "WOULD_SUBMIT"
+                            reason_code = "ACCEPTED_HILEGA_ENTRY"
+                            trade_id = _trade_id(direction, timestamp, record["record_hash"])
                     else:
-                        decision = "WOULD_SUBMIT"
-                        reason_code = "ACCEPTED_HILEGA_ENTRY"
-                        trade_id = _trade_id(direction, timestamp, record["record_hash"])
-                else:
-                    if open_trade is None:
-                        decision = "WOULD_NOT_SUBMIT"
-                        reason_code = "NO_OPEN_BRIDGE_TRADE"
-                        trade_id = None
-                        blocked += 1
-                    else:
-                        decision = "WOULD_SUBMIT"
-                        reason_code = "ACCEPTED_HILEGA_EXIT"
-                        trade_id = open_trade["trade_id"]
+                        if open_trade is None:
+                            decision = "WOULD_NOT_SUBMIT"
+                            reason_code = "NO_OPEN_BRIDGE_TRADE"
+                            trade_id = None
+                            blocked += 1
+                        else:
+                            decision = "WOULD_SUBMIT"
+                            reason_code = "ACCEPTED_HILEGA_EXIT"
+                            trade_id = open_trade["trade_id"]
 
-                row = {
-                    "model": MODEL,
-                    "intent_id": intent_id,
-                    "event_id": f"HILEGA-AUDIT-{record['record_hash'][:24]}-{event_type}",
-                    "trade_id": trade_id,
-                    "event_type": event_type,
-                    "direction": direction,
-                    "option_type": "CE" if direction == "BULLISH" else "PE",
-                    "transaction_type": "BUY" if event_type == "ENTRY" else "SELL",
-                    "event_timestamp": timestamp,
-                    "source_event": name,
-                    "source_sequence": record.get("sequence"),
-                    "source_record_hash": record.get("record_hash"),
-                    "decision": decision,
-                    "reason_code": reason_code,
-                    "quantity_policy": "ONE_DYNAMIC_BROKER_LOT",
-                    "broker_called": False,
-                    "sandbox_order_sent": False,
-                    "live_order_sent": False,
-                    "observation_only": True,
-                }
-                self.store.append(row)
-                existing_ids.add(intent_id)
-                written += 1
-                if decision == "WOULD_SUBMIT" and event_type == "ENTRY":
-                    active[direction] = row
-                elif decision == "WOULD_SUBMIT" and event_type == "EXIT":
-                    active.pop(direction, None)
+                    row = {
+                        "model": MODEL,
+                        "intent_id": intent_id,
+                        "event_id": f"HILEGA-AUDIT-{record['record_hash'][:24]}-{event_type}",
+                        "trade_id": trade_id,
+                        "event_type": event_type,
+                        "direction": direction,
+                        "option_type": "CE" if direction == "BULLISH" else "PE",
+                        "transaction_type": "BUY" if event_type == "ENTRY" else "SELL",
+                        "event_timestamp": timestamp,
+                        "source_event": name,
+                        "source_sequence": record.get("sequence"),
+                        "source_record_hash": record.get("record_hash"),
+                        "strategy_id": record_strategy,
+                        "decision": decision,
+                        "reason_code": reason_code,
+                        "quantity_policy": "ONE_DYNAMIC_BROKER_LOT",
+                        "broker_called": False,
+                        "sandbox_order_sent": False,
+                        "live_order_sent": False,
+                        "observation_only": True,
+                    }
+                    self.store.append(row)
+                    existing.append(row)
+                    existing_ids.add(intent_id)
+                    written += 1
+                    if decision == "WOULD_SUBMIT" and event_type == "ENTRY":
+                        active[direction] = row
+                    elif decision == "WOULD_SUBMIT" and event_type == "EXIT":
+                        active.pop(direction, None)
 
             return {
                 "model": MODEL,

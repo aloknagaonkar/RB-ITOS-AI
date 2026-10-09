@@ -15,6 +15,7 @@ from .hilega_directional_live_shadow_v1 import (
     STRATEGY_ID as HILEGA_DIRECTIONAL_STRATEGY_ID,
     HilegaDirectionalLiveShadowCoordinatorV1,
 )
+from .hilega_wma_gap_live_v2 import HilegaWmaGapLiveCoordinatorV2, STRATEGY_ID as WMA_GAP_V2_ID
 from .midpoint_strategy.live_shadow_v1 import MidpointLiveShadowCoordinatorV1
 from .midpoint_strategy.config import live_shadow_config_from_env
 
@@ -133,7 +134,8 @@ def run():
             finally:
                 if evidence is not None:
                     evidence.close()
-        elif selected==HILEGA_DIRECTIONAL_STRATEGY_ID:
+        elif selected in {HILEGA_DIRECTIONAL_STRATEGY_ID, WMA_GAP_V2_ID}:
+            directional_factory = HilegaWmaGapLiveCoordinatorV2 if selected == WMA_GAP_V2_ID else HilegaDirectionalLiveShadowCoordinatorV1
             expiry_raw=os.getenv("HILEGA_MILEGA_OPTION_EXPIRY","").strip()
             option_expiry, option_expiry_source = _resolve_hilega_option_expiry(
                 sources,
@@ -156,11 +158,13 @@ def run():
                 journal.append("process_start", {"session_date":datetime.now(IST).date().isoformat()}, {
                     "expiry":option_expiry.isoformat() if option_expiry else None,
                     "expiry_source":option_expiry_source,
+                    "strategy_id":selected,
+                    "wma_gap_live_source_sha256":hashlib.sha256(Path(__import__('market_lab.hilega_wma_gap_live_v2',fromlist=['x']).__file__).read_bytes()).hexdigest() if selected==WMA_GAP_V2_ID else None,
                     "directional_source_sha256":hashlib.sha256(Path(directional_module.__file__).read_bytes()).hexdigest(),
                     "live_directional_source_sha256":hashlib.sha256(Path(live_directional_module.__file__).read_bytes()).hexdigest(),
                 })
                 active_sources=evidence
-            coord=HilegaDirectionalLiveShadowCoordinatorV1(market_sources=active_sources,option_expiry=option_expiry)
+            coord=directional_factory(market_sources=active_sources,option_expiry=option_expiry)
             midpoint_coord=MidpointLiveShadowCoordinatorV1(
                 market_sources=sources,
                 config=live_shadow_config_from_env(),
@@ -182,10 +186,12 @@ def run():
                         journal.append("process_start", {"session_date":now.date().isoformat()}, {
                             "expiry":option_expiry.isoformat() if option_expiry else None,
                     "expiry_source":option_expiry_source,
-                            "directional_source_sha256":hashlib.sha256(Path(directional_module.__file__).read_bytes()).hexdigest(),
+                            "strategy_id":selected,
+                    "wma_gap_live_source_sha256":hashlib.sha256(Path(__import__('market_lab.hilega_wma_gap_live_v2',fromlist=['x']).__file__).read_bytes()).hexdigest() if selected==WMA_GAP_V2_ID else None,
+                    "directional_source_sha256":hashlib.sha256(Path(directional_module.__file__).read_bytes()).hexdigest(),
                             "live_directional_source_sha256":hashlib.sha256(Path(live_directional_module.__file__).read_bytes()).hexdigest(),
                         })
-                        coord=HilegaDirectionalLiveShadowCoordinatorV1(market_sources=evidence,option_expiry=option_expiry)
+                        coord=directional_factory(market_sources=evidence,option_expiry=option_expiry)
                     # AUTO_EXPIRY_DAILY_GUARD — independent of evidence recording.
                     if getattr(coord, '_expiry_session_date', None) != now.date():
                         option_expiry, option_expiry_source = _resolve_hilega_option_expiry(

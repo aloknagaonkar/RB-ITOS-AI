@@ -131,7 +131,7 @@ class BasketWorker:
             cfg=SandboxConfig.from_env(self.env);cfg.assert_ready('SANDBOX_ONLY') # Config's V1 cap is intentionally not consulted for submission counts.
             bridge=HilegaSandboxEventBridgeV1(BridgeConfig(True,Path(os.getenv('HILEGA_SANDBOX_BRIDGE_SOURCE',str(DEFAULT_SOURCE))),Path(os.getenv('HILEGA_SANDBOX_BRIDGE_OUTPUT',str(DEFAULT_OUTPUT)))))
             bridge.run_once();intents=IntentStore(bridge.config.output).rows()
-            eligible=sorted([r for r in intents if r.get('decision')=='WOULD_SUBMIT' and r['event_timestamp'][:10]==c['session_date'] and int(r['source_sequence'])>int(c['baseline_source_sequence']) and r['intent_id'] not in self.store.terminal_ids()],key=lambda r:(int(r['source_sequence']),r['intent_id']))
+            eligible=sorted([r for r in intents if r.get('decision')=='WOULD_SUBMIT' and r['event_timestamp'][:10]==c['session_date'] and int(r['source_sequence'])>int(c['baseline_source_sequence']) and r['intent_id'] not in self.store.terminal_ids() and (r.get('strategy_id')==c['strategy_id'] or (not r.get('strategy_id') and c['strategy_id']=='HILEGA_DIRECTIONAL_SHADOW_V1'))],key=lambda r:(int(r['source_sequence']),0 if r['event_type']=='EXIT' else 1,r['intent_id']))
             transport=self.transport or BasketTransport(cfg.analytics_token,cfg.sandbox_token)
             try:
                 for r in eligible:self.process(r,intents,transport,cfg)

@@ -290,7 +290,8 @@ def status(fast: bool = False):
         "strategy_id": STRATEGY_ID,
         "strategy_version": STRATEGY_VERSION,
         "selected_live_shadow_strategy": selected or None,
-        "directional_mode_active": selected == STRATEGY_ID,
+        "directional_mode_active": selected in {STRATEGY_ID, "HILEGA_WMA_GAP_V2_LIVE_SHADOW"},
+        "active_strategy_id": selected or STRATEGY_ID,
         "observation_only": True,
         "execution_enabled": False,
         "paper_order_enabled": False,
@@ -345,3 +346,14 @@ def events(limit: int = 200):
 @router.get("/trade-dashboard")
 def trade_dashboard():
     return project_directional_shadow_dashboard(_rows())
+
+
+@router.get("/wma-gap-evaluations")
+def wma_gap_evaluations(limit: int = 100):
+    if not 1 <= limit <= 2000:
+        raise HTTPException(422, "limit must be between 1 and 2000")
+    today = datetime.now(IST).date().isoformat()
+    result = [r for r in _rows() if r.get("stage")=="WMA_GAP_MINUTE_EVALUATION"
+              and str((r.get("payload") or {}).get("minute_timestamp", "")).startswith(today)
+              and r.get("status") != "RECOVERED"]
+    return {"strategy_id": "HILEGA_WMA_GAP_V2_LIVE_SHADOW", "rows": result[-limit:]}

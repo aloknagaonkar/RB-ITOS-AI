@@ -356,6 +356,8 @@ def recorded_live_completed_trades(
 
 
 def generate_session(day: str, cache_root: Path) -> tuple[list[dict], list[dict], list[dict]]:
+    from market_lab.hilega_wma_gap_live_v2 import assert_forward_control_strategy
+    assert_forward_control_strategy(day)
     audit = load_script("forward_indicator_audit", "audit_hilega_indicator_dataset_v2.py")
     alignment = load_script("forward_alignment", "research_hilega_alignment_points_490.py")
     delayed = load_script("forward_delayed", "validate_hilega_wma_delayed_confirmation.py")

@@ -158,7 +158,8 @@ class HilegaDirectionalLiveShadowCoordinatorV1:
                 }, checkpoint=bar.ts)
             return
         try:
-            candidate_set = self._candidate_set(direction, bar.close)
+            entry_spot = event.entry_price if getattr(self, 'minute_entry_boundaries', False) else bar.close
+            candidate_set = self._candidate_set(direction, entry_spot)
             if candidate_set is None:
                 return
             lifecycle = self.ce_shadow if direction == "BULLISH" else self.pe_shadow
@@ -170,10 +171,11 @@ class HilegaDirectionalLiveShadowCoordinatorV1:
                 return
             snap = lifecycle.start(
                 signal_bar_ts=bar.ts,
-                signal_spot=bar.close,
+                signal_spot=entry_spot,
                 source=event.source,
                 candidate_set=candidate_set,
                 option_minutes=self.sources.option_intraday_1m,
+                **({'signal_boundary_ts':event.entry_time} if getattr(self, 'minute_entry_boundaries', False) else {}),
             )
             if direction == "BULLISH":
                 self._ce_last_update = None

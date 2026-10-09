@@ -7,8 +7,8 @@ BASE='http://127.0.0.1:8123/api'
 def call(path,body=None):
     req=Request(BASE+path,data=None if body is None else json.dumps(body).encode(),headers={'Content-Type':'application/json'})
     with urlopen(req,timeout=30) as r:return json.load(r)
-state=call('/state?history_limit=1');status=call('/live-shadow/hilega-directional/status')
-expiry=(status.get('operational') or {}).get('option_expiry')
+state=call('/state?history_limit=1');status=call('/live-shadow/hilega-directional/status?fast=true')
+expiry='2026-10-13'  # Expiry confirmed in Hilega UI
 today=datetime.now(ZoneInfo('Asia/Kolkata')).date()
 try:valid=datetime.strptime(expiry,'%Y-%m-%d').date()>=today
 except (TypeError,ValueError):valid=False
