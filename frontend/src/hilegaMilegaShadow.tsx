@@ -273,12 +273,14 @@ export default function HilegaMilegaShadow(){
     let merged=a as HilegaAudit[]
     if(dr.ok){
       const directional=await dr.json()
-      const directionalRows=augmentDirectionalRowsWithTrades(directional.rows??[],d.trades??[])
+      const rawRows=directional.rows??[]
+      const directionalRows=[...augmentDirectionalRowsWithTrades(rawRows.filter((r:any)=>r.strategy_id!=='HILEGA_WMA_GAP_V2_LIVE_SHADOW'),d.trades??[]),...rawRows.filter((r:any)=>r.strategy_id==='HILEGA_WMA_GAP_V2_LIVE_SHADOW')]
       merged=overlayDirectionalAuditReports(a as HilegaAudit[],directionalRows)
     }
-    merged=overlayDirectionalTradeMarkers(merged,d.trades??[])
+    const v2Reports=merged.filter(r=>r.strategy?.strategy_id==='HILEGA_WMA_GAP_V2_LIVE_SHADOW')
+    merged=overlayDirectionalTradeMarkers(merged.filter(r=>r.strategy?.strategy_id!=='HILEGA_WMA_GAP_V2_LIVE_SHADOW'),d.trades??[])
     merged=attachDirectionalTradeAuditMetadata(merged,d.trades??[])
-    if(active())setRows(merged as AuditReport[])
+    if(active())setRows([...merged.filter(r=>!v2Reports.some(v=>v.checkpoint.slice(0,10)===r.checkpoint.slice(0,10))),...v2Reports].sort((a,b)=>b.checkpoint.localeCompare(a.checkpoint)) as AuditReport[])
   }
 
   useEffect(()=>{let active=true;let inFlight=false;const poll=async()=>{if(!active||inFlight||document.hidden)return;inFlight=true;try{await refresh(()=>active)}catch(e){if(active)setError((e as Error).message)}finally{inFlight=false}};void poll();const t=setInterval(()=>void poll(),15000);return()=>{active=false;clearInterval(t)}},[])

@@ -2,6 +2,7 @@ import {useEffect,useMemo,useState} from 'react'
 import HilegaDecisionTable,{type HilegaAudit} from './hilegaDecisionTable'
 import {overlayDirectionalAuditReports} from './hilegaDirectionalAuditOverlay'
 import HilegaDirectionalReplayTrades from './hilegaDirectionalReplayTrades'
+import HilegaAlignmentReplay from './hilegaAlignmentReplay'
 import './hilegaHistoricalReplay.css'
 
 type Session={
@@ -33,7 +34,7 @@ const shortTime=(v:string)=>{
 export default function HilegaHistoricalReplay(){
   const [sessions,setSessions]=useState<Session[]>([])
   const [selectedDate,setSelectedDate]=useState('')
-  const [strategyVersion,setStrategyVersion]=useState<'LIVE'|'V1'|'V2'>('LIVE')
+  const [strategyVersion,setStrategyVersion]=useState<'LIVE'|'V1'|'V2'|'V2_ALIGN'>('LIVE')
   const [data,setData]=useState<Response|null>(null)
   const [error,setError]=useState('')
   const [busy,setBusy]=useState(false)
@@ -90,11 +91,11 @@ export default function HilegaHistoricalReplay(){
       const sessionUrl=`/api/live-shadow/hilega-historical/session?session_date=${encodeURIComponent(selectedDate)}`
       const v1Url=`${strategyTestUrl}&strategy=V1`
       const [r,dr,mr]=await Promise.all([
-        fetch(strategyVersion==='V2' ? strategyTestUrl : strategyVersion==='V1' ? v1Url : sessionUrl),
-        strategyVersion==='V2'
+        fetch(strategyVersion==='V2_ALIGN' ? `${strategyTestUrl}&strategy=V2_ALIGN` : strategyVersion==='V2' ? strategyTestUrl : strategyVersion==='V1' ? v1Url : sessionUrl),
+        (strategyVersion==='V2'||strategyVersion==='V2_ALIGN')
           ? Promise.resolve({ok:false} as globalThis.Response)
           : fetch(`/api/live-shadow/hilega-directional-candles/historical?session_date=${encodeURIComponent(selectedDate)}`),
-        strategyVersion==='V2' ? Promise.resolve({ok:false} as globalThis.Response) : fetch(strategyTestUrl),
+        (strategyVersion==='V2'||strategyVersion==='V2_ALIGN') ? Promise.resolve({ok:false} as globalThis.Response) : fetch(strategyTestUrl),
       ])
       if(!r.ok)throw new Error(`Session HTTP ${r.status}: ${await r.text()}`)
       const body=await r.json() as Response
@@ -108,7 +109,7 @@ export default function HilegaHistoricalReplay(){
         body.performance_summary=metrics.performance_summary
         body.comparison=metrics.comparison
       }
-      body.strategy_version=strategyVersion==='LIVE'
+      body.strategy_version=strategyVersion==='V2_ALIGN' ? body.strategy_version : strategyVersion==='LIVE'
         ? 'LIVE_RECORDED_V1'
         : strategyVersion==='V1' ? 'HILEGA_V1_REPLAY' : 'HILEGA_WMA_GAP_V2_REPLAY'
       setData(body)
@@ -168,10 +169,11 @@ export default function HilegaHistoricalReplay(){
           {s.session_date} · {s.evidence_level} · {s.source}{s.ce_available?' · CE':''}
         </option>)}
       </select></label>
-      <label>Strategy <select aria-label="Hilega historical strategy" value={strategyVersion} onChange={e=>setStrategyVersion(e.target.value as 'LIVE'|'V1'|'V2')}>
+      <label>Strategy <select aria-label="Hilega historical strategy" value={strategyVersion} onChange={e=>setStrategyVersion(e.target.value as 'LIVE'|'V1'|'V2'|'V2_ALIGN')}>
         <option value="LIVE">Existing live strategy (recorded)</option>
         <option value="V1">Hilega v1 (canonical historical replay)</option>
         <option value="V2">WMA-gap V2 (historical observation)</option>
+        <option value="V2_ALIGN">V2 — alignment setup + dual exit (research)</option>
       </select></label>
       <button onClick={()=>void load()} disabled={!selectedDate||busy}>{busy?'Loading…':'Reload session'}</button>
       <button onClick={()=>void refreshSessions()} disabled={refreshing}>{refreshing?'Refreshing…':'Refresh sessions'}</button>
@@ -231,6 +233,7 @@ export default function HilegaHistoricalReplay(){
         </>}
       </div>
 
+      {strategyVersion==='V2_ALIGN' ? <HilegaAlignmentReplay data={data} visibleUntil={until} onSelected={setReviewCheckpoint}/> : <>
       {data?.source==='RECOVERED_HISTORICAL_REPLAY' ? <section className="panel"><h4>Recovered NIFTY trades · no option fills</h4><div style={{overflowX:'auto'}}><table><thead><tr><th>Direction</th><th>Signal candle</th><th>Decision</th><th>Entry time</th><th>Entry NIFTY</th><th>Exit candle</th><th>Exit NIFTY</th><th>Points</th><th>Canonical points</th></tr></thead><tbody>{((data as any).recovered_trades??[]).map((r:any)=><tr key={r.trade_id}><td>{r.direction}</td><td>{shortTime(r.entry_timestamp)}</td><td>{strategyVersion==='V1'?'ENTRY':r.candidate_decision}</td><td>{strategyVersion==='V1'?shortTime(r.entry_timestamp):r.candidate_entry_timestamp?shortTime(r.candidate_entry_timestamp):'—'}</td><td>{strategyVersion==='V1'?Number(r.entry_price).toFixed(2):r.candidate_entry_price==null?'—':Number(r.candidate_entry_price).toFixed(2)}</td><td>{shortTime(r.exit_timestamp)}</td><td>{Number(r.exit_price).toFixed(2)}</td><td>{strategyVersion==='V1'?Number(r.canonical_points).toFixed(2):r.candidate_points==null?'Not entered':Number(r.candidate_points).toFixed(2)}</td><td>{Number(r.canonical_points).toFixed(2)}</td></tr>)}</tbody></table></div><p>Denied V2 rows show the original canonical exit for comparison, not a V2 exit. Times are candle labels; no fees or slippage included.</p></section> : <HilegaDirectionalReplayTrades sessionDate={selectedDate} />}
 
       <HilegaDecisionTable key={`${selectedDate}-${data.source}-${step?'step':'full'}`} reports={reports}
@@ -240,6 +243,7 @@ export default function HilegaHistoricalReplay(){
           : 'No Hilega strategy rows were recorded for this session.'}
         onSelected={setReviewCheckpoint}/>
 
+      </>}
       <div className="hime-review"><h4>Manual review (separate from immutable audit)</h4>
         <p>Selected checkpoint: {reviewCheckpoint?shortTime(reviewCheckpoint):'Select View audit on a row'}</p>
         <label>Classification <select value={label} disabled={!reviewCheckpoint} onChange={e=>setLabel(e.target.value)}>

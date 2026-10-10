@@ -43,6 +43,7 @@ export const shortDateTime = (x:any) => {
 }
 
 const candleTiming=(r:HilegaAudit)=>{
+  if(r.strategy?.decision_timestamp)return {window:shortDateTime(r.strategy.decision_timestamp),processed:null as string|null,label:null as string|null}
   const start=new Date(String(r.checkpoint))
   if(Number.isNaN(start.getTime()))return {window:shortDateTime(r.checkpoint),processed:null as string|null,label:null as string|null}
   const end=new Date(start.getTime()+5*60_000)
@@ -204,9 +205,9 @@ const entryNiftyAt=(r:HilegaAudit):number|null=>{
   // infer an entry from a later continuation candle.
   return finiteNumber(entry?.price??entry?.entry_price??r.bar?.close)
 }
-export function niftyPointsFromEntry(current:any,entry:any):number|null {
+export function niftyPointsFromEntry(current:any,entry:any,direction:string="BULLISH"):number|null {
   const c=finiteNumber(current),e=finiteNumber(entry)
-  return c===null||e===null?null:c-e
+  return c===null||e===null?null:(c-e)*(direction==="BEARISH"?-1:1)
 }
 export function shortRuleText(
   r:HilegaAudit,
@@ -330,7 +331,7 @@ export function deriveDecisionRows(reports:HilegaAudit[]):DecisionRow[] {
       }
     }
 
-    const niftyPoints=(displayKind==='ENTRY'||displayKind==='ACTIVE'||displayKind==='EXIT')?niftyPointsFromEntry(currentNifty(report),entryNifty):null
+    const niftyPoints=(displayKind==='ENTRY'||displayKind==='ACTIVE'||displayKind==='EXIT')?niftyPointsFromEntry(currentNifty(report),entryNifty,activeDirection??reportDirection(report)):null
     const result:DecisionRow={report,origin,originRoute,entryNifty,niftyPoints,rawKind,displayKind,lifecycleIssue}
     if(displayKind==='EXIT'){
       active=false

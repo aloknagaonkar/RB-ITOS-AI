@@ -74,7 +74,7 @@ class WmaGapGate:
             previous_strength=sign*previous['wma_change'] if previous and previous['wma_change'] is not None else None
             age=(minute-p['available']).total_seconds()/60
             consecutive=previous is not None and previous['minute']==minute-timedelta(minutes=1)
-            same_boundary=exit_boundary and age == -1
+            same_boundary=False  # Historical confirmation starts after the signal close.
             elapsed=0<=age<10 or same_boundary
             threshold=strength is not None and strength>=.75
             was_armed=p['armed_at'] is not None and minute>p['armed_at']
@@ -120,13 +120,13 @@ class WmaGapGate:
 
 class HilegaWmaGapLiveCoordinatorV2(HilegaDirectionalLiveShadowCoordinatorV1):
     def _safe(self):
-        return {**super()._safe(),'model':'HILEGA_WMA_GAP_LIVE_V2','strategy_id':STRATEGY_ID,'strategy_version':'2.0.0',
-                'entry_policy':'POST_ARM_PERSISTENCE_ADJACENT_GAP','same_candle_exit_entry_enabled':True,
+        return {**super()._safe(),'model':'HILEGA_WMA_GAP_LIVE_V2','strategy_id':STRATEGY_ID,'strategy_version':'2.1.0',
+                'entry_policy':'POST_ARM_PERSISTENCE_ADJACENT_GAP','same_candle_exit_entry_enabled':False,'policy_id':'HISTORICAL_490_ORDERED_GAP_V1',
                 'exit_policy':'CURRENT_RSI9_WMA21_STRUCTURAL'}
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.minute_entry_boundaries=True
-        self.canonical=ExitFirstCanonical();self.gate=WmaGapGate();self._last_minute=None
+        self.canonical=HilegaDirectionalCoordinatorV1();self.gate=WmaGapGate();self._last_minute=None
         self._sync_view()
     def _audited_option_restore_plan(self, session_date):
         # V1 option identities must never be restored into the V2 strategy.
@@ -149,12 +149,13 @@ class HilegaWmaGapLiveCoordinatorV2(HilegaDirectionalLiveShadowCoordinatorV1):
             'BULLISH' in self.gate.pending,'BEARISH' in self.gate.pending,note)
     def _advance(self, minute, bars, *, recovered):
         t=minute.timestamp.astimezone(IST);available=t+timedelta(minutes=1)
-        before=self.gate.owner; events=[]
+        before=self.gate.owner; events=[]; canonical_decision=None
         reference=self.canonical.bullish.previous_indicators
         current=deepcopy(self.canonical.bullish.indicators).update(float(minute.close))
         bar=bars.get(t-timedelta(minutes=4)) if t.minute%5==4 else None
         if bar:
             decision=self.canonical.on_bar(bar)
+            canonical_decision=decision
             for event in decision.accepted_events:
                 if event.event_type in EXIT_TYPES:
                     closed=self.gate.close(event,available,float(bar.close))
@@ -176,6 +177,11 @@ class HilegaWmaGapLiveCoordinatorV2(HilegaDirectionalLiveShadowCoordinatorV1):
                 'bar_timestamp':self._last_bar_ts.isoformat() if self._last_bar_ts else None,
                 'minute_timestamp':t.isoformat(),'decision_timestamp':available.isoformat(),'nifty_close':float(minute.close),
                 'wma_gap_checks':checks,'reconstructed':recovered,
+                'canonical_setup_events':[e.event_type for e in canonical_decision.accepted_events] if canonical_decision else [],
+                'canonical_suppressed_events':[e.event_type for e in canonical_decision.suppressed_events] if canonical_decision else [],
+                'canonical_owner':self.canonical.trade_owner,
+                'canonical_bullish_conditions':dict(self.canonical.bullish.last_decision_payload or {}),
+                'canonical_bearish_conditions':dict(self.canonical.bearish.last_decision_payload or {}),
                 'event_details':[{'event_type':e.event_type,'entry_price':e.entry_price,'entry_time':e.entry_time.isoformat() if e.entry_time else None,'price':e.price,'points':e.points} for e in events],
             },checkpoint=t)
         if not recovered:
@@ -217,7 +223,7 @@ class HilegaWmaGapLiveCoordinatorV2(HilegaDirectionalLiveShadowCoordinatorV1):
     def bootstrap(self,now):
         now=now.astimezone(IST)
         if self._bootstrapped_date==now.date():return {'status':'ALREADY_BOOTSTRAPPED'}
-        self.canonical=ExitFirstCanonical();self.gate=WmaGapGate();self._last_minute=None;self._last_bar_ts=None;self._cutoff_done_date=None
+        self.canonical=HilegaDirectionalCoordinatorV1();self.gate=WmaGapGate();self._last_minute=None;self._last_bar_ts=None;self._cutoff_done_date=None
         self._ce_last_update=self._pe_last_update=None
         from .hilega_milega_option_shadow_lifecycle_v1 import HilegaMilegaOptionShadowLifecycleV1
         from .hilega_milega_pe_option_shadow_lifecycle_v1 import HilegaMilegaPEOptionShadowLifecycleV1
