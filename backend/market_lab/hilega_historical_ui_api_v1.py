@@ -366,6 +366,13 @@ def _directional_report(row: dict) -> dict:
             "suppressed_events": row.get("suppressed_events"),
         },
     } for event in accepted]
+    if row.get("strategy_id") == "HILEGA_WMA_GAP_V2_LIVE_SHADOW":
+        details = {x.get("event_type"): x for x in row.get("event_details") or []}
+        for transition in transitions:
+            event = details.get(transition["event_type"], {})
+            transition.update({key: event.get(key) for key in ("price", "points", "entry_price", "entry_time")})
+            transition["details"].update({"original_entry_time": event.get("entry_time"),
+                                          "original_entry_price": event.get("entry_price")})
     selected_route = next((
         route for route in ("ROUTE_A", "ROUTE_B", "OPENING")
         if any(route in event for event in accepted)
@@ -378,8 +385,11 @@ def _directional_report(row: dict) -> dict:
             "ema3_rsi": row.get("ema3_rsi"),
             "wma21_rsi": row.get("wma21_rsi"),
         },
-        "conditions": {},
+        "conditions": {"wma_gap_checks": row.get("wma_gap_checks") or [], "canonical_setup": row.get("canonical_setup")},
         "strategy": {
+            "strategy_id": row.get("strategy_id"),
+            "decision_timestamp": row.get("decision_timestamp"),
+            "source_bar_timestamp": row.get("source_bar_timestamp"),
             "directional_action": row.get("action"),
             "state_before": row.get("owner_before"),
             "state_after": row.get("owner_after"),
@@ -662,6 +672,16 @@ def strategy_test(session_date: str = Query(..., min_length=10, max_length=10),
     except ValueError as exc:
         raise HTTPException(422, "Invalid session date") from exc
     try:
+        if strategy.strip().upper() == "V2_ALIGN":
+            from .hilega_v2_alignment_replay_v1 import load_session as load_alignment, ReplayBusyError
+            try:
+                return load_alignment(day.isoformat())
+            except ReplayBusyError as exc:
+                raise HTTPException(409, str(exc)) from exc
+            except FileNotFoundError as exc:
+                raise HTTPException(404, str(exc)) from exc
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from exc
         from .recovered_replay_ui_v1 import load_hilega
         recovered = load_hilega(day.isoformat(), "V1" if strategy.strip().upper() == "V1" else "V2")
         if recovered is not None:
@@ -787,7 +807,7 @@ def load_capture(capture_id: str, root: Path = ROOT):
 def sessions():
     return {
         "model": "HILEGA_SESSION_REGISTRY_V1",
-        "sessions": list_sessions(),
+        "sessions": __import__("market_lab.hilega_v2_alignment_replay_v1", fromlist=["merge_sessions"]).merge_sessions(list_sessions()),
     }
 
 

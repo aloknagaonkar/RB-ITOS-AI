@@ -1,6 +1,12 @@
 import type {HilegaAudit} from './hilegaDecisionTable'
 
 export type DirectionalCandleOverlayRow={
+  canonical_setup?:Record<string,any>
+  strategy_id?:string
+  decision_timestamp?:string
+  source_bar_timestamp?:string
+  event_details?:Array<Record<string,any>>
+  wma_gap_checks?:Array<Record<string,any>>
   bar_timestamp:string
   open?:number|null
   high?:number|null
@@ -195,6 +201,28 @@ export function overlayDirectionalAuditReports(
   base:HilegaAudit[],
   rows:DirectionalCandleOverlayRow[],
 ):HilegaAudit[]{
+  const v2Rows=rows.filter(r=>r.strategy_id==='HILEGA_WMA_GAP_V2_LIVE_SHADOW')
+  if(v2Rows.length){
+    const legacy=overlayDirectionalAuditReports(base,rows.filter(r=>r.strategy_id!=='HILEGA_WMA_GAP_V2_LIVE_SHADOW'))
+    const dates=new Set(v2Rows.map(r=>r.bar_timestamp.slice(0,10)))
+    const projected:HilegaAudit[]=v2Rows.map(r=>{
+      const events=Array.isArray(r.accepted_events)?r.accepted_events:String(r.accepted_events??'').split(',').filter(Boolean)
+      const details=r.event_details??[]
+      return {checkpoint:r.bar_timestamp,bar:{close:r.close,open:r.open,high:r.high,low:r.low},
+        conditions:{wma_gap_checks:r.wma_gap_checks??[],canonical_setup:r.canonical_setup},
+        strategy:{strategy_id:r.strategy_id,decision_timestamp:r.decision_timestamp,
+          source_bar_timestamp:r.source_bar_timestamp,events_emitted:events,
+          directional_action:r.action,state_before:r.owner_before,state_after:r.owner_after,
+          owner_before:r.owner_before,owner_after:r.owner_after,
+          direction:r.owner_after==='NONE'?r.owner_before:r.owner_after},
+        transitions:events.map(event=>{
+          const d=details.find(x=>x.event_type===event)??{}
+          return {...d,event_type:event,event_time:r.bar_timestamp,
+            details:{original_entry_time:d.entry_time,original_entry_price:d.entry_price}}
+        })}
+    })
+    return [...legacy.filter(r=>!dates.has(r.checkpoint.slice(0,10))),...projected].sort((a,b)=>b.checkpoint.localeCompare(a.checkpoint))
+  }
   const byMinute=new Map<string,DirectionalCandleOverlayRow>()
 
   for(const r of rows){

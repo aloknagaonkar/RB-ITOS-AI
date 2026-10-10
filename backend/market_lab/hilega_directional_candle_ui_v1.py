@@ -528,7 +528,8 @@ def build_live_directional_candles(session_date: str | None = None, *, audit_onl
         if record.get("stage") != "DIRECTIONAL_DECISION":
             continue
         payload = record.get("payload") or {}
-        ts = payload.get("bar_timestamp") or record.get("checkpoint")
+        is_v2 = payload.get("strategy_id") == "HILEGA_WMA_GAP_V2_LIVE_SHADOW"
+        ts = (payload.get("decision_timestamp") if is_v2 else None) or payload.get("bar_timestamp") or record.get("checkpoint")
         if not isinstance(ts, str) or _iso_session(ts) != day:
             continue
 
@@ -539,6 +540,21 @@ def build_live_directional_candles(session_date: str | None = None, *, audit_onl
             "open": None, "high": None, "low": None, "close": None, "volume": None,
             "rsi9": None, "ema3_rsi": None, "wma21_rsi": None,
         })
+        # A later bootstrap reconstructs the day. Preserve original processed
+        # evidence at the same decision instant instead of replacing it.
+        if is_v2 and row.get("audit_status") == "PROCESSED" and record.get("status") != "PROCESSED":
+            continue
+        if is_v2:
+            row.update({"close": payload.get("nifty_close"),
+                        "decision_timestamp": ts,
+                        "source_bar_timestamp": payload.get("bar_timestamp"),
+                        "strategy_id": payload.get("strategy_id"),
+                        "event_details": payload.get("event_details") or [],
+                        "audit_status": record.get("status"),
+                        "wma_gap_checks": payload.get("wma_gap_checks") or [],
+                        "canonical_setup": {key: payload.get(key) for key in (
+                            "canonical_setup_events", "canonical_suppressed_events", "canonical_owner",
+                            "canonical_bullish_conditions", "canonical_bearish_conditions")}})
         row.update({
             "owner_before": payload.get("trade_owner_before"),
             "owner_after": payload.get("trade_owner_after"),
