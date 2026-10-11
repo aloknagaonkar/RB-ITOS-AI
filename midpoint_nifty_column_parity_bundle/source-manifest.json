@@ -1,0 +1,5 @@
+{
+  "backend/market_lab/midpoint_strategy/live_shadow_ui.py": "52ca02c37a33002834fdc672bd9a54854a15e8ab33351c7b455506e2d35cae66",
+  "frontend/src/midpointStrategyShadow.tsx": "041b16cb3a82c34e68fcfb8763757aa9131e12627f16faf05b7525d15dd813e9",
+  "tests/test_midpoint_signal_nifty_points.py": "1d037d4b2f1193d164a1ea6d810b9ca5d6d1c312f374590cffb22b9cebed668a"
+}
