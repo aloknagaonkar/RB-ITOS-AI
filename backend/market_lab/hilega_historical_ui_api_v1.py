@@ -673,7 +673,8 @@ def strategy_test(session_date: str = Query(..., min_length=10, max_length=10),
         raise HTTPException(422, "Invalid session date") from exc
     try:
         if strategy.strip().upper() == "V2_ALIGN":
-            from .hilega_v2_alignment_replay_v1 import load_session as load_alignment, ReplayBusyError
+            from .hilega_v2_replay_presentation_v1 import load_session as load_alignment
+            from .hilega_v2_alignment_replay_v1 import ReplayBusyError
             try:
                 return load_alignment(day.isoformat())
             except ReplayBusyError as exc:

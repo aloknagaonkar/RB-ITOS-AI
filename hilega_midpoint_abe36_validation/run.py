@@ -54,7 +54,7 @@ def midpoint(rows,config):
   try:
    for r in rows:
     t=datetime.fromisoformat(r['timestamp']);c=SimpleNamespace(timestamp=t,open=r['underlying_open'],high=r['underlying_high'],low=r['underlying_low'],close=r['underlying_close'],volume=0);seen[t]=c
-    coord._process_minute(ts=t,underlying=c,futures_close=r['futures_close'],futures_vwap=r['futures_vwap'],futures_open=r.get('futures_open'),futures_volume=r['futures_volume'],underlying_by_ts=seen.copy())
+    coord._process_minute(ts=t,underlying=c,futures_close=r['futures_close'],futures_vwap=r['futures_vwap'],futures_open=r.get('futures_open'),futures_volume=r.get('futures_volume'),underlying_by_ts=seen.copy())
   finally:
    if old is None:os.environ.pop('MIDPOINT_V62_OOS_COLLECTOR_ENABLED',None)
    else:os.environ['MIDPOINT_V62_OOS_COLLECTOR_ENABLED']=old
@@ -108,7 +108,7 @@ def validate_inputs(day,raw,rows):
    if n is None:raise ValueError('MISSING_MATCHING_NIFTY_MINUTE:'+stamp)
    for key in ('open','high','low','close'):
     if abs(float(n[key])-float(r['underlying_'+key]))>0.011:raise ValueError('NIFTY_MIDPOINT_PRICE_MISMATCH:'+stamp+':'+key)
-  for k in ('futures_close','futures_vwap','futures_volume'):
+  for k in ('futures_close','futures_vwap'):
    if r.get(k) is None:raise ValueError('MISSING_MIDPOINT_FIELD:'+k+':'+stamp)
  first=datetime.fromisoformat(day+'T09:15:00+05:30')
  if any((first+timedelta(minutes=i)).isoformat() not in seen for i in range(340)):raise ValueError('INCOMPLETE_MIDPOINT_STRATEGY_WINDOW')
