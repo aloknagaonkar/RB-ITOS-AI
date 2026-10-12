@@ -1,0 +1,6 @@
+{
+  "backend/market_lab/hilega_directional_candle_ui_v1.py": "f743954f13369d4759b37aa46c254dd2a8d3f16b899f5b7da117700d60c3826b",
+  "frontend/src/hilegaDirectionalAuditOverlay.ts": "bae47788a4d70504ebf4dbf7ce5d4d80924480a3d51082e3881caaa02ed9f7d7",
+  "frontend/src/hilegaDecisionTable.tsx": "8449b6973398b5a3abc86a8449cb4baef84d7cc34db628d9aaf897eb922d5aef",
+  "backend/market_lab/hilega_v2_replay_presentation_v1.py": "28c869def20463040fc35233221422f503869c6a3a79dad0470b46339b512d23"
+}
