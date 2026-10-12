@@ -1,0 +1,6 @@
+{
+  "backend/market_lab/hilega_v2_alignment_replay_v1.py": "a4fd06a58b80fe99cb7a48b7d26e6673ce09decb5b1a17feec03e986b6002861",
+  "backend/market_lab/hilega_alignment_dual_exit_live_v1.py": "e24ba411c47ff6718c83d35fc95d7878d4fa083dbf34c5842be2a809334ffefc",
+  "tests/test_hilega_v2_alignment_auto_replay.py": "280249e4dca525a296c973f1eca6319185032aff6fe1c64689e9b1164612ce49",
+  "tests/test_hilega_five_minute_setup_timing.py": null
+}
