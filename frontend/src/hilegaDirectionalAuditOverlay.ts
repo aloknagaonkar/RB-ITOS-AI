@@ -1,6 +1,11 @@
 import type {HilegaAudit} from './hilegaDecisionTable'
 
 export type DirectionalCandleOverlayRow={
+  strategy_steps?:Array<Record<string,any>>
+  setup_attempts?:Array<Record<string,any>>
+  exit_validation?:Record<string,any>
+  exit_warning_time?:string|null
+  indicator_timestamp?:string|null
   canonical_setup?:Record<string,any>
   strategy_id?:string
   decision_timestamp?:string
@@ -201,15 +206,16 @@ export function overlayDirectionalAuditReports(
   base:HilegaAudit[],
   rows:DirectionalCandleOverlayRow[],
 ):HilegaAudit[]{
-  const v2Rows=rows.filter(r=>r.strategy_id==='HILEGA_WMA_GAP_V2_LIVE_SHADOW')
+  const v2Rows=rows.filter(r=>['HILEGA_WMA_GAP_V2_LIVE_SHADOW','HILEGA_V2_ALIGNMENT_DUAL_EXIT'].includes(r.strategy_id??''))
   if(v2Rows.length){
-    const legacy=overlayDirectionalAuditReports(base,rows.filter(r=>r.strategy_id!=='HILEGA_WMA_GAP_V2_LIVE_SHADOW'))
+    const legacy=overlayDirectionalAuditReports(base,rows.filter(r=>!['HILEGA_WMA_GAP_V2_LIVE_SHADOW','HILEGA_V2_ALIGNMENT_DUAL_EXIT'].includes(r.strategy_id??'')))
     const dates=new Set(v2Rows.map(r=>r.bar_timestamp.slice(0,10)))
     const projected:HilegaAudit[]=v2Rows.map(r=>{
       const events=Array.isArray(r.accepted_events)?r.accepted_events:String(r.accepted_events??'').split(',').filter(Boolean)
       const details=r.event_details??[]
       return {checkpoint:r.bar_timestamp,bar:{close:r.close,open:r.open,high:r.high,low:r.low},
-        conditions:{wma_gap_checks:r.wma_gap_checks??[],canonical_setup:r.canonical_setup},
+        indicators:{rsi9:r.rsi9,ema3_rsi:r.ema3_rsi,wma21_rsi:r.wma21_rsi},
+        conditions:{latest_strategy_audit:true,strategy_steps:r.strategy_steps,setup_attempts:r.setup_attempts,indicator_timestamp:r.indicator_timestamp,exit_validation:r.exit_validation,exit_warning_time:r.exit_warning_time,wma_gap_checks:r.wma_gap_checks??[],canonical_setup:r.canonical_setup},
         strategy:{strategy_id:r.strategy_id,decision_timestamp:r.decision_timestamp,
           source_bar_timestamp:r.source_bar_timestamp,events_emitted:events,
           directional_action:r.action,state_before:r.owner_before,state_after:r.owner_after,

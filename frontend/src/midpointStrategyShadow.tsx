@@ -35,7 +35,7 @@ const semanticOwner=(event:{event_type?:string|null;reason?:string|null;family?:
 
 function NiftyDeltaCell({points,entry,current}:{points:number|null|undefined;entry:number|null|undefined;current:number|null|undefined}){
  const tone=points==null?'':points>0?'positive':points<0?'negative':''
- return <div className="mp-nifty-delta"><b className={tone}>{signedPoints(points)}</b><small>E {num(entry)} → C {num(current)}</small></div>
+ return <div className="mp-nifty-delta"><b>{num(current)}</b><small>Recorded NIFTY</small>{entry!=null&&points!=null?<><small>Entry {num(entry)}</small><b className={tone}>{signedPoints(points)}</b><small>Points from entry</small></>:<small>No active trade points</small>}</div>
 }
 
 function DirectionHealthCell({direction,health,supportCount}:{direction:'BULLISH'|'BEARISH';health:string|null|undefined;supportCount:number|null|undefined}){

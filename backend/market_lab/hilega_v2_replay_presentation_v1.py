@@ -23,9 +23,9 @@ def inspection(a):
           step(f'{side} · evaluation result',c.get('status')=='ENTRY',c.get('status'),'All entry gates pass',' · '.join(c.get('reasons') or []) or 'All recorded gates passed')]
     v=a.get('exit_validation')
     if v:
-        out += [step('Five-minute RSI exit warning',v['rsi_opposite'],v['rsi9'],'Opposite WMA21','Initial warning; not sufficient alone.'),
-                step('Five-minute EMA exit confirmation',v['ema_opposite'],f'EMA {v["ema3"]}; WMA {v["wma21"]}','EMA also opposite WMA21','Equality waits.'),
-                step('Actual dual exit',v['dual_exit_pass'],v['direction'],'Both opposite at completed 5m close','14:55 cutoff is a separate forced exit.')]
+        out += [step('Five-minute RSI exit warning',v.get('rsi_opposite'),v.get('rsi9'),'Opposite WMA21','Initial warning; not sufficient alone.'),
+                step('Five-minute EMA exit confirmation',v.get('ema_opposite'),f'EMA {v.get("ema3")}; WMA {v.get("wma21")}','EMA also opposite WMA21','Equality waits.'),
+                step('Actual dual exit',v.get('dual_exit_pass'),v.get('direction'),'Both opposite at completed 5m close','14:55 cutoff is a separate forced exit.')]
     if not out:out=[step('Minute monitoring',None,a.get('owner_after'),'Wait for a setup / monitor active position','No pending entry gate was evaluated at this checkpoint.')]
     return out
 

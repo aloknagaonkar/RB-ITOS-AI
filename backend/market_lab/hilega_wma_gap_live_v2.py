@@ -119,6 +119,9 @@ class WmaGapGate:
         return accepted,checks
 
 class HilegaWmaGapLiveCoordinatorV2(HilegaDirectionalLiveShadowCoordinatorV1):
+    strategy_id = STRATEGY_ID
+    canonical_factory = HilegaDirectionalCoordinatorV1
+    gate_factory = WmaGapGate
     def _safe(self):
         return {**super()._safe(),'model':'HILEGA_WMA_GAP_LIVE_V2','strategy_id':STRATEGY_ID,'strategy_version':'2.1.0',
                 'entry_policy':'POST_ARM_PERSISTENCE_ADJACENT_GAP','same_candle_exit_entry_enabled':False,'policy_id':'HISTORICAL_490_ORDERED_GAP_V1',
@@ -126,12 +129,12 @@ class HilegaWmaGapLiveCoordinatorV2(HilegaDirectionalLiveShadowCoordinatorV1):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.minute_entry_boundaries=True
-        self.canonical=HilegaDirectionalCoordinatorV1();self.gate=WmaGapGate();self._last_minute=None
+        self.canonical=self.canonical_factory();self.gate=self.gate_factory();self._last_minute=None
         self._sync_view()
     def _audited_option_restore_plan(self, session_date):
         # V1 option identities must never be restored into the V2 strategy.
         original = self.step_audit.read_all
-        self.step_audit.read_all = lambda: [r for r in original() if (r.get('payload') or {}).get('strategy_id') == STRATEGY_ID]
+        self.step_audit.read_all = lambda: [r for r in original() if (r.get('payload') or {}).get('strategy_id') == self.strategy_id]
         try:
             return super()._audited_option_restore_plan(session_date)
         finally:
@@ -220,10 +223,12 @@ class HilegaWmaGapLiveCoordinatorV2(HilegaDirectionalLiveShadowCoordinatorV1):
             self._missing_minute=expected
             self._health(now,'WAITING_FOR_EXACT_MINUTE',missing_minute=expected.isoformat())
         return processed
+    def _reset_policy_session(self):
+        pass
     def bootstrap(self,now):
         now=now.astimezone(IST)
         if self._bootstrapped_date==now.date():return {'status':'ALREADY_BOOTSTRAPPED'}
-        self.canonical=HilegaDirectionalCoordinatorV1();self.gate=WmaGapGate();self._last_minute=None;self._last_bar_ts=None;self._cutoff_done_date=None
+        self.canonical=self.canonical_factory();self.gate=self.gate_factory();self._last_minute=None;self._last_bar_ts=None;self._cutoff_done_date=None
         self._ce_last_update=self._pe_last_update=None
         from .hilega_milega_option_shadow_lifecycle_v1 import HilegaMilegaOptionShadowLifecycleV1
         from .hilega_milega_pe_option_shadow_lifecycle_v1 import HilegaMilegaPEOptionShadowLifecycleV1
@@ -238,6 +243,7 @@ class HilegaWmaGapLiveCoordinatorV2(HilegaDirectionalLiveShadowCoordinatorV1):
         self.canonical.bullish.session=SessionState(session_date=now.date());self.canonical.bearish.session=BearishSessionState(session_date=now.date())
         for engine in (self.canonical.bullish,self.canonical.bearish):engine.previous_indicators=None;engine.previous_bar=None
         self.canonical.trade_owner='NONE';self.canonical.session_date=now.date()
+        self._reset_policy_session()
         self._consume(self.sources.nifty_intraday_1m(now=now),now,recovered=True)
         self._sync_view();restore=self._restore_audited_option_state(now=now,session_date=now.date())
         self._bootstrapped_date=now.date()
@@ -271,7 +277,7 @@ class HilegaWmaGapLiveCoordinatorV2(HilegaDirectionalLiveShadowCoordinatorV1):
         cutoff=self.process_cutoff(now,intraday=intraday)
         self._retry_pending(now);self._update_options(now)
         self._health(now,'WAITING_FOR_EXACT_MINUTE' if self._missing_minute else 'PROCESSED',missing_minute=self._missing_minute.isoformat() if self._missing_minute else None,trade_owner=self.gate.owner,bullish_state=self.directional.bullish.session.name,bearish_state=self.directional.bearish.session.name)
-        return {'status':'PROCESSED','strategy_id':STRATEGY_ID,'minutes_processed':count,'trade_owner':self.gate.owner,'cutoff_processed':cutoff is not None}
+        return {'status':'PROCESSED','strategy_id':self.strategy_id,'minutes_processed':count,'trade_owner':self.gate.owner,'cutoff_processed':cutoff is not None}
 
 
 def assert_forward_control_strategy(day, source=None):
@@ -284,5 +290,5 @@ def assert_forward_control_strategy(day, source=None):
         if not line.strip():continue
         record=json.loads(line);payload=record.get('payload') or {}
         at=str(payload.get('minute_timestamp') or payload.get('bar_timestamp') or record.get('checkpoint') or record.get('event_time') or '')
-        if payload.get('strategy_id')==STRATEGY_ID and at.startswith(day) and record.get('status')=='PROCESSED':
+        if payload.get('strategy_id') in {STRATEGY_ID, 'HILEGA_V2_ALIGNMENT_DUAL_EXIT'} and at.startswith(day) and record.get('status')=='PROCESSED':
             raise ValueError('V2_LIVE_POLICY_REQUIRES_SEPARATE_FORWARD_COHORT: do not use V2 decisions as canonical V1 control')

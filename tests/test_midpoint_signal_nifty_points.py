@@ -32,3 +32,13 @@ def test_replay_minutes_show_points_only_after_entry_and_through_exit():
     rendered=_presentation_for_replay(minutes,audit)
     assert [x.get('nifty_points_from_entry') for x in rendered]==[None,0,12.4,-34.95,None]
     assert rendered[3]['presentation']['status']=='EXIT'
+
+
+def test_pre_entry_snapshot_is_not_trade_pnl():
+    rows = _with_nifty_points([event("E_ENTRY", "09:26", 100),
+        event("PRE_ENTRY_HEALTH_SNAPSHOT", "09:26", 110),
+        event("CONTINUOUS_HEALTH_CHECK", "09:27", 95),
+        event("DEGRADED_EXIT_CANDIDATE_TRIGGERED", "09:28", 94),
+        event("CONTINUOUS_HEALTH_CHECK", "09:29", 93)])
+    assert [r["nifty_points_from_entry"] for r in rows] == [0, None, 5, 6, 7]
+    assert rows[1]["nifty_entry_price"] is None

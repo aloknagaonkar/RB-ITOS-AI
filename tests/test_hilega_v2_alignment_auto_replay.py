@@ -9,7 +9,7 @@ class Tests(unittest.TestCase):
   return [dict(timestamp=(start+timedelta(minutes=i)).isoformat(),open=100,high=100,low=100,close=100,volume=1) for i in range(count)]
  def test_flat_session_is_available_not_missing(self):
   x=replay('2026-10-06',self.rows('2026-10-06'),[('2026-10-05',self.rows('2026-10-05',375))])
-  self.assertEqual(x['trades'],[]);self.assertEqual(len(x['audit']),340)
+  self.assertEqual(x['trades'],[]);self.assertEqual(len(x['audit']),68)
   self.assertEqual(x['performance_summary'][0]['net_points'],0)
  def test_missing_minute_and_duplicate_rejected(self):
   rr=self.rows('2026-10-06');rr.pop(8)
@@ -50,7 +50,7 @@ class Tests(unittest.TestCase):
    self.cache(cache,'2026-10-05');p=self.cache(cache,'2026-10-06')
    with patch.object(m,'replay',wraps=m.replay) as run:
     first=m.load_session('2026-10-06',out,[cache]);second=m.load_session('2026-10-06',out,[cache])
-    self.assertEqual(run.call_count,1);self.assertEqual(first,second);self.assertEqual(first['report_count'],340)
+    self.assertEqual(run.call_count,1);self.assertEqual(first,second);self.assertEqual(first['report_count'],68)
     x=json.loads(p.read_text());x['candles'][0]['volume']=2;p.write_text(json.dumps(x))
     m.load_session('2026-10-06',out,[cache]);self.assertEqual(run.call_count,2)
    self.assertEqual(len(list((out/'previous-research-versions').glob('*.json'))),1)
