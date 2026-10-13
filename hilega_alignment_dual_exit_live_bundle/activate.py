@@ -62,7 +62,7 @@ def select(session):
         env.write_text(updated);os.chmod(env,0o600)
         # Existing arm function checks legacy/open/uncertain exposure and sets a fresh baseline.
         source=Path(os.getenv('HILEGA_SANDBOX_BRIDGE_SOURCE',str(DEFAULT_SOURCE)))
-        result=arm(session,source,JsonControl(CONTROL),BasketStore(JOURNAL),env=env)
+        result=arm(__import__('datetime').date.fromisoformat(session),source,JsonControl(CONTROL),BasketStore(JOURNAL),env=env)
         after=dotenv_values(env)
         assert {k:v for k,v in values.items() if k!='LIVE_SHADOW_STRATEGY'}=={k:v for k,v in after.items() if k!='LIVE_SHADOW_STRATEGY'}
     except BaseException:

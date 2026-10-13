@@ -366,7 +366,7 @@ def _directional_report(row: dict) -> dict:
             "suppressed_events": row.get("suppressed_events"),
         },
     } for event in accepted]
-    if row.get("strategy_id") == "HILEGA_WMA_GAP_V2_LIVE_SHADOW":
+    if row.get("strategy_id") in {"HILEGA_WMA_GAP_V2_LIVE_SHADOW", "HILEGA_V2_ALIGNMENT_DUAL_EXIT"}:
         details = {x.get("event_type"): x for x in row.get("event_details") or []}
         for transition in transitions:
             event = details.get(transition["event_type"], {})

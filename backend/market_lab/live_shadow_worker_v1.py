@@ -51,6 +51,8 @@ def process_isolated_tick(now, tasks):
     return outcomes
 
 
+from .hilega_alignment_dual_exit_live_v1 import HilegaAlignmentDualExitLiveCoordinator, STRATEGY_ID as ALIGNMENT_V2_ID
+
 def _resolve_hilega_option_expiry(sources, *, session_date: date, configured_raw: str):
     from .hilega_expiry_rollover_v1 import resolve_expiry
     return resolve_expiry(sources, session_date=session_date, configured_raw=configured_raw)
@@ -134,8 +136,8 @@ def run():
             finally:
                 if evidence is not None:
                     evidence.close()
-        elif selected in {HILEGA_DIRECTIONAL_STRATEGY_ID, WMA_GAP_V2_ID}:
-            directional_factory = HilegaWmaGapLiveCoordinatorV2 if selected == WMA_GAP_V2_ID else HilegaDirectionalLiveShadowCoordinatorV1
+        elif selected in {HILEGA_DIRECTIONAL_STRATEGY_ID, WMA_GAP_V2_ID, ALIGNMENT_V2_ID}:
+            directional_factory = (HilegaAlignmentDualExitLiveCoordinator if selected == ALIGNMENT_V2_ID else HilegaWmaGapLiveCoordinatorV2 if selected == WMA_GAP_V2_ID else HilegaDirectionalLiveShadowCoordinatorV1)
             expiry_raw=os.getenv("HILEGA_MILEGA_OPTION_EXPIRY","").strip()
             option_expiry, option_expiry_source = _resolve_hilega_option_expiry(
                 sources,
@@ -159,6 +161,7 @@ def run():
                     "expiry":option_expiry.isoformat() if option_expiry else None,
                     "expiry_source":option_expiry_source,
                     "strategy_id":selected,
+                    "alignment_dual_exit_source_sha256":hashlib.sha256(Path(__import__('market_lab.hilega_alignment_dual_exit_live_v1',fromlist=['x']).__file__).read_bytes()).hexdigest() if selected==ALIGNMENT_V2_ID else None,
                     "wma_gap_live_source_sha256":hashlib.sha256(Path(__import__('market_lab.hilega_wma_gap_live_v2',fromlist=['x']).__file__).read_bytes()).hexdigest() if selected==WMA_GAP_V2_ID else None,
                     "directional_source_sha256":hashlib.sha256(Path(directional_module.__file__).read_bytes()).hexdigest(),
                     "live_directional_source_sha256":hashlib.sha256(Path(live_directional_module.__file__).read_bytes()).hexdigest(),
@@ -187,6 +190,7 @@ def run():
                             "expiry":option_expiry.isoformat() if option_expiry else None,
                     "expiry_source":option_expiry_source,
                             "strategy_id":selected,
+                    "alignment_dual_exit_source_sha256":hashlib.sha256(Path(__import__('market_lab.hilega_alignment_dual_exit_live_v1',fromlist=['x']).__file__).read_bytes()).hexdigest() if selected==ALIGNMENT_V2_ID else None,
                     "wma_gap_live_source_sha256":hashlib.sha256(Path(__import__('market_lab.hilega_wma_gap_live_v2',fromlist=['x']).__file__).read_bytes()).hexdigest() if selected==WMA_GAP_V2_ID else None,
                     "directional_source_sha256":hashlib.sha256(Path(directional_module.__file__).read_bytes()).hexdigest(),
                             "live_directional_source_sha256":hashlib.sha256(Path(live_directional_module.__file__).read_bytes()).hexdigest(),

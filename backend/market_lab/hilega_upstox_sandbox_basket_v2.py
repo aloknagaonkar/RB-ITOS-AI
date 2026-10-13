@@ -144,7 +144,7 @@ class BasketWorker:
 
 
 def build_dashboard(env=Path('.env')):
-    worker=BasketWorker(env=env);control=worker.control.read();day=control.get('session_date');accepted=[r for r in worker.store.accepted() if r['session_date']==day];pairs={}
+    worker=BasketWorker(env=env);control=worker.control.read();day=control.get('session_date');accepted=worker.store.accepted();pairs={}
     for r in accepted:
         pair=pairs.setdefault((r['trade_id'],r['role']),{});pair[r['event_type']]=r
     cfg=SandboxConfig.from_env(env);keys=[p['ENTRY']['contract']['instrument_key'] for p in pairs.values() if p.get('ENTRY') and not p.get('EXIT')];quotes={};quote_error=None
@@ -159,10 +159,10 @@ def build_dashboard(env=Path('.env')):
         if not en:continue
         entry_price=en.get('observed_option_price');mark=ex.get('observed_option_price') if ex else quotes.get(en['contract']['instrument_key']);pts=mark-entry_price if mark is not None and entry_price is not None else None
         leg=dict(**en['contract'],quantity=en['quantity'],entry_time=en['timestamp'],entry_signal_time=en['event_timestamp'],entry_price=entry_price,entry_order_id=en['broker_order_id'],exit_time=ex.get('timestamp') if ex else None,exit_price=ex.get('observed_option_price') if ex else None,exit_order_id=ex.get('broker_order_id') if ex else None,current_price=mark,quote_timestamp=now().isoformat() if not ex and mark is not None else None,points=pts,pnl_rupees=pts*en['quantity'] if pts is not None else None,status='SELL_ACKNOWLEDGED' if ex else 'BUY_ACKNOWLEDGED')
-        trade=trades.setdefault(trade_id,dict(trade_id=trade_id,direction=en['direction'],signal_time=en['event_timestamp'],strategy_id=en['strategy_id'],expiry=en['contract']['expiry'],legs=[]));trade['legs'].append(leg)
+        trade=trades.setdefault(trade_id,dict(trade_id=trade_id,session_date=en['session_date'],direction=en['direction'],signal_time=en['event_timestamp'],strategy_id=en['strategy_id'],expiry=en['contract']['expiry'],legs=[]));trade['legs'].append(leg)
     for plan in worker.store.rows():
-        if plan.get('status')!='BASKET_PLANNED' or plan.get('session_date')!=day:continue
-        t=trades.setdefault(plan['trade_id'],dict(trade_id=plan['trade_id'],direction=plan['direction'],signal_time=plan['event_timestamp'],strategy_id=plan['strategy_id'],expiry=plan['contracts'][0]['expiry'],legs=[]))
+        if plan.get('status')!='BASKET_PLANNED':continue
+        t=trades.setdefault(plan['trade_id'],dict(trade_id=plan['trade_id'],session_date=plan['session_date'],direction=plan['direction'],signal_time=plan['event_timestamp'],strategy_id=plan['strategy_id'],expiry=plan['contracts'][0]['expiry'],legs=[]))
         for contract in plan['contracts']:
             if any(l['role']==contract['role'] for l in t['legs']):continue
             uncertain=any(r['trade_id']==plan['trade_id'] and r['role']==contract['role'] for r in worker.store.uncertain())
@@ -170,11 +170,19 @@ def build_dashboard(env=Path('.env')):
     for t in trades.values():
         t['legs'].sort(key=lambda l:l['role']);t['status']='RECONCILIATION_REQUIRED' if any(l['status']=='SUBMISSION_UNCERTAIN' for l in t['legs']) or any(r['trade_id']==t['trade_id'] for r in worker.store.uncertain()) else 'NOT_SUBMITTED' if not any(l['entry_order_id'] for l in t['legs']) else 'CLOSED_ACKNOWLEDGED' if all(l['exit_order_id'] for l in t['legs'] if l['entry_order_id']) else 'OPEN_ACKNOWLEDGED';t['pnl_rupees']=sum(l['pnl_rupees'] for l in t['legs'] if l['pnl_rupees'] is not None);t['missing_pnl_legs']=sum(l['pnl_rupees'] is None for l in t['legs']);t['partial_basket']=sum(bool(l['entry_order_id']) for l in t['legs'])!=5
     opened=[t for t in trades.values() if t['status']!='CLOSED_ACKNOWLEDGED'];closed=[t for t in trades.values() if t['status']=='CLOSED_ACKNOWLEDGED']
-    legs=[l for t in trades.values() for l in t['legs']];priced_closed=[l['pnl_rupees'] for l in legs if l['exit_order_id'] and l['pnl_rupees'] is not None];gains=sum(max(0,v) for v in priced_closed);losses=-sum(min(0,v) for v in priced_closed)
+    def totals(selected):
+        legs=[l for t in selected for l in t['legs']]
+        closed_prices=[l['pnl_rupees'] for l in legs if l['exit_order_id'] and l['pnl_rupees'] is not None]
+        gains=sum(max(0,v) for v in closed_prices);losses=-sum(min(0,v) for v in closed_prices)
+        return dict(open_estimated_rupees=sum(l['pnl_rupees'] for l in legs if not l['exit_order_id'] and l['pnl_rupees'] is not None),closed_estimated_rupees=sum(closed_prices),total_estimated_rupees=sum(l['pnl_rupees'] for l in legs if l['pnl_rupees'] is not None),gross_profit_rupees=gains,gross_loss_rupees=losses,gain_loss_ratio=gains/losses if losses else None,missing_pnl_legs=sum(l['pnl_rupees'] is None for l in legs),completed_baskets=sum(t['status']=='CLOSED_ACKNOWLEDGED' for t in selected),partial_baskets=sum(t['partial_basket'] for t in selected))
+    daily_trades=[t for t in trades.values() if t['session_date']==day]
+    all_trades=list(trades.values());sessions=sorted({t['session_date'] for t in all_trades})
+    overall=totals(all_trades)
+    overall.update(session_count=len(sessions),first_session=sessions[0] if sessions else None,last_session=sessions[-1] if sessions else None,journal_path=str(worker.store.path) if hasattr(worker.store,'path') else str(JOURNAL),scope='ALL_RETAINED_FIVE_LEG_SANDBOX_JOURNAL',estimated=True)
     try:os.kill(int(DEFAULT_PID.read_text()),0);running=True
     except (OSError,ValueError):running=False
     return dict(model=MODEL,worker=dict(worker.status(),running=running),strategy=dict(active_strategy_id=strategy(env),armed_strategy_id=control.get('strategy_id')),active_trades=opened,active_trade=next((l for t in opened for l in t['legs'] if l['role']==0),None),completed_trades=closed,
-        pnl=dict(open_estimated_rupees=sum(l['pnl_rupees'] for l in legs if not l['exit_order_id'] and l['pnl_rupees'] is not None),closed_estimated_rupees=sum(priced_closed),total_estimated_rupees=sum(l['pnl_rupees'] for l in legs if l['pnl_rupees'] is not None),gross_profit_rupees=gains,gross_loss_rupees=losses,gain_loss_ratio=gains/losses if losses else None,missing_pnl_legs=sum(l['pnl_rupees'] is None for l in legs)),
+        pnl=totals(daily_trades),pnl_session_date=day,overall_pnl=overall,
         events=[r for r in worker.store.rows() if r.get('session_date')==day and r['status'] not in {'ACCEPTED','REQUESTED','BASKET_PLANNED'}][-50:][::-1],last_refresh=now().isoformat(),quote_error=quote_error,warning='Actual Sandbox order acknowledgements; P&L estimated from observed quotes, not confirmed fills. Missing legs/prices are explicit. No daily order-count cap.',safety=dict(sandbox_only=True,live_execution_enabled=False))
 
 def main():

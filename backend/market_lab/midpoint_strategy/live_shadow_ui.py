@@ -300,6 +300,7 @@ def _selected_trade_view(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
             round(sign * (price - entry_price), 4)
             if entry_price is not None and price is not None
             and direction in {"BULLISH", "BEARISH"}
+            and row.get("event_type") != "PRE_ENTRY_HEALTH_SNAPSHOT"
             else None
         )
         row["nifty_points_from_entry"] = points
@@ -414,7 +415,7 @@ def _with_nifty_points(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         lane = active.get(identity)
         price = _num(row.get("underlying_price"))
         move = None
-        if lane and price is not None:
+        if lane and price is not None and kind != "PRE_ENTRY_HEALTH_SNAPSHOT" and lane["direction"] in {"BULLISH", "BEARISH"}:
             sign = 1 if lane["direction"] == "BULLISH" else -1
             move = round(sign * (price - lane["entry"]), 4)
         row["nifty_points_from_entry"] = move

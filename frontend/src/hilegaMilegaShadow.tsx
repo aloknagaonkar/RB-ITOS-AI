@@ -1,3 +1,4 @@
+import {sessionDay,dateOptions,recentAuditDays,selectedTradeDay,TradeDateFilter} from './hilegaTradeDates'
 import HilegaPcrWorkspace from './hilegaPcrWorkspace'
 import HilegaPcrAuditCard,{usePcrContext,strikeBias} from './hilegaPcrContext'
 import HilegaExpiryWorkspace from './hilegaExpiryWorkspace'
@@ -256,6 +257,7 @@ export default function HilegaMilegaShadow(){
   const [detail,setDetail]=useState<AuditReport|null>(null)
   const [auditLoading,setAuditLoading]=useState(false)
   const [error,setError]=useState('')
+  const [tradeDate,setTradeDate]=useState('')
   const [gapChecks,setGapChecks]=useState<Record<string,any>[]>([])
 
   const refresh=async(active:()=>boolean)=>{
@@ -274,11 +276,11 @@ export default function HilegaMilegaShadow(){
     if(dr.ok){
       const directional=await dr.json()
       const rawRows=directional.rows??[]
-      const directionalRows=[...augmentDirectionalRowsWithTrades(rawRows.filter((r:any)=>r.strategy_id!=='HILEGA_WMA_GAP_V2_LIVE_SHADOW'),d.trades??[]),...rawRows.filter((r:any)=>r.strategy_id==='HILEGA_WMA_GAP_V2_LIVE_SHADOW')]
+      const directionalRows=[...augmentDirectionalRowsWithTrades(rawRows.filter((r:any)=>!['HILEGA_WMA_GAP_V2_LIVE_SHADOW','HILEGA_V2_ALIGNMENT_DUAL_EXIT'].includes(r.strategy_id)),d.trades??[]),...rawRows.filter((r:any)=>['HILEGA_WMA_GAP_V2_LIVE_SHADOW','HILEGA_V2_ALIGNMENT_DUAL_EXIT'].includes(r.strategy_id))]
       merged=overlayDirectionalAuditReports(a as HilegaAudit[],directionalRows)
     }
-    const v2Reports=merged.filter(r=>r.strategy?.strategy_id==='HILEGA_WMA_GAP_V2_LIVE_SHADOW')
-    merged=overlayDirectionalTradeMarkers(merged.filter(r=>r.strategy?.strategy_id!=='HILEGA_WMA_GAP_V2_LIVE_SHADOW'),d.trades??[])
+    const v2Reports=merged.filter(r=>['HILEGA_WMA_GAP_V2_LIVE_SHADOW','HILEGA_V2_ALIGNMENT_DUAL_EXIT'].includes(r.strategy?.strategy_id))
+    merged=overlayDirectionalTradeMarkers(merged.filter(r=>!['HILEGA_WMA_GAP_V2_LIVE_SHADOW','HILEGA_V2_ALIGNMENT_DUAL_EXIT'].includes(r.strategy?.strategy_id)),d.trades??[])
     merged=attachDirectionalTradeAuditMetadata(merged,d.trades??[])
     if(active())setRows([...merged.filter(r=>!v2Reports.some(v=>v.checkpoint.slice(0,10)===r.checkpoint.slice(0,10))),...v2Reports].sort((a,b)=>b.checkpoint.localeCompare(a.checkpoint)) as AuditReport[])
   }
@@ -292,7 +294,13 @@ export default function HilegaMilegaShadow(){
   const latestExit=exits[0]??null
   const activePcr=usePcrContext()
   const activeTrades=useMemo(()=>dashboard?.trades.filter(t=>String(t.status).toUpperCase()==='ACTIVE')??[],[dashboard])
-  const exitedTrades=useMemo(()=>dashboard?.trades.filter(t=>String(t.status).toUpperCase()!=='ACTIVE')??[],[dashboard])
+  const allExitedTrades=useMemo(()=>dashboard?.trades.filter(t=>String(t.status).toUpperCase()!=='ACTIVE')??[],[dashboard])
+  const tradeDates=dateOptions(allExitedTrades.map(t=>sessionDay(t.signal_bar)))
+  const selectedDate=selectedTradeDay(tradeDate,tradeDates)
+  const exitedTrades=allExitedTrades.filter(t=>sessionDay(t.signal_bar)===selectedDate)
+  const auditDays=recentAuditDays(rows.map(r=>sessionDay(r.checkpoint)))
+  const liveAuditRows=rows.filter(r=>auditDays.includes(sessionDay(r.checkpoint)))
+
 
   const openTradeAudit=async(checkpoint:string)=>{
     if(expanded===checkpoint){setExpanded(null);setDetail(null);return}
@@ -317,8 +325,8 @@ export default function HilegaMilegaShadow(){
     {error&&<div className="banner error">{error}</div>}
 
     <div className="shadow-safety"><b>Active strategy: {status?.selected_live_shadow_strategy??'Loading'}</b><span>Structural exit · exit-first processing</span></div>
-    {status?.selected_live_shadow_strategy==='HILEGA_WMA_GAP_V2_LIVE_SHADOW'&&<section className="panel">
-      <h2>WMA-gap V2 · minute decision audit</h2>
+    {['HILEGA_WMA_GAP_V2_LIVE_SHADOW','HILEGA_V2_ALIGNMENT_DUAL_EXIT'].includes(status?.selected_live_shadow_strategy??'')&&<section className="panel">
+      <h2>{status?.selected_live_shadow_strategy} · minute entry confirmation audit</h2>
       <p>Previous and current are actual adjacent completed minutes. A replacement entry on the exit boundary requires both minutes to satisfy WMA strength.</p>
       <div style={{overflowX:'auto'}}><table><thead><tr><th>Decision time</th><th>Direction</th><th>Previous gap</th><th>Current gap</th><th>Expansion</th><th>Previous WMA strength</th><th>Current WMA strength</th><th>Persistence</th><th>Decision / reason</th></tr></thead>
       <tbody>{gapChecks.slice().reverse().map((r,i)=>{const p=r.payload??{};return <tr key={r.record_hash??i}><td>{tm(p.decision_timestamp)}</td><td>{p.direction}</td><td>{num(p.previous_gap,4)}</td><td>{num(p.current_gap,4)}</td><td>{num(p.gap_delta,4)}</td><td>{num(p.previous_directional_wma_strength,4)}</td><td>{num(p.directional_wma_strength,4)}</td><td>{p.persistence_pass?'PASS':'WAIT'}</td><td>{p.status} · {(p.reasons??[]).join(', ')||'All conditions passed'}</td></tr>})}</tbody></table></div>
@@ -361,7 +369,7 @@ export default function HilegaMilegaShadow(){
           return <article className="hilega-trade-card" key={`${t.direction}-${t.signal_bar}`}>
             <div className="hilega-trade-head"><div>
               <b>{words(t.direction)} · {side} · Signal candle {candleWindow(t.signal_bar)}</b> · {words(t.source)} <span className="shadow-stage">ACTIVE</span>
-              <small>Decision boundary {tm(t.signal_boundary??plusMinutes(t.signal_bar,5))} · {side} entry {tm(entryTime)} · Expiry {t.expiry??'—'} · ATM {num(t.atm,0)} · Signal NIFTY {num(t.signal_spot)}</small>
+              <small>Session {sessionDay(t.signal_bar)} · Decision boundary {tm(t.signal_boundary??plusMinutes(t.signal_bar,5))} · {side} entry {tm(entryTime)} · Expiry {t.expiry??'—'} · ATM {num(t.atm,0)} · Signal NIFTY {num(t.signal_spot)}</small>
             </div>{t.direction==='BULLISH'&&<button onClick={()=>void openTradeAudit(t.signal_bar)}>{isOpen?'Hide audit':'Audit ▾'}</button>}</div>
             {t.issue&&<div className="hilega-dashboard-warning">Data limitation: {t.issue}</div>}
             {t.legs.length>0&&<div className="shadow-table-scroll"><table className="shadow-table hilega-economics-table"><thead><tr><th>{side}</th><th>Entry time</th><th>Entry premium</th><th>Latest premium</th><th>Current pts</th><th>Current %</th><th>Combined bias</th><th>MFE</th><th>MAE</th></tr></thead><tbody>{t.legs.map(l=><tr key={l.instrument_key}><td>{role(l.relation_to_atm)} · {num(l.strike,0)} {side}</td><td>{tm(l.entry_timestamp)}</td><td>{num(l.entry_open)}</td><td>{num(l.latest_close)}</td><td className={l.current_points==null?'':l.current_points>=0?'positive':'negative'}>{signed(l.current_points)}</td><td>{l.current_return_pct==null?'—':`${signed(l.current_return_pct)}%`}</td><td>{strikeBias(activePcr,l.strike,l.instrument_key)}</td><td>{num(l.mfe_points)}</td><td>{num(l.mae_points)}</td></tr>)}</tbody></table></div>}
@@ -373,9 +381,10 @@ export default function HilegaMilegaShadow(){
 
     <section className="panel shadow-panel">
       <div className="panel-heading"><div><h2>Hilega candle-by-candle decision audit</h2>
-        <p>Existing bullish audit view preserved. Directional owner/state is added above; this section is not redesigned.</p></div>
+        <p>Today and the previous available session only. Older dates remain in historical replay.</p></div>
         <span className="pill teal">LIVE · OBSERVATION ONLY</span></div>
-      <HilegaDecisionTable reports={rows as HilegaAudit[]} mode="LIVE"
+      <p>Sessions: {auditDays.join(" · ")} · {liveAuditRows.length} checkpoints</p>
+      <HilegaDecisionTable reports={liveAuditRows as HilegaAudit[]} mode="LIVE"
         fetchDetail={async checkpoint=>{
           const local=rows.find(r=>r.checkpoint===checkpoint)
 
@@ -390,8 +399,9 @@ export default function HilegaMilegaShadow(){
 
     <section className="panel shadow-panel">
       <div className="panel-heading"><div><h2>Exited option shadow trades</h2><p>Same existing trade cards, now combined across bullish CE and bearish PE lifecycles.</p></div><span className="pill teal">{exitedTrades.length} EXITED</span></div>
+      <TradeDateFilter value={selectedDate} dates={tradeDates} onChange={d=>{setTradeDate(d);setExpanded(null);setDetail(null)}}><span>{exitedTrades.length} of {allExitedTrades.length} exited records · active trades remain visible above</span></TradeDateFilter>
       {dashboard?.coverage_note&&<div className="hilega-dashboard-warning">{dashboard.coverage_note}</div>}
-      {!dashboard?<div className="empty">Loading exited trades…</div>:!exitedTrades.length?<div className="empty">No exited option shadow trades yet.</div>:<div className="hilega-ledger">
+      {!dashboard?<div className="empty">Loading exited trades…</div>:!exitedTrades.length?<div className="empty">No exited option shadow trades for this session.</div>:<div className="hilega-ledger">
         {exitedTrades.map(t=>{
           const isOpen=expanded===t.signal_bar
           const entryTime=firstLegTime(t,'entry_timestamp')
@@ -400,7 +410,7 @@ export default function HilegaMilegaShadow(){
           return <article className="hilega-trade-card" key={`${t.direction}-${t.signal_bar}`}>
             <div className="hilega-trade-head"><div>
               <b>{words(t.direction)} · {side} · Signal candle {candleWindow(t.signal_bar)}</b> · {words(t.source)} <span className="shadow-stage">{words(t.status)}</span>
-              <small>Decision boundary {tm(t.signal_boundary??plusMinutes(t.signal_bar,5))} · {side} entry {tm(entryTime)} · {side} exit {tm(exitTime)} · Expiry {t.expiry??'—'} · ATM {num(t.atm,0)} · Signal NIFTY {num(t.signal_spot)} · Exit reason {words(t.exit_reason)}</small>
+              <small>Session {sessionDay(t.signal_bar)} · Decision boundary {tm(t.signal_boundary??plusMinutes(t.signal_bar,5))} · {side} entry {tm(entryTime)} · {side} exit {tm(exitTime)} · Expiry {t.expiry??'—'} · ATM {num(t.atm,0)} · Signal NIFTY {num(t.signal_spot)} · Exit reason {words(t.exit_reason)}</small>
             </div>{t.direction==='BULLISH'&&<button onClick={()=>void openTradeAudit(t.signal_bar)}>{isOpen?'Hide audit':'Audit ▾'}</button>}</div>
             {String(t.status).toUpperCase()==='PENDING_EXACT_EXIT'&&<div className="hilega-dashboard-warning">Underlying strategy has exited. Awaiting the exact causal {side} exit-minute OPEN at {tm(t.pending_exit_boundary)}. Realized premium points remain unavailable until exact prices are recorded.</div>}
             {t.issue&&<div className="hilega-dashboard-warning">Data limitation: {t.issue}</div>}

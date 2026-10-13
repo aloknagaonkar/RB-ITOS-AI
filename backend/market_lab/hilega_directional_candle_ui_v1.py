@@ -528,7 +528,7 @@ def build_live_directional_candles(session_date: str | None = None, *, audit_onl
         if record.get("stage") != "DIRECTIONAL_DECISION":
             continue
         payload = record.get("payload") or {}
-        is_v2 = payload.get("strategy_id") == "HILEGA_WMA_GAP_V2_LIVE_SHADOW"
+        is_v2 = payload.get("strategy_id") in {"HILEGA_WMA_GAP_V2_LIVE_SHADOW", "HILEGA_V2_ALIGNMENT_DUAL_EXIT"}
         ts = (payload.get("decision_timestamp") if is_v2 else None) or payload.get("bar_timestamp") or record.get("checkpoint")
         if not isinstance(ts, str) or _iso_session(ts) != day:
             continue
@@ -555,6 +555,25 @@ def build_live_directional_candles(session_date: str | None = None, *, audit_onl
                         "canonical_setup": {key: payload.get(key) for key in (
                             "canonical_setup_events", "canonical_suppressed_events", "canonical_owner",
                             "canonical_bullish_conditions", "canonical_bearish_conditions")}})
+        if is_v2:
+            indicator = payload.get("completed_5m_indicators") or {}
+            row.update({"rsi9": indicator.get("rsi9"),
+                        "ema3_rsi": indicator.get("ema3"), "wma21_rsi": indicator.get("wma21")})
+            from .hilega_v2_replay_presentation_v1 import inspection
+            row["strategy_steps"] = inspection({
+                "completed_5m_indicators": payload.get("completed_5m_indicators"),
+                "checks": payload.get("wma_gap_checks") or [],
+                "exit_validation": payload.get("exit_validation"),
+                "owner_after": payload.get("trade_owner_after"),
+            })
+            row["setup_attempts"] = payload.get("setup_attempts") or []
+            row["exit_validation"] = payload.get("exit_validation")
+            row["exit_warning_time"] = payload.get("exit_warning_time")
+            row["indicator_timestamp"] = payload.get("bar_timestamp")
+            minute_bar = payload.get("minute_ohlcv") or {}
+            for field in ("open", "high", "low", "volume"):
+                if field in minute_bar:
+                    row[field] = minute_bar[field]
         row.update({
             "owner_before": payload.get("trade_owner_before"),
             "owner_after": payload.get("trade_owner_after"),

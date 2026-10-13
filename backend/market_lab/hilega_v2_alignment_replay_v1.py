@@ -112,10 +112,14 @@ class WmaGapGate:
         return accepted,checks
 
 
+def decision_checkpoint(*, boundary, checks, entries, exits):
+    """Five-minute monitoring, with minute evidence only for pending confirmation/transitions."""
+    return bool(boundary or checks or entries or exits)
+
 MODEL='HILEGA_V2_ALIGNMENT_DUAL_EXIT_REPLAY_V1'
 SOURCE='V2_ALIGNMENT_DUAL_EXIT_RESEARCH'
 OUTPUT_ROOT=Path('data/historical-evidence/hilega-v2-alignment-dual-exit-v1')
-RULES={"version":"research-1.0.0","setup":"V1 OR completed-5m RSI9/EMA3/WMA21 ordering + positive expanding minute gap", "strength_min":0.75,"expansion_min_exclusive":0.0,"persistence":"previous/current >=0.75; later arm confirmation", "window_minutes":10,"exit":"both RSI9 and EMA3 opposite WMA21 at completed 5m close", "cutoff_IST":"14:55", "same_candle_exit_first":True,"ema10_enabled":False,"mandatory_5m_slope":False,"alternative_50_filter":False,"signal_episode":"one alternative per continuous alignment episode; no minute window reset"}
+RULES={"version":"five-minute-setup-1.1.0","setup":"Five-minute boundary only: V1 OR completed-5m RSI9/EMA3/WMA21 ordering + positive expanding minute gap", "strength_min":0.75,"expansion_min_exclusive":0.0,"persistence":"previous/current >=0.75; later arm confirmation", "window_minutes":10,"exit":"both RSI9 and EMA3 opposite WMA21 at completed 5m close", "cutoff_IST":"14:55", "same_candle_exit_first":True,"ema10_enabled":False,"mandatory_5m_slope":False,"alternative_50_filter":False,"signal_episode":"one alternative per continuous alignment episode; no minute window reset", "setup_interval_minutes":5,"confirmation_interval_minutes":1,"active_decision_interval_minutes":5}
 def candles(rows):
  result=[];seen=set()
  for row in rows:
@@ -190,20 +194,22 @@ def replay(session_date, raw_rows, warmup, metadata=None):
    gap=sign*(current.ema3_rsi-current.wma21_rsi) if current.ready else None
    pg=sign*(prev['snapshot'].ema3_rsi-prev['snapshot'].wma21_rsi) if prev and prev['snapshot'].ready else None
    expanding=pg is not None and gap is not None and gap>pg and prev['minute']==t-timedelta(minutes=1)
-   if aligned and gap is not None and gap>0 and expanding and not episode[side] and g.owner=='NONE' and side not in g.pending and at.strftime('%H:%M')<'14:55':
+   if bar and aligned and gap is not None and gap>0 and expanding and not episode[side] and g.owner=='NONE' and side not in g.pending and at.strftime('%H:%M')<'14:55':
     episode[side]=True
     ev=StrategyEvent('ENTRY_PATH1_ROUTE_A_CROSS_RSI50_ABOVE_WMA21' if side=='BULLISH' else 'ENTRY_BEARISH_ROUTE_B_STRUCTURAL',t,'ALTERNATIVE_ALIGNMENT','IDLE','ARMED',details={'alternative':True})
     g.signal(ev,at)
     setup_attempts.append({'time':at.isoformat(),'direction':side,'source':'ALTERNATIVE_ALIGNMENT'})
     signals.append(dict(time=at.isoformat(),direction=side,rsi=latest.rsi9,ema=latest.ema3_rsi,wma=latest.wma21_rsi,current_gap=gap,previous_gap=pg,delta=gap-pg,strength=sign*(current.wma21_rsi-ref.wma21_rsi) if ref and ref.ready else None))
   entries,cc=g.evaluate(minute=t,current=current,reference=ref,price=float(minute.close),exit_boundary=bool(events));checks.extend(cc)
+  if entries:g.pending.clear()
   for e in events:
    active.update(exit_time=at.isoformat(),exit_price=e.price,points=e.points,exit_reason=e.exit_reason or e.event_type);trades.append(active);active=None
   for e in entries:
    trade_number+=1
    assert active is None, "ENTRY_BEFORE_EXIT"
    active=dict(trade_id=f'{TARGET}-{trade_number:03d}',direction=direction(e),entry_time=at.isoformat(),entry_price=e.price,signal_time=e.details['wma_gap']['signal_available_at'],entry_checks=e.details['wma_gap'])
-  audit.append({'checkpoint':at.isoformat(),'minute_timestamp':t.isoformat(),'five_minute_label':bar.ts.isoformat() if bar else None,'nifty_close':float(minute.close),'owner_before':before,'owner_after':g.owner,'indicators':{'rsi9':current.rsi9,'ema3':current.ema3_rsi,'wma21':current.wma21_rsi},'completed_5m_indicators':{'rsi9':latest.rsi9,'ema3':latest.ema3_rsi,'wma21':latest.wma21_rsi} if latest else None,'five_minute_changes':{'rsi9':latest.rsi9-ref.rsi9,'ema3':latest.ema3_rsi-ref.ema3_rsi,'wma21':latest.wma21_rsi-ref.wma21_rsi} if bar and ref and ref.ready else None,'checks':cc,'alternative_signals':[z for z in signals if z['time']==at.isoformat()],'canonical_events':[e.event_type for e in dec.accepted_events] if bar else [],'transitions':[{'event':'EXIT_CLOSED','direction':direction(e),'price':e.price,'points':e.points} for e in events]+[{'event':'ENTRY_ACTIVE','direction':direction(e),'price':e.price} for e in entries],'exit_validation':exit_validation,'active_trade':{'direction':active['direction'],'entry_time':active['entry_time'],'entry_price':active['entry_price'],'nifty_points':(float(minute.close)-active['entry_price'])*(1 if active['direction']=='BULLISH' else -1)} if active else None,'exit_warning_time':active.get('warning_time') if active else None})
+  if decision_checkpoint(boundary=bar is not None, checks=cc, entries=entries, exits=events):
+   audit.append({'checkpoint':at.isoformat(),'minute_timestamp':t.isoformat(),'five_minute_label':bar.ts.isoformat() if bar else None,'nifty_close':float(minute.close),'owner_before':before,'owner_after':g.owner,'indicators':{'rsi9':current.rsi9,'ema3':current.ema3_rsi,'wma21':current.wma21_rsi},'completed_5m_indicators':{'rsi9':latest.rsi9,'ema3':latest.ema3_rsi,'wma21':latest.wma21_rsi} if latest else None,'five_minute_changes':{'rsi9':latest.rsi9-ref.rsi9,'ema3':latest.ema3_rsi-ref.ema3_rsi,'wma21':latest.wma21_rsi-ref.wma21_rsi} if bar and ref and ref.ready else None,'checks':cc,'alternative_signals':[z for z in signals if z['time']==at.isoformat()],'canonical_events':[e.event_type for e in dec.accepted_events] if bar else [],'transitions':[{'event':'EXIT_CLOSED','direction':direction(e),'price':e.price,'points':e.points} for e in events]+[{'event':'ENTRY_ACTIVE','direction':direction(e),'price':e.price} for e in entries],'exit_validation':exit_validation,'active_trade':{'direction':active['direction'],'entry_time':active['entry_time'],'entry_price':active['entry_price'],'nifty_points':(float(minute.close)-active['entry_price'])*(1 if active['direction']=='BULLISH' else -1)} if active else None,'exit_warning_time':active.get('warning_time') if active else None})
   if at.strftime('%H:%M')>='14:55':g.pending.clear()
  if active:
   at=datetime.fromisoformat(TARGET+'T14:55:00+05:30');price=float(next(x.open for x in rows if x.timestamp==at))

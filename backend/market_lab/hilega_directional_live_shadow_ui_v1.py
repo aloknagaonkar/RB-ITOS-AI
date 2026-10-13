@@ -272,6 +272,8 @@ def status(fast: bool = False):
                              _store().verify_chain() if STEP_AUDIT_PATH.exists() else (True, None))
     today = datetime.now(IST).date().isoformat()
     session_rows = [row for row in rows if _record_session(row) == today]
+    if os.getenv("LIVE_SHADOW_STRATEGY", "").strip().upper() == "HILEGA_V2_ALIGNMENT_DUAL_EXIT":
+        session_rows = [row for row in session_rows if (row.get("payload") or {}).get("strategy_id") == "HILEGA_V2_ALIGNMENT_DUAL_EXIT"]
     current, latest_state = _state_payload(session_rows)
     # Keep the nested current-state contract even before today's first audit.
     # An absent bootstrap is not yesterday's state and is not a trading lock.
@@ -290,7 +292,7 @@ def status(fast: bool = False):
         "strategy_id": STRATEGY_ID,
         "strategy_version": STRATEGY_VERSION,
         "selected_live_shadow_strategy": selected or None,
-        "directional_mode_active": selected in {STRATEGY_ID, "HILEGA_WMA_GAP_V2_LIVE_SHADOW"},
+        "directional_mode_active": selected in {STRATEGY_ID, "HILEGA_WMA_GAP_V2_LIVE_SHADOW", "HILEGA_V2_ALIGNMENT_DUAL_EXIT"},
         "active_strategy_id": selected or STRATEGY_ID,
         "observation_only": True,
         "execution_enabled": False,
@@ -356,4 +358,4 @@ def wma_gap_evaluations(limit: int = 100):
     result = [r for r in _rows() if r.get("stage")=="WMA_GAP_MINUTE_EVALUATION"
               and str((r.get("payload") or {}).get("minute_timestamp", "")).startswith(today)
               and r.get("status") != "RECOVERED"]
-    return {"strategy_id": "HILEGA_WMA_GAP_V2_LIVE_SHADOW", "rows": result[-limit:]}
+    return {"strategy_id": os.getenv("LIVE_SHADOW_STRATEGY", "HILEGA_WMA_GAP_V2_LIVE_SHADOW"), "rows": [r for r in result if (r.get("payload") or {}).get("strategy_id") == os.getenv("LIVE_SHADOW_STRATEGY", "HILEGA_WMA_GAP_V2_LIVE_SHADOW")][-limit:]}
