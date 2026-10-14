@@ -1,0 +1,415 @@
+[
+  {
+    "checkpoint": "2026-10-14T09:20:00+05:30",
+    "strategy": {
+      "owner_after": "NONE",
+      "owner_before": "NONE",
+      "bullish_armed": false,
+      "bearish_armed": true,
+      "bullish_state": "PATH1_IDLE",
+      "bearish_state": "BEARISH_PATH1_ARMED",
+      "direction": "BEARISH",
+      "events_emitted": []
+    },
+    "conditions": {
+      "wma_gap_checks": [
+        {
+          "armed_at": null,
+          "confirmation_window_pass": false,
+          "current_ema3": 72.82702559526683,
+          "current_gap": 7.438034949218178,
+          "current_rsi9": 60.14061819037434,
+          "current_wma21": 80.26506054448501,
+          "decision_timestamp": "2026-10-14T09:20:00+05:30",
+          "direction": "BEARISH",
+          "directional_alignment_diagnostic": true,
+          "directional_wma_strength": 1.5777862343708762,
+          "ema3_continuation_delta": 0.3187219754343289,
+          "gap_delta": 0.26077252535534967,
+          "gap_expanding_pass": true,
+          "gap_positive_pass": true,
+          "minute_timestamp": "2026-10-14T09:19:00+05:30",
+          "persistence_pass": false,
+          "previous_directional_wma_strength": 1.519836784291897,
+          "previous_ema3": 73.14574757070116,
+          "previous_gap": 7.177262423862828,
+          "previous_rsi9": 60.77806214124301,
+          "previous_timestamp": "2026-10-14T09:18:00+05:30",
+          "previous_wma21": 80.32300999456399,
+          "reasons": [
+            "WAIT_FIRST_POST_SIGNAL_MINUTE",
+            "WAIT_LATER_PERSISTENCE"
+          ],
+          "reference_bar_timestamp": "2026-10-13T15:25:00+05:30",
+          "reference_crosses_session": true,
+          "same_exit_boundary_confirmation": false,
+          "signal_available_at": "2026-10-14T09:20:00+05:30",
+          "signal_timestamp": "2026-10-14T09:19:00+05:30",
+          "status": "WAIT",
+          "wma_threshold_pass": true
+        }
+      ]
+    }
+  },
+  {
+    "checkpoint": "2026-10-14T09:21:00+05:30",
+    "strategy": {
+      "owner_after": "NONE",
+      "owner_before": "NONE",
+      "bullish_armed": false,
+      "bearish_armed": true,
+      "bullish_state": "PATH1_IDLE",
+      "bearish_state": "BEARISH_PATH1_ARMED",
+      "direction": "BEARISH",
+      "events_emitted": []
+    },
+    "conditions": {
+      "wma_gap_checks": [
+        {
+          "armed_at": null,
+          "confirmation_window_pass": true,
+          "current_ema3": 64.65759117198371,
+          "current_gap": 13.707544558355181,
+          "current_rsi9": 56.48815674870059,
+          "current_wma21": 78.36513573033889,
+          "decision_timestamp": "2026-10-14T09:21:00+05:30",
+          "direction": "BEARISH",
+          "directional_alignment_diagnostic": true,
+          "directional_wma_strength": 1.899924814146118,
+          "ema3_continuation_delta": 8.169434423283121,
+          "gap_delta": 6.269509609137003,
+          "gap_expanding_pass": true,
+          "gap_positive_pass": true,
+          "minute_timestamp": "2026-10-14T09:20:00+05:30",
+          "persistence_pass": false,
+          "previous_directional_wma_strength": 1.5777862343708762,
+          "previous_ema3": 72.82702559526683,
+          "previous_gap": 7.438034949218178,
+          "previous_rsi9": 60.14061819037434,
+          "previous_timestamp": "2026-10-14T09:19:00+05:30",
+          "previous_wma21": 80.26506054448501,
+          "reasons": [
+            "WAIT_LATER_PERSISTENCE"
+          ],
+          "same_exit_boundary_confirmation": false,
+          "signal_available_at": "2026-10-14T09:20:00+05:30",
+          "signal_timestamp": "2026-10-14T09:19:00+05:30",
+          "status": "WAIT",
+          "wma_threshold_pass": true
+        }
+      ]
+    }
+  },
+  {
+    "checkpoint": "2026-10-14T09:22:00+05:30",
+    "strategy": {
+      "owner_after": "NONE",
+      "owner_before": "NONE",
+      "bullish_armed": false,
+      "bearish_armed": true,
+      "bullish_state": "PATH1_IDLE",
+      "bearish_state": "BEARISH_PATH1_ARMED",
+      "direction": "BEARISH",
+      "events_emitted": []
+    },
+    "conditions": {
+      "wma_gap_checks": [
+        {
+          "armed_at": "2026-10-14T09:20:00+05:30",
+          "confirmation_window_pass": true,
+          "current_ema3": 69.16248737993077,
+          "current_gap": 10.021720388216679,
+          "current_rsi9": 65.4979491645947,
+          "current_wma21": 79.18420776814744,
+          "decision_timestamp": "2026-10-14T09:22:00+05:30",
+          "direction": "BEARISH",
+          "directional_alignment_diagnostic": true,
+          "directional_wma_strength": 1.080852776337565,
+          "ema3_continuation_delta": -4.504896207947056,
+          "gap_delta": -3.6858241701385026,
+          "gap_expanding_pass": false,
+          "gap_positive_pass": true,
+          "minute_timestamp": "2026-10-14T09:21:00+05:30",
+          "persistence_pass": true,
+          "previous_directional_wma_strength": 1.899924814146118,
+          "previous_ema3": 64.65759117198371,
+          "previous_gap": 13.707544558355181,
+          "previous_rsi9": 56.48815674870059,
+          "previous_timestamp": "2026-10-14T09:20:00+05:30",
+          "previous_wma21": 78.36513573033889,
+          "reasons": [
+            "GAP_NOT_EXPANDING_OR_PREVIOUS_MINUTE_MISSING"
+          ],
+          "same_exit_boundary_confirmation": false,
+          "signal_available_at": "2026-10-14T09:20:00+05:30",
+          "signal_timestamp": "2026-10-14T09:19:00+05:30",
+          "status": "WAIT",
+          "wma_threshold_pass": true
+        }
+      ]
+    }
+  },
+  {
+    "checkpoint": "2026-10-14T09:23:00+05:30",
+    "strategy": {
+      "owner_after": "NONE",
+      "owner_before": "NONE",
+      "bullish_armed": false,
+      "bearish_armed": true,
+      "bullish_state": "PATH1_IDLE",
+      "bearish_state": "BEARISH_PATH1_ARMED",
+      "direction": "BEARISH",
+      "events_emitted": []
+    },
+    "conditions": {
+      "wma_gap_checks": [
+        {
+          "armed_at": "2026-10-14T09:20:00+05:30",
+          "confirmation_window_pass": true,
+          "current_ema3": 70.31351534932598,
+          "current_gap": 9.079970231438764,
+          "current_rsi9": 67.80000510338513,
+          "current_wma21": 79.39348558076475,
+          "decision_timestamp": "2026-10-14T09:23:00+05:30",
+          "direction": "BEARISH",
+          "directional_alignment_diagnostic": true,
+          "directional_wma_strength": 0.8715749637202634,
+          "ema3_continuation_delta": -1.1510279693952157,
+          "gap_delta": -0.9417501567779141,
+          "gap_expanding_pass": false,
+          "gap_positive_pass": true,
+          "minute_timestamp": "2026-10-14T09:22:00+05:30",
+          "persistence_pass": true,
+          "previous_directional_wma_strength": 1.080852776337565,
+          "previous_ema3": 69.16248737993077,
+          "previous_gap": 10.021720388216679,
+          "previous_rsi9": 65.4979491645947,
+          "previous_timestamp": "2026-10-14T09:21:00+05:30",
+          "previous_wma21": 79.18420776814744,
+          "reasons": [
+            "GAP_NOT_EXPANDING_OR_PREVIOUS_MINUTE_MISSING"
+          ],
+          "same_exit_boundary_confirmation": false,
+          "signal_available_at": "2026-10-14T09:20:00+05:30",
+          "signal_timestamp": "2026-10-14T09:19:00+05:30",
+          "status": "WAIT",
+          "wma_threshold_pass": true
+        }
+      ]
+    }
+  },
+  {
+    "checkpoint": "2026-10-14T09:24:00+05:30",
+    "strategy": {
+      "owner_after": "NONE",
+      "owner_before": "NONE",
+      "bullish_armed": false,
+      "bearish_armed": true,
+      "bullish_state": "PATH1_IDLE",
+      "bearish_state": "BEARISH_PATH1_ARMED",
+      "direction": "BEARISH",
+      "events_emitted": []
+    },
+    "conditions": {
+      "wma_gap_checks": [
+        {
+          "armed_at": "2026-10-14T09:20:00+05:30",
+          "confirmation_window_pass": true,
+          "current_ema3": 71.63225806021669,
+          "current_gap": 8.000998922528197,
+          "current_rsi9": 70.43749052516652,
+          "current_wma21": 79.63325698274488,
+          "decision_timestamp": "2026-10-14T09:24:00+05:30",
+          "direction": "BEARISH",
+          "directional_alignment_diagnostic": true,
+          "directional_wma_strength": 0.6318035617401279,
+          "ema3_continuation_delta": -1.318742710890703,
+          "gap_delta": -1.0789713089105675,
+          "gap_expanding_pass": false,
+          "gap_positive_pass": true,
+          "minute_timestamp": "2026-10-14T09:23:00+05:30",
+          "persistence_pass": false,
+          "previous_directional_wma_strength": 0.8715749637202634,
+          "previous_ema3": 70.31351534932598,
+          "previous_gap": 9.079970231438764,
+          "previous_rsi9": 67.80000510338513,
+          "previous_timestamp": "2026-10-14T09:22:00+05:30",
+          "previous_wma21": 79.39348558076475,
+          "reasons": [
+            "WMA_THRESHOLD_NOT_MET",
+            "WAIT_LATER_PERSISTENCE",
+            "GAP_NOT_EXPANDING_OR_PREVIOUS_MINUTE_MISSING"
+          ],
+          "same_exit_boundary_confirmation": false,
+          "signal_available_at": "2026-10-14T09:20:00+05:30",
+          "signal_timestamp": "2026-10-14T09:19:00+05:30",
+          "status": "WAIT",
+          "wma_threshold_pass": false
+        }
+      ]
+    }
+  },
+  {
+    "checkpoint": "2026-10-14T09:25:00+05:30",
+    "strategy": {
+      "owner_after": "NONE",
+      "owner_before": "NONE",
+      "bullish_armed": false,
+      "bearish_armed": true,
+      "bullish_state": "PATH1_IDLE",
+      "bearish_state": "BEARISH_PATH1_ARMED",
+      "direction": "BEARISH",
+      "events_emitted": []
+    },
+    "conditions": {
+      "wma_gap_checks": [
+        {
+          "armed_at": "2026-10-14T09:20:00+05:30",
+          "confirmation_window_pass": true,
+          "current_ema3": 68.16342701574695,
+          "current_gap": 10.839133413457972,
+          "current_rsi9": 63.49982843622708,
+          "current_wma21": 79.00256042920492,
+          "decision_timestamp": "2026-10-14T09:25:00+05:30",
+          "direction": "BEARISH",
+          "directional_alignment_diagnostic": true,
+          "directional_wma_strength": 1.2625001152800905,
+          "ema3_continuation_delta": 3.468831044469738,
+          "gap_delta": 2.838134490929775,
+          "gap_expanding_pass": true,
+          "gap_positive_pass": true,
+          "minute_timestamp": "2026-10-14T09:24:00+05:30",
+          "persistence_pass": false,
+          "previous_directional_wma_strength": 0.6318035617401279,
+          "previous_ema3": 71.63225806021669,
+          "previous_gap": 8.000998922528197,
+          "previous_rsi9": 70.43749052516652,
+          "previous_timestamp": "2026-10-14T09:23:00+05:30",
+          "previous_wma21": 79.63325698274488,
+          "reasons": [
+            "WAIT_LATER_PERSISTENCE"
+          ],
+          "same_exit_boundary_confirmation": false,
+          "signal_available_at": "2026-10-14T09:20:00+05:30",
+          "signal_timestamp": "2026-10-14T09:19:00+05:30",
+          "status": "WAIT",
+          "wma_threshold_pass": true
+        }
+      ]
+    }
+  },
+  {
+    "checkpoint": "2026-10-14T09:26:00+05:30",
+    "strategy": {
+      "owner_after": "NONE",
+      "owner_before": "NONE",
+      "bullish_armed": false,
+      "bearish_armed": true,
+      "bullish_state": "PATH1_IDLE",
+      "bearish_state": "BEARISH_PATH1_ARMED",
+      "direction": "BEARISH",
+      "events_emitted": []
+    },
+    "conditions": {
+      "wma_gap_checks": [
+        {
+          "armed_at": "2026-10-14T09:20:00+05:30",
+          "confirmation_window_pass": true,
+          "current_ema3": 67.17939431335122,
+          "current_gap": 10.789751199416372,
+          "current_rsi9": 66.1953616109555,
+          "current_wma21": 77.9691455127676,
+          "decision_timestamp": "2026-10-14T09:26:00+05:30",
+          "direction": "BEARISH",
+          "directional_alignment_diagnostic": true,
+          "directional_wma_strength": 1.033414916437323,
+          "ema3_continuation_delta": 0.9840327023957229,
+          "gap_delta": -0.04938221404160004,
+          "gap_expanding_pass": false,
+          "gap_positive_pass": true,
+          "minute_timestamp": "2026-10-14T09:25:00+05:30",
+          "persistence_pass": true,
+          "previous_directional_wma_strength": 1.2625001152800905,
+          "previous_ema3": 68.16342701574695,
+          "previous_gap": 10.839133413457972,
+          "previous_rsi9": 63.49982843622708,
+          "previous_timestamp": "2026-10-14T09:24:00+05:30",
+          "previous_wma21": 79.00256042920492,
+          "reasons": [
+            "GAP_NOT_EXPANDING_OR_PREVIOUS_MINUTE_MISSING"
+          ],
+          "same_exit_boundary_confirmation": false,
+          "signal_available_at": "2026-10-14T09:20:00+05:30",
+          "signal_timestamp": "2026-10-14T09:19:00+05:30",
+          "status": "WAIT",
+          "wma_threshold_pass": true
+        }
+      ]
+    }
+  },
+  {
+    "checkpoint": "2026-10-14T09:27:00+05:30",
+    "strategy": {
+      "owner_after": "BEARISH",
+      "owner_before": "NONE",
+      "bullish_armed": false,
+      "bearish_armed": false,
+      "bullish_state": "PATH1_IDLE",
+      "bearish_state": "BEARISH_ACTIVE",
+      "direction": "BEARISH",
+      "events_emitted": [
+        "ENTRY_BEARISH_ROUTE_B_STRUCTURAL"
+      ]
+    },
+    "conditions": {
+      "wma_gap_checks": [
+        {
+          "armed_at": "2026-10-14T09:20:00+05:30",
+          "confirmation_window_pass": true,
+          "current_ema3": 64.26153609516561,
+          "current_gap": 13.177089741568238,
+          "current_rsi9": 60.35964517458426,
+          "current_wma21": 77.43862583673385,
+          "decision_timestamp": "2026-10-14T09:27:00+05:30",
+          "direction": "BEARISH",
+          "directional_alignment_diagnostic": true,
+          "directional_wma_strength": 1.563934592471071,
+          "ema3_continuation_delta": 2.9178582181856143,
+          "gap_delta": 2.3873385421518662,
+          "gap_expanding_pass": true,
+          "gap_positive_pass": true,
+          "minute_timestamp": "2026-10-14T09:26:00+05:30",
+          "persistence_pass": true,
+          "previous_directional_wma_strength": 1.033414916437323,
+          "previous_ema3": 67.17939431335122,
+          "previous_gap": 10.789751199416372,
+          "previous_rsi9": 66.1953616109555,
+          "previous_timestamp": "2026-10-14T09:25:00+05:30",
+          "previous_wma21": 77.9691455127676,
+          "reasons": [],
+          "same_exit_boundary_confirmation": false,
+          "signal_available_at": "2026-10-14T09:20:00+05:30",
+          "signal_timestamp": "2026-10-14T09:19:00+05:30",
+          "status": "ENTRY",
+          "wma_threshold_pass": true
+        }
+      ]
+    }
+  },
+  {
+    "checkpoint": "2026-10-14T09:30:00+05:30",
+    "strategy": {
+      "owner_after": "BEARISH",
+      "owner_before": "BEARISH",
+      "bullish_armed": false,
+      "bearish_armed": false,
+      "bullish_state": "PATH1_IDLE",
+      "bearish_state": "BEARISH_ACTIVE",
+      "direction": "BEARISH",
+      "events_emitted": []
+    },
+    "conditions": {
+      "wma_gap_checks": []
+    }
+  }
+]
