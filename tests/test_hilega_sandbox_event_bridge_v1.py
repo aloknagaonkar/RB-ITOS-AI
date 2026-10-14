@@ -1,4 +1,5 @@
 from datetime import datetime
+import json
 
 import pytest
 
@@ -113,3 +114,42 @@ def test_multiple_execution_actions_in_one_audit_row_fail_closed(tmp_path):
     )
     with pytest.raises(BridgeError, match="ambiguous"):
         HilegaSandboxEventBridgeV1(cfg).run_once()
+
+
+def test_verified_manual_reset_releases_bridge_trade_without_replaying_old_entry(tmp_path, monkeypatch):
+    import market_lab.hilega_sandbox_event_bridge_v1 as bridge_module
+
+    cfg = config(tmp_path)
+    source = ShadowStepAuditStoreV1(cfg.source)
+    strategy = "HILEGA_V2_ALIGNMENT_DUAL_EXIT"
+    at = datetime.fromisoformat("2026-10-06T10:00:00+05:30")
+    source.append(event_time=at, checkpoint=at, stage="DIRECTIONAL_DECISION",
+                  status="PROCESSED", payload=dict(strategy_id=strategy,
+                  decision_timestamp=at.isoformat(), accepted_events=["ENTRY_OPENING_BULLISH_CONFIRMED"]))
+    first = HilegaSandboxEventBridgeV1(cfg).run_once()
+    assert first["written"] == 1
+    old_trade = IntentStore(cfg.output).rows()[0]["trade_id"]
+    root = tmp_path / "manual"
+    root.mkdir()
+    monkeypatch.setattr(bridge_module, "MANUAL_EXIT_ROOT", root)
+    request_id = "verified-reset"
+    completed = "2026-10-06T10:05:00+05:30"
+    (root / "manual-exit.json").write_text(json.dumps({"requests": [dict(
+        request_id=request_id, status="READY_FOR_FRESH_SIGNAL", strategy_id=strategy,
+        completed_at=completed, trade_ids=[old_trade])]}))
+    (root / "manual-reset-acks.json").write_text(json.dumps({request_id: {"applied_at": completed, "completed_at": completed}}))
+    reset_at = datetime.fromisoformat(completed)
+    source.append(event_time=reset_at, checkpoint=reset_at, stage="DIRECTIONAL_MANUAL_EXIT_RESET",
+                  status="PROCESSED", payload=dict(strategy_id=strategy, request_id=request_id,
+                  completed_at=completed, trade_owner_after="NONE", accepted_events=[]))
+    fresh_at = datetime.fromisoformat("2026-10-06T10:10:00+05:30")
+    source.append(event_time=fresh_at, checkpoint=fresh_at, stage="DIRECTIONAL_DECISION",
+                  status="PROCESSED", payload=dict(strategy_id=strategy,
+                  decision_timestamp=fresh_at.isoformat(), accepted_events=["ENTRY_OPENING_BULLISH_CONFIRMED"]))
+    bridge = HilegaSandboxEventBridgeV1(cfg)
+    assert bridge.run_once()["written"] == 2
+    rows = IntentStore(cfg.output).rows()
+    assert [row["event_type"] for row in rows] == ["ENTRY", "RESET", "ENTRY"]
+    assert rows[-1]["decision"] == "WOULD_SUBMIT"
+    assert rows[-1]["trade_id"] != old_trade
+    assert bridge.run_once()["written"] == 0

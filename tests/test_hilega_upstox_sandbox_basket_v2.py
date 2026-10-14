@@ -1,4 +1,6 @@
 from datetime import datetime
+import hashlib
+import json
 from pathlib import Path
 from types import SimpleNamespace
 import pytest
@@ -93,3 +95,42 @@ def test_partial_basket_dashboard_shows_unknown_and_unsubmitted(tmp_path,monkeyp
     assert len(legs)==5
     assert [l['status'] for l in legs]==['BUY_ACKNOWLEDGED','BUY_ACKNOWLEDGED','SUBMISSION_UNCERTAIN','NOT_SUBMITTED','NOT_SUBMITTED']
     assert result['active_trades'][0]['status']=='RECONCILIATION_REQUIRED'
+
+
+def test_ranked_mode_buys_and_exits_only_selected_contract(tmp_path,monkeypatch):
+    import market_lab.hilega_upstox_sandbox_basket_v2 as m
+    from market_lab.hilega_v2_alignment_replay_v1 import RULES
+    w,c=fixture(tmp_path);f=Fake();en=intent('ENTRY');ex=intent('EXIT',seq=12)
+    policy_path=tmp_path/'approved-policy.json'
+    policy_path.write_text(json.dumps(dict(version='reviewed-v1',strategy_version=RULES['version'],approved=True,
+        ranked_ce_roles=[0,-1,1,-2,2],ranked_pe_roles=[-1,0,1,-2,2],max_spread_pct=5,
+        min_bid_quantity=65,min_ask_quantity=65,min_volume=100,max_signal_age_seconds=120,
+        max_quote_age_seconds=30,max_one_lot_premium_rupees=10000)))
+    monkeypatch.setattr(m,'selector_policy_path',lambda env: str(policy_path))
+    control=w.control.read();control.update(execution_mode=m.RANKED_MODE,
+        strike_policy_sha256=hashlib.sha256(policy_path.read_bytes()).hexdigest());w.control.write(control)
+    f.option_quality_quotes=lambda keys:{key:dict(bid_price=99,ask_price=100,bid_quantity=100,
+        ask_quantity=100,volume=500,quote_time=NOW.isoformat()) for key in keys}
+    w.process(en,[en,ex],f,c);w.process(en,[en,ex],f,c)
+    assert len(f.calls)==1 and f.calls[0]['instrument_key']=='K-1'
+    plans=[r for r in w.store.rows() if r['status']=='BASKET_PLANNED']
+    assert len(plans)==1 and plans[0]['strike_selection']['selected']['role']==-1
+    w.process(ex,[en,ex],f,c)
+    assert len(f.calls)==2 and f.calls[1]['instrument_key']=='K-1' and f.calls[1]['transaction_type']=='SELL'
+
+
+def test_ranked_mode_declines_incomplete_quote_and_exit_has_no_position(tmp_path,monkeypatch):
+    import market_lab.hilega_upstox_sandbox_basket_v2 as m
+    from market_lab.hilega_v2_alignment_replay_v1 import RULES
+    w,c=fixture(tmp_path);f=Fake();en=intent('ENTRY');ex=intent('EXIT',seq=12)
+    policy_path=tmp_path/'approved-policy.json'
+    policy_path.write_text(json.dumps(dict(version='reviewed-v1',strategy_version=RULES['version'],approved=True,
+        ranked_ce_roles=[0,-1,1,-2,2],ranked_pe_roles=[-1,0,1,-2,2],max_spread_pct=5,
+        min_bid_quantity=65,min_ask_quantity=65,min_volume=100,max_signal_age_seconds=120,
+        max_quote_age_seconds=30,max_one_lot_premium_rupees=10000)))
+    monkeypatch.setattr(m,'selector_policy_path',lambda env: str(policy_path))
+    control=w.control.read();control.update(execution_mode=m.RANKED_MODE,
+        strike_policy_sha256=hashlib.sha256(policy_path.read_bytes()).hexdigest());w.control.write(control)
+    f.option_quality_quotes=lambda keys:{}
+    w.process(en,[en,ex],f,c);w.process(ex,[en,ex],f,c)
+    assert not f.calls and [r['status'] for r in w.store.rows()]==['ENTRY_NOT_TRADED','EXIT_NO_POSITION']

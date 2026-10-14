@@ -24,6 +24,7 @@ from .live_shadow_step_audit_v1 import ShadowStepAuditStoreV1
 MODEL = "HILEGA_SANDBOX_EVENT_BRIDGE_V1"
 DEFAULT_SOURCE = Path("data/live-observation/hilega-directional-v1/step-audit.jsonl")
 DEFAULT_OUTPUT = Path("data/live-observation/hilega-upstox-sandbox-v1/would-submit.jsonl")
+MANUAL_EXIT_ROOT = Path("data/live-observation/hilega-upstox-sandbox-v2")
 
 EVENT_DIRECTION = {
     **{name: "BULLISH" for name in BULLISH_ENTRY_EVENTS | BULLISH_EXIT_EVENTS},
@@ -113,6 +114,9 @@ class HilegaSandboxEventBridgeV1:
     def _active_trades(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         active: dict[str, dict[str, Any]] = {}
         for row in rows:
+            if row.get("event_type") == "RESET" and row.get("decision") == "STATE_RESET":
+                active.clear()
+                continue
             if row.get("decision") != "WOULD_SUBMIT":
                 continue
             direction = row["direction"]
@@ -121,6 +125,35 @@ class HilegaSandboxEventBridgeV1:
             elif row["event_type"] == "EXIT":
                 active.pop(direction, None)
         return active
+
+    @staticmethod
+    def _verified_manual_reset(record: dict[str, Any], active: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
+        if record.get("stage") != "DIRECTIONAL_MANUAL_EXIT_RESET" or record.get("status") != "PROCESSED":
+            return None
+        payload = record.get("payload") or {}
+        request_id = payload.get("request_id")
+        if not request_id or payload.get("trade_owner_after") != "NONE" or not payload.get("completed_at"):
+            return None
+        requests_path = MANUAL_EXIT_ROOT / "manual-exit.json"
+        acks_path = MANUAL_EXIT_ROOT / "manual-reset-acks.json"
+        if not requests_path.exists() or not acks_path.exists():
+            return None
+        requests = json.loads(requests_path.read_text()).get("requests", [])
+        acks = json.loads(acks_path.read_text())
+        request = next((r for r in requests if r.get("request_id") == request_id), None)
+        ack = acks.get(request_id)
+        if not request or request.get("status") != "READY_FOR_FRESH_SIGNAL" or not isinstance(ack, dict):
+            return None
+        if request.get("strategy_id") != payload.get("strategy_id"):
+            return None
+        if request.get("completed_at") != payload.get("completed_at"):
+            return None
+        if ack.get("completed_at") != payload.get("completed_at") or not ack.get("applied_at"):
+            return None
+        open_ids = {row["trade_id"] for row in active.values()}
+        if open_ids and not open_ids.issubset(set(request.get("trade_ids") or [])):
+            return None
+        return request
 
     def run_once(self) -> dict[str, Any]:
         if not self.config.enabled:
@@ -144,12 +177,36 @@ class HilegaSandboxEventBridgeV1:
 
             for record in self.source.read_all():
                 record_strategy = (record.get("payload") or {}).get("strategy_id") or "HILEGA_DIRECTIONAL_SHADOW_V1"
+                active = active_by_strategy.setdefault(record_strategy, {})
+                if record.get("stage") == "DIRECTIONAL_MANUAL_EXIT_RESET":
+                    reset_id = hashlib.sha256(f"{record['record_hash']}|MANUAL_RESET".encode()).hexdigest()
+                    if reset_id in existing_ids:
+                        continue
+                    request = self._verified_manual_reset(record, active)
+                    if request is None:
+                        continue
+                    row = {
+                        "model": MODEL, "intent_id": reset_id, "event_type": "RESET",
+                        "strategy_id": record_strategy, "decision": "STATE_RESET",
+                        "reason_code": "VERIFIED_MANUAL_EXIT_RESET",
+                        "request_id": request["request_id"],
+                        "trade_ids": request.get("trade_ids", []),
+                        "source_sequence": record.get("sequence"),
+                        "source_record_hash": record.get("record_hash"),
+                        "event_timestamp": (record.get("payload") or {}).get("completed_at"),
+                        "broker_called": False, "sandbox_order_sent": False,
+                        "live_order_sent": False, "observation_only": True,
+                    }
+                    self.store.append(row)
+                    existing_ids.add(reset_id)
+                    active.clear()
+                    written += 1
+                    continue
                 names = self._accepted_events(record)
                 if not names:
                     continue
                 if len(names) > 1 and not (record_strategy in {"HILEGA_WMA_GAP_V2_LIVE_SHADOW", "HILEGA_V2_ALIGNMENT_DUAL_EXIT"} and len(names)==2 and sum(n in EXIT_EVENTS for n in names)==1 and sum(n in ENTRY_EVENTS for n in names)==1):
                     raise BridgeError(f"ambiguous accepted execution events: {names}")
-                active = active_by_strategy.setdefault(record_strategy, {})
                 # Causal ordering within one record: SELL intent before BUY intent.
                 for name in sorted(names, key=lambda n: 0 if n in EXIT_EVENTS else 1):
                     intent_id = hashlib.sha256(
