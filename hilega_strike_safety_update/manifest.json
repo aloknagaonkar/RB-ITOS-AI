@@ -52,7 +52,7 @@
   {
     "path": "tests/test_hilega_upstox_sandbox_basket_v2.py",
     "before": "bea82bdd7ebaa574bfb19374436ba281b707f0147b54cde90758ec842bbd8ae1",
-    "after": "da686dc59acbcaf89cec1c816a7f3db28b3610848965cbcc197dfaa61bca2099"
+    "after": "8252c4571090406393ae4e4e8e137e59346ebdcb11791f75225102035d0b0195"
   },
   {
     "path": "tests/test_hilega_sandbox_event_bridge_v1.py",

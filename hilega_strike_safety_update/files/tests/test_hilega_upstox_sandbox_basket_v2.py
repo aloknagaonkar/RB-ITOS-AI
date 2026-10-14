@@ -57,7 +57,12 @@ def test_prearm_exit_and_overlap_guard(tmp_path):
     w.process(ex,[en,ex],f,c);assert not f.calls
     fresh=intent('ENTRY','fresh');w.process(fresh,[fresh],f,c)
     other=intent('ENTRY','other',12);w.process(other,[other],f,c)
-    assert len(f.calls)==5 and w.store.rows()[-1]['status']=='ENTRY_BLOCKED'
+    assert len(f.calls)==5 and w.store.rows()[-1]['status']=='ENTRY_NOT_TRADED'
+    assert w.store.rows()[-1]['reason']=='OPEN_BASKET_OR_RECONCILIATION_REQUIRED'
+    other_exit=intent('EXIT','other',13)
+    w.process(other_exit,[other,other_exit],f,c)
+    assert len(f.calls)==5 and w.store.rows()[-1]['status']=='EXIT_NO_POSITION'
+    assert not w.control.read().get('entries_blocked')
 
 def test_nearest_expiry_five_strikes_and_missing_guard():
     rows=[dict(expiry=expiry,instrument_type=side,strike_price=22000+i*50,instrument_key=f'{expiry}-{side}-{i}',lot_size=65) for expiry in ('2026-10-06','2026-10-13','2026-10-20') for side in ('CE','PE') for i in range(10)]
