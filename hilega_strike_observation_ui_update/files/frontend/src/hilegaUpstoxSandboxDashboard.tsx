@@ -47,7 +47,7 @@ export default function HilegaUpstoxSandboxDashboard(){
     <HilegaManualExit/>
     <section className="panel shadow-panel"><h2>Strike ranking and no-trade decisions</h2><p>Fixed policy priority with quote filters. Observation decisions do not send orders.</p>{(data.strike_decisions??[]).slice(-50).reverse().map((r:any)=><StrikeDecision key={r.intent_id+'-'+r.status} row={r}/>)}</section>
     <section className="panel shadow-panel"><h2>Current active Sandbox trade</h2>{!data.active_trades.length?<div className="empty">No active Sandbox position.</div>:data.active_trades.map((x:any)=><Basket key={x.trade_id} trade={x}/>)}</section>
-    <section className="panel shadow-panel"><h2>Completed Sandbox trades</h2><TradeDateFilter value={selectedDate} dates={completedDates} onChange={setTradeDate}><span>{completedTrades.length} of {data.completed_trades.length} completed trades</span></TradeDateFilter>{!completedTrades.length?<div className="empty">No completed Sandbox trades for this session.</div>:completedTrades.map((x:any)=><Basket key={x.trade_id} trade={x}/>)}</section>
     <HilegaStrikeObservations/>
+    <section className="panel shadow-panel"><h2>Completed Sandbox trades</h2><TradeDateFilter value={selectedDate} dates={completedDates} onChange={setTradeDate}><span>{completedTrades.length} of {data.completed_trades.length} completed trades</span></TradeDateFilter>{!completedTrades.length?<div className="empty">No completed Sandbox trades for this session.</div>:completedTrades.map((x:any)=><Basket key={x.trade_id} trade={x}/>)}</section>
   </div>
 }

@@ -13,7 +13,7 @@ def main():
     rows=json.loads((HERE/'manifest.json').read_text());errors=[]
     for row in rows:
         if sha(HERE/'files'/row['path'])!=row['after']:errors.append('PACKAGE_HASH_MISMATCH:'+row['path'])
-        if sha(root/row['path']) not in {row['before'],row['after']}:errors.append('SOURCE_HASH_MISMATCH:'+row['path'])
+        if sha(root/row['path']) not in {row['before'],row['after'],*row.get('accepted_before',[])}:errors.append('SOURCE_HASH_MISMATCH:'+row['path'])
     if errors:raise SystemExit(json.dumps(dict(status='BLOCKED',errors=errors)))
     print(json.dumps(dict(status='VALIDATED',files=[r['path'] for r in rows],tests_run=False)))
     if a.check:return

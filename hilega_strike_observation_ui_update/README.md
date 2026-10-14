@@ -59,3 +59,6 @@ Captured historical exit quotes are allowed for CLOSED observations.
 This package renders evidence and does not validate or implement the ranking
 policy. A separate collector/evaluator integration is still required before
 automatic signal snapshots, top-five audits and mark/exit updates appear.
+
+The observation section is positioned directly after Current active Sandbox trade,
+before Completed Sandbox trades. This installer also accepts the previous UI package.
