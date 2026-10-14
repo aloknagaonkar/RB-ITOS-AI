@@ -73,3 +73,5 @@ def test_atm_tie_chooses_lower_and_wider_strict_manifest_requires_eleven():
                 strike=22500+i*50,instrument_key=str(i),lot_size=65) for i in range(-5,6)])
     assert len(validate_frozen(frozen,trade,DAY,wings=5))==11
     with pytest.raises(ValueError,match='EXACT_CANDIDATE'):validate_frozen(frozen,trade,DAY)
+    frozen['contracts'][-1]['instrument_key']=frozen['contracts'][0]['instrument_key']
+    with pytest.raises(ValueError,match='DUPLICATE_MANIFEST'):validate_frozen(frozen,trade,DAY,wings=5)

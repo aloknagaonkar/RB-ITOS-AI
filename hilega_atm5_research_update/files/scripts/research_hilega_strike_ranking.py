@@ -45,7 +45,7 @@ def validate_frozen(frozen, trade, day, *, wings=2):
     contracts = frozen['contracts']
     if len(contracts) != len(roles_for(wings)) or {r['role'] for r in contracts} != set(roles_for(wings)):
         raise ValueError('EXACT_CANDIDATE_MANIFEST_REQUIRED')
-    if len({r['instrument_key'] for r in contracts}) != 5:
+    if len({r['instrument_key'] for r in contracts}) != len(roles_for(wings)):
         raise ValueError('DUPLICATE_MANIFEST_CONTRACT')
     atm = float(frozen['atm'])
     step = float(frozen['strike_interval'])

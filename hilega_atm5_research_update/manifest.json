@@ -2,7 +2,7 @@
   {
     "path": "scripts/research_hilega_strike_ranking.py",
     "before": "eb56616514ece76eb03be69658a22d876a805043ef88da8a753a94c3e1ed4a3a",
-    "after": "f419abcc574e7d6e2dd96beea181d88d66c6affb2ef5bc1ec87c688c1968c413"
+    "after": "f34fbba07ac836e05d70fd5ac85490d3caafb249a8ede9d5c7aeba063896dd52"
   },
   {
     "path": "scripts/research_hilega_atm5_coverage.py",
@@ -17,7 +17,7 @@
   {
     "path": "tests/test_hilega_atm5_coverage.py",
     "before": null,
-    "after": "94f7c25327e37a009b661c5e849de0e228ca0dfbbc079478684d0761d40f688e"
+    "after": "a03eb6eadda07f1a1c391195ae0954739fc44517e23959738f0a7a1cce4617c9"
   },
   {
     "path": "docs/hilega-atm5-research.md",
