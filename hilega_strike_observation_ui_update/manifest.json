@@ -25,10 +25,11 @@
   {
     "path": "frontend/src/hilegaUpstoxSandboxDashboard.tsx",
     "before": "6fb5f7cdd50ed93b7b3b162429ac44ae7a50bb88a38ea9a555c5327493ea29cf",
-    "after": "64f0ecd36bc8507639d0461ff955e07bc4d5fac51c058c26acbd53437bc069f2",
+    "after": "6ff3817c8837d218c1133a82ba604af3b515daa3a2bda0b3e951a6439b09d843",
     "accepted_before": [
       "961a8c440f9ec0f509e6903ac5fb8734e391ff2d535262d8f78c3f08ab40e763",
-      "eac791eb89cc0a40891ad2f336fafe62096bcd40ffc4b2fb2fc9d661e6285367"
+      "eac791eb89cc0a40891ad2f336fafe62096bcd40ffc4b2fb2fc9d661e6285367",
+      "64f0ecd36bc8507639d0461ff955e07bc4d5fac51c058c26acbd53437bc069f2"
     ]
   }
 ]

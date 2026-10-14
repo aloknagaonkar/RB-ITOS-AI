@@ -74,3 +74,7 @@ Use the separately provided hilega-shadow-observer.zip for the policy evaluator
 and its VM tests. Its independent feed publisher and configured assumptions are
 still required. The existing accepted HILEGA signal alone does not prove the
 required breakout-velocity context. This UI update does not invent that flag.
+
+Completed Sandbox trades now use native, keyboard-accessible details/summary
+expanders, initially closed. The existing header, status, contract count and
+P&L remain visible. Active trade rows remain expanded. No accounting changes.
