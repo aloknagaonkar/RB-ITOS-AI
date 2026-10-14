@@ -62,3 +62,15 @@ automatic signal snapshots, top-five audits and mark/exit updates appear.
 
 The observation section is positioned directly after Current active Sandbox trade,
 before Completed Sandbox trades. This installer also accepts the previous UI package.
+
+## Replacement of earlier fixed-priority ranking
+
+The earlier “Strike ranking and no-trade decisions” section is removed. There
+is one ranking section, below the active Sandbox trade, using the new observer
+journal. Fixed-priority execution code and stored decisions remain intact for
+existing Sandbox behavior and audit history. No trading selector is activated.
+
+Use the separately provided hilega-shadow-observer.zip for the policy evaluator
+and its VM tests. Its independent feed publisher and configured assumptions are
+still required. The existing accepted HILEGA signal alone does not prove the
+required breakout-velocity context. This UI update does not invent that flag.

@@ -32,10 +32,10 @@ export default function HilegaStrikeObservations(){
     return()=>{active=false;clearInterval(interval);clearInterval(tick);controller?.abort()}
   },[])
   const stale=!!received&&clock-received>30000
-  return <section className="panel shadow-panel"><h2>Strike Selection Observations · Top 5</h2>
-    <p>Separate observation of ATM ±5 candidates. Each row is an alternative trade; hypothetical P&amp;L is not added to Sandbox P&amp;L. No orders are sent.</p>
+  return <section className="panel shadow-panel"><h2>Strike ranking · Policy shadow observer · Top 5</h2>
+    <p>Confirmed HILEGA direction selects CE or PE. The observation policy filters ATM ±5 candidates and ranks by modelled net ROI, Gamma/premium, then distance from 0.45 Delta. Each row is an alternative trade; hypothetical P&amp;L is not added to Sandbox P&amp;L. No orders are sent.</p>
     {error&&<div className="banner error">{error}</div>}{stale&&<div className="banner error">Observation view is stale; refresh before using displayed values.</div>}
-    {!data?<p>Loading observations…</p>:<><p>{data.status==='NOT_CONNECTED'?'Observation collector not connected yet.':data.status.replaceAll('_',' ')} · Read {t(data.read_at)}</p>
+    {!data?<p>Loading observations…</p>:<><p>{data.status==='NOT_CONNECTED'?'Policy observer inputs pending: connect confirmed signals, breakout velocity, timestamped quotes and model assumptions.':data.status.replaceAll('_',' ')} · Read {t(data.read_at)}</p>
       {!!list(data.errors).length&&<div className="banner error">{list(data.errors).join(' · ')}</div>}
       {!list(data.frames).length&&<div className="empty">No recorded strike evaluations. Ranking reasons and P&amp;L will appear only when evidence is available.</div>}
       {list(data.frames).map((frame:any,index:number)=><article className="panel" key={`${frame.observation_id}-${frame.timestamp}-${index}`}><h3>{frame.signal??'Signal unavailable'} · Spot {n(frame.spot)} · {t(frame.timestamp)}</h3><p>{frame.verdict??'Verdict not recorded'} · {frame.reason??''} · Policy {frame.policy_version??'Not recorded'}</p>
