@@ -87,7 +87,7 @@ Do not run that command merely as a deployment check.
 
 ## Tests and limitations
 
-35 focused tests passed locally with injected broker transport and temporary durable journals. Coverage includes five-leg closure, partial fills, cancellation, timeouts/tag recovery, duplicate requests, restart persistence, automatic/manual collision, stale signal suppression, preserved indicators and cutoff locks, recovery-block ownership, installer guards and Sandbox-only transport endpoints. Patched Python source parses successfully. There were no broker calls and no deployment.
+36 focused tests passed locally with injected broker transport and temporary durable journals. Coverage includes regular-package loading before installation, five-leg closure, partial fills, cancellation, timeouts/tag recovery, duplicate requests, restart persistence, automatic/manual collision, stale signal suppression, preserved indicators and cutoff locks, recovery-block ownership, installer guards and Sandbox-only transport endpoints. Patched Python source parses successfully. There were no broker calls and no deployment.
 
 This environment lacks FastAPI/httpx/filelock/python-dotenv and frontend TypeScript/Vite dependencies. A full application/API integration test, frontend build and actual Sandbox order/fill acceptance test remain required on the VM. Local tests exercise the new reconciliation engine using a deterministic transport; they do not prove your provider exposes these endpoints.
 

@@ -5,6 +5,8 @@ from types import SimpleNamespace
 HERE=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(HERE/'files/backend'))
 import market_lab
+# Regular packages ignore earlier namespace-only directories on sys.path.
+market_lab.__path__ = [str(HERE / "files" / "backend" / "market_lab")] + list(market_lab.__path__)
 # Repo supplied on VM; fixture repo optional locally.
 repo=Path.cwd()/'backend/market_lab'
 if not repo.exists():repo=HERE.parent/'source/RB-ITOS-AI-feature-pcr-foundation/backend/market_lab'
