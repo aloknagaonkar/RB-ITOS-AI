@@ -1,0 +1,14 @@
+{
+  "existing": [
+    "backend/market_lab/hilega_upstox_sandbox_basket_v2.py",
+    "backend/market_lab/hilega_alignment_dual_exit_live_v1.py",
+    "backend/market_lab/api.py",
+    "frontend/src/hilegaUpstoxSandboxDashboard.tsx"
+  ],
+  "new": [
+    "backend/market_lab/hilega_manual_exit_strategy_v1.py",
+    "backend/market_lab/hilega_manual_exit_api_v1.py",
+    "backend/market_lab/hilega_manual_exit_v1.py",
+    "frontend/src/hilegaManualExit.tsx"
+  ]
+}

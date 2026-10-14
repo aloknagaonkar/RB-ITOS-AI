@@ -104,6 +104,14 @@ const reportDirection=(r:HilegaAudit):'BULLISH'|'BEARISH'=>{
 
   // When no trade is active, candidate direction comes from the recorded
   // directional evidence.
+  // PENDING_DIRECTION_DISPLAY_FIX: audited exclusive flags precede stale/default direction.
+  const pendingBullish=r.strategy?.bullish_armed===true
+  const pendingBearish=r.strategy?.bearish_armed===true
+  if(pendingBearish&&!pendingBullish)return 'BEARISH'
+  if(pendingBullish&&!pendingBearish)return 'BULLISH'
+  const pendingChecks=list(r.conditions?.wma_gap_checks)
+  const pendingDirections=[...new Set(pendingChecks.map((c:any)=>String(c?.direction??'').toUpperCase()).filter((d:string)=>d==='BULLISH'||d==='BEARISH'))]
+  if(pendingDirections.length===1)return pendingDirections[0] as 'BULLISH'|'BEARISH'
   const explicit=String(r.strategy?.direction??'').toUpperCase()
   if(explicit==='BEARISH')return 'BEARISH'
   if(explicit==='BULLISH')return 'BULLISH'
@@ -252,10 +260,12 @@ export function shortRuleText(
     }
     return `${direction} ENTRY · RECORDED STRATEGY TRANSITION`
   }
+  if(r.strategy?.manual_exit?.status==='REQUESTED')return `${direction} · MANUAL EXIT REQUESTED · WAITING FOR CLOSURE`
   if(kind==='ACTIVE')return `CONTINUE · ${direction}_ACTIVE`
   if(kind==='EXIT'){
     const ev=checkpointTransitions(r).find(isExit)
     const label=String(ev?.event_type??list(r.strategy?.events_emitted).find((x:any)=>String(x).includes('EXIT'))??'')
+    if(label.startsWith('MANUAL_EXIT_'))return `${direction} EXIT · MANUAL EXIT`
     if(label.includes('STRUCTURAL_EXIT_BEARISH_RSI_CROSS_ABOVE_WMA21'))return 'BEARISH EXIT · RSI↑WMA21'
     if(label.includes('STRUCTURAL_EXIT_RSI_CROSS_BELOW_WMA21'))return 'BULLISH EXIT · RSI↓WMA21'
     if(label.includes('CUTOFF')||at==='14:55')return `${direction} EXIT · 14:55 CUTOFF`

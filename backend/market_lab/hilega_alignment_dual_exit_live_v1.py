@@ -11,6 +11,7 @@ from .hilega_v2_alignment_replay_v1 import (
 )
 from .hilega_milega_strategy_v1 import FiveMinuteBar, StrategyEvent
 from .domain import IST
+from .hilega_opening_reference_v1 import capture_opening_reference, confirmation_reference
 STRATEGY_ID = 'HILEGA_V2_ALIGNMENT_DUAL_EXIT'
 
 class HilegaAlignmentDualExitLiveCoordinator(HilegaWmaGapLiveCoordinatorV2):
@@ -25,6 +26,7 @@ class HilegaAlignmentDualExitLiveCoordinator(HilegaWmaGapLiveCoordinatorV2):
     def _reset_policy_session(self):
         self.episode = {'BULLISH': False, 'BEARISH': False}
         self.warning_time = None
+        self._manual_exit_seen = set()
 
     def _safe(self):
         return {**super()._safe(), 'model':'HILEGA_ALIGNMENT_DUAL_EXIT_LIVE_V1',
@@ -56,6 +58,7 @@ class HilegaAlignmentDualExitLiveCoordinator(HilegaWmaGapLiveCoordinatorV2):
             warmup_sessions+=1
         if not self.canonical.bullish.previous_indicators or not self.canonical.bullish.previous_indicators.ready:
             raise ValueError('ALIGNMENT_LIVE_LOCAL_WARMUP_NOT_READY')
+        self._opening_reference = capture_opening_reference(self.canonical, now.date())
         self.canonical.bullish.session=SessionState(session_date=now.date())
         self.canonical.bearish.session=BearishSessionState(session_date=now.date())
         for engine in (self.canonical.bullish,self.canonical.bearish):
@@ -65,23 +68,31 @@ class HilegaAlignmentDualExitLiveCoordinator(HilegaWmaGapLiveCoordinatorV2):
         self._consume(self.sources.nifty_intraday_1m(now=now),now,recovered=True)
         self._sync_view()
         restore=self._restore_audited_option_state(now=now,session_date=now.date())
+        from .hilega_manual_exit_strategy_v1 import after_bootstrap
+        after_bootstrap(self,now)
         self._bootstrapped_date=now.date()
         self._audit(now,'DIRECTIONAL_LIVE_BOOTSTRAP','PASS',{
             'session_date':now.date().isoformat(),'trade_owner':self.gate.owner,
             'bullish_state':self.directional.bullish.session.name,'bearish_state':self.directional.bearish.session.name,
             'last_completed_bar':self._last_bar_ts.isoformat() if self._last_bar_ts else None,
             'reconstructed':True,'option_restore':restore,'warmup_sessions':warmup_sessions,
+            'opening_reference_timestamp':self._opening_reference.bar_timestamp.isoformat() if self._opening_reference else None,
+            'opening_reference_policy':'PRIOR_SESSION_FIRST_CANDLE_ONLY',
             'warmup_policy':'HISTORICAL_LOCAL_CACHE_ORDER'})
         return {'status':'BOOTSTRAPPED'}
 
     def _advance(self, minute, bars, *, recovered):
         t=minute.timestamp.astimezone(IST);available=t+timedelta(minutes=1)
+        from .hilega_manual_exit_strategy_v1 import apply_manual_control
+        manual_block=apply_manual_control(self,available,recovered=recovered)
         before=self.gate.owner;events=[];canonical_decision=None;exit_validation=None;setups=[]
-        reference=self.canonical.bullish.previous_indicators
+        reference=confirmation_reference(self.canonical.bullish.previous_indicators,
+            getattr(self, "_opening_reference", None), t)
         current=deepcopy(self.canonical.bullish.indicators).update(float(minute.close))
         bar=bars.get(t-timedelta(minutes=4)) if t.minute%5==4 else None
         if bar:
             canonical_decision=self.canonical.on_bar(bar)
+            self.gate.observe_arms(canonical_decision.accepted_events,available)
             for event in canonical_decision.accepted_events:
                 if event.event_type in EXIT_TYPES:self.gate.pending.pop(direction(event),None)
             if self.gate.owner!='NONE':
@@ -113,15 +124,21 @@ class HilegaAlignmentDualExitLiveCoordinator(HilegaWmaGapLiveCoordinatorV2):
             gap=sign*(current.ema3_rsi-current.wma21_rsi) if current.ready else None
             pg=sign*(prev['snapshot'].ema3_rsi-prev['snapshot'].wma21_rsi) if prev and prev['snapshot'].ready else None
             expanding=pg is not None and gap is not None and gap>pg and prev['minute']==t-timedelta(minutes=1)
-            if bar and aligned and gap is not None and gap>0 and expanding and not self.episode[side] and self.gate.owner=='NONE' and side not in self.gate.pending and available.time()<time(14,55):
+            if bar and self.gate.can_signal(side,available) and aligned and gap is not None and gap>0 and expanding and not self.episode[side] and self.gate.owner=='NONE' and side not in self.gate.pending and available.time()<time(14,55):
                 self.episode[side]=True
                 event=StrategyEvent('ENTRY_PATH1_ROUTE_A_CROSS_RSI50_ABOVE_WMA21' if side=='BULLISH'
                     else 'ENTRY_BEARISH_ROUTE_B_STRUCTURAL',t,'ALTERNATIVE_ALIGNMENT','IDLE','ARMED',details={'alternative':True})
                 self.gate.signal(event,available)
                 setups.append(dict(time=available.isoformat(),direction=side,source='ALTERNATIVE_ALIGNMENT'))
+        if manual_block:self.gate.pending.clear()
         entries,checks=self.gate.evaluate(minute=t,current=current,reference=reference,
             price=float(minute.close),exit_boundary=bool(events))
+        for check in checks:
+            if getattr(self, '_opening_reference', None) is not None and reference is self._opening_reference.snapshot:
+                check['reference_bar_timestamp'] = self._opening_reference.bar_timestamp.isoformat()
+                check['reference_crosses_session'] = True
         events.extend(entries)
+        pending_switches=self.gate.take_switches()
         if entries:
             self.warning_time=None
             self.gate.pending.clear()
@@ -136,7 +153,7 @@ class HilegaAlignmentDualExitLiveCoordinator(HilegaWmaGapLiveCoordinatorV2):
                 'minute_timestamp':t.isoformat(),'decision_timestamp':available.isoformat(),
                 'minute_ohlcv':dict(open=float(minute.open),high=float(minute.high),low=float(minute.low),close=float(minute.close),volume=getattr(minute,'volume',None)),
                 'nifty_close':float(minute.close),'wma_gap_checks':checks,'reconstructed':recovered,
-                'setup_attempts':setups,'exit_validation':exit_validation,'exit_warning_time':self.warning_time,
+                'setup_attempts':setups,'pending_switches':pending_switches,'exit_validation':exit_validation,'exit_warning_time':self.warning_time,
                 'completed_5m_indicators':dict(rsi9=latest.rsi9,ema3=latest.ema3_rsi,wma21=latest.wma21_rsi) if latest else None,
                 'canonical_setup_events':[e.event_type for e in canonical_decision.accepted_events] if canonical_decision else [],
                 'canonical_suppressed_events':[e.event_type for e in canonical_decision.suppressed_events] if canonical_decision else [],

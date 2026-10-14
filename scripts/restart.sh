@@ -100,3 +100,6 @@ fi
 "$ROOT/scripts/stop_hilega_wma_gap_forward_publisher.sh" || true
 "$ROOT/scripts/start_hilega_wma_gap_forward_publisher.sh"
 # ===== END HILEGA WMA-GAP FORWARD-CONFIRMATION PUBLISHER =====
+
+# UI-only operational readiness
+bash "$ROOT/scripts/start_operational_readiness.sh"

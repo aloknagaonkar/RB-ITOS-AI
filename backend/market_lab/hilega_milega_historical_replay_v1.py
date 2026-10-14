@@ -181,7 +181,10 @@ def load_validated_warmup_1m(gateway, *, underlying, session_date, cache_root):
                           key=lambda candle: candle.timestamp)
         if not repaired:
             raise ValueError("WARMUP_REPAIR_EMPTY")
-        aggregate_exact_5m(repaired, session_date, require_full_session=True)
+        try:
+            aggregate_exact_5m(repaired, session_date, require_full_session=True)
+        except ValueError as exc:
+            raise ValueError(f"Warmup {session_date}: {exc}") from exc
         path = _cache_path(cache_root, session_date)
         if path.exists():
             backup = path.with_name(path.name + ".pre-warmup-repair-" +

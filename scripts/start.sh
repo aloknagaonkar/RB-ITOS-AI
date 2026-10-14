@@ -118,3 +118,6 @@ done
 echo "ERROR: API process started but health check failed."
 echo "Check data/logs/api-error.log"
 exit 1
+
+# UI-only operational readiness
+bash "$ROOT/scripts/start_operational_readiness.sh"

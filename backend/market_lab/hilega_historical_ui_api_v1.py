@@ -370,7 +370,7 @@ def _directional_report(row: dict) -> dict:
         details = {x.get("event_type"): x for x in row.get("event_details") or []}
         for transition in transitions:
             event = details.get(transition["event_type"], {})
-            transition.update({key: event.get(key) for key in ("price", "points", "entry_price", "entry_time")})
+            transition.update({key: event.get(key) for key in ("price", "points", "entry_price", "entry_time", "exit_reason")})
             transition["details"].update({"original_entry_time": event.get("entry_time"),
                                           "original_entry_price": event.get("entry_price")})
     selected_route = next((
@@ -379,6 +379,7 @@ def _directional_report(row: dict) -> dict:
     ), None)
     return {
         "checkpoint": row.get("bar_timestamp"),
+        "audit_row_id": row.get("audit_row_id"),
         "bar": {key: row.get(key) for key in ("open", "high", "low", "close", "volume")},
         "indicators": {
             "rsi9": row.get("rsi9"),
@@ -391,11 +392,13 @@ def _directional_report(row: dict) -> dict:
             "decision_timestamp": row.get("decision_timestamp"),
             "source_bar_timestamp": row.get("source_bar_timestamp"),
             "directional_action": row.get("action"),
+            "manual_exit": row.get("manual_exit"),
+            "manual_exit_source_state": row.get("manual_exit_source_state"),
             "state_before": row.get("owner_before"),
             "state_after": row.get("owner_after"),
             "selected_route": selected_route,
             "events_emitted": accepted,
-            "direction": row.get("owner_after") or row.get("owner_before"),
+            "direction": __import__("market_lab.hilega_pending_direction_display_v1", fromlist=["resolve_audit_direction"]).resolve_audit_direction(row),
             "bullish_state": row.get("bullish_state"),
             "bearish_state": row.get("bearish_state"),
             "bullish_armed": row.get("bullish_armed"),

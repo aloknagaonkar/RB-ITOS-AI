@@ -28,7 +28,20 @@ def active_entry(rows,now):
     if not candidates:raise ValueError('ORIGINAL_RECOVERED_ENTRY_NOT_FOUND')
     p=rr[-1]['payload'];at=p.get('decision_timestamp') or rr[-1].get('event_time','')
     age=(now-datetime.fromisoformat(at)).total_seconds()
-    if not 0<=age<=90 or p.get('trade_owner_after')!='BULLISH' or p.get('bullish_state')!='BULLISH_ACTIVE':raise ValueError('ACTIVE_BULLISH_EVIDENCE_MISSING_OR_STALE')
+    if not 0<=age<=390 or p.get('trade_owner_after')!='BULLISH' or p.get('bullish_state')!='BULLISH_ACTIVE':raise ValueError('ACTIVE_BULLISH_EVIDENCE_MISSING_OR_STALE')
+    from urllib.request import urlopen
+    with urlopen("http://127.0.0.1:8123/api/live-shadow/hilega-directional/status?fast=true", timeout=10) as response:
+        live = json.load(response)
+    health = live.get("worker_component_health") or {}
+    current = live.get("current") or {}
+    heartbeat = health.get("timestamp")
+    if not heartbeat:
+        raise ValueError("WORKER_HEARTBEAT_MISSING")
+    heartbeat_age = (now-datetime.fromisoformat(heartbeat)).total_seconds()
+    if not 0<=heartbeat_age<=90 or health.get("components", {}).get("hilega")!="OK":
+        raise ValueError("WORKER_HEARTBEAT_STALE_OR_UNHEALTHY")
+    if not live.get("current_session_ready") or current.get("session_date")!=DAY or current.get("trade_owner")!="BULLISH" or current.get("bullish_state")!="BULLISH_ACTIVE":
+        raise ValueError("CURRENT_BULLISH_RUN_NOT_ACTIVE")
     return candidates[0]
 
 def main():

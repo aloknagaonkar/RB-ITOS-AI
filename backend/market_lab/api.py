@@ -1,3 +1,4 @@
+from .operational_readiness_v1 import router as operational_readiness_router
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -23,6 +24,7 @@ from .hilega_milega_live_shadow_ui_v1 import router as hilega_milega_live_shadow
 from .midpoint_strategy.live_shadow_ui import router as midpoint_strategy_live_shadow_router
 from .hilega_directional_live_shadow_ui_v1 import router as hilega_directional_live_shadow_router
 from .hilega_upstox_sandbox_dashboard_v1 import router as hilega_upstox_sandbox_dashboard_router
+from .hilega_manual_exit_api_v1 import router as hilega_manual_exit_router
 from .pattern_statistics import calculate_pattern_statistics
 from .pattern_evidence import build_pattern_evidence
 from .storage import (
@@ -61,12 +63,14 @@ def create_app(engine=None, historical_gateway_factory=None):
         yield
 
     app = FastAPI(title="Market Strategy Lab", version="0.1.0", lifespan=lifespan)
+    app.include_router(operational_readiness_router)
     app.include_router(hilega_pcr_context_router)
     app.include_router(live_shadow_router)
     app.include_router(hilega_milega_live_shadow_router)
     app.include_router(midpoint_strategy_live_shadow_router)
     app.include_router(hilega_directional_live_shadow_router)
     app.include_router(hilega_upstox_sandbox_dashboard_router)
+    app.include_router(hilega_manual_exit_router)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "testserver", "35.200.183.200"])
     app.add_middleware(GZipMiddleware, minimum_size=1000)
     app.add_middleware(

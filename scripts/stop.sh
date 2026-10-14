@@ -135,3 +135,6 @@ else
     echo "midpoint-history: publisher not running"
 fi
 # ===== END MIDPOINT HISTORICAL AUTO-PUBLISHER =====
+
+# Stop independent readiness monitor
+bash "$ROOT/scripts/stop_operational_readiness.sh"

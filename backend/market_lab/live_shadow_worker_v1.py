@@ -21,6 +21,7 @@ from .midpoint_strategy.config import live_shadow_config_from_env
 
 HILEGA_UNDERLYING = "NSE_INDEX|Nifty 50"
 _component_retry_after = {}
+_component_errors = {}
 
 
 def process_isolated_tick(now, tasks):
@@ -34,8 +35,14 @@ def process_isolated_tick(now, tasks):
             callback(now)
             outcomes[name] = "OK"
             _component_retry_after.pop(name, None)
+            _component_errors.pop(name, None)
         except Exception as exc:
             outcomes[name] = type(exc).__name__
+            # Keep only whitelisted candle-validation messages; provider strings may contain secrets.
+            import re
+            message = str(exc)
+            safe = isinstance(exc, ValueError) and len(message) < 500 and re.fullmatch(r"[A-Za-z0-9 :,;._\-]+", message) and any(word in message.lower() for word in ("warmup", "candle", "missing 1m"))
+            _component_errors[name] = {"first_seen": _component_errors.get(name, {}).get("first_seen", now.isoformat()), "last_failure": now.isoformat(), "error_type": type(exc).__name__, "message": message if safe else type(exc).__name__}
             _component_retry_after[name] = now.timestamp() + 30
             # Do not log broker exception strings, credentials or response bodies.
             print(json.dumps({"stage": "SHADOW_COMPONENT_ERROR", "component": name,
@@ -46,7 +53,7 @@ def process_isolated_tick(now, tasks):
     temporary = path.with_suffix(".tmp")
     temporary.write_text(json.dumps({"timestamp": now.isoformat(),
                                    "session_date": now.date().isoformat(),
-                                   "components": outcomes}), encoding="utf-8")
+                                   "components": outcomes, "component_errors": _component_errors}), encoding="utf-8")
     temporary.replace(path)
     return outcomes
 

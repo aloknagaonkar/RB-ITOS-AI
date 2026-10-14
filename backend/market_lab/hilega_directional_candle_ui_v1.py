@@ -524,7 +524,8 @@ def build_live_directional_candles(session_date: str | None = None, *, audit_onl
         rows = _base_live_rows(day)
     directional_count = 0
 
-    for record in _read_audit(LIVE_DIRECTIONAL_AUDIT):
+    manual_audit_records = _read_audit(LIVE_DIRECTIONAL_AUDIT)
+    for record in manual_audit_records:
         if record.get("stage") != "DIRECTIONAL_DECISION":
             continue
         payload = record.get("payload") or {}
@@ -567,6 +568,9 @@ def build_live_directional_candles(session_date: str | None = None, *, audit_onl
                 "owner_after": payload.get("trade_owner_after"),
             })
             row["setup_attempts"] = payload.get("setup_attempts") or []
+            row["pending_switches"] = payload.get("pending_switches") or []
+            for switch in row["pending_switches"]:
+                row["strategy_steps"].append({"label":"Pending direction switch", "status":"INFO", "value":switch["from_direction"]+" → "+switch["to_direction"], "requirement":"Fresh opposite arm / setup while no actual position is open", "explanation":switch["reason"]+"; old pending signal cancelled; confirmation reset"})
             row["exit_validation"] = payload.get("exit_validation")
             row["exit_warning_time"] = payload.get("exit_warning_time")
             row["indicator_timestamp"] = payload.get("bar_timestamp")
@@ -589,6 +593,8 @@ def build_live_directional_candles(session_date: str | None = None, *, audit_onl
         })
         directional_count += 1
 
+    from .hilega_manual_exit_decision_v1 import overlay_manual_exit_rows
+    overlay_manual_exit_rows(rows,manual_audit_records,day)
     ordered = [rows[key] for key in sorted(rows)]
     return {
         "model": "HILEGA_DIRECTIONAL_CANDLE_UI_V1",

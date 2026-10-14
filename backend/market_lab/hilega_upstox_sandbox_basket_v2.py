@@ -40,6 +40,14 @@ class BasketTransport(UpstoxTransport):
         if not keys:return {}
         payload=self._body(self.analytics.get('/v3/market-quote/ltp',params={'instrument_key':','.join(keys)}))
         return {str(r.get('instrument_token')):float(r['last_price']) for r in payload['data'].values() if r.get('instrument_token')}
+    def order_details(self, *, order_id=None, tag=None):
+        if not order_id and not tag:raise ValueError('ORDER_ID_OR_TAG_REQUIRED')
+        params={'order_id':order_id} if order_id else {'tag':tag}
+        data=self._body(self.sandbox.get('/v2/order/details',params=params))['data']
+        if not isinstance(data,dict):raise ValueError('INVALID_SANDBOX_ORDER_DETAILS')
+        return data
+    def cancel_order(self, order_id):
+        return self._body(self.sandbox.delete('/v3/order/cancel',params={'order_id':order_id}))
     def close(self):self.analytics.close();self.sandbox.close()
 
 class BasketStore(DispatchStore):
@@ -53,9 +61,9 @@ class BasketStore(DispatchStore):
             else:opened.pop(key,None)
         return list(opened.values())
     def uncertain(self):
-        rows=self.rows();done={r['request_id'] for r in rows if r.get('status')=='ACCEPTED'}
+        rows=self.rows();done={r['request_id'] for r in rows if r.get('status') in {'ACCEPTED','REQUEST_RESOLVED_NO_FILL'}}
         return [r for r in rows if r.get('status')=='REQUESTED' and r['request_id'] not in done]
-    def terminal_ids(self):return {r['intent_id'] for r in self.rows() if r.get('status') in {'INTENT_COMPLETE','SKIPPED_PRE_ARM_TRADE_EXIT','ENTRY_BLOCKED','EXIT_BLOCKED'}}
+    def terminal_ids(self):return {r['intent_id'] for r in self.rows() if r.get('status') in {'INTENT_COMPLETE','SKIPPED_PRE_ARM_TRADE_EXIT','ENTRY_BLOCKED','EXIT_BLOCKED','SKIPPED_MANUAL_EXIT'}}
 
 def ensure_clear(store):
     if store.open_legs() or store.uncertain():raise ValueError('OPEN_OR_UNCERTAIN_SANDBOX_LEGS_RECONCILE_BEFORE_REARM')
@@ -83,6 +91,8 @@ class BasketWorker:
     def block(self,reason):
         c=self.control.read();c.update(entries_blocked=True,failure_reason=reason,failed_at=self.clock().isoformat());self.control.write(c)
     def process(self,intent,intents,transport,config):
+        from .hilega_manual_exit_v1 import suppress_intent
+        if suppress_intent(self,intent):return
         c=self.control.read();rows=self.store.rows();base=dict(intent_id=intent['intent_id'],event_id=intent['event_id'],trade_id=intent['trade_id'],event_type=intent['event_type'],direction=intent['direction'],session_date=c['session_date'],event_timestamp=intent['event_timestamp'],source_sequence=intent['source_sequence'],strategy_id=c['strategy_id'])
         if intent['intent_id'] in self.store.terminal_ids():return
         if is_prearm_exit(intent,intents,c,rows):self.store.append(dict(base,status='SKIPPED_PRE_ARM_TRADE_EXIT',terminal=True));return
@@ -124,6 +134,8 @@ class BasketWorker:
     def run_once(self):
         self.store.path.parent.mkdir(parents=True,exist_ok=True)
         with FileLock(str(self.store.path)+'.worker.lock'):
+            from .hilega_manual_exit_v1 import service_manual_exit
+            if service_manual_exit(self):return self.status('MANUAL_EXIT_IN_PROGRESS')
             c=self.control.read()
             if not c.get('armed') or c.get('kill_switch'):return self.status('DISARMED')
             if self.clock().date().isoformat()!=c.get('session_date'):return self.status('WAITING_FOR_ARMED_SESSION')
@@ -139,8 +151,9 @@ class BasketWorker:
                 if self.transport is None:transport.close()
             return self.status('PROCESSED')
     def status(self,state='STATUS'):
+        from .hilega_manual_exit_v1 import accepted_order_count
         c=self.control.read();rs=[r for r in self.store.accepted() if r['session_date']==c.get('session_date')]
-        return dict(c,status=state,accepted_orders_this_session=len(rs),open_legs=len(self.store.open_legs()),uncertain_requests=len(self.store.uncertain()),live_order_sent=False)
+        return dict(c,status=state,accepted_orders_this_session=accepted_order_count(self),open_legs=len(self.store.open_legs()),uncertain_requests=len(self.store.uncertain()),live_order_sent=False)
 
 
 def build_dashboard(env=Path('.env')):
@@ -159,6 +172,8 @@ def build_dashboard(env=Path('.env')):
         if not en:continue
         entry_price=en.get('observed_option_price');mark=ex.get('observed_option_price') if ex else quotes.get(en['contract']['instrument_key']);pts=mark-entry_price if mark is not None and entry_price is not None else None
         leg=dict(**en['contract'],quantity=en['quantity'],entry_time=en['timestamp'],entry_signal_time=en['event_timestamp'],entry_price=entry_price,entry_order_id=en['broker_order_id'],exit_time=ex.get('timestamp') if ex else None,exit_price=ex.get('observed_option_price') if ex else None,exit_order_id=ex.get('broker_order_id') if ex else None,current_price=mark,quote_timestamp=now().isoformat() if not ex and mark is not None else None,points=pts,pnl_rupees=pts*en['quantity'] if pts is not None else None,status='SELL_ACKNOWLEDGED' if ex else 'BUY_ACKNOWLEDGED')
+        from .hilega_manual_exit_pnl_v1 import apply_manual_exit_pnl
+        apply_manual_exit_pnl(leg,en,ex)
         trade=trades.setdefault(trade_id,dict(trade_id=trade_id,session_date=en['session_date'],direction=en['direction'],signal_time=en['event_timestamp'],strategy_id=en['strategy_id'],expiry=en['contract']['expiry'],legs=[]));trade['legs'].append(leg)
     for plan in worker.store.rows():
         if plan.get('status')!='BASKET_PLANNED':continue
@@ -169,12 +184,17 @@ def build_dashboard(env=Path('.env')):
             t['legs'].append(dict(role=contract['role'],**{k:v for k,v in contract.items() if k!='role'},quantity=int(contract['lot_size'])*cfg.lots,entry_time=None,entry_signal_time=plan['event_timestamp'],entry_price=None,entry_order_id=None,exit_time=None,exit_price=None,exit_order_id=None,current_price=None,quote_timestamp=None,points=None,pnl_rupees=None,status='SUBMISSION_UNCERTAIN' if uncertain else 'NOT_SUBMITTED'))
     for t in trades.values():
         t['legs'].sort(key=lambda l:l['role']);t['status']='RECONCILIATION_REQUIRED' if any(l['status']=='SUBMISSION_UNCERTAIN' for l in t['legs']) or any(r['trade_id']==t['trade_id'] for r in worker.store.uncertain()) else 'NOT_SUBMITTED' if not any(l['entry_order_id'] for l in t['legs']) else 'CLOSED_ACKNOWLEDGED' if all(l['exit_order_id'] for l in t['legs'] if l['entry_order_id']) else 'OPEN_ACKNOWLEDGED';t['pnl_rupees']=sum(l['pnl_rupees'] for l in t['legs'] if l['pnl_rupees'] is not None);t['missing_pnl_legs']=sum(l['pnl_rupees'] is None for l in t['legs']);t['partial_basket']=sum(bool(l['entry_order_id']) for l in t['legs'])!=5
-    opened=[t for t in trades.values() if t['status']!='CLOSED_ACKNOWLEDGED'];closed=[t for t in trades.values() if t['status']=='CLOSED_ACKNOWLEDGED']
+    for t in trades.values():
+        entered=[l for l in t['legs'] if l['entry_order_id']]
+        if entered and all(l['status']=='CANCELLED_UNFILLED' for l in entered):t['status']='CANCELLED_UNFILLED'
+        elif entered and all(l['status'] in {'SELL_FILLED','CANCELLED_UNFILLED','SELL_ACKNOWLEDGED'} for l in entered):t['status']='CLOSED_ACKNOWLEDGED'
+        elif any(l['status']=='MANUAL_EXIT_EVIDENCE_INCOMPLETE' for l in entered):t['status']='RECONCILIATION_REQUIRED'
+    opened=[t for t in trades.values() if t['status'] not in {'CLOSED_ACKNOWLEDGED','CANCELLED_UNFILLED'}];closed=[t for t in trades.values() if t['status'] in {'CLOSED_ACKNOWLEDGED','CANCELLED_UNFILLED'}]
     def totals(selected):
         legs=[l for t in selected for l in t['legs']]
-        closed_prices=[l['pnl_rupees'] for l in legs if l['exit_order_id'] and l['pnl_rupees'] is not None]
+        closed_prices=[l['pnl_rupees'] for l in legs if (l['exit_order_id'] or l['status']=='CANCELLED_UNFILLED') and l['pnl_rupees'] is not None]
         gains=sum(max(0,v) for v in closed_prices);losses=-sum(min(0,v) for v in closed_prices)
-        return dict(open_estimated_rupees=sum(l['pnl_rupees'] for l in legs if not l['exit_order_id'] and l['pnl_rupees'] is not None),closed_estimated_rupees=sum(closed_prices),total_estimated_rupees=sum(l['pnl_rupees'] for l in legs if l['pnl_rupees'] is not None),gross_profit_rupees=gains,gross_loss_rupees=losses,gain_loss_ratio=gains/losses if losses else None,missing_pnl_legs=sum(l['pnl_rupees'] is None for l in legs),completed_baskets=sum(t['status']=='CLOSED_ACKNOWLEDGED' for t in selected),partial_baskets=sum(t['partial_basket'] for t in selected))
+        return dict(open_estimated_rupees=sum(l['pnl_rupees'] for l in legs if not l['exit_order_id'] and l['status']!='CANCELLED_UNFILLED' and l['pnl_rupees'] is not None),closed_estimated_rupees=sum(closed_prices),total_estimated_rupees=sum(l['pnl_rupees'] for l in legs if l['pnl_rupees'] is not None),gross_profit_rupees=gains,gross_loss_rupees=losses,gain_loss_ratio=gains/losses if losses else None,missing_pnl_legs=sum(l['pnl_rupees'] is None for l in legs),completed_baskets=sum(t['status']=='CLOSED_ACKNOWLEDGED' for t in selected),partial_baskets=sum(t['partial_basket'] for t in selected))
     daily_trades=[t for t in trades.values() if t['session_date']==day]
     all_trades=list(trades.values());sessions=sorted({t['session_date'] for t in all_trades})
     overall=totals(all_trades)
@@ -199,7 +219,10 @@ def main():
     else:
         if not 2<=a.interval_seconds<=60:raise ValueError('Invalid poll interval')
         while True:
-            try:result=w.run_once()
+            try:
+                from .hilega_sandbox_daily_autoarm_v1 import maybe_autoarm_in_worker
+                maybe_autoarm_in_worker(w,a.env_file)
+                result=w.run_once()
             except Exception as exc:
                 w.block('WORKER_ERROR:'+type(exc).__name__);result=w.status('ERROR_RECONCILIATION_REQUIRED')
             print(json.dumps(result),flush=True);time.sleep(a.interval_seconds)
