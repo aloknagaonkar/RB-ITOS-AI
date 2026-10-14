@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import os
+import json
+from datetime import datetime
+from .domain import IST
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -267,16 +270,30 @@ def status(fast: bool = False):
     rows = _rows()
     chain_ok, chain_issue = ((None, "VERIFICATION_DEFERRED") if fast else
                              _store().verify_chain() if STEP_AUDIT_PATH.exists() else (True, None))
-    current, latest_state = _state_payload(rows)
-    latest_accepted, latest_suppressed = _latest_event_rows(rows)
+    today = datetime.now(IST).date().isoformat()
+    session_rows = [row for row in rows if _record_session(row) == today]
+    if os.getenv("LIVE_SHADOW_STRATEGY", "").strip().upper() == "HILEGA_V2_ALIGNMENT_DUAL_EXIT":
+        session_rows = [row for row in session_rows if (row.get("payload") or {}).get("strategy_id") == "HILEGA_V2_ALIGNMENT_DUAL_EXIT"]
+    current, latest_state = _state_payload(session_rows)
+    # Keep the nested current-state contract even before today's first audit.
+    # An absent bootstrap is not yesterday's state and is not a trading lock.
+    current["session_date"] = today
+    current["state_available"] = latest_state is not None
+    _, latest_saved_state = _state_payload(rows)
+    latest_accepted, latest_suppressed = _latest_event_rows(session_rows)
     counts = Counter(row.get("stage") for row in rows)
     selected = os.getenv("LIVE_SHADOW_STRATEGY", "").strip().upper()
+    try:
+        worker_health = json.loads(Path("data/live-observation/shadow-worker-health.json").read_text())
+    except (OSError, ValueError):
+        worker_health = None
     return {
         "model": MODEL,
         "strategy_id": STRATEGY_ID,
         "strategy_version": STRATEGY_VERSION,
         "selected_live_shadow_strategy": selected or None,
-        "directional_mode_active": selected == STRATEGY_ID,
+        "directional_mode_active": selected in {STRATEGY_ID, "HILEGA_WMA_GAP_V2_LIVE_SHADOW", "HILEGA_V2_ALIGNMENT_DUAL_EXIT"},
+        "active_strategy_id": selected or STRATEGY_ID,
         "observation_only": True,
         "execution_enabled": False,
         "paper_order_enabled": False,
@@ -288,8 +305,13 @@ def status(fast: bool = False):
         "step_audit_chain_issue": chain_issue,
         "record_counts": dict(counts),
         "current": current,
+        "current_session_date": today,
+        "current_session_ready": latest_state is not None,
+        "worker_component_health": worker_health,
+        "session_warning": None if latest_state is not None else "WAITING_FOR_CURRENT_SESSION_BOOTSTRAP",
         "operational": _operational_payload(rows, fast=fast),
         "latest_state_record": latest_state,
+        "latest_state_session_date": _record_session(latest_saved_state) if latest_saved_state else None,
         "latest_accepted_record": latest_accepted,
         "latest_suppressed_record": latest_suppressed,
     }
@@ -326,3 +348,14 @@ def events(limit: int = 200):
 @router.get("/trade-dashboard")
 def trade_dashboard():
     return project_directional_shadow_dashboard(_rows())
+
+
+@router.get("/wma-gap-evaluations")
+def wma_gap_evaluations(limit: int = 100):
+    if not 1 <= limit <= 2000:
+        raise HTTPException(422, "limit must be between 1 and 2000")
+    today = datetime.now(IST).date().isoformat()
+    result = [r for r in _rows() if r.get("stage")=="WMA_GAP_MINUTE_EVALUATION"
+              and str((r.get("payload") or {}).get("minute_timestamp", "")).startswith(today)
+              and r.get("status") != "RECOVERED"]
+    return {"strategy_id": os.getenv("LIVE_SHADOW_STRATEGY", "HILEGA_WMA_GAP_V2_LIVE_SHADOW"), "rows": [r for r in result if (r.get("payload") or {}).get("strategy_id") == os.getenv("LIVE_SHADOW_STRATEGY", "HILEGA_WMA_GAP_V2_LIVE_SHADOW")][-limit:]}

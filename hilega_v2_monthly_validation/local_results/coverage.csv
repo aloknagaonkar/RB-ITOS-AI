@@ -1,0 +1,93 @@
+session_date,status,issue
+2026-07-10,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-07-11,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-07-12,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-07-13,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-07-14,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-07-15,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-07-16,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-07-17,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-07-18,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-07-19,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-07-20,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-07-21,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-07-22,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-07-23,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-07-24,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-07-25,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-07-26,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-07-27,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-07-28,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-07-29,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-07-30,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-07-31,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-08-01,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-08-02,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-08-03,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-08-04,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-08-05,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-08-06,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-08-07,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-08-08,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-08-09,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-08-10,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-08-11,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-08-12,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-08-13,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-08-14,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-08-15,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-08-16,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-08-17,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-08-18,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-08-19,CACHE_MISSING,No local input; not assumed a holiday or zero-trade session
+2026-08-20,NOT_EVALUATED,V2 alignment replay: no prior-session indicator warmup for 2026-08-20.
+2026-08-21,EVALUATED,
+2026-08-22,EMPTY_CACHE,No candles; holiday/non-session status not independently verified
+2026-08-23,EMPTY_CACHE,No candles; holiday/non-session status not independently verified
+2026-08-24,EVALUATED,
+2026-08-25,EVALUATED,
+2026-08-26,EVALUATED,
+2026-08-27,EVALUATED,
+2026-08-28,EVALUATED,
+2026-08-29,EMPTY_CACHE,No candles; holiday/non-session status not independently verified
+2026-08-30,EMPTY_CACHE,No candles; holiday/non-session status not independently verified
+2026-08-31,EVALUATED,
+2026-09-01,EVALUATED,
+2026-09-02,EVALUATED,
+2026-09-03,EVALUATED,
+2026-09-04,EVALUATED,
+2026-09-05,EMPTY_CACHE,No candles; holiday/non-session status not independently verified
+2026-09-06,EMPTY_CACHE,No candles; holiday/non-session status not independently verified
+2026-09-07,EVALUATED,
+2026-09-08,EVALUATED,
+2026-09-09,EVALUATED,
+2026-09-10,EVALUATED,
+2026-09-11,EVALUATED,
+2026-09-12,EMPTY_CACHE,No candles; holiday/non-session status not independently verified
+2026-09-13,EMPTY_CACHE,No candles; holiday/non-session status not independently verified
+2026-09-14,EMPTY_CACHE,No candles; holiday/non-session status not independently verified
+2026-09-15,EVALUATED,
+2026-09-16,EVALUATED,
+2026-09-17,EVALUATED,
+2026-09-18,EVALUATED,
+2026-09-19,EMPTY_CACHE,No candles; holiday/non-session status not independently verified
+2026-09-20,EMPTY_CACHE,No candles; holiday/non-session status not independently verified
+2026-09-21,EVALUATED,
+2026-09-22,EVALUATED,
+2026-09-23,EVALUATED,
+2026-09-24,EVALUATED,
+2026-09-25,EVALUATED,
+2026-09-26,EMPTY_CACHE,No candles; holiday/non-session status not independently verified
+2026-09-27,EMPTY_CACHE,No candles; holiday/non-session status not independently verified
+2026-09-28,EVALUATED,
+2026-09-29,EVALUATED,
+2026-09-30,EVALUATED,
+2026-10-01,EVALUATED,
+2026-10-02,EMPTY_CACHE,No candles; holiday/non-session status not independently verified
+2026-10-03,EMPTY_CACHE,No candles; holiday/non-session status not independently verified
+2026-10-04,EMPTY_CACHE,No candles; holiday/non-session status not independently verified
+2026-10-05,EVALUATED,
+2026-10-06,EVALUATED,
+2026-10-07,EVALUATED,
+2026-10-08,EVALUATED,
+2026-10-09,EVALUATED,

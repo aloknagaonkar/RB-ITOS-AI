@@ -1,0 +1,5 @@
+{
+  "backend/market_lab/hilega_v2_alignment_replay_v1.py": "ea1463e0d21c65341961287763c25b919644ac564a0803f4fdbaebca6c631659",
+  "backend/market_lab/hilega_alignment_dual_exit_live_v1.py": "b6b007b00d49595af5d22823111a7fd03ea7eee668a585ad1044e64195e5314f",
+  "backend/market_lab/hilega_directional_candle_ui_v1.py": "a9c470f34a87899ca6b505e18d5e162a51cc5a051b23bcf642742585a59389d2"
+}

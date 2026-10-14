@@ -315,7 +315,8 @@ def list_sessions(root: Path = ROOT, replay_root: Path = REPLAY_ROOT,
             "expiry": (best.get("manifest") or {}).get("expiry"),
             "available_sources": alternatives,
         })
-    return sorted(sessions, key=lambda x: x["session_date"], reverse=True)
+    from .recovered_replay_ui_v1 import hilega_sessions
+    return hilega_sessions(sorted(sessions, key=lambda x: x["session_date"], reverse=True))
 
 
 def _load_audit_candidate(candidate: dict):
@@ -365,25 +366,39 @@ def _directional_report(row: dict) -> dict:
             "suppressed_events": row.get("suppressed_events"),
         },
     } for event in accepted]
+    if row.get("strategy_id") in {"HILEGA_WMA_GAP_V2_LIVE_SHADOW", "HILEGA_V2_ALIGNMENT_DUAL_EXIT"}:
+        details = {x.get("event_type"): x for x in row.get("event_details") or []}
+        for transition in transitions:
+            event = details.get(transition["event_type"], {})
+            transition.update({key: event.get(key) for key in ("price", "points", "entry_price", "entry_time", "exit_reason")})
+            transition["details"].update({"original_entry_time": event.get("entry_time"),
+                                          "original_entry_price": event.get("entry_price")})
     selected_route = next((
         route for route in ("ROUTE_A", "ROUTE_B", "OPENING")
         if any(route in event for event in accepted)
     ), None)
     return {
         "checkpoint": row.get("bar_timestamp"),
+        "audit_row_id": row.get("audit_row_id"),
         "bar": {key: row.get(key) for key in ("open", "high", "low", "close", "volume")},
         "indicators": {
             "rsi9": row.get("rsi9"),
             "ema3_rsi": row.get("ema3_rsi"),
             "wma21_rsi": row.get("wma21_rsi"),
         },
-        "conditions": {},
+        "conditions": {"wma_gap_checks": row.get("wma_gap_checks") or [], "canonical_setup": row.get("canonical_setup")},
         "strategy": {
+            "strategy_id": row.get("strategy_id"),
+            "decision_timestamp": row.get("decision_timestamp"),
+            "source_bar_timestamp": row.get("source_bar_timestamp"),
+            "directional_action": row.get("action"),
+            "manual_exit": row.get("manual_exit"),
+            "manual_exit_source_state": row.get("manual_exit_source_state"),
             "state_before": row.get("owner_before"),
             "state_after": row.get("owner_after"),
             "selected_route": selected_route,
             "events_emitted": accepted,
-            "direction": row.get("owner_after") or row.get("owner_before"),
+            "direction": __import__("market_lab.hilega_pending_direction_display_v1", fromlist=["resolve_audit_direction"]).resolve_audit_direction(row),
             "bullish_state": row.get("bullish_state"),
             "bearish_state": row.get("bearish_state"),
             "bullish_armed": row.get("bullish_armed"),
@@ -555,7 +570,8 @@ def _load_research_summary(candidate: dict, research_root: Path = RESEARCH_ROOT)
 
 def load_session(session_date: str, root: Path = ROOT, replay_root: Path = REPLAY_ROOT,
                  research_root: Path = RESEARCH_ROOT, live_path: Path = LIVE_AUDIT,
-                 directional_live_path: Path = DIRECTIONAL_LIVE_AUDIT):
+                 directional_live_path: Path = DIRECTIONAL_LIVE_AUDIT,
+                 preferred_source: str | None = None):
     try:
         day = date.fromisoformat(session_date).isoformat()
     except ValueError as exc:
@@ -569,7 +585,9 @@ def load_session(session_date: str, root: Path = ROOT, replay_root: Path = REPLA
     ]
     if not candidates:
         raise HTTPException(404, "Hilega session not found")
-    best = _best_for_day(candidates)
+    preferred = str(preferred_source or "").strip().upper()
+    matches = [x for x in candidates if str(x.get("source") or "").upper() == preferred]
+    best = _best_for_day(matches or candidates)
     if best["source"] == "RESEARCH_120":
         result = _load_research_summary(best, research_root)
     elif best["source"] == "DIRECTIONAL_LIVE_SHADOW":
@@ -577,6 +595,187 @@ def load_session(session_date: str, root: Path = ROOT, replay_root: Path = REPLA
     else:
         result = _load_audit_candidate(best)
     result["available_sources"] = sorted({x["source"] for x in candidates})
+    return result
+
+
+class _CacheOnlyUnderlyingGateway:
+    """Historical V2 testing may consume cached candles, never broker data."""
+
+    def __init__(self, cache_root: Path):
+        self.cache_root = cache_root
+
+    def historical_candles(self, instrument_key: str, session_date: date):
+        from .hilega_milega_historical_replay_v1 import _read_cache
+
+        return _read_cache(
+            self.cache_root / f"{session_date.isoformat()}.json",
+            instrument_key,
+            session_date,
+        ) or []
+
+
+def _v2_report(row: dict) -> dict:
+    checkpoint = row["bar_timestamp"]
+    accepted = [x for x in str(row.get("accepted_events") or "").split(",") if x]
+    suppressed = [x for x in str(row.get("suppressed_events") or "").split(",") if x]
+    transitions = [{
+        "event_type": event,
+        "event_time": checkpoint,
+        "price": row.get("close"),
+        "source": event,
+        "state_before": row.get("owner_before"),
+        "state_after": row.get("owner_after"),
+    } for event in accepted]
+    return {
+        "checkpoint": checkpoint,
+        "bar": {key: row.get(key) for key in ("open", "high", "low", "close", "volume")},
+        "indicators": {
+            "rsi9": row.get("rsi9"), "ema3_rsi": row.get("ema3_rsi"),
+            "wma21_rsi": row.get("wma21_rsi"),
+            "previous_wma21_rsi": row.get("previous_wma21_rsi"),
+        },
+        "conditions": {
+            "wma21_slope_required": True,
+            "wma21_slope_change": row.get("wma21_slope_change"),
+            "wma21_slope_direction": row.get("wma21_slope_direction"),
+            "wma21_slope_gate_status": row.get("wma21_slope_gate_status"),
+            "wma21_current_candle": row.get("wma21_current_candle"),
+            "wma21_previous_candle": row.get("wma21_previous_candle"),
+            "wma21_slope_interval_minutes": row.get("wma21_slope_interval_minutes"),
+            "bullish_wma21_rising": row.get("bullish_wma21_rising"),
+            "bearish_wma21_falling": row.get("bearish_wma21_falling"),
+            "bullish_wma21_slope_pass": row.get("bullish_wma21_slope_pass"),
+            "bearish_wma21_slope_pass": row.get("bearish_wma21_slope_pass"),
+            "bullish_wma21_slope_rejection": row.get("bullish_wma21_slope_rejection"),
+            "bearish_wma21_slope_rejection": row.get("bearish_wma21_slope_rejection"),
+        },
+        "strategy": {
+            "strategy_id": "HILEGA_DIRECTIONAL_SHADOW_V2",
+            "strategy_version": "2.0.0",
+            "directional_action": row.get("action"),
+            "owner_before": row.get("owner_before"), "owner_after": row.get("owner_after"),
+            "state_before": row.get("owner_before"), "state_after": row.get("owner_after"),
+            "events_emitted": accepted, "suppressed_events": suppressed,
+            "note": row.get("note"),
+        },
+        "route_a": {"fail_reasons": [x for x in (row.get("bullish_wma21_slope_rejection"), row.get("bearish_wma21_slope_rejection")) if x]},
+        "route_b": {"fail_reasons": []},
+        "transitions": transitions,
+        "option_candidate": None, "option_market_snapshot": None, "option_lifecycle": {},
+        "audit_integrity": {"source": "CACHED_CANDLE_V2_OBSERVATION_TEST", "chain_ok": None, "canonical_step_audit_available": False},
+        "safety": {"observation_only": True, "execution_enabled": False, "paper_order_enabled": False},
+    }
+
+
+@router.get("/strategy-test")
+def strategy_test(session_date: str = Query(..., min_length=10, max_length=10),
+                  strategy: str = Query("V2", max_length=20)):
+    try:
+        day = date.fromisoformat(session_date)
+    except ValueError as exc:
+        raise HTTPException(422, "Invalid session date") from exc
+    try:
+        if strategy.strip().upper() == "V2_ALIGN":
+            from .hilega_v2_replay_presentation_v1 import load_session as load_alignment
+            from .hilega_v2_alignment_replay_v1 import ReplayBusyError
+            try:
+                return load_alignment(day.isoformat())
+            except ReplayBusyError as exc:
+                raise HTTPException(409, str(exc)) from exc
+            except FileNotFoundError as exc:
+                raise HTTPException(404, str(exc)) from exc
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from exc
+        from .recovered_replay_ui_v1 import load_hilega
+        recovered = load_hilega(day.isoformat(), "V1" if strategy.strip().upper() == "V1" else "V2")
+        if recovered is not None:
+            return recovered
+        from .hilega_wma_gap_historical_v1 import (
+            build_v1_session,
+            build_wma_gap_session,
+            recorded_live_metrics,
+        )
+        result = (build_v1_session(day.isoformat())
+                  if strategy.strip().upper() == "V1"
+                  else build_wma_gap_session(day.isoformat()))
+        try:
+            recorded = load_session(day.isoformat())
+        except HTTPException:
+            recorded = None
+        if recorded and recorded.get("source") in {
+            "LIVE_SHADOW", "DIRECTIONAL_LIVE_SHADOW"
+        }:
+            recorded_reports = recorded.get("reports") or []
+            live_metrics = recorded_live_metrics(recorded_reports)
+            result["performance_summary"][0] = live_metrics
+            canonical_metrics = next(
+                (row for row in result["performance_summary"]
+                 if row.get("strategy_id") == "HILEGA_V1_REPLAY"),
+                {"signals": 0, "completed": 0},
+            )
+            live_entries = []
+            for report in recorded_reports:
+                for transition in report.get("transitions") or []:
+                    event = str(transition.get("event_type") or "")
+                    if not event.startswith("ENTRY_"):
+                        continue
+                    live_entries.append({
+                        "timestamp": transition.get("event_time") or report.get("checkpoint"),
+                        "direction": "BEARISH" if "BEARISH" in event else "BULLISH",
+                        "event_type": event,
+                    })
+            replay_entries = []
+            for report in result.get("reports") or []:
+                event = str((report.get("strategy") or {}).get("directional_action") or "")
+                if event not in {"HILEGA_V1_CANONICAL_ENTRY", "WMA_GAP_SIGNAL_RECEIVED"}:
+                    continue
+                replay_entries.append({
+                    "timestamp": report.get("checkpoint"),
+                    "direction": str((report.get("strategy") or {}).get("direction") or
+                                     (report.get("conditions") or {}).get("direction") or ""),
+                    "event_type": event,
+                })
+            live_count = int(live_metrics.get("signals") or 0)
+            replay_count = int(canonical_metrics.get("signals") or 0)
+            parity_ok = live_count == replay_count
+            result["parity"] = {
+                "status": "PASS" if parity_ok else "PARITY_MISMATCH",
+                "recorded_live_signals": live_count,
+                "recorded_live_completed": int(live_metrics.get("completed") or 0),
+                "canonical_replay_signals": replay_count,
+                "canonical_replay_completed": int(canonical_metrics.get("completed") or 0),
+                "recorded_live_entries": live_entries,
+                "canonical_replay_entries": replay_entries,
+            }
+            result["forward_confirmation_eligible"] = parity_ok
+            if not parity_ok:
+                result["warning"] = (
+                    "PARITY_MISMATCH: recorded live and canonical replay signal counts differ. "
+                    "This session is diagnostic only and is excluded from forward confirmation."
+                )
+        return result
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            404,
+            "WMA-gap replay unavailable. Frozen evidence is preserved; the "
+            "completed session is waiting for automatic forward-confirmation publication.",
+        ) from exc
+
+
+@router.get("/wma-gap-forward-status")
+def wma_gap_forward_status():
+    path = ROOT / "hilega-wma-gap-forward-confirmation-v1" / "report.json"
+    if not path.is_file():
+        return {
+            "model": "HILEGA_WMA_GAP_FORWARD_CONFIRMATION_V1",
+            "available": False,
+            "forward_sessions": 0,
+            "selected_dates": [],
+            "observation_only": True,
+            "execution_enabled": False,
+        }
+    result = _json_file(path)
+    result["available"] = True
     return result
 
 
@@ -612,13 +811,14 @@ def load_capture(capture_id: str, root: Path = ROOT):
 def sessions():
     return {
         "model": "HILEGA_SESSION_REGISTRY_V1",
-        "sessions": list_sessions(),
+        "sessions": __import__("market_lab.hilega_v2_alignment_replay_v1", fromlist=["merge_sessions"]).merge_sessions(list_sessions()),
     }
 
 
 @router.get("/session")
-def session(session_date: str = Query(..., min_length=10, max_length=10)):
-    return load_session(session_date)
+def session(session_date: str = Query(..., min_length=10, max_length=10),
+            source: str | None = Query(None, max_length=40)):
+    return load_session(session_date, preferred_source=source)
 
 
 @router.get("/capture")

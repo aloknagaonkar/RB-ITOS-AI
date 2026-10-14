@@ -524,11 +524,13 @@ def build_live_directional_candles(session_date: str | None = None, *, audit_onl
         rows = _base_live_rows(day)
     directional_count = 0
 
-    for record in _read_audit(LIVE_DIRECTIONAL_AUDIT):
+    manual_audit_records = _read_audit(LIVE_DIRECTIONAL_AUDIT)
+    for record in manual_audit_records:
         if record.get("stage") != "DIRECTIONAL_DECISION":
             continue
         payload = record.get("payload") or {}
-        ts = payload.get("bar_timestamp") or record.get("checkpoint")
+        is_v2 = payload.get("strategy_id") in {"HILEGA_WMA_GAP_V2_LIVE_SHADOW", "HILEGA_V2_ALIGNMENT_DUAL_EXIT"}
+        ts = (payload.get("decision_timestamp") if is_v2 else None) or payload.get("bar_timestamp") or record.get("checkpoint")
         if not isinstance(ts, str) or _iso_session(ts) != day:
             continue
 
@@ -539,6 +541,43 @@ def build_live_directional_candles(session_date: str | None = None, *, audit_onl
             "open": None, "high": None, "low": None, "close": None, "volume": None,
             "rsi9": None, "ema3_rsi": None, "wma21_rsi": None,
         })
+        # A later bootstrap reconstructs the day. Preserve original processed
+        # evidence at the same decision instant instead of replacing it.
+        if is_v2 and row.get("audit_status") == "PROCESSED" and record.get("status") != "PROCESSED":
+            continue
+        if is_v2:
+            row.update({"close": payload.get("nifty_close"),
+                        "decision_timestamp": ts,
+                        "source_bar_timestamp": payload.get("bar_timestamp"),
+                        "strategy_id": payload.get("strategy_id"),
+                        "event_details": payload.get("event_details") or [],
+                        "audit_status": record.get("status"),
+                        "wma_gap_checks": payload.get("wma_gap_checks") or [],
+                        "canonical_setup": {key: payload.get(key) for key in (
+                            "canonical_setup_events", "canonical_suppressed_events", "canonical_owner",
+                            "canonical_bullish_conditions", "canonical_bearish_conditions")}})
+        if is_v2:
+            indicator = payload.get("completed_5m_indicators") or {}
+            row.update({"rsi9": indicator.get("rsi9"),
+                        "ema3_rsi": indicator.get("ema3"), "wma21_rsi": indicator.get("wma21")})
+            from .hilega_v2_replay_presentation_v1 import inspection
+            row["strategy_steps"] = inspection({
+                "completed_5m_indicators": payload.get("completed_5m_indicators"),
+                "checks": payload.get("wma_gap_checks") or [],
+                "exit_validation": payload.get("exit_validation"),
+                "owner_after": payload.get("trade_owner_after"),
+            })
+            row["setup_attempts"] = payload.get("setup_attempts") or []
+            row["pending_switches"] = payload.get("pending_switches") or []
+            for switch in row["pending_switches"]:
+                row["strategy_steps"].append({"label":"Pending direction switch", "status":"INFO", "value":switch["from_direction"]+" → "+switch["to_direction"], "requirement":"Fresh opposite arm / setup while no actual position is open", "explanation":switch["reason"]+"; old pending signal cancelled; confirmation reset"})
+            row["exit_validation"] = payload.get("exit_validation")
+            row["exit_warning_time"] = payload.get("exit_warning_time")
+            row["indicator_timestamp"] = payload.get("bar_timestamp")
+            minute_bar = payload.get("minute_ohlcv") or {}
+            for field in ("open", "high", "low", "volume"):
+                if field in minute_bar:
+                    row[field] = minute_bar[field]
         row.update({
             "owner_before": payload.get("trade_owner_before"),
             "owner_after": payload.get("trade_owner_after"),
@@ -554,6 +593,8 @@ def build_live_directional_candles(session_date: str | None = None, *, audit_onl
         })
         directional_count += 1
 
+    from .hilega_manual_exit_decision_v1 import overlay_manual_exit_rows
+    overlay_manual_exit_rows(rows,manual_audit_records,day)
     ordered = [rows[key] for key in sorted(rows)]
     return {
         "model": "HILEGA_DIRECTIONAL_CANDLE_UI_V1",

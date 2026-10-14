@@ -1,0 +1,13 @@
+{
+  "backend/market_lab/hilega_wma_gap_live_v2.py": "abd1c214365a0baf552bcd5389aa120687bff2373e78caffd8b969effff42a96",
+  "backend/market_lab/live_shadow_worker_v1.py": "8127cdc37b80dd961c1490c319875cc034cccd684cf6a18671fd9388cdac30dd",
+  "backend/market_lab/hilega_directional_candle_ui_v1.py": "58edb0f72ae975336f3d11ddabf4858db40337ff3b02d236e62d189ff8f2faa8",
+  "backend/market_lab/hilega_historical_ui_api_v1.py": "ad73ca4eda175f7fc896eb25faec1b26fa37a7b583567fcb6af25ce8091f20b3",
+  "backend/market_lab/hilega_sandbox_event_bridge_v1.py": "0941cb7fb2211d7b3f9aeea1fa2645faef7aa4acfa60a16cc6bc55123c0f5a9a",
+  "backend/market_lab/hilega_directional_live_shadow_ui_v1.py": "09e70999ef42a371931c2bf0576305706f97b64bd7b2ed79e8400ab2e38dd405",
+  "frontend/src/hilegaMilegaShadow.tsx": "235a55e9a1a6754cb01039454ee3f804688694205475d502d47bd95a25fc853e",
+  "backend/market_lab/hilega_alignment_dual_exit_live_v1.py": null,
+  "tests/test_hilega_alignment_dual_exit_live_v1.py": null,
+  "scripts/validate_hilega_alignment_live_parity.py": null,
+  "tests/test_hilega_alignment_activation.py": null
+}

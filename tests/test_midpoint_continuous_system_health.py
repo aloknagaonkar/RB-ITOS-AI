@@ -99,8 +99,8 @@ def test_ui_adds_minute_rows_without_removing_existing_health_ui():
     assert "function ContinuousSystemHealth" in source
     assert "function SystemDirectionalCard" in source
     assert "MARKET_HEALTH_MINUTE" in source
-    assert "one health row is added after every completed minute" in source
-    assert "Signal rows and their data remain unchanged" in source
+    assert "health appears only in the health columns" in source
+    assert "Original strategy events remain in audit order" in source
     assert "mp-minute-observation" in source
 
 

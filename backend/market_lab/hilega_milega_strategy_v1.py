@@ -166,12 +166,16 @@ class HilegaMilegaBullishEngineV1:
     No WMA3/gap/3-candle/profit-management research rules are present here.
     """
 
-    def __init__(self, *, audit_store: ShadowStepAuditStoreV1 | None = None) -> None:
+    def __init__(self, *, audit_store: ShadowStepAuditStoreV1 | None = None, require_wma_slope: bool = False) -> None:
         self.audit_store = audit_store
+        self.require_wma_slope = require_wma_slope
+        self.strategy_id = "HILEGA_MILEGA_BULLISH_SHADOW_V2" if require_wma_slope else STRATEGY_ID
+        self.strategy_version = "2.0.0" if require_wma_slope else STRATEGY_VERSION
         self.indicators = HilegaMilegaIndicatorEngineV1()
         self.session = SessionState()
         self.previous_indicators: IndicatorSnapshot | None = None
         self.previous_bar: FiveMinuteBar | None = None
+        self.last_decision_payload: dict[str, Any] = {}
 
     @staticmethod
     def _cross_up(a0: float | None, b0: float | None, a1: float | None, b1: float | None) -> bool:
@@ -200,8 +204,8 @@ class HilegaMilegaBullishEngineV1:
             stage=stage,
             status=status,
             payload={
-                "strategy_id": STRATEGY_ID,
-                "strategy_version": STRATEGY_VERSION,
+                "strategy_id": self.strategy_id,
+                "strategy_version": self.strategy_version,
                 **payload,
             },
         )
@@ -307,7 +311,11 @@ class HilegaMilegaBullishEngineV1:
             prev
             and self._cross_down(prev.rsi9, prev.wma21_rsi, ind.rsi9, ind.wma21_rsi)
         )
-        return {
+        wma21_rising = bool(
+            prev and prev.wma21_rsi is not None and ind.wma21_rsi is not None
+            and ind.wma21_rsi > prev.wma21_rsi
+        )
+        d = {
             "rsi9": ind.rsi9,
             "ema3_rsi": ind.ema3_rsi,
             "wma21_rsi": ind.wma21_rsi,
@@ -316,6 +324,11 @@ class HilegaMilegaBullishEngineV1:
             "previous_wma21_rsi": prev.wma21_rsi if prev else None,
             "rsi_rising": rsi_up,
             "ema_rising": ema_up,
+            "wma21_rising": wma21_rising,
+            "wma21_falling": bool(prev and prev.wma21_rsi is not None and ind.wma21_rsi is not None and ind.wma21_rsi < prev.wma21_rsi),
+            "wma21_slope_change": None if not prev or prev.wma21_rsi is None or ind.wma21_rsi is None else ind.wma21_rsi - prev.wma21_rsi,
+            "wma21_slope_required": self.require_wma_slope,
+            "wma21_slope_pass": (not self.require_wma_slope) or wma21_rising,
             "rsi_cross_ema_up": rsi_cross_ema,
             "rsi_cross_wma_down": rsi_cross_down_wma,
             "rsi_gt_50": ind.rsi9 is not None and ind.rsi9 > 50,
@@ -323,6 +336,8 @@ class HilegaMilegaBullishEngineV1:
             "ema_gt_wma": ind.ready and ind.ema3_rsi > ind.wma21_rsi,
             "full_alignment": self._full_alignment(ind),
         }
+        self.last_decision_payload = d
+        return d
 
     @staticmethod
     def _route_a_fail_reasons(d: dict[str, Any]) -> list[str]:
@@ -331,6 +346,8 @@ class HilegaMilegaBullishEngineV1:
             reasons.append("RSI_NOT_ABOVE_50")
         if not d["rsi_gt_wma"]:
             reasons.append("RSI_NOT_ABOVE_WMA21")
+        if d.get("wma21_slope_required") and not d.get("wma21_rising"):
+            reasons.append("WMA21_NOT_RISING_OR_FLAT")
         return reasons
 
     @staticmethod
@@ -342,6 +359,8 @@ class HilegaMilegaBullishEngineV1:
             reasons.append("RSI_NOT_RISING")
         if not d["ema_rising"]:
             reasons.append("EMA_NOT_RISING")
+        if d.get("wma21_slope_required") and not d.get("wma21_rising"):
+            reasons.append("WMA21_NOT_RISING_OR_FLAT")
         return reasons
 
     def _audit_decision_result(
@@ -559,7 +578,7 @@ class HilegaMilegaBullishEngineV1:
                 events.append(self._emit(bar=bar, event_type="OPENING_REJECTED_0920", before=before))
         elif t == "09:25" and self.session.opening_candidate and self.session.opening_holding:
             before = self.session.name
-            if d["rsi_gt_wma"] and not self.session.active:
+            if d["rsi_gt_wma"] and d["wma21_slope_pass"] and not self.session.active:
                 self.session.active = True
                 self.session.source = "OPENING_PATH"
                 self.session.entry_time = bar.ts
@@ -591,7 +610,7 @@ class HilegaMilegaBullishEngineV1:
             self.session.armed = True
             self.session.armed_time = bar.ts
 
-            if entry_boundary_open and d["rsi_gt_50"] and d["rsi_gt_wma"]:
+            if entry_boundary_open and d["rsi_gt_50"] and d["rsi_gt_wma"] and d["wma21_slope_pass"]:
                 self.session.active = True
                 self.session.source = "PATH1_ROUTE_A_CROSS_RSI50_ABOVE_WMA21"
                 self.session.entry_time = bar.ts
@@ -623,6 +642,7 @@ class HilegaMilegaBullishEngineV1:
             and (d["rsi_gt_wma"] or d["ema_gt_wma"])
             and d["rsi_rising"]
             and d["ema_rising"]
+            and d["wma21_slope_pass"]
             and entry_boundary_open
         ):
             before = self.session.name
@@ -657,3 +677,10 @@ class HilegaMilegaBullishEngineV1:
         self.previous_indicators = indicators
         self.previous_bar = bar
         return events
+
+
+class HilegaMilegaBullishEngineV2(HilegaMilegaBullishEngineV1):
+    """Observation-only V2: bullish entries require a strictly rising WMA21."""
+
+    def __init__(self, *, audit_store: ShadowStepAuditStoreV1 | None = None) -> None:
+        super().__init__(audit_store=audit_store, require_wma_slope=True)

@@ -1,0 +1,12 @@
+const fs=require('fs'),path=require('path'),vm=require('vm'),assert=require('assert');
+const root=path.resolve(process.argv[2]||'.');
+const src=fs.readFileSync(path.join(root,'frontend/src/hilegaDecisionTable.tsx'),'utf8');
+const start=src.indexOf('export function shortRuleText('),end=src.indexOf('// Build the visible lifecycle',start),brace=src.indexOf('{',start);
+assert(start>=0&&end>brace);
+const body=src.slice(brace,end).replaceAll('(x:any)','(x)');
+const fn=vm.runInNewContext('function shortRuleText(r,kind,lifecycleIssue)'+body+'\nshortRuleText',{pathText:()=>'',clock:()=> '14:55',reportDirection:r=>r.strategy.direction||'BULLISH',list:x=>Array.isArray(x)?x:[],checkpointTransitions:r=>r.transitions||[],isExit:x=>String(x.event_type).includes('EXIT')});
+assert.equal(fn({strategy:{direction:'BULLISH'},transitions:[{event_type:'MANUAL_EXIT_BULLISH'}]},'EXIT'),'BULLISH EXIT · MANUAL EXIT');
+assert.equal(fn({strategy:{direction:'BEARISH'},transitions:[{event_type:'MANUAL_EXIT_BEARISH'}]},'EXIT'),'BEARISH EXIT · MANUAL EXIT');
+assert.equal(fn({strategy:{direction:'BULLISH',manual_exit:{status:'REQUESTED'}}},'ACTIVE'),'BULLISH · MANUAL EXIT REQUESTED · WAITING FOR CLOSURE');
+assert.equal(fn({strategy:{direction:'BULLISH'}},'ACTIVE'),'CONTINUE · BULLISH_ACTIVE');
+console.log('4 frontend manual-exit label checks passed');

@@ -3,6 +3,24 @@
 This document records the strategy currently exposed by the live and historical
 validation workspace. It is a testing baseline, not an execution authorization.
 
+## Strategy V2 observation test
+
+V2 is a separate historical/observation test and does not replace the current
+live strategy. Entry checks add a strict WMA(21) slope condition, calculated from
+the current completed 5-minute candle and the immediately previous completed
+5-minute candle:
+
+- Bullish entries require current WMA(21) > previous WMA(21).
+- Bearish entries require current WMA(21) < previous WMA(21).
+- Equal values are flat and fail the entry gate.
+- There is no minimum slope threshold; any strict non-zero difference qualifies.
+- Entries with unavailable prior/current WMA values fail closed.
+
+Historical replay labels each row with current/prior WMA, signed slope change,
+directional slope pass/fail, and any rejection reason. The V2 replay UI reads
+cached candles only; it does not call a broker or create option orders. The
+recorded live strategy selection remains unchanged.
+
 ## Safety
 
 - Observation only.

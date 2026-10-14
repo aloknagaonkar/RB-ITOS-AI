@@ -1,0 +1,14 @@
+{
+  "reference_tests_passed": 8,
+  "focused_live_adapter_tests_passed": 6,
+  "live_replay_opening_parity_passed": true,
+  "installer_reapply_check_passed": true,
+  "oct8_all_trade_entries_exits_prices_points_unchanged": true,
+  "opening_strength_at_0920": 1.7946907758008095,
+  "previous_reference_timestamp": "2026-10-07T15:25:00+05:30",
+  "baseline_net": -58.80000000000291,
+  "patched_net": -58.80000000000291,
+  "entry_rule_change": false,
+  "remote_deployment_performed": false,
+  "suite_limitation": "The full live test module import was blocked by missing optional python-dotenv. Six adapter tests were run via AST extraction excluding the unrelated sandbox bridge test."
+}

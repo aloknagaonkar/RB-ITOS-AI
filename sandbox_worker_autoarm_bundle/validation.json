@@ -1,0 +1,10 @@
+{
+  "tests_passed": 21,
+  "worker_scheduling_tests": 4,
+  "installer_test_passed": true,
+  "production_lock_dependency": "existing filelock",
+  "test_lock": "injected null context",
+  "remote_deployed": false,
+  "cron_required": false,
+  "scope": "existing Sandbox serve loop daily arming only"
+}

@@ -152,11 +152,10 @@ class RecordingHilegaSourcesV1:
         return rows
 
     def warmup_candles(self, session_date: date, cache_root: Path):
-        from .hilega_milega_historical_replay_v1 import UNDERLYING, load_or_fetch_1m
+        from .hilega_milega_historical_replay_v1 import UNDERLYING, load_validated_warmup_1m
         return self._call("warmup", {"date": session_date.isoformat()},
-                          lambda: load_or_fetch_1m(self.upstream, underlying=UNDERLYING,
-                                                    session_date=session_date, cache_root=cache_root,
-                                                    refresh_cache=False))
+                          lambda: load_validated_warmup_1m(self.upstream, underlying=UNDERLYING,
+                                                    session_date=session_date, cache_root=cache_root))
 
     def nifty_intraday_1m(self, *, now: datetime | None = None):
         return self._call("underlying", {"now": now.astimezone(IST).isoformat() if now else None},

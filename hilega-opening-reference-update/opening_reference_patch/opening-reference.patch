@@ -1,0 +1,132 @@
+--- a/backend/market_lab/hilega_alignment_dual_exit_live_v1.py
++++ b/backend/market_lab/hilega_alignment_dual_exit_live_v1.py
+@@ -11,6 +11,7 @@
+ )
+ from .hilega_milega_strategy_v1 import FiveMinuteBar, StrategyEvent
+ from .domain import IST
++from .hilega_opening_reference_v1 import capture_opening_reference, confirmation_reference
+ STRATEGY_ID = 'HILEGA_V2_ALIGNMENT_DUAL_EXIT'
+ 
+ class HilegaAlignmentDualExitLiveCoordinator(HilegaWmaGapLiveCoordinatorV2):
+@@ -56,6 +57,7 @@
+             warmup_sessions+=1
+         if not self.canonical.bullish.previous_indicators or not self.canonical.bullish.previous_indicators.ready:
+             raise ValueError('ALIGNMENT_LIVE_LOCAL_WARMUP_NOT_READY')
++        self._opening_reference = capture_opening_reference(self.canonical, now.date())
+         self.canonical.bullish.session=SessionState(session_date=now.date())
+         self.canonical.bearish.session=BearishSessionState(session_date=now.date())
+         for engine in (self.canonical.bullish,self.canonical.bearish):
+@@ -71,13 +73,16 @@
+             'bullish_state':self.directional.bullish.session.name,'bearish_state':self.directional.bearish.session.name,
+             'last_completed_bar':self._last_bar_ts.isoformat() if self._last_bar_ts else None,
+             'reconstructed':True,'option_restore':restore,'warmup_sessions':warmup_sessions,
++            'opening_reference_timestamp':self._opening_reference.bar_timestamp.isoformat() if self._opening_reference else None,
++            'opening_reference_policy':'PRIOR_SESSION_FIRST_CANDLE_ONLY',
+             'warmup_policy':'HISTORICAL_LOCAL_CACHE_ORDER'})
+         return {'status':'BOOTSTRAPPED'}
+ 
+     def _advance(self, minute, bars, *, recovered):
+         t=minute.timestamp.astimezone(IST);available=t+timedelta(minutes=1)
+         before=self.gate.owner;events=[];canonical_decision=None;exit_validation=None;setups=[]
+-        reference=self.canonical.bullish.previous_indicators
++        reference=confirmation_reference(self.canonical.bullish.previous_indicators,
++            getattr(self, "_opening_reference", None), t)
+         current=deepcopy(self.canonical.bullish.indicators).update(float(minute.close))
+         bar=bars.get(t-timedelta(minutes=4)) if t.minute%5==4 else None
+         if bar:
+@@ -121,6 +126,10 @@
+                 setups.append(dict(time=available.isoformat(),direction=side,source='ALTERNATIVE_ALIGNMENT'))
+         entries,checks=self.gate.evaluate(minute=t,current=current,reference=reference,
+             price=float(minute.close),exit_boundary=bool(events))
++        for check in checks:
++            if getattr(self, '_opening_reference', None) is not None and reference is self._opening_reference.snapshot:
++                check['reference_bar_timestamp'] = self._opening_reference.bar_timestamp.isoformat()
++                check['reference_crosses_session'] = True
+         events.extend(entries)
+         if entries:
+             self.warning_time=None
+--- a/backend/market_lab/hilega_v2_alignment_replay_v1.py
++++ b/backend/market_lab/hilega_v2_alignment_replay_v1.py
+@@ -7,6 +7,7 @@
+ from pathlib import Path
+ from types import SimpleNamespace
+ from .domain import IST
++from .hilega_opening_reference_v1 import capture_opening_reference, confirmation_reference
+ from .hilega_directional_coordinator_v1 import (HilegaDirectionalCoordinatorV1, DirectionalDecision,
+  BULLISH_ENTRY_EVENTS,BEARISH_ENTRY_EVENTS,BULLISH_EXIT_EVENTS,BEARISH_EXIT_EVENTS)
+ from .hilega_milega_strategy_v1 import SessionState,StrategyEvent
+@@ -147,6 +148,7 @@
+  for d,rows in sorted(warm):
+   for b in aggregate_exact_5m(candles(rows),date.fromisoformat(d)):c.on_bar(b)
+  if not c.bullish.previous_indicators or not c.bullish.previous_indicators.ready:raise ValueError('INDICATOR_WARMUP_NOT_READY')
++ opening_reference=capture_opening_reference(c,date.fromisoformat(TARGET))
+  day=date.fromisoformat(TARGET);c.bullish.session=SessionState(session_date=day);c.bearish.session=BearishSessionState(session_date=day)
+  for eng in [c.bullish,c.bearish]:eng.previous_indicators=None;eng.previous_bar=None
+  c.trade_owner='NONE';c.session_date=day
+@@ -160,7 +162,7 @@
+  setup_attempts=[];audit=[];trade_number=0;trades=[];active=None;checks=[];signals=[]; episode={"BULLISH":False,"BEARISH":False}
+  for minute in selected:
+   before=g.owner;exit_validation=None
+-  t=minute.timestamp;at=t+timedelta(minutes=1);ref=c.bullish.previous_indicators;current=copy.deepcopy(c.bullish.indicators).update(float(minute.close));events=[]
++  t=minute.timestamp;at=t+timedelta(minutes=1);ref=confirmation_reference(c.bullish.previous_indicators,opening_reference,t);current=copy.deepcopy(c.bullish.indicators).update(float(minute.close));events=[]
+   bar=bars.get(t-timedelta(minutes=4)) if t.minute%5==4 else None
+   if bar:
+    dec=c.on_bar(bar)
+@@ -201,6 +203,10 @@
+     setup_attempts.append({'time':at.isoformat(),'direction':side,'source':'ALTERNATIVE_ALIGNMENT'})
+     signals.append(dict(time=at.isoformat(),direction=side,rsi=latest.rsi9,ema=latest.ema3_rsi,wma=latest.wma21_rsi,current_gap=gap,previous_gap=pg,delta=gap-pg,strength=sign*(current.wma21_rsi-ref.wma21_rsi) if ref and ref.ready else None))
+   entries,cc=g.evaluate(minute=t,current=current,reference=ref,price=float(minute.close),exit_boundary=bool(events));checks.extend(cc)
++  for check in cc:
++   if opening_reference is not None and ref is opening_reference.snapshot:
++    check['reference_bar_timestamp']=opening_reference.bar_timestamp.isoformat()
++    check['reference_crosses_session']=True
+   if entries:g.pending.clear()
+   for e in events:
+    active.update(exit_time=at.isoformat(),exit_price=e.price,points=e.points,exit_reason=e.exit_reason or e.event_type);trades.append(active);active=None
+@@ -252,7 +258,7 @@
+ def source_signature(paths):
+  # Read bounded files, never the entire live audit. Changes invalidate the cache.
+  hashes={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
+- engine_hash=hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
++ engine_hash=hashlib.sha256(Path(__file__).read_bytes()+Path(__file__).with_name('hilega_opening_reference_v1.py').read_bytes()).hexdigest()
+  signature=hashlib.sha256(json.dumps({'files':hashes,'engine':engine_hash,'rules':RULES},sort_keys=True).encode()).hexdigest()
+  return signature,hashes
+ 
+--- /dev/null
++++ b/backend/market_lab/hilega_opening_reference_v1.py
+@@ -0,0 +1,35 @@
++"""Prior-session indicator data for the first exact 5m candle, not setup state."""
++from copy import deepcopy
++from dataclasses import dataclass
++from datetime import date, datetime, time
++from math import isfinite
++from .domain import IST
++
++@dataclass(frozen=True)
++class OpeningReference:
++    session_date: date
++    bar_timestamp: datetime
++    snapshot: object
++
++def capture_opening_reference(canonical, session_date):
++    engine = canonical.bullish
++    snapshot = engine.previous_indicators
++    bar = engine.previous_bar
++    if snapshot is None or not snapshot.ready or bar is None:
++        return None
++    stamp = bar.ts
++    if stamp.tzinfo is None or stamp.astimezone(IST).date() >= session_date:
++        return None
++    values = (snapshot.rsi9, snapshot.ema3_rsi, snapshot.wma21_rsi)
++    if any(value is None or not isfinite(float(value)) for value in values):
++        return None
++    return OpeningReference(session_date, stamp.astimezone(IST), deepcopy(snapshot))
++
++def confirmation_reference(current, opening, minute):
++    if current is not None:
++        return current
++    stamp = minute.astimezone(IST)
++    if (opening is not None and stamp.date() == opening.session_date
++            and time(9, 15) <= stamp.time() < time(9, 20)):
++        return opening.snapshot
++    return None

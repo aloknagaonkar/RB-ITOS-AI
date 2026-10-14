@@ -1,0 +1,8 @@
+{
+  "api_helper_tests_passed": 9,
+  "renderer_tests_passed": 15,
+  "vm_rows_verified": 9,
+  "full_frontend_build_performed": false,
+  "remote_deployed": false,
+  "strategy_changed": false
+}

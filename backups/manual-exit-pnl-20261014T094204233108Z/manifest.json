@@ -1,0 +1,14 @@
+{
+  "existing": [
+    "backend/market_lab/hilega_manual_exit_v1.py",
+    "backend/market_lab/hilega_upstox_sandbox_basket_v2.py",
+    "frontend/src/hilegaUpstoxSandboxDashboard.tsx",
+    "backend/market_lab/hilega_directional_candle_ui_v1.py",
+    "backend/market_lab/hilega_historical_ui_api_v1.py",
+    "frontend/src/hilegaDecisionTable.tsx"
+  ],
+  "new": [
+    "backend/market_lab/hilega_manual_exit_decision_v1.py",
+    "backend/market_lab/hilega_manual_exit_pnl_v1.py"
+  ]
+}

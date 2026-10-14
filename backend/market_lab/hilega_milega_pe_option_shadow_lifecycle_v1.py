@@ -174,9 +174,12 @@ class HilegaMilegaPEOptionShadowLifecycleV1:
         source: str | None,
         candidate_set: OptionCandidateSet,
         option_minutes: Callable[[str], Iterable],
+        signal_boundary_ts: datetime | None = None,
     ) -> ShadowOptionLifecycleSnapshot:
         bar_ts = _minute_key(signal_bar_ts)
-        boundary = bar_ts + timedelta(minutes=5)
+        boundary = _minute_key(signal_boundary_ts) if signal_boundary_ts is not None else bar_ts + timedelta(minutes=5)
+        if boundary < bar_ts + timedelta(minutes=5):
+            raise ValueError("OPTION_ENTRY_BOUNDARY_BEFORE_SIGNAL_AVAILABLE")
 
         if candidate_set.status != "AVAILABLE":
             self._snapshot = ShadowOptionLifecycleSnapshot(
@@ -529,6 +532,7 @@ class HilegaMilegaPEOptionShadowLifecycleV1:
         old = self._snapshot
         return self.start(
             signal_bar_ts=datetime.fromisoformat(old.signal_bar),
+            signal_boundary_ts=datetime.fromisoformat(old.signal_boundary),
             signal_spot=old.signal_spot,
             source=old.source,
             candidate_set=self._candidate_set,

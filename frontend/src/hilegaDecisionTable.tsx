@@ -1,3 +1,4 @@
+import HilegaPcrAuditCard from './hilegaPcrContext'
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import './hilegaDecisionTable.css'
 
@@ -5,6 +6,8 @@ import './hilegaDecisionTable.css'
    recalculated, no market requests are made, and no execution APIs are called. */
 export type HilegaAudit = {
   checkpoint: string
+  audit_row_id?: string
+  audit_sequence?: number
   linked_signal_bar?: string
   bar?: Record<string, any>
   indicators?: Record<string, any>
@@ -42,6 +45,7 @@ export const shortDateTime = (x:any) => {
 }
 
 const candleTiming=(r:HilegaAudit)=>{
+  if(r.strategy?.decision_timestamp)return {window:shortDateTime(r.strategy.decision_timestamp),processed:null as string|null,label:null as string|null}
   const start=new Date(String(r.checkpoint))
   if(Number.isNaN(start.getTime()))return {window:shortDateTime(r.checkpoint),processed:null as string|null,label:null as string|null}
   const end=new Date(start.getTime()+5*60_000)
@@ -62,8 +66,9 @@ const candleTiming=(r:HilegaAudit)=>{
   }
 }
 const json=(v:unknown)=>JSON.stringify(v??{},null,2)
-const isEntry=(x:any)=>String(x?.event_type??'').startsWith('ENTRY_')
+const isEntry=(x:any)=>String(x?.event_type??'').startsWith('ENTRY_')||String(x?.event_type??'')==='WMA_GAP_ENTRY'
 const isExit=(x:any)=>String(x?.event_type??'').includes('EXIT')
+const auditKey=(r:HilegaAudit)=>r.audit_row_id??r.checkpoint
 const transitions=(r:HilegaAudit)=>list(r.transitions)
 const sameInstant=(a:any,b:any):boolean=>{
   if(!a||!b)return false
@@ -99,6 +104,14 @@ const reportDirection=(r:HilegaAudit):'BULLISH'|'BEARISH'=>{
 
   // When no trade is active, candidate direction comes from the recorded
   // directional evidence.
+  // PENDING_DIRECTION_DISPLAY_FIX: audited exclusive flags precede stale/default direction.
+  const pendingBullish=r.strategy?.bullish_armed===true
+  const pendingBearish=r.strategy?.bearish_armed===true
+  if(pendingBearish&&!pendingBullish)return 'BEARISH'
+  if(pendingBullish&&!pendingBearish)return 'BULLISH'
+  const pendingChecks=list(r.conditions?.wma_gap_checks)
+  const pendingDirections=[...new Set(pendingChecks.map((c:any)=>String(c?.direction??'').toUpperCase()).filter((d:string)=>d==='BULLISH'||d==='BEARISH'))]
+  if(pendingDirections.length===1)return pendingDirections[0] as 'BULLISH'|'BEARISH'
   const explicit=String(r.strategy?.direction??'').toUpperCase()
   if(explicit==='BEARISH')return 'BEARISH'
   if(explicit==='BULLISH')return 'BULLISH'
@@ -119,6 +132,8 @@ export function eventKind(r:HilegaAudit):Kind {
 
   if(t.some(isEntry)||events.some(x=>x.startsWith('ENTRY_')))return 'ENTRY'
   if(t.some(isExit)||events.some(x=>x.includes('EXIT')))return 'EXIT'
+  if(events.some(x=>x.includes('NO_ENTRY_BY_T10')))return 'REJECTED'
+  if(events.some(x=>x.startsWith('WMA_GAP_SIGNAL')||x==='WMA_GAP_WAIT'||x.includes('POST_T10')))return 'DETECTED'
 
   // Informational ARMED/candidate evidence may coexist with the opposite active
   // trade owner. Detect it before ACTIVE so it is not flattened into a
@@ -201,18 +216,31 @@ const entryNiftyAt=(r:HilegaAudit):number|null=>{
   // infer an entry from a later continuation candle.
   return finiteNumber(entry?.price??entry?.entry_price??r.bar?.close)
 }
-export function niftyPointsFromEntry(current:any,entry:any):number|null {
+export function niftyPointsFromEntry(current:any,entry:any,direction:string="BULLISH"):number|null {
   const c=finiteNumber(current),e=finiteNumber(entry)
-  return c===null||e===null?null:c-e
+  return c===null||e===null?null:(c-e)*(direction==="BEARISH"?-1:1)
 }
 export function shortRuleText(
   r:HilegaAudit,
   kind:DisplayKind,
   lifecycleIssue?:string|null,
 ):string {
+  if(r.strategy?.rule_description)return String(r.strategy.rule_description)
   const path=pathText(r).toUpperCase()
   const at=clock(r.checkpoint)
   const direction=reportDirection(r)
+  const wmaGap=String(r.strategy?.strategy_id??'')==='HILEGA_WMA_GAP_V2_REPLAY'
+
+  if(wmaGap){
+    const action=String(r.strategy?.directional_action??'')
+    if(action==='WMA_GAP_ENTRY')return `${direction} WMA-GAP ENTRY · WMA≥0.75 PERSISTED + GAP POSITIVE/EXPANDING`
+    if(action==='WMA_GAP_CONTINUATION')return `${direction} WMA-GAP · ACTIVE CANDLE MONITORING`
+    if(action==='WMA_GAP_CANONICAL_EXIT')return `${direction} EXIT · UNCHANGED CANONICAL V1 EXIT`
+    if(action==='WMA_GAP_NO_ENTRY_BY_T10')return `${direction} DENIED · NO CONFIRMATION BY T+10`
+    if(action==='WMA_GAP_POST_T10_OBSERVATION')return `${direction} DENIED · POST-T+10 OBSERVATION ONLY`
+    if(action==='WMA_GAP_WAIT')return `${direction} WMA-GAP · WAITING FOR COMPLETE CONFIRMATION`
+    if(action==='WMA_GAP_SIGNAL_RECEIVED')return `${direction} CANONICAL SIGNAL · T+10 WATCH STARTED`
+  }
 
   if(kind==='ENTRY'){
     if(path.includes('OPENING')){
@@ -232,10 +260,12 @@ export function shortRuleText(
     }
     return `${direction} ENTRY · RECORDED STRATEGY TRANSITION`
   }
+  if(r.strategy?.manual_exit?.status==='REQUESTED')return `${direction} · MANUAL EXIT REQUESTED · WAITING FOR CLOSURE`
   if(kind==='ACTIVE')return `CONTINUE · ${direction}_ACTIVE`
   if(kind==='EXIT'){
     const ev=checkpointTransitions(r).find(isExit)
     const label=String(ev?.event_type??list(r.strategy?.events_emitted).find((x:any)=>String(x).includes('EXIT'))??'')
+    if(label.startsWith('MANUAL_EXIT_'))return `${direction} EXIT · MANUAL EXIT`
     if(label.includes('STRUCTURAL_EXIT_BEARISH_RSI_CROSS_ABOVE_WMA21'))return 'BEARISH EXIT · RSI↑WMA21'
     if(label.includes('STRUCTURAL_EXIT_RSI_CROSS_BELOW_WMA21'))return 'BULLISH EXIT · RSI↓WMA21'
     if(label.includes('CUTOFF')||at==='14:55')return `${direction} EXIT · 14:55 CUTOFF`
@@ -315,7 +345,7 @@ export function deriveDecisionRows(reports:HilegaAudit[]):DecisionRow[] {
       }
     }
 
-    const niftyPoints=(displayKind==='ENTRY'||displayKind==='ACTIVE'||displayKind==='EXIT')?niftyPointsFromEntry(currentNifty(report),entryNifty):null
+    const niftyPoints=(displayKind==='ENTRY'||displayKind==='ACTIVE'||displayKind==='EXIT')?niftyPointsFromEntry(currentNifty(report),entryNifty,activeDirection??reportDirection(report)):null
     const result:DecisionRow={report,origin,originRoute,entryNifty,niftyPoints,rawKind,displayKind,lifecycleIssue}
     if(displayKind==='EXIT'){
       active=false
@@ -625,14 +655,16 @@ function directionalAuditChecks(r:HilegaAudit,reports:HilegaAudit[]):Directional
 function Detail({r,reports,allowedUntil,origin,originRoute,displayKind,lifecycleIssue}:{r:HilegaAudit;reports:HilegaAudit[];allowedUntil?:string;origin?:string|null;originRoute?:string|null;displayKind:DisplayKind;lifecycleIssue?:string|null}){
   const cand=r.bar??{},ind=r.indicators??{},direction=reportDirection(r),side=direction==='BEARISH'?'PE':'CE'
   const entry=checkpointTransitions(r).find(isEntry),exit=checkpointTransitions(r).find(isExit)
-  const checks=directionalAuditChecks(r,reports)
+  const checks=r.conditions?.latest_strategy_audit===true || r.conditions?.authoritative_strategy_steps===true || String(r.strategy?.strategy_id??'')==='HILEGA_WMA_GAP_V2_REPLAY'
+    ? [] : directionalAuditChecks(r,reports)
   const reasons=[...list(r.route_a?.fail_reasons),...list(r.route_b?.fail_reasons)]
   const snapshotTime=r.option_market_snapshot?.signal_boundary
   const visibleSnapshot=allowedUntil===undefined||reached(snapshotTime,allowedUntil)
   return <div className="hd-audit">
+    {r.conditions?.authoritative_strategy_steps!==true && <HilegaPcrAuditCard at={String(r.audit_integrity?.decision_timestamp??allowedUntil??candleBoundary(r.checkpoint))}/>} 
     <div className="hd-cards">
       <article><b>Nifty candle</b><span>{clock(r.checkpoint)} IST</span><span>O {val(cand.open)} · H {val(cand.high)} · L {val(cand.low)} · C {val(cand.close)}</span><span>Volume {val(cand.volume)}</span></article>
-      <article><b>Indicators</b><span>RSI9 {money(ind.rsi9)} (prev {money(ind.previous_rsi9)})</span><span>EMA3(RSI) {money(ind.ema3_rsi)} (prev {money(ind.previous_ema3_rsi)})</span><span>WMA21(RSI) {money(ind.wma21_rsi)} (prev {money(ind.previous_wma21_rsi)})</span></article>
+      <article><b>Indicators</b><span>RSI9 {money(ind.rsi9)} (prev {money(ind.previous_rsi9)})</span><span>EMA3(RSI) {money(ind.ema3_rsi)} (prev {money(ind.previous_ema3_rsi)})</span><span>WMA21(RSI) {money(ind.wma21_rsi)} (prev {money(ind.previous_wma21_rsi)})</span>{r.conditions?.wma21_slope_change!==undefined&&<><span>WMA21 change {money(r.conditions.wma21_slope_change)} · {val(r.conditions.wma21_slope_direction)}</span><span>Compared candle timestamps: {shortDateTime(r.conditions.wma21_previous_candle)} → {shortDateTime(r.conditions.wma21_current_candle)} ({val(r.conditions.wma21_slope_interval_minutes)} min)</span><span>WMA slope rule: {r.conditions.wma21_slope_required===true?`${val(r.conditions.wma21_slope_gate_status)} · V2 enforced`:'INFORMATIONAL ONLY · V1 does not gate entries'}</span>{r.conditions.wma21_slope_required===true&&<><span>No minimum slope threshold</span><span>Directional gate: {score(direction==='BULLISH'?r.conditions.bullish_wma21_slope_pass:r.conditions.bearish_wma21_slope_pass)}</span><span>Rejection: {val(direction==='BULLISH'?r.conditions.bullish_wma21_slope_rejection:r.conditions.bearish_wma21_slope_rejection)}</span></>}</>}</article>
       <article><b>Strategy state</b><span>Direction: {direction}</span><span>{val(r.strategy?.state_before)} → {val(r.strategy?.state_after)}</span><span>Decision: {displayDecisionText(displayKind,direction)}</span><span>Original entry route: {originRoute??pathText(r)}</span><span>Entry signal candle: {origin?clock(origin):displayKind==='ENTRY'?clock(r.checkpoint):'Not available in current timeline'}</span></article>
       <article><b>Entry / exit</b><span>Entry: {entry?`${eventAt(entry,r)} · Nifty ${money(entry.price)}`:'Not detected'}</span><span>Exit: {exit?`${eventAt(exit,r)} · Nifty ${money(exit.price)}`:'Not detected'}</span><span>Reason: {val(exit?.exit_reason??exit?.event_type)}</span></article>
     </div>
@@ -640,15 +672,19 @@ function Detail({r,reports,allowedUntil,origin,originRoute,displayKind,lifecycle
     {displayKind==='ACTIVE'&&<div className="hd-continuation-reason"><b>{displayDecisionText('ACTIVE',direction)}</b><p>Recorded owner/state remains active and no directional exit was emitted for this candle.</p></div>}
     {displayKind==='EXIT'&&<div className="hd-exit-reason"><b>{displayDecisionText('EXIT',direction)}</b><p>Recorded exit: {val(exit?.exit_reason??exit?.event_type??list(r.strategy?.events_emitted).find((x:any)=>String(x).includes('EXIT')))}. Original entry signal: {origin?clock(origin):'not available in current timeline'}.</p></div>}
     {displayKind==='REVIEW'&&<div className="hd-review-reason"><b>REVIEW_REQUIRED</b><p>{val(lifecycleIssue)}. Raw evidence is preserved; UI does not promote unsupported lifecycle state.</p></div>}
-    <h4>{direction} {pathText(r)} validation</h4>
+    {r.conditions?.latest_strategy_audit&&<section><h4>{r.strategy?.strategy_id} · setup evidence</h4><p>Completed five-minute indicator candle: {shortDateTime(r.conditions.indicator_timestamp)}. Entry checks use adjacent completed-minute observations; dual exit uses the completed five-minute candle.</p><p>EMA10 and mandatory all-three slope gates are not enabled in this policy.</p><div className="hd-scroll"><table className="hd-table"><thead><tr><th>Setup source</th><th>Direction</th><th>Available at</th></tr></thead><tbody>{list(r.conditions.setup_attempts).length?list(r.conditions.setup_attempts).map((s:any,i:number)=><tr key={i}><td>{val(s.source)}</td><td>{val(s.direction)}</td><td>{shortDateTime(s.time)}</td></tr>):<tr><td colSpan={3}>No new setup was armed at this checkpoint.</td></tr>}</tbody></table></div><p>Recorded accepted setup events: {list(r.conditions.canonical_setup?.canonical_setup_events).join(' · ')||'None at this checkpoint'}</p><p>Recorded suppressed events: {list(r.conditions.canonical_setup?.canonical_suppressed_events).join(' · ')||'None recorded'}</p><p>First exit warning: {shortDateTime(r.conditions.exit_warning_time)} · Forced session cutoff: 14:55 IST · Exit precedes any permitted replacement entry.</p></section>}
+    {list(r.conditions?.strategy_steps).length>0&&<><h4>WMA-gap strategy inspection</h4><div className="hd-scroll"><table className="hd-table"><thead><tr><th>Monitored step</th><th>Status</th><th>Observed value</th><th>Required rule</th><th>Explanation</th></tr></thead><tbody>{list(r.conditions?.strategy_steps).map((x:any,i:number)=><tr key={`${x.label}-${i}`}><td>{val(x.label)}</td><td><span className={`hd-badge ${x.status==='PASS'?'hd-pass':x.status==='FAIL'?'hd-fail':'hd-neutral'}`}>{val(x.status)}</span></td><td>{val(x.value)}</td><td>{val(x.requirement)}</td><td>{val(x.explanation)}</td></tr>)}</tbody></table></div></>}
+    {r.conditions?.latest_strategy_audit!==true && r.conditions?.authoritative_strategy_steps!==true && String(r.strategy?.strategy_id??'')!=='HILEGA_WMA_GAP_V2_REPLAY'&&<><h4>{direction} {pathText(r)} validation</h4>
     {checks.length?<div className="hd-scroll"><table className="hd-table"><thead><tr><th>Check</th><th>Result</th><th>Canonical evidence</th></tr></thead><tbody>{checks.map((x,i)=><tr key={`${x.label}-${i}`}><td>{x.label}</td><td><span className={`hd-badge ${x.result===true?'hd-pass':x.result===false?'hd-fail':'hd-neutral'}`}>{score(x.result)}</span></td><td>{x.evidence}</td></tr>)}</tbody></table></div>:<p className="hd-muted">No additional route-specific validation is required for this checkpoint.</p>}
-    {reasons.length>0&&<p className="hd-muted">Recorded rejection reasons: {reasons.map(String).join(' · ')}</p>}
+    {reasons.length>0&&<p className="hd-muted">Recorded rejection reasons: {reasons.map(String).join(' · ')}</p>}</>}
+    {r.conditions?.authoritative_strategy_steps===true ? <p className="hd-muted">Nifty research replay only. Exact option fills and PCR context were not reconstructed for this strategy.</p> : <>
     <h4>Five independent {side} contracts — exact historical/live observations</h4>
     <p>Expiry {val(r.option_candidate?.expiry)} · ATM {val(r.option_candidate?.atm)} · Lifecycle {val(r.option_lifecycle?.start?.status??r.option_candidate?.status)} · Entry boundary {clock(r.option_lifecycle?.start?.signal_boundary??r.option_candidate?.signal_boundary)}</p>
     {(r.option_lifecycle?.start?.issue??r.option_candidate?.issue)&&<p className="hd-muted"><b>Exact option data issue:</b> {val(r.option_lifecycle?.start?.issue??r.option_candidate?.issue)}</p>}
     <OptionTable r={r} allowedUntil={allowedUntil} displayKind={displayKind}/>
     <details><summary>Recorded candidate selection and option-market snapshot</summary><pre>{json({candidate:r.option_candidate,snapshot:visibleSnapshot?r.option_market_snapshot:'Not yet available at selected candle'})}</pre></details>
-    <details><summary>Strategy transitions and recorded decision evidence</summary><pre>{json({strategy:r.strategy,route_a:r.route_a,route_b:r.route_b,transitions:r.transitions})}</pre></details>
+    </>}
+    <details><summary>Advanced diagnostic evidence (JSON)</summary><pre>{json({strategy:r.strategy,route_a:r.route_a,route_b:r.route_b,transitions:r.transitions})}</pre></details>
     <details><summary>Audit integrity and recorded source events</summary><p>Full-capture hash-chain check: {r.audit_integrity?.chain_ok===true?'PASS':r.audit_integrity?.chain_ok===false?'FAIL':'NOT VERIFIED'}</p><pre>{json(allowedUntil===undefined?r.audit_integrity:{...r.audit_integrity,records:list(r.audit_integrity?.records).filter((x:any)=>reached(x.event_time??x.checkpoint,allowedUntil))})}</pre></details>
   </div>
 }
@@ -667,16 +703,17 @@ export default function HilegaDecisionTable({reports,mode,fetchDetail,visibleUnt
   const contextual=useMemo(()=>deriveDecisionRows(ordered),[ordered])
   // Derive lifecycle state chronologically, but present newest completed candle first.
   // This keeps entry/continuation/exit state correct while making live monitoring easier.
-  const filtered=[...contextual.filter(row=>filter==='ALL'||row.displayKind===filter)].reverse()
+  const filtered=[...contextual.filter(row=>filter==='ALL'||row.displayKind===filter)].sort((a,b)=>b.report.checkpoint.localeCompare(a.report.checkpoint)||(a.report.audit_sequence??0)-(b.report.audit_sequence??0))
   const lifecycleGroup=(origin:string|null|undefined,checkpoint:string)=>{
     const key=origin??checkpoint
     return contextual.filter(row=>(row.origin??row.report.checkpoint)===key)
   }
   useEffect(()=>{
     if(mode!=='LIVE'||!open||!fetchDetail)return
+    if(contextual.find(x=>auditKey(x.report)===open)?.report.conditions?.latest_strategy_audit)return
     let active=true
     const refresh=async()=>{
-      const current=contextual.find(x=>x.report.checkpoint===open)
+      const current=contextual.find(x=>auditKey(x.report)===open)
       const group=current?lifecycleGroup(current.origin,open):[]
       const checkpoints=[...new Set((group.length?group.map(x=>x.report.checkpoint):[open]))]
       const values=await Promise.all(checkpoints.map(async cp=>[cp,await fetchDetail(cp)] as const))
@@ -688,9 +725,9 @@ export default function HilegaDecisionTable({reports,mode,fetchDetail,visibleUnt
   async function toggle(row:DecisionRow){
     const r=row.report
     onSelected?.(r.checkpoint)
-    if(open===r.checkpoint){setOpen(null);return}
-    setOpen(r.checkpoint);setError('')
-    if(fetchDetail){
+    if(open===auditKey(r)){setOpen(null);return}
+    setOpen(auditKey(r));setError('')
+    if(fetchDetail&&!r.conditions?.latest_strategy_audit){
       setLoading(true)
       try{
         const group=lifecycleGroup(row.origin,r.checkpoint)
@@ -710,13 +747,13 @@ export default function HilegaDecisionTable({reports,mode,fetchDetail,visibleUnt
     {error&&<p role="alert" className="hd-warning">{error}</p>}
     <div className="hd-scroll"><table className="hd-table hd-main"><thead><tr><th>Date / Time (IST)</th><th>Strategy rule / decision</th><th>Nifty Δ from entry</th><th>Opening path / Route A / Route B</th><th>Signal detected</th><th>Audit</th></tr></thead><tbody>
       {filtered.map((row)=>{const {report:r,origin,originRoute,niftyPoints,displayKind:k,lifecycleIssue}=row
-        const opened=open===r.checkpoint
+        const opened=open===auditKey(r)
         const peers=lifecycleGroup(origin,r.checkpoint).map(x=>details[x.report.checkpoint]??x.report)
-        const report=mergeLifecycleEvidence(details[r.checkpoint]??r,peers)
+        const report=mergeLifecycleEvidence((r.conditions?.latest_strategy_audit?r:details[r.checkpoint]??r),peers)
         const badge=k==='NONE'?'NO SIGNAL':k==='REVIEW'?'REVIEW REQUIRED':k==='REJECTED'?'REJECTED':displayDecisionText(k,reportDirection(r))
         const timing=candleTiming(r)
-        return <Fragment key={r.checkpoint}><tr className={`hd-row hd-${k.toLowerCase()}`}><td><span style={{display:'block'}}>{timing.window}</span>{timing.processed&&<small style={{display:'block'}}>{timing.label==='recovered'?`recovered ${timing.processed}`:timing.processed}</small>}</td><td><strong>{shortRuleText(r,k,lifecycleIssue)}</strong>{lifecycleIssue&&<small className="hd-lifecycle-issue">{lifecycleIssue}</small>}</td><td><span className={color(niftyPoints)} style={{display:'block'}}>{niftyPoints===null?'—':`${niftyPoints>0?'+':''}${money(niftyPoints)} pts`}</span><small style={{display:'block'}}>O {money(r.bar?.open)} → C {money(r.bar?.close)}</small></td><td>{pathText(r,originRoute??undefined)}</td><td><span className={`hd-badge hd-${k.toLowerCase()}`}>{badge}</span></td><td><button aria-expanded={opened} aria-label={`Audit ${r.checkpoint}`} onClick={()=>void toggle(row)}>{opened?'Hide audit':'View audit ▾'}</button></td></tr>
-        {opened&&<tr className="hd-expanded"><td colSpan={6}>{loading&&!details[r.checkpoint]&&<p>Loading linked directional option lifecycle…</p>}<Detail r={report} reports={ordered} origin={origin} originRoute={originRoute} displayKind={k} lifecycleIssue={lifecycleIssue} allowedUntil={candleBoundary(r.checkpoint)}/></td></tr>}
+        return <Fragment key={auditKey(r)}><tr className={`hd-row hd-${k.toLowerCase()}`}><td><span style={{display:'block'}}>{timing.window}</span>{timing.processed&&<small style={{display:'block'}}>{timing.label==='recovered'?`recovered ${timing.processed}`:timing.processed}</small>}</td><td><strong>{shortRuleText(r,k,lifecycleIssue)}</strong>{lifecycleIssue&&<small className="hd-lifecycle-issue">{lifecycleIssue}</small>}</td><td><span className={color(niftyPoints)} style={{display:'block'}}>{niftyPoints===null?'—':`${niftyPoints>0?'+':''}${money(niftyPoints)} pts`}</span><small style={{display:'block'}}>O {money(r.bar?.open)} → C {money(r.bar?.close)}</small></td><td>{pathText(r,originRoute??undefined)}</td><td><span className={`hd-badge hd-${k.toLowerCase()}`}>{badge}</span></td><td><button aria-expanded={opened} aria-label={`Audit ${r.checkpoint}`} onClick={()=>void toggle(row)}>{opened?'Hide audit':'View audit ▾'}</button></td></tr>
+        {opened&&<tr className="hd-expanded"><td colSpan={6}>{loading&&!details[r.checkpoint]&&<p>Loading linked directional option lifecycle…</p>}<Detail r={report} reports={ordered} origin={origin} originRoute={originRoute} displayKind={k} lifecycleIssue={lifecycleIssue} allowedUntil={r.strategy?.decision_timestamp??candleBoundary(r.checkpoint)}/></td></tr>}
         </Fragment>
       })}
       {!filtered.length&&<tr><td colSpan={6}>{emptyMessage??'No recorded checkpoints for this selection.'}</td></tr>}

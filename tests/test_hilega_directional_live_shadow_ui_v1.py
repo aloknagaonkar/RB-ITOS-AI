@@ -1,3 +1,6 @@
+from datetime import datetime
+from pathlib import Path
+
 import market_lab.hilega_directional_live_shadow_ui_v1 as ui
 from market_lab.hilega_market_evidence_v1 import EvidenceJournalV1
 
@@ -96,3 +99,52 @@ def test_status_safety_contract_remains_observation_only(tmp_path, monkeypatch):
     assert got["quantity"] is None
     assert got["operational"]["observation_only"] is True
     assert got["operational"]["execution_enabled"] is False
+
+
+class FixedDateTime(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return cls(2026, 10, 6, 9, 30, tzinfo=tz)
+
+
+def test_previous_session_lock_is_not_returned_as_current_state(tmp_path, monkeypatch):
+    monkeypatch.setattr(ui, "datetime", FixedDateTime)
+    monkeypatch.setattr(ui, "STEP_AUDIT_PATH", tmp_path / "missing-step-audit.jsonl")
+    monkeypatch.setattr(ui, "EVIDENCE_ROOT", tmp_path / "missing-evidence")
+    monkeypatch.setattr(ui, "_rows", lambda: [row("DIRECTIONAL_SESSION_CUTOFF", {
+        "bar_timestamp": "2026-10-05T14:55:00+05:30",
+        "trade_owner_after": "NONE",
+        "bullish_state": "SESSION_LOCKED",
+        "bearish_state": "SESSION_LOCKED",
+    }, status="PROCESSED")])
+
+    result = ui.status(fast=True)
+
+    assert result["current"]["session_date"] == "2026-10-06"
+    assert result["current"]["state_available"] is False
+    assert result["current"]["bullish_state"] is None
+    assert result["current"]["bearish_state"] is None
+    assert result["latest_state_session_date"] == "2026-10-05"
+    assert result["latest_accepted_record"] is None
+
+
+def test_trade_dashboard_keeps_saved_previous_session_rows(tmp_path, monkeypatch):
+    monkeypatch.setattr(ui, "datetime", FixedDateTime)
+    previous_session = row("DIRECTIONAL_SESSION_CUTOFF", {
+        "bar_timestamp": "2026-10-05T14:55:00+05:30",
+    }, status="PROCESSED")
+    monkeypatch.setattr(ui, "_rows", lambda: [previous_session])
+    monkeypatch.setattr(ui, "project_directional_shadow_dashboard", lambda rows: {
+        "record_count": len(list(rows)),
+    })
+
+    result = ui.trade_dashboard()
+
+    assert result["record_count"] == 1
+
+
+def test_live_view_preserves_saved_rows_and_labels_their_date():
+    source = (Path(__file__).parents[1] / "frontend/src/hilegaMilegaShadow.tsx").read_text(encoding="utf-8")
+    assert "merged=merged.filter" not in source
+    assert "the latest state is from {status.latest_state_session_date" in source
+    assert "status?.current.state_available===false" in source

@@ -10,6 +10,7 @@ from market_lab.hilega_milega_strategy_v1 import (
     PAPER_ORDER_ENABLED,
     FiveMinuteBar,
     HilegaMilegaBullishEngineV1,
+    HilegaMilegaBullishEngineV2,
     HilegaMilegaIndicatorEngineV1,
     IndicatorSnapshot,
 )
@@ -53,6 +54,18 @@ def test_route_a_enters_on_fresh_rsi_ema_cross_with_rsi_above_50_and_wma():
     assert e.session.active is True
     assert e.session.source == "PATH1_ROUTE_A_CROSS_RSI50_ABOVE_WMA21"
     assert e.session.entry_price == 101
+
+
+@pytest.mark.parametrize(("current_wma", "entry_expected"), [(50.01, True), (50.0, False), (49.99, False)])
+def test_v2_bullish_route_a_requires_strictly_rising_wma(current_wma, entry_expected):
+    e = HilegaMilegaBullishEngineV2()
+    e.process_enriched_bar_for_test(bar("10:00"), ind(48, 50, 50.0))
+    events = e.process_enriched_bar_for_test(bar("10:05", 101), ind(55, 52, current_wma))
+    assert any(x.startswith("ENTRY_PATH1_ROUTE_A") for x in event_types(events)) is entry_expected
+    assert e.last_decision_payload["wma21_slope_pass"] is entry_expected
+    assert e.last_decision_payload["wma21_slope_change"] == pytest.approx(current_wma - 50.0)
+    if not entry_expected:
+        assert "WMA21_NOT_RISING_OR_FLAT" in e._route_a_fail_reasons(e.last_decision_payload)
 
 
 def test_route_b_can_confirm_on_same_cross_candle_when_route_a_fails():

@@ -65,3 +65,9 @@ if curl -fsS --max-time 3 "$HEALTH_URL" >/dev/null 2>&1; then
 else
     echo "dashboard: UNAVAILABLE at http://127.0.0.1:8123"
 fi
+
+if [ -f data/operational-readiness.pid ] && kill -0 "$(cat data/operational-readiness.pid)" 2>/dev/null; then
+    echo "readiness-monitor: RUNNING (UI-only)"
+else
+    echo "readiness-monitor: STOPPED"
+fi

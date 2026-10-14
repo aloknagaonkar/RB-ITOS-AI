@@ -1,5 +1,7 @@
 """Observation-only shadow worker; run alongside market_lab.worker."""
 import os,time
+import json
+from pathlib import Path
 from datetime import date,datetime
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
@@ -13,23 +15,55 @@ from .hilega_directional_live_shadow_v1 import (
     STRATEGY_ID as HILEGA_DIRECTIONAL_STRATEGY_ID,
     HilegaDirectionalLiveShadowCoordinatorV1,
 )
+from .hilega_wma_gap_live_v2 import HilegaWmaGapLiveCoordinatorV2, STRATEGY_ID as WMA_GAP_V2_ID
 from .midpoint_strategy.live_shadow_v1 import MidpointLiveShadowCoordinatorV1
 from .midpoint_strategy.config import live_shadow_config_from_env
 
 HILEGA_UNDERLYING = "NSE_INDEX|Nifty 50"
+_component_retry_after = {}
+_component_errors = {}
 
+
+def process_isolated_tick(now, tasks):
+    """One observation failure must not starve another strategy. Retry next tick."""
+    outcomes = {}
+    for name, callback in tasks:
+        if now.timestamp() < _component_retry_after.get(name, 0):
+            outcomes[name] = "RETRY_BACKOFF"
+            continue
+        try:
+            callback(now)
+            outcomes[name] = "OK"
+            _component_retry_after.pop(name, None)
+            _component_errors.pop(name, None)
+        except Exception as exc:
+            outcomes[name] = type(exc).__name__
+            # Keep only whitelisted candle-validation messages; provider strings may contain secrets.
+            import re
+            message = str(exc)
+            safe = isinstance(exc, ValueError) and len(message) < 500 and re.fullmatch(r"[A-Za-z0-9 :,;._\-]+", message) and any(word in message.lower() for word in ("warmup", "candle", "missing 1m"))
+            _component_errors[name] = {"first_seen": _component_errors.get(name, {}).get("first_seen", now.isoformat()), "last_failure": now.isoformat(), "error_type": type(exc).__name__, "message": message if safe else type(exc).__name__}
+            _component_retry_after[name] = now.timestamp() + 30
+            # Do not log broker exception strings, credentials or response bodies.
+            print(json.dumps({"stage": "SHADOW_COMPONENT_ERROR", "component": name,
+                              "session_date": now.date().isoformat(),
+                              "timestamp": now.isoformat(), "error_type": type(exc).__name__}), flush=True)
+    path = Path("data/live-observation/shadow-worker-health.json")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps({"timestamp": now.isoformat(),
+                                   "session_date": now.date().isoformat(),
+                                   "components": outcomes, "component_errors": _component_errors}), encoding="utf-8")
+    temporary.replace(path)
+    return outcomes
+
+
+from .hilega_alignment_dual_exit_live_v1 import HilegaAlignmentDualExitLiveCoordinator, STRATEGY_ID as ALIGNMENT_V2_ID
 
 def _resolve_hilega_option_expiry(sources, *, session_date: date, configured_raw: str):
-    configured_raw = configured_raw.strip()
+    from .hilega_expiry_rollover_v1 import resolve_expiry
+    return resolve_expiry(sources, session_date=session_date, configured_raw=configured_raw)
 
-    if configured_raw:
-        return date.fromisoformat(configured_raw), "CONFIGURED_ENV"
-
-    expiry = sources.resolve_option_expiry(
-        HILEGA_UNDERLYING,
-        today=session_date,
-    )
-    return expiry, "AUTO_UPSTOX_INSTRUMENT_SEARCH"
 
 def run():
     load_dotenv('.env');engine=make_engine();initialize(engine)
@@ -93,6 +127,12 @@ def run():
                             "coordinator_source_sha256":hashlib.sha256(Path(coordinator_module.__file__).read_bytes()).hexdigest(),
                         })
                         coord=HilegaMilegaLiveShadowCoordinatorV1(market_sources=evidence,option_expiry=option_expiry)
+                    # AUTO_EXPIRY_DAILY_GUARD — independent of evidence recording.
+                    if getattr(coord, '_expiry_session_date', None) != now.date():
+                        option_expiry, option_expiry_source = _resolve_hilega_option_expiry(
+                            sources, session_date=now.date(), configured_raw=expiry_raw)
+                        coord.option_expiry = option_expiry
+                        coord._expiry_session_date = now.date()
                     if now.second>=30:
                         if evidence is not None:
                             evidence.tick(now)
@@ -103,7 +143,8 @@ def run():
             finally:
                 if evidence is not None:
                     evidence.close()
-        elif selected==HILEGA_DIRECTIONAL_STRATEGY_ID:
+        elif selected in {HILEGA_DIRECTIONAL_STRATEGY_ID, WMA_GAP_V2_ID, ALIGNMENT_V2_ID}:
+            directional_factory = (HilegaAlignmentDualExitLiveCoordinator if selected == ALIGNMENT_V2_ID else HilegaWmaGapLiveCoordinatorV2 if selected == WMA_GAP_V2_ID else HilegaDirectionalLiveShadowCoordinatorV1)
             expiry_raw=os.getenv("HILEGA_MILEGA_OPTION_EXPIRY","").strip()
             option_expiry, option_expiry_source = _resolve_hilega_option_expiry(
                 sources,
@@ -126,11 +167,14 @@ def run():
                 journal.append("process_start", {"session_date":datetime.now(IST).date().isoformat()}, {
                     "expiry":option_expiry.isoformat() if option_expiry else None,
                     "expiry_source":option_expiry_source,
+                    "strategy_id":selected,
+                    "alignment_dual_exit_source_sha256":hashlib.sha256(Path(__import__('market_lab.hilega_alignment_dual_exit_live_v1',fromlist=['x']).__file__).read_bytes()).hexdigest() if selected==ALIGNMENT_V2_ID else None,
+                    "wma_gap_live_source_sha256":hashlib.sha256(Path(__import__('market_lab.hilega_wma_gap_live_v2',fromlist=['x']).__file__).read_bytes()).hexdigest() if selected==WMA_GAP_V2_ID else None,
                     "directional_source_sha256":hashlib.sha256(Path(directional_module.__file__).read_bytes()).hexdigest(),
                     "live_directional_source_sha256":hashlib.sha256(Path(live_directional_module.__file__).read_bytes()).hexdigest(),
                 })
                 active_sources=evidence
-            coord=HilegaDirectionalLiveShadowCoordinatorV1(market_sources=active_sources,option_expiry=option_expiry)
+            coord=directional_factory(market_sources=active_sources,option_expiry=option_expiry)
             midpoint_coord=MidpointLiveShadowCoordinatorV1(
                 market_sources=sources,
                 config=live_shadow_config_from_env(),
@@ -152,15 +196,26 @@ def run():
                         journal.append("process_start", {"session_date":now.date().isoformat()}, {
                             "expiry":option_expiry.isoformat() if option_expiry else None,
                     "expiry_source":option_expiry_source,
-                            "directional_source_sha256":hashlib.sha256(Path(directional_module.__file__).read_bytes()).hexdigest(),
+                            "strategy_id":selected,
+                    "alignment_dual_exit_source_sha256":hashlib.sha256(Path(__import__('market_lab.hilega_alignment_dual_exit_live_v1',fromlist=['x']).__file__).read_bytes()).hexdigest() if selected==ALIGNMENT_V2_ID else None,
+                    "wma_gap_live_source_sha256":hashlib.sha256(Path(__import__('market_lab.hilega_wma_gap_live_v2',fromlist=['x']).__file__).read_bytes()).hexdigest() if selected==WMA_GAP_V2_ID else None,
+                    "directional_source_sha256":hashlib.sha256(Path(directional_module.__file__).read_bytes()).hexdigest(),
                             "live_directional_source_sha256":hashlib.sha256(Path(live_directional_module.__file__).read_bytes()).hexdigest(),
                         })
-                        coord=HilegaDirectionalLiveShadowCoordinatorV1(market_sources=evidence,option_expiry=option_expiry)
+                        coord=directional_factory(market_sources=evidence,option_expiry=option_expiry)
+                    # AUTO_EXPIRY_DAILY_GUARD — independent of evidence recording.
+                    if getattr(coord, '_expiry_session_date', None) != now.date():
+                        option_expiry, option_expiry_source = _resolve_hilega_option_expiry(
+                            sources, session_date=now.date(), configured_raw=expiry_raw)
+                        coord.option_expiry = option_expiry
+                        coord._expiry_session_date = now.date()
                     if now.second>=30:
-                        if evidence is not None:evidence.tick(now)
-                        coord.process(now)
+                        tasks = []
+                        if evidence is not None:tasks.append(("market_evidence", evidence.tick))
+                        tasks.append(("hilega", coord.process))
                         if midpoint_coord is not None:
-                            midpoint_coord.process(now)
+                            tasks.append(("midpoint", midpoint_coord.process))
+                        process_isolated_tick(now, tasks)
                     time.sleep(5)
             finally:
                 if evidence is not None:evidence.close()

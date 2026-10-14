@@ -8,10 +8,11 @@ from typing import Literal
 from .hilega_milega_strategy_v1 import (
     FiveMinuteBar,
     HilegaMilegaBullishEngineV1,
+    HilegaMilegaBullishEngineV2,
     IndicatorSnapshot,
     StrategyEvent,
 )
-from .hilega_milega_bearish_strategy_v1 import HilegaMilegaBearishEngineV1
+from .hilega_milega_bearish_strategy_v1 import HilegaMilegaBearishEngineV1, HilegaMilegaBearishEngineV2
 
 Direction = Literal["BULLISH", "BEARISH"]
 TradeOwner = Literal["NONE", "BULLISH", "BEARISH"]
@@ -261,4 +262,14 @@ class HilegaDirectionalCoordinatorV1:
             bar=bar,
             bullish_events=bullish_events,
             bearish_events=bearish_events,
+        )
+
+
+class HilegaDirectionalCoordinatorV2(HilegaDirectionalCoordinatorV1):
+    """Observation-test coordinator using strict directional WMA21 slope gates."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            bullish=HilegaMilegaBullishEngineV2(audit_store=None),
+            bearish=HilegaMilegaBearishEngineV2(audit_store=None),
         )

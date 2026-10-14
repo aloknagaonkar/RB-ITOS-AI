@@ -31,6 +31,7 @@ def main() -> None:
         default="data/historical-evidence/hilega-directional-replay-v1",
     )
     parser.add_argument("--refresh-cache", action="store_true")
+    parser.add_argument("--strategy-version", choices=("V1", "V2"), default="V1")
     args = parser.parse_args()
 
     load_dotenv(Path(__file__).resolve().parents[2]/".env")
@@ -44,6 +45,7 @@ def main() -> None:
             cache_root=args.cache_root,
             output_root=args.output_root,
             refresh_cache=args.refresh_cache,
+            strategy_version=args.strategy_version,
         )
     finally:
         gateway.close()

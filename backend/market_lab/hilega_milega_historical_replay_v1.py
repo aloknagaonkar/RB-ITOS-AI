@@ -163,6 +163,37 @@ def load_or_fetch_1m(
     return candles
 
 
+def load_validated_warmup_1m(gateway, *, underlying, session_date, cache_root):
+    """Repair incomplete operational warmup caches without inventing candles.
+
+    Fetch and validate BEFORE replacing a corrupt cache; keep its original bytes.
+    This helper is live-bootstrap only and does not alter frozen replay evidence.
+    """
+    candles = load_or_fetch_1m(gateway, underlying=underlying,
+                              session_date=session_date, cache_root=cache_root)
+    if not candles:
+        return candles
+    try:
+        aggregate_exact_5m(candles, session_date, require_full_session=True)
+        return candles
+    except ValueError:
+        repaired = sorted(gateway.historical_candles(underlying, session_date),
+                          key=lambda candle: candle.timestamp)
+        if not repaired:
+            raise ValueError("WARMUP_REPAIR_EMPTY")
+        try:
+            aggregate_exact_5m(repaired, session_date, require_full_session=True)
+        except ValueError as exc:
+            raise ValueError(f"Warmup {session_date}: {exc}") from exc
+        path = _cache_path(cache_root, session_date)
+        if path.exists():
+            backup = path.with_name(path.name + ".pre-warmup-repair-" +
+                                    datetime.now().strftime("%Y%m%dT%H%M%S%f"))
+            backup.write_bytes(path.read_bytes())
+        _write_cache(path, underlying, session_date, repaired)
+        return repaired
+
+
 def aggregate_exact_5m(
     candles: Iterable[HistoricalCandle], session_date: date, *, require_full_session: bool = False
 ) -> list[FiveMinuteBar]:
@@ -304,6 +335,11 @@ def _decision_reason_rows(audit_rows: Sequence[dict[str, Any]]) -> list[dict[str
                 "previous_rsi9": p.get("previous_rsi9"),
                 "previous_ema3_rsi": p.get("previous_ema3_rsi"),
                 "previous_wma21_rsi": p.get("previous_wma21_rsi"),
+                "wma21_rising": p.get("wma21_rising"),
+                "wma21_falling": p.get("wma21_falling"),
+                "wma21_slope_change": p.get("wma21_slope_change"),
+                "wma21_slope_required": p.get("wma21_slope_required"),
+                "wma21_slope_pass": p.get("wma21_slope_pass"),
                 "rsi_cross_ema_up": p.get("rsi_cross_ema_up"),
                 "rsi_cross_wma_down": p.get("rsi_cross_wma_down"),
                 "rsi_gt_50": p.get("rsi_gt_50"),
@@ -447,6 +483,11 @@ def _all_decision_rows(audit_rows: Sequence[dict[str, Any]]) -> list[dict[str, A
             "previous_rsi9": p.get("previous_rsi9"),
             "previous_ema3_rsi": p.get("previous_ema3_rsi"),
             "previous_wma21_rsi": p.get("previous_wma21_rsi"),
+            "wma21_rising": p.get("wma21_rising"),
+            "wma21_falling": p.get("wma21_falling"),
+            "wma21_slope_change": p.get("wma21_slope_change"),
+            "wma21_slope_required": p.get("wma21_slope_required"),
+            "wma21_slope_pass": p.get("wma21_slope_pass"),
             "rsi_cross_ema_up": p.get("rsi_cross_ema_up"),
             "rsi_cross_wma_down": p.get("rsi_cross_wma_down"),
             "rsi_gt_50": p.get("rsi_gt_50"),
@@ -581,6 +622,8 @@ def _write_decision_text(path: Path, session_date: date, rows: Sequence[dict[str
             f"  Previous RSI9     : {_fmt_num(r.get('previous_rsi9'))}",
             f"  Previous EMA3     : {_fmt_num(r.get('previous_ema3_rsi'))}",
             f"  Previous WMA21    : {_fmt_num(r.get('previous_wma21_rsi'))}",
+            f"  WMA21 slope       : {_fmt_num(r.get('wma21_slope_change'), 4)} ({'required' if r.get('wma21_slope_required') else 'not required'})",
+            f"  WMA21 rising      : {_yn(r.get('wma21_rising'))} · falling: {_yn(r.get('wma21_falling'))} · gate: {_yn(r.get('wma21_slope_pass'))}",
             "",
             "STRUCTURAL CHECKS",
             f"  RSI crosses EMA up: {_yn(r.get('rsi_cross_ema_up'))}",
