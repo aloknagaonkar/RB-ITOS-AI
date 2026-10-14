@@ -78,3 +78,7 @@ required breakout-velocity context. This UI update does not invent that flag.
 Completed Sandbox trades now use native, keyboard-accessible details/summary
 expanders, initially closed. The existing header, status, contract count and
 P&L remain visible. Active trade rows remain expanded. No accounting changes.
+
+Completed headers use compact padding, 13px titles/P&L and 11px metadata, with
+left-aligned details and right-aligned P&L. Narrow screens place P&L below the
+metadata. Scoped styles do not change active trades or other dashboard panels.
