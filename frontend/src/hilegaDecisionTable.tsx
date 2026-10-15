@@ -1,3 +1,4 @@
+import HilegaVwapAudit from './hilegaVwapAudit'
 import HilegaPcrAuditCard from './hilegaPcrContext'
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import './hilegaDecisionTable.css'
@@ -661,6 +662,7 @@ function Detail({r,reports,allowedUntil,origin,originRoute,displayKind,lifecycle
   const snapshotTime=r.option_market_snapshot?.signal_boundary
   const visibleSnapshot=allowedUntil===undefined||reached(snapshotTime,allowedUntil)
   return <div className="hd-audit">
+    <HilegaVwapAudit at={String(r.audit_integrity?.decision_timestamp??(r.strategy as any)?.decision_timestamp??candleBoundary(r.checkpoint))} allowedUntil={allowedUntil}/>
     {r.conditions?.authoritative_strategy_steps!==true && <HilegaPcrAuditCard at={String(r.audit_integrity?.decision_timestamp??allowedUntil??candleBoundary(r.checkpoint))}/>} 
     <div className="hd-cards">
       <article><b>Nifty candle</b><span>{clock(r.checkpoint)} IST</span><span>O {val(cand.open)} · H {val(cand.high)} · L {val(cand.low)} · C {val(cand.close)}</span><span>Volume {val(cand.volume)}</span></article>

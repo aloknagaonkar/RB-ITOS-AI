@@ -115,7 +115,8 @@ class HilegaSandboxEventBridgeV1:
         active: dict[str, dict[str, Any]] = {}
         for row in rows:
             if row.get("event_type") == "RESET" and row.get("decision") == "STATE_RESET":
-                active.clear()
+                closed = set(row.get('trade_ids') or [])
+                active = {side: trade for side, trade in active.items() if trade['trade_id'] not in closed}
                 continue
             if row.get("decision") != "WOULD_SUBMIT":
                 continue
@@ -150,6 +151,14 @@ class HilegaSandboxEventBridgeV1:
             return None
         if ack.get("completed_at") != payload.get("completed_at") or not ack.get("applied_at"):
             return None
+        completed = datetime.fromisoformat(payload['completed_at'])
+        applied = datetime.fromisoformat(ack['applied_at'])
+        if completed.tzinfo is None or applied.tzinfo is None or applied < completed:
+            return None
+        if request.get('session_date') != completed.date().isoformat():
+            return None
+        if any(datetime.fromisoformat(row['event_timestamp']) > completed for row in active.values()):
+            return None
         open_ids = {row["trade_id"] for row in active.values()}
         if open_ids and not open_ids.issubset(set(request.get("trade_ids") or [])):
             return None
@@ -167,9 +176,11 @@ class HilegaSandboxEventBridgeV1:
         with self.store.lock:
             existing = self.store.rows()
             existing_ids = {row["intent_id"] for row in existing}
+            # Reconstruct at each source position, never apply an old reset to
+            # the final state of a newer journal entry. Existing blocked rows
+            # remain immutable and cannot turn into executable intents.
+            existing_by_id = {r['intent_id']: r for r in existing}
             active_by_strategy = {}
-            for existing_strategy in {(r.get("strategy_id") or "HILEGA_DIRECTIONAL_SHADOW_V1") for r in existing}:
-                active_by_strategy[existing_strategy] = self._active_trades([r for r in existing if (r.get("strategy_id") or "HILEGA_DIRECTIONAL_SHADOW_V1") == existing_strategy])
             active = {}
             written = 0
             ignored = 0
@@ -181,6 +192,11 @@ class HilegaSandboxEventBridgeV1:
                 if record.get("stage") == "DIRECTIONAL_MANUAL_EXIT_RESET":
                     reset_id = hashlib.sha256(f"{record['record_hash']}|MANUAL_RESET".encode()).hexdigest()
                     if reset_id in existing_ids:
+                        saved = existing_by_id[reset_id]
+                        closed = set(saved.get('trade_ids') or [])
+                        for side in list(active):
+                            if active[side]['trade_id'] in closed:
+                                active.pop(side)
                         continue
                     request = self._verified_manual_reset(record, active)
                     if request is None:
@@ -199,7 +215,9 @@ class HilegaSandboxEventBridgeV1:
                     }
                     self.store.append(row)
                     existing_ids.add(reset_id)
-                    active.clear()
+                    for side in list(active):
+                        if active[side]["trade_id"] in set(request.get("trade_ids") or []):
+                            active.pop(side)
                     written += 1
                     continue
                 names = self._accepted_events(record)
@@ -213,6 +231,12 @@ class HilegaSandboxEventBridgeV1:
                         f"{record['record_hash']}|{name}".encode()
                     ).hexdigest()
                     if intent_id in existing_ids:
+                        saved = existing_by_id[intent_id]
+                        if saved.get('decision') == 'WOULD_SUBMIT':
+                            if saved['event_type'] == 'ENTRY':
+                                active[saved['direction']] = saved
+                            elif saved['event_type'] == 'EXIT':
+                                active.pop(saved['direction'], None)
                         ignored += 1
                         continue
 

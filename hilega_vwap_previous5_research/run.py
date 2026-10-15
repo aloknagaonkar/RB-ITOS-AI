@@ -37,7 +37,7 @@ def replay_entries(payload,day,expected):
             signal_time=at.isoformat(),setup_time=trade.get('signal_time'),
             entry_price=trade['entry_price'],exit_time=trade.get('exit_time'),exit_price=trade.get('exit_price'),
             trade_points=trade.get('points'),exit_reason=trade.get('exit_reason'),
-            strategy_version=expected,session_date=day,evidence_source='VERSION_VERIFIED_RESEARCH_REPLAY')))
+            strategy_version=expected,session_date=day,evidence_source='VERSION_VERIFIED_RESEARCH_REPLAY'))
     return entries
 
 

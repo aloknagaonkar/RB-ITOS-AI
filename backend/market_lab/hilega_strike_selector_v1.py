@@ -33,14 +33,15 @@ class StrikePolicy:
     max_one_lot_premium_rupees: float
 
     @classmethod
-    def load(cls, path: str | Path) -> "StrikePolicy":
+    def load(cls, path: str | Path, *, require_approval: bool = True) -> "StrikePolicy":
         raw = json.loads(Path(path).read_text(encoding="utf-8"))
         raw["ranked_ce_roles"] = tuple(raw["ranked_ce_roles"])
         raw["ranked_pe_roles"] = tuple(raw["ranked_pe_roles"])
         policy = cls(**raw)
-        if not policy.version or not policy.strategy_version or policy.approved is not True:
+        if not isinstance(policy.version, str) or not policy.version.strip() or not isinstance(policy.strategy_version, str) or not policy.strategy_version.strip() or type(policy.approved) is not bool or (require_approval and policy.approved is not True):
             raise ValueError("STRIKE_POLICY_NOT_APPROVED")
-        if (len(policy.ranked_ce_roles) != len(ROLES) or set(policy.ranked_ce_roles) != set(ROLES)
+        if (any(type(r) is not int for r in policy.ranked_ce_roles + policy.ranked_pe_roles)
+                or len(policy.ranked_ce_roles) != len(ROLES) or set(policy.ranked_ce_roles) != set(ROLES)
                 or len(policy.ranked_pe_roles) != len(ROLES) or set(policy.ranked_pe_roles) != set(ROLES)):
             raise ValueError("STRIKE_POLICY_MUST_RANK_FIVE_ROLES")
         limits = (
@@ -64,17 +65,23 @@ def _time(value: str) -> datetime:
 
 def rank_strikes(*, policy: StrikePolicy, strategy_version: str, direction: str,
                  signal_time: str, evaluated_at: str,
-                 candidates: Iterable[dict[str, Any]]) -> dict[str, Any]:
+                 candidates: Iterable[dict[str, Any]], lots: int = 1,
+                 observation_only: bool = False) -> dict[str, Any]:
     """Return a frozen decision. All quote values must be captured after the signal."""
-    if not policy.approved or strategy_version != policy.strategy_version:
+    if (not policy.approved and not observation_only) or strategy_version != policy.strategy_version:
         raise ValueError("STRIKE_POLICY_VERSION_NOT_APPROVED_FOR_STRATEGY")
     if direction not in {"BULLISH", "BEARISH"}:
         raise ValueError("UNKNOWN_DIRECTION")
+    if type(lots) is not int or lots != 1:
+        raise ValueError("RANKED_MODE_REQUIRES_EXACTLY_ONE_LOT")
     now, signal = _time(evaluated_at), _time(signal_time)
     age = (now - signal).total_seconds()
     if age < 0 or age > policy.max_signal_age_seconds:
         return dict(model=MODEL, policy_version=policy.version, status="NO_TRADE",
-                    reason="SIGNAL_STALE_OR_FUTURE", selected=None, candidates=[])
+                    strategy_version=strategy_version, signal_time=signal_time,
+                    evaluated_at=evaluated_at, direction=direction,
+                    reason="SIGNAL_STALE_OR_FUTURE", selected=None,
+                    candidates=[dict(r, eligible=False, rejection_reasons=["SIGNAL_STALE_OR_FUTURE"]) for r in candidates])
     rows = [dict(row) for row in candidates]
     side = "CE" if direction == "BULLISH" else "PE"
     if len(rows) != 5 or {r.get("role") for r in rows} != set(ROLES):
@@ -92,6 +99,9 @@ def rank_strikes(*, policy: StrikePolicy, strategy_version: str, direction: str,
         issues = []
         try:
             bid, ask = float(row["bid_price"]), float(row["ask_price"])
+            for field in ("bid_quantity", "ask_quantity", "volume", "lot_size"):
+                if isinstance(row[field], bool) or float(row[field]) != int(row[field]):
+                    raise ValueError("INTEGER_QUOTE_QUANTITY_REQUIRED")
             bid_qty, ask_qty = int(row["bid_quantity"]), int(row["ask_quantity"])
             volume, lot = int(row["volume"]), int(row["lot_size"])
             quote_time = _time(str(row["quote_time"]))
@@ -117,6 +127,7 @@ def rank_strikes(*, policy: StrikePolicy, strategy_version: str, direction: str,
     ranked.sort(key=lambda row: row["rank"])
     selected = next((row for row in ranked if row["eligible"]), None)
     return dict(model=MODEL, policy_version=policy.version,
+                observation_only=observation_only, execution_approved=policy.approved and not observation_only,
                 policy=asdict(policy), strategy_version=strategy_version,
                 signal_time=signal_time, evaluated_at=evaluated_at,
                 direction=direction, status="SELECTED" if selected else "NO_TRADE",

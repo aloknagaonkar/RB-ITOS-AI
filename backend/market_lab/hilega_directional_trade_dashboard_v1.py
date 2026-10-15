@@ -84,7 +84,7 @@ def project_directional_shadow_dashboard(rows: Iterable[dict[str, Any]]) -> dict
                 "atm": payload.get("atm"),
                 "status": payload.get("status") or "NO_EXACT_ENTRY",
                 "complete": False,
-                "issue": payload.get("issue") or "EXACT_ENTRY_NOT_AVAILABLE",
+                "issue": payload.get("issue") or payload.get("reason") or payload.get("error") or "EXACT_ENTRY_NOT_AVAILABLE",
                 "exit_reason": payload.get("exit_reason"),
                 "pending_exit_boundary": payload.get("pending_exit_boundary"),
                 "legs": [],
@@ -159,6 +159,37 @@ def project_directional_shadow_dashboard(rows: Iterable[dict[str, Any]]) -> dict
             "pending_exit_boundary": latest.get("pending_exit_boundary"),
             "legs": legs,
         })
+
+
+    # OBSERVATION_MANUAL_RELEASE_PROJECTION_V1
+    for release_row in records:
+        stage = release_row.get("stage")
+        if stage not in {
+            "BULLISH_OPTION_MANUAL_RELEASE",
+            "BEARISH_OPTION_MANUAL_RELEASE",
+        }:
+            continue
+        side = stage.split("_", 1)[0]
+        prior = (release_row.get("payload") or {}).get("prior_snapshot") or {}
+        for trade in trades:
+            if (
+                trade["direction"] == side
+                and trade["signal_bar"] == prior.get("signal_bar")
+                and trade["status"] != "CLOSED"
+            ):
+                trade.update(
+                    status="MANUAL_RELEASED",
+                    complete=False,
+                    exit_reason="MANUAL_EXIT",
+                    issue="MANUAL_EXIT_OPTION_PRICE_NOT_CAPTURED",
+                )
+                for leg in trade["legs"]:
+                    leg.update(
+                        exit_timestamp=None,
+                        exit_open=None,
+                        realized_points=None,
+                        realized_return_pct=None,
+                    )
 
     by_direction = {}
     for direction in DIRECTIONS:

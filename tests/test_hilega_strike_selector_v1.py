@@ -52,3 +52,14 @@ def test_missing_quote_data_never_selects_candidate():
     result = rank(rows)
     assert result["status"] == "NO_TRADE"
     assert all(not row["eligible"] for row in result["candidates"])
+
+
+def test_ranked_execution_rejects_unapproved_policy_but_observation_allows_it():
+    import pytest
+    from dataclasses import replace
+    p=replace(policy(),approved=False)
+    kwargs=dict(policy=p,strategy_version='sample-version',direction='BULLISH',
+                signal_time=(NOW-timedelta(seconds=5)).isoformat(),evaluated_at=NOW.isoformat(),candidates=candidates())
+    with pytest.raises(ValueError,match='NOT_APPROVED'):rank_strikes(**kwargs)
+    result=rank_strikes(**kwargs,observation_only=True)
+    assert result['selected']['role']==-1 and result['execution_approved'] is False

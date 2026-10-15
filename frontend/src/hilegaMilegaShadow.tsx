@@ -1,3 +1,4 @@
+import HilegaVwapAudit from './hilegaVwapAudit'
 import {sessionDay,dateOptions,recentAuditDays,selectedTradeDay,TradeDateFilter} from './hilegaTradeDates'
 import HilegaPcrWorkspace from './hilegaPcrWorkspace'
 import HilegaPcrAuditCard,{usePcrContext,strikeBias} from './hilegaPcrContext'
@@ -131,6 +132,7 @@ function AuditDetail({r}:{r:AuditReport}){
   const entry=firstEntry(r)
   const exit=firstExit(r)
   return <div className="hilega-audit-body">
+    <HilegaVwapAudit at={String((r as any).audit_integrity?.decision_timestamp??(r.strategy as any)?.decision_timestamp??new Date(new Date(r.checkpoint).getTime()+300000).toISOString())}/>
     <HilegaPcrAuditCard at={new Date(new Date(r.checkpoint).getTime()+300000).toISOString()}/>
     <div className="shadow-detail-grid" style={{gridTemplateColumns:'repeat(auto-fit,minmax(210px,1fr))'}}>
       <span>Checkpoint <b>{dt(r.checkpoint)}</b></span><span>Route <b>{words(r.strategy.selected_route)}</b></span>

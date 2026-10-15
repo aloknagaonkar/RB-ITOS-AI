@@ -1,0 +1,5 @@
+[
+  "scripts/research_hilega_atm5_coverage.py",
+  "tests/test_hilega_atm5_coverage.py",
+  "docs/hilega-atm5-research.md"
+]

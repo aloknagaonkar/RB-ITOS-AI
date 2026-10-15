@@ -1,0 +1,15 @@
+{
+  "max_quote_age_seconds": null,
+  "max_greeks_age_seconds": null,
+  "max_signal_age_seconds": null,
+  "max_spread_percent": null,
+  "premium_budget_rupees": null,
+  "round_trip_cost_per_lot_rupees": null,
+  "slippage_points_per_side": null,
+  "gamma_shock_points": null,
+  "max_gamma_delta_change": null,
+  "max_theta_premium_fraction": null,
+  "max_open_observations": null,
+  "theta_unit": null,
+  "vega_unit": null
+}
