@@ -52,9 +52,13 @@ def frozen_parity(saved,current):
         return sorted(result)
     issues=[]
     if signature(saved['trades'])!=signature(current['trades']):issues.append('FROZEN_TRADE_SIGNATURE_MISMATCH')
-    replay={r['checkpoint']:r for r in current['audit']}
+    def frame_key(frame):
+        return (frame['checkpoint'],frame.get('minute_timestamp'),
+                'MINUTE_DECISION' if frame.get('nifty_close') is not None else 'CUTOFF_EXIT')
+    replay={frame_key(r):r for r in current['audit']}
+    if len(replay)!=len(current['audit']):raise ValueError('DUPLICATE_REPLAY_AUDIT_IDENTITY')
     for old in saved['audit']:
-        at=old['checkpoint'];new=replay.get(at)
+        at=old['checkpoint'];new=replay.get(frame_key(old))
         if not new:issues.append('FROZEN_CHECKPOINT_MISSING:'+at);continue
         if old['owner_after']!=new['owner_after']:issues.append('FROZEN_OWNER_MISMATCH:'+at)
         if old.get('nifty_close') is None or new.get('nifty_close') is None:
@@ -114,6 +118,20 @@ def cutoff_parity(result,cutoffs):
     return [] if actual==wanted else ['LIVE_CUTOFF_TRADE_MISMATCH']
 
 class Checks(unittest.TestCase):
+    def test_same_checkpoint_minute_and_cutoff_both_compared(self):
+        import copy
+        cutoff=self.cutoff_frame()
+        minute=dict(checkpoint=cutoff['checkpoint'],minute_timestamp='2026-10-15T14:54:00+05:30',
+                    nifty_close=101,owner_after='BEARISH',completed_5m_indicators=dict(rsi9=40,ema3=42,wma21=45))
+        saved=dict(trades=[],audit=[minute,cutoff]);current=copy.deepcopy(saved)
+        self.assertEqual(frozen_parity(saved,current)['status'],'PASS')
+        current['audit'][0]['nifty_close']=102
+        self.assertEqual(frozen_parity(saved,current)['status'],'MISMATCH')
+    def test_duplicate_audit_identity_rejected(self):
+        import copy
+        saved=dict(trades=[],audit=[self.cutoff_frame()]);current=copy.deepcopy(saved)
+        current['audit'].append(copy.deepcopy(current['audit'][0]))
+        with self.assertRaises(ValueError):frozen_parity(saved,current)
     @staticmethod
     def cutoff_frame():
         at='2026-10-15T14:55:00+05:30'
