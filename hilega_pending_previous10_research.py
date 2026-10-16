@@ -34,6 +34,22 @@ def stats(trades):
        max_closed_trade_drawdown_points=round(dd,4))
 
 def frozen_parity(saved,current):
+    def cutoff_signature(frame):
+        at=frame['checkpoint']
+        if at[11:16]!='14:55' or frame.get('minute_timestamp')!=at or frame.get('owner_after')!='NONE':
+            raise ValueError('INVALID_PRICELESS_AUDIT_FRAME:'+at)
+        if frame.get('checks') or frame.get('indicators') is not None:
+            raise ValueError('INVALID_CUTOFF_AUDIT_SHAPE:'+at)
+        transitions=frame.get('transitions') or []
+        if not transitions:raise ValueError('CUTOFF_EXIT_EVIDENCE_REQUIRED:'+at)
+        result=[]
+        for t in transitions:
+            if t.get('event')!='EXIT_CLOSED' or t.get('reason')!='SESSION_CUTOFF_1455' or t.get('direction') not in ('BULLISH','BEARISH'):
+                raise ValueError('INVALID_CUTOFF_TRANSITION:'+at)
+            price=float(t['price']);points=float(t['points'])
+            if not math.isfinite(price) or price<=0 or not math.isfinite(points):raise ValueError('INVALID_CUTOFF_PRICE_OR_POINTS:'+at)
+            result.append((t['direction'],round(price,5),round(points,5),t['reason']))
+        return sorted(result)
     issues=[]
     if signature(saved['trades'])!=signature(current['trades']):issues.append('FROZEN_TRADE_SIGNATURE_MISMATCH')
     replay={r['checkpoint']:r for r in current['audit']}
@@ -41,6 +57,9 @@ def frozen_parity(saved,current):
         at=old['checkpoint'];new=replay.get(at)
         if not new:issues.append('FROZEN_CHECKPOINT_MISSING:'+at);continue
         if old['owner_after']!=new['owner_after']:issues.append('FROZEN_OWNER_MISMATCH:'+at)
+        if old.get('nifty_close') is None or new.get('nifty_close') is None:
+            if cutoff_signature(old)!=cutoff_signature(new):issues.append('FROZEN_CUTOFF_TRANSITION_MISMATCH:'+at)
+            continue
         if abs(float(old['nifty_close'])-float(new['nifty_close']))>1e-5:issues.append('FROZEN_PRICE_MISMATCH:'+at)
         for key in ('rsi9','ema3','wma21'):
             a=(old.get('completed_5m_indicators') or {}).get(key);b=(new.get('completed_5m_indicators') or {}).get(key)
@@ -95,6 +114,24 @@ def cutoff_parity(result,cutoffs):
     return [] if actual==wanted else ['LIVE_CUTOFF_TRADE_MISMATCH']
 
 class Checks(unittest.TestCase):
+    @staticmethod
+    def cutoff_frame():
+        at='2026-10-15T14:55:00+05:30'
+        return dict(checkpoint=at,minute_timestamp=at,owner_after='NONE',indicators=None,checks=[],
+                    transitions=[dict(event='EXIT_CLOSED',direction='BEARISH',price=100,points=5,reason='SESSION_CUTOFF_1455')])
+    def test_priceless_cutoff_frames_are_compared(self):
+        import copy
+        saved=dict(trades=[],audit=[self.cutoff_frame()])
+        self.assertEqual(frozen_parity(saved,copy.deepcopy(saved))['status'],'PASS')
+    def test_cutoff_price_difference_fails(self):
+        import copy
+        saved=dict(trades=[],audit=[self.cutoff_frame()]);current=copy.deepcopy(saved)
+        current['audit'][0]['transitions'][0]['price']=101
+        self.assertEqual(frozen_parity(saved,current)['status'],'MISMATCH')
+    def test_missing_intraday_price_is_not_ignored(self):
+        import copy
+        saved=dict(trades=[],audit=[self.cutoff_frame()]);saved['audit'][0]['checkpoint']='2026-10-15T14:50:00+05:30'
+        with self.assertRaises(ValueError):frozen_parity(saved,copy.deepcopy(saved))
     def test_stats_counts_winners_and_losers(self):
         rows=[dict(entry_time=str(i),points=v) for i,v in enumerate((20,-30,15,0))]
         s=stats(rows);self.assertEqual((s['trades'],s['points'],s['winners'],s['losers'],s['flat']),(4,5,2,1,1));self.assertEqual(s['max_closed_trade_drawdown_points'],30)
