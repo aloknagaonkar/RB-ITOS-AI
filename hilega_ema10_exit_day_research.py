@@ -14,7 +14,7 @@ import os
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
-from datetime import timedelta
+from datetime import datetime,timedelta
 
 def ema_step(previous,close):
     if isinstance(close,bool) or not math.isfinite(float(close)) or float(close)<=0:raise ValueError('INVALID_CLOSE')
@@ -23,6 +23,11 @@ def ema_step(previous,close):
 def ema_frames(engine,day,raw,warm,dt):
     value=None;frames={};count=0
     for session,rows in list(warm)+[(day,raw)]:
+        # Target-session 14:55 minute supplies the forced-exit OPEN only.
+        # It is not a completed 14:55-15:00 candle. Exclude before aggregation;
+        # keep raw unchanged for replay and keep full historical warmup days.
+        if session==day:
+            rows=[r for r in rows if dt(r['timestamp']).strftime('%H:%M')<'14:55']
         bars=engine.aggregate_exact_5m(engine.candles(rows),dt(session+'T00:00:00+05:30').date(),require_full_session=False)
         for bar in bars:
             available=bar.ts+timedelta(minutes=5)
@@ -76,6 +81,25 @@ class Checks(unittest.TestCase):
         self.assertEqual(ema_step(None,100),100);self.assertAlmostEqual(ema_step(100,111),102)
     def test_invalid_price_rejected(self):
         with self.assertRaises(ValueError):ema_step(100,float('nan'))
+    def test_cutoff_minute_excluded_before_aggregation(self):
+        dt=datetime.fromisoformat;day='2026-08-26';start=dt(day+'T14:50:00+05:30')
+        raw=[dict(timestamp=(start+timedelta(minutes=i)).isoformat(),close=100) for i in range(6)]
+        def aggregate(rows,session,require_full_session=False):
+            self.assertEqual([dt(r['timestamp']).strftime('%H:%M') for r in rows],['14:50','14:51','14:52','14:53','14:54'])
+            return [SimpleNamespace(ts=start,close=100)]
+        engine=SimpleNamespace(candles=lambda rows:rows,aggregate_exact_5m=aggregate)
+        frames=ema_frames(engine,day,raw,[],dt)
+        self.assertEqual(frames[start+timedelta(minutes=5)]['ema10'],100)
+        self.assertEqual(len(raw),6)
+    def test_internal_missing_minute_is_not_suppressed(self):
+        dt=datetime.fromisoformat;day='2026-08-26';start=dt(day+'T14:50:00+05:30')
+        raw=[dict(timestamp=(start+timedelta(minutes=i)).isoformat(),close=100) for i in (0,1,3,4,5)]
+        def aggregate(rows,session,require_full_session=False):
+            stamps={dt(r['timestamp']) for r in rows}
+            if any(start+timedelta(minutes=i) not in stamps for i in range(5)):raise ValueError('MISSING_INTERNAL_MINUTE')
+            return [SimpleNamespace(ts=start,close=100)]
+        engine=SimpleNamespace(candles=lambda rows:rows,aggregate_exact_5m=aggregate)
+        with self.assertRaisesRegex(ValueError,'MISSING_INTERNAL_MINUTE'):ema_frames(engine,day,raw,[],dt)
 
 def main():
     ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--date',default='2026-08-26')
