@@ -13,7 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import unittest
 
-MODEL='SCOPED_EMA10_CLOSE_AND_RSI_CROSS_45_55_V6'
+MODEL='FRESH_DIRECT_5M_STRENGTH_GAP_EMA10_RSI_CROSS_V7'
 BASES=('EXISTING','PREVIOUS_AND','FRESH_AND')
 POLICIES=tuple(k for b in BASES for k in (b,b+'_EMA10_ENTRY'))+('EXISTING_BASELINE_2',)
 WARNING=('Research only. Gross NIFTY points; no option fills or costs. Each EMA variant adds an entry gate to its own baseline. '
@@ -23,13 +23,16 @@ WARNING=('Research only. Gross NIFTY points; no option fills or costs. Each EMA 
     'No cross latch: evidence expires when a new completed 5m candle replaces it. Wick position and EMA10 slope are diagnostic only for these two policies. '
     'EXISTING_EMA10_ENTRY and PREVIOUS_AND_EMA10_ENTRY retain whole-candle position AND directional EMA10 slope. '
     'Strict comparisons; equality waits. EMA10 uses close, alpha 2/11, first-close seed, continuous over original warmup. '
-    'For the original three EMA variants, full baseline confirmation comes first. Failed EMA checks retain only that candidate within its original ten-minute window, '
-    'with fresh baseline checks each minute. WMA-vetoed candidates stay consumed. Original exits and 14:55 cutoff retained. '
+    'FRESH_AND_EMA10_ENTRY now removes minute-gap setup vetoes, separate 1m entry evaluation and persistence. '
+    'It evaluates strength >=0.75 and positive expanding gap against the previous completed 5m reference, plus close/RSI-cross, '
+    'directly at completed 5m boundaries INCLUDING the setup boundary. Original WMA lock and 40/60 AND exceptions remain mandatory. '
+    'Its ten-minute candidate window, direction watch and canonical cancellation remain; existing pending candidates are not refreshed. '
+    'Other EMA variants retain their prior confirmation rules. WMA-vetoed candidates stay consumed. Original exits and 14:55 cutoff retained. '
     'EXISTING_BASELINE_2 instead validates only completed 5m boundaries: strength >=0.75, positive gap expanding versus the prior completed 5m, '
     'plus the close/RSI-cross conjunction above. No persistence veto or time-based candidate expiry in baseline 2. '
     'Existing setup generation, opposite-arm/setup cancellation, canonical cancellation, position ownership and exits remain in baseline 2; '
     'no WMA direction lock or RSI/EMA exception is added. A candidate can still be cancelled by original lifecycle events. '
-    'The original first-post-setup timing and same-exit-boundary exception remain. No EMA exit or reversal override in any policy. '
+    'Baseline 2 retains its first-post-setup timing and same-exit-boundary exception. No EMA exit or reversal override in any policy. '
     'Historical controls reproduce saved research, not historical broker execution; Oct16 recorded/API inputs are mixed. '
     'Exploratory sample already examined; no independent holdout or live changes.')
 
@@ -184,7 +187,63 @@ def baseline2_gate(engine,frames,rule='FULL_CANDLE'):
     return entry_gate(ValidatedBoundary,frames,rule=rule)
 
 
-def add_variants(engine,baseline,old,new,Gate,NewGate,fresh,p,day,raw,warm,asof):
+def direct_five_base(Base):
+    """5m-only strength/gap evaluation, no persistence, same-boundary setup allowed."""
+    import textwrap
+    source=textwrap.dedent(inspect.getsource(Base.evaluate))
+    replacements={
+        "previous['minute']==minute-timedelta(minutes=1)":"previous['minute']==minute-timedelta(minutes=5)",
+        'elapsed=0<=age<10 or same_boundary':'elapsed=-1<=age<10 or same_boundary',
+        'if age<0 and not same_boundary:':'if age<-1 and not same_boundary:',
+        "if not persistence:reasons.append('WAIT_LATER_PERSISTENCE')":'# Persistence is diagnostic only in direct 5m research.',
+    }
+    for old,new in replacements.items():
+        if source.count(old)!=1:raise ValueError('DIRECT_5M_GATE_ANCHOR_MISMATCH:'+old)
+        source=source.replace(old,new,1)
+    filename='<hilega-fresh-direct-five-minute-gate>'
+    linecache.cache[filename]=(len(source),None,source.splitlines(True),filename)
+    namespace=dict(Base.evaluate.__globals__)
+    exec(compile(source,filename,'exec'),namespace)
+    evaluate_boundary=namespace['evaluate']
+    class DirectFive(Base):
+        def evaluate(self,*,minute,current,reference,price,exit_boundary=False):
+            at=minute+timedelta(minutes=1)
+            history=dict(minute=minute,snapshot=current,
+                wma_change=current.wma21_rsi-reference.wma21_rsi if current.ready and reference and reference.ready else None)
+            if at.minute%5:
+                self.can_signal('BULLISH',at)
+                for side,pending in list(self.pending.items()):
+                    if self.locked or (minute-pending['available']).total_seconds()/60>=10:del self.pending[side]
+                self.previous=history
+                return [],[]
+            # Use the immediately prior completed 5m indicator snapshot, including opening reference.
+            self.previous=dict(minute=minute-timedelta(minutes=5),snapshot=reference,wma_change=None) if reference and reference.ready else None
+            entries,checks=evaluate_boundary(self,minute=minute,current=current,reference=reference,price=price,exit_boundary=exit_boundary)
+            self.previous=history
+            for c in checks:c.update(policy_name='FRESH_AND_EMA10_ENTRY',confirmation_interval_minutes=5,
+                confirmation_snapshot_basis='COMPLETED_FIVE_MINUTE',persistence_required=False,
+                setup_boundary_entry_allowed=True,gap_reference='PREVIOUS_COMPLETED_FIVE_MINUTE')
+            return entries,checks
+    return DirectFive
+
+
+def direct_fresh_replay(engine,fresh):
+    original=fresh.fresh_replay(engine)
+    source=inspect.getsource(original)
+    old='and aligned and gap is not None and gap>0 and expanding and not episode[side]'
+    if source.count(old)!=1:raise ValueError('DIRECT_SETUP_GAP_ANCHOR_MISMATCH')
+    source=source.replace(old,'and aligned and not episode[side]',1)
+    old='delta=gap-pg,strength='
+    if source.count(old)!=1:raise ValueError('DIRECT_SETUP_DIAGNOSTIC_ANCHOR_MISMATCH')
+    source=source.replace(old,'delta=(gap-pg if gap is not None and pg is not None else None),strength=',1)
+    filename='<hilega-direct-fresh-five-minute-replay>'
+    linecache.cache[filename]=(len(source),None,source.splitlines(True),filename)
+    namespace=dict(original.__globals__)
+    exec(compile(source,filename,'exec'),namespace)
+    return namespace['replay']
+
+
+def add_variants(engine,baseline,old,new,Gate,NewGate,fresh,p,day,raw,warm,asof,wm,lock,threshold):
     frames=attach_completed_rsi(build_frames(engine,day,raw,warm,p.dt),baseline,p.dt)
     variants=dict(EXISTING=baseline,PREVIOUS_AND=old,FRESH_AND=new)
     for key,parent,replay in (
@@ -192,7 +251,21 @@ def add_variants(engine,baseline,old,new,Gate,NewGate,fresh,p,day,raw,warm,asof)
         ('PREVIOUS_AND',Gate,engine.replay),
         ('FRESH_AND',NewGate,fresh.fresh_replay(engine))):
         rule='CLOSE_AND_RSI_CROSS' if key=='FRESH_AND' else 'FULL_CANDLE'
+        if key=='FRESH_AND':
+            parent=fresh.combined_gate(SimpleNamespace(WmaGapGate=direct_five_base(engine.WmaGapGate),direction=engine.direction),{},wm,lock,None,threshold)
+            replay=direct_fresh_replay(engine,fresh)
         variants[key+'_EMA10_ENTRY']=p.simulate(SimpleNamespace(WmaGapGate=entry_gate(parent,frames,rule=rule),replay=replay),day,raw,warm,asof,'CURRENT')
+        if key=='FRESH_AND':
+            value=variants[key+'_EMA10_ENTRY']
+            for row in value['setup_diagnostics']:
+                row['original_minute_gap_diagnostics']={k:row['flags'].get(k) for k in ('gap_positive','previous_minute_available','gap_expanding')}
+                row['flags']={k:v for k,v in row['flags'].items() if k not in ('gap_positive','previous_minute_available','gap_expanding')}
+                row['failed']=[k for k in row['failed'] if k not in ('gap_positive','previous_minute_available','gap_expanding')]
+                row['minute_gap_required_for_setup']=False
+            for signal in value.get('alternative_signals',[]):signal['minute_gap_diagnostic_only']=True
+            value['research_entry_rules']=dict(evaluation_minutes=5,strength_min=.75,positive_expanding_5m_gap=True,
+                minute_gap_setup_filter=False,persistence_required=False,setup_boundary_entry_allowed=True,
+                candidate_expiry_minutes=10,wma_lock_and_exception=True,ema_rule='CLOSE_AND_RSI_CROSS')
     variants['EXISTING_BASELINE_2']=p.simulate(SimpleNamespace(WmaGapGate=baseline2_gate(engine,frames,rule='CLOSE_AND_RSI_CROSS'),replay=engine.replay),day,raw,warm,asof,'CURRENT')
     return variants
 
@@ -418,6 +491,73 @@ class Checks(unittest.TestCase):
         rows=dict(audit=[dict(checkpoint=at.isoformat(),completed_5m_indicators=dict(rsi9=46),five_minute_changes=dict(rsi9=2))])
         attach_completed_rsi(frames,rows,datetime.fromisoformat)
         self.assertEqual(frames[at]['previous_rsi9'],44);self.assertEqual(frames[at]['rsi9'],46)
+    def direct_harness(self,strength=1,gap=2):
+        from market_lab import hilega_v2_alignment_replay_v1 as engine
+        at=datetime.fromisoformat('2026-10-16T14:20:00+05:30')
+        g=direct_five_base(engine.WmaGapGate)(opposite_switch=True)
+        event=engine.StrategyEvent('ENTRY_BEARISH_ROUTE_B_STRUCTURAL',at,None,'IDLE','ARMED',details={})
+        g.signal(event,at)
+        reference=SimpleNamespace(ready=True,wma21_rsi=50,ema3_rsi=49,rsi9=48)
+        wma=50-strength
+        current=SimpleNamespace(ready=True,wma21_rsi=wma,ema3_rsi=wma-gap,rsi9=wma-gap-1)
+        def tick(offset=0,snap=current):
+            return g.evaluate(minute=at+timedelta(minutes=offset-1),current=snap,reference=reference,price=100)
+        return g,tick,at,engine
+    def test_direct5m_enters_on_setup_boundary_without_persistence(self):
+        g,tick,_,_=self.direct_harness();entries,checks=tick()
+        self.assertTrue(entries);self.assertFalse(checks[0]['persistence_pass']);self.assertFalse(checks[0]['persistence_required'])
+        self.assertEqual(checks[0]['previous_gap'],1);self.assertEqual(checks[0]['gap_delta'],1)
+    def test_direct5m_strength_still_required(self):
+        g,tick,_,_=self.direct_harness(strength=.74)
+        entries,checks=tick();self.assertFalse(entries);self.assertIn('WMA_THRESHOLD_NOT_MET',checks[0]['reasons'])
+    def test_direct5m_expansion_still_required(self):
+        g,tick,_,_=self.direct_harness(gap=1)
+        entries,checks=tick();self.assertFalse(entries);self.assertFalse(checks[0]['gap_expanding_pass'])
+    def test_direct5m_no_entry_between_boundaries(self):
+        g,tick,_,_=self.direct_harness();self.assertEqual(tick(1),([],[]));self.assertEqual(g.owner,'NONE')
+    def test_direct5m_reference_ignores_intermediate_minute(self):
+        g,tick,_,_=self.direct_harness()
+        tick(4,SimpleNamespace(ready=True,wma21_rsi=49,ema3_rsi=30,rsi9=29))
+        entries,checks=tick(5);self.assertTrue(entries);self.assertEqual(checks[0]['previous_gap'],1)
+    def test_direct5m_original_ten_minute_expiry_retained(self):
+        g,tick,_,_=self.direct_harness(gap=1);tick();tick(5);tick(10);tick(11)
+        self.assertFalse(g.pending);self.assertFalse(tick(15)[0])
+    def test_direct5m_original_engine_unchanged(self):
+        from market_lab import hilega_v2_alignment_replay_v1 as engine
+        source=inspect.getsource(engine.WmaGapGate.evaluate);direct_five_base(engine.WmaGapGate)
+        self.assertEqual(inspect.getsource(engine.WmaGapGate.evaluate),source)
+    def test_direct_replay_removes_only_minute_setup_gap_veto(self):
+        from market_lab import hilega_v2_alignment_replay_v1 as engine
+        import hilega_and_fresh_setup_last10_research as fresh
+        original=inspect.getsource(engine.replay);source=inspect.getsource(direct_fresh_replay(engine,fresh))
+        self.assertIn('if bar and g.can_signal(side,at) and aligned and not episode[side]',source)
+        self.assertIn('side not in g.pending',source);self.assertIn("g.owner=='NONE'",source)
+        self.assertIn('if bar:episode[side]=False',source)
+        self.assertEqual(inspect.getsource(engine.replay),original)
+    def test_direct5m_cross_close_gate_runs_on_setup_boundary(self):
+        from market_lab import hilega_v2_alignment_replay_v1 as engine
+        at=datetime.fromisoformat('2026-10-16T14:20:00+05:30')
+        frame=dict(open=100,high=107,low=99,close=100,ema10=105,previous_ema10=104,
+            previous_rsi9=56,rsi9=54,available_at=at.isoformat(),rsi_available_at=at.isoformat())
+        g=entry_gate(direct_five_base(engine.WmaGapGate),{at:frame},rule='CLOSE_AND_RSI_CROSS')(opposite_switch=True)
+        ev=engine.StrategyEvent('ENTRY_BEARISH_ROUTE_B_STRUCTURAL',at,None,'IDLE','ARMED',details={});g.signal(ev,at)
+        entries,checks=g.evaluate(minute=at-timedelta(minutes=1),current=SimpleNamespace(ready=True,wma21_rsi=49,ema3_rsi=47,rsi9=46),
+            reference=SimpleNamespace(ready=True,wma21_rsi=50,ema3_rsi=49,rsi9=48),price=100)
+        self.assertTrue(entries);self.assertTrue(checks[0]['ema10_entry']['rsi_cross_pass'])
+    def test_direct5m_wma_lock_still_vetoes(self):
+        from market_lab import hilega_v2_alignment_replay_v1 as engine
+        import hilega_and_fresh_setup_last10_research as fresh
+        import hilega_post_entry_wma_lock_today_research as lock
+        import hilega_wma_threshold_only_oct14_research as threshold
+        at=datetime.fromisoformat('2026-10-16T14:20:00+05:30')
+        wm={at:dict(wma21=70,previous_wma21=71,rsi9=65,ema3=65,available_at=at.isoformat())}
+        Parent=fresh.combined_gate(SimpleNamespace(WmaGapGate=direct_five_base(engine.WmaGapGate),direction=engine.direction),{},wm,lock,None,threshold)
+        g=Parent(opposite_switch=True)
+        ev=engine.StrategyEvent('ENTRY_BEARISH_ROUTE_B_STRUCTURAL',at,None,'IDLE','ARMED',details={});g.signal(ev,at)
+        entries,checks=g.evaluate(minute=at-timedelta(minutes=1),current=SimpleNamespace(ready=True,wma21_rsi=69,ema3_rsi=67,rsi9=66),
+            reference=SimpleNamespace(ready=True,wma21_rsi=70,ema3_rsi=69,rsi9=68),price=100)
+        self.assertFalse(entries);self.assertEqual(g.owner,'NONE');self.assertFalse(g.pending)
+        self.assertEqual(checks[0]['status'],'POST_ENTRY_WMA_LOCK_BLOCKED')
     def test_supported_original_confirmation_enters(self):
         g=self.harness(frame=self.frame());entries,checks=g.evaluate(minute=self.at-timedelta(minutes=1))
         self.assertEqual(entries,['entry']);self.assertEqual(g.owner,'BULLISH');self.assertFalse(g.pending)
@@ -529,9 +669,9 @@ def main():
         "args=ap.parse_args()\n    if args.date:\n        if any(x in ('--sessions','--end-date') or x.startswith(('--sessions=','--end-date=')) for x in sys.argv[1:]):ap.error('--date cannot be combined with --sessions or --end-date')\n        args.end_date=args.date\n        args.sessions=1\n        if not any(x=='--output' or x.startswith('--output=') for x in sys.argv[1:]):args.output=Path('data/research/hilega-ema10-entry-day-'+args.date.replace('-',''))")
     replace("days=select_sessions(calendar,parent['start_date'],args.end_date,args.sessions,extra['session_date'])",
         "days=single_session(args.date,calendar,parent['start_date'],extra['session_date'],extra['session_date']) if args.date else select_sessions(calendar,parent['start_date'],args.end_date,args.sessions,extra['session_date'])")
-    replace("data/research/hilega-and-fresh-setup-30sessions-20261016","data/research/hilega-ema10-close-rsi-cross-3months-20261016")
+    replace("data/research/hilega-and-fresh-setup-30sessions-20261016","data/research/hilega-fresh-direct5m-ema10-rsi-3months-20261016")
     replace('variants=dict(EXISTING=baseline,PREVIOUS_AND=old,FRESH_AND=new)',
-        'variants=add_variants(engine,baseline,old,new,Gate,NewGate,fresh,p,day,raw,warm,asof)')
+        'variants=add_variants(engine,baseline,old,new,Gate,NewGate,fresh,p,day,raw,warm,asof,wm,lock,threshold)')
     namespace=dict(batch.main.__globals__,add_variants=add_variants,write_reports=write_reports,single_session=single_session,sys=sys)
     filename='<hilega-ema10-entry-batch>'
     linecache.cache[filename]=(len(source),None,source.splitlines(True),filename)
