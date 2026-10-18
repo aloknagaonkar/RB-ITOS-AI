@@ -1,4 +1,5 @@
-"""Research only: confirmed baseline entry AND completed full-candle price EMA10 support.
+"""Research only: baseline entry AND directional completed close versus price EMA10.
+Bullish close above EMA10; bearish close below. Wick and EMA slope are diagnostic.
 No orders, API calls, installation or live strategy changes. Run from RB-ITOS-AI.
 """
 import csv
@@ -12,16 +13,17 @@ from pathlib import Path
 from types import SimpleNamespace
 import unittest
 
-MODEL='CONFIRMED_ENTRY_EMA10_WITH_EXISTING_BASELINE_2_V2'
+MODEL='DIRECTIONAL_CLOSE_EMA10_ENTRY_WITH_EXISTING_BASELINE_2_V4'
 BASES=('EXISTING','PREVIOUS_AND','FRESH_AND')
 POLICIES=tuple(k for b in BASES for k in (b,b+'_EMA10_ENTRY'))+('EXISTING_BASELINE_2',)
 WARNING=('Research only. Gross NIFTY points; no option fills or costs. Each EMA variant adds an entry gate to its own baseline. '
-    'Latest completed 5m candle: bullish LOW > price EMA10 and EMA10 rising; bearish HIGH < EMA10 and EMA10 falling. '
+    'Latest completed 5m candle: bullish CLOSE > price EMA10; bearish CLOSE < price EMA10. '
+    'Wick position and EMA10 slope are diagnostic only in both directions. '
     'Strict comparisons; equality waits. EMA10 uses close, alpha 2/11, first-close seed, continuous over original warmup. '
     'For the original three EMA variants, full baseline confirmation comes first. Failed EMA checks retain only that candidate within its original ten-minute window, '
     'with fresh baseline checks each minute. WMA-vetoed candidates stay consumed. Original exits and 14:55 cutoff retained. '
     'EXISTING_BASELINE_2 instead validates only completed 5m boundaries: strength >=0.75, positive gap expanding versus the prior completed 5m, '
-    'plus the same full-candle EMA10 entry rule. No persistence veto or time-based candidate expiry in baseline 2. '
+    'plus the same directional EMA10 entry rules. No persistence veto or time-based candidate expiry in baseline 2. '
     'Existing setup generation, opposite-arm/setup cancellation, canonical cancellation, position ownership and exits remain in baseline 2; '
     'no WMA direction lock or RSI/EMA exception is added. A candidate can still be cancelled by original lifecycle events. '
     'The original first-post-setup timing and same-exit-boundary exception remain. No EMA exit or reversal override in any policy. '
@@ -39,8 +41,9 @@ def single_session(value,calendar,start,end,extra_day):
     return [value]
 
 
-def frame_check(side, frame, at):
+def frame_check(side, frame, at, rule='FULL_CANDLE'):
     if side not in ('BULLISH','BEARISH'):raise ValueError('INVALID_DIRECTION')
+    if rule not in ('FULL_CANDLE','BULLISH_CLOSE','CLOSE_BOTH'):raise ValueError('INVALID_EMA_ENTRY_RULE')
     if frame is None:return dict(passed=False,reasons=['COMPLETED_5M_FRAME_MISSING'])
     available=datetime.fromisoformat(frame['available_at'])
     if available>at:raise ValueError('FUTURE_EMA_FRAME')
@@ -52,13 +55,19 @@ def frame_check(side, frame, at):
             raise ValueError('INVALID_EMA_FRAME:'+k)
     o,h,l,c,e,p=(float(frame[k]) for k in fields)
     if h<max(o,l,c) or l>min(o,c):raise ValueError('INVALID_OHLC')
-    correct_side=l>e if side=='BULLISH' else h<e
+    close_only=rule=='CLOSE_BOTH' or (side=='BULLISH' and rule=='BULLISH_CLOSE')
+    whole_side=l>e if side=='BULLISH' else h<e
+    close_side=c>e if side=='BULLISH' else c<e
+    correct_side=close_side if close_only else whole_side
     correct_slope=e>p if side=='BULLISH' else e<p
     reasons=[]
-    if not correct_side:reasons.append('ENTIRE_CANDLE_NOT_ABOVE_EMA10' if side=='BULLISH' else 'ENTIRE_CANDLE_NOT_BELOW_EMA10')
-    if not correct_slope:reasons.append('EMA10_NOT_RISING' if side=='BULLISH' else 'EMA10_NOT_FALLING')
+    if not correct_side:
+        if close_only:reasons.append('BULLISH_CLOSE_NOT_ABOVE_EMA10' if side=='BULLISH' else 'BEARISH_CLOSE_NOT_BELOW_EMA10')
+        else:reasons.append('ENTIRE_CANDLE_NOT_ABOVE_EMA10' if side=='BULLISH' else 'ENTIRE_CANDLE_NOT_BELOW_EMA10')
+    if not close_only and not correct_slope:reasons.append('EMA10_NOT_RISING' if side=='BULLISH' else 'EMA10_NOT_FALLING')
     return dict(frame,passed=not reasons,reasons=reasons,ema10_slope=e-p,
-                entire_candle_pass=correct_side,slope_pass=correct_slope)
+                entire_candle_pass=whole_side,slope_pass=correct_slope,price_position_pass=correct_side,
+                ema_entry_rule=rule,slope_required=not close_only,close_above_ema10=c>e,close_below_ema10=c<e)
 
 
 def build_frames(engine,day,raw,warm,dt):
@@ -80,7 +89,7 @@ def build_frames(engine,day,raw,warm,dt):
     return frames
 
 
-def entry_gate(Parent,frames):
+def entry_gate(Parent,frames,rule='FULL_CANDLE'):
     class EmaEntry(Parent):
         def __init__(self,*args,**kwargs):
             super().__init__(*args,**kwargs)
@@ -98,7 +107,7 @@ def entry_gate(Parent,frames):
             matching=[c for c in checks if c.get('status')=='ENTRY' and c['direction']==side]
             if len(entries)!=1 or len(matching)!=1 or side not in before:raise ValueError('CONFIRMATION_IDENTITY_MISMATCH')
             check=matching[0];boundary=at.replace(minute=at.minute//5*5,second=0,microsecond=0)
-            evidence=frame_check(side,frames.get(boundary),at)
+            evidence=frame_check(side,frames.get(boundary),at,rule=rule)
             check['ema10_entry']=evidence
             self.policy_events.append(dict(event='EMA10_ENTRY_CHECK',time=at.isoformat(),direction=side,
                 setup_available=check['signal_available_at'],baseline_confirmed=True,**evidence))
@@ -118,7 +127,7 @@ def entry_gate(Parent,frames):
     return EmaEntry
 
 
-def baseline2_gate(engine,frames):
+def baseline2_gate(engine,frames,rule='FULL_CANDLE'):
     """Original lifecycle, 5m checks, unlimited time window, no persistence veto."""
     import textwrap
     from hilega_five_min_confirmation_research import five_gate
@@ -138,7 +147,7 @@ def baseline2_gate(engine,frames):
             entries,checks=super().evaluate(**kwargs)
             for c in checks:c.update(persistence_required=False,candidate_time_expiry_enabled=False,policy_name='EXISTING_BASELINE_2')
             return entries,checks
-    return entry_gate(ValidatedBoundary,frames)
+    return entry_gate(ValidatedBoundary,frames,rule=rule)
 
 
 def add_variants(engine,baseline,old,new,Gate,NewGate,fresh,p,day,raw,warm,asof):
@@ -148,8 +157,8 @@ def add_variants(engine,baseline,old,new,Gate,NewGate,fresh,p,day,raw,warm,asof)
         ('EXISTING',engine.WmaGapGate,engine.replay),
         ('PREVIOUS_AND',Gate,engine.replay),
         ('FRESH_AND',NewGate,fresh.fresh_replay(engine))):
-        variants[key+'_EMA10_ENTRY']=p.simulate(SimpleNamespace(WmaGapGate=entry_gate(parent,frames),replay=replay),day,raw,warm,asof,'CURRENT')
-    variants['EXISTING_BASELINE_2']=p.simulate(SimpleNamespace(WmaGapGate=baseline2_gate(engine,frames),replay=engine.replay),day,raw,warm,asof,'CURRENT')
+        variants[key+'_EMA10_ENTRY']=p.simulate(SimpleNamespace(WmaGapGate=entry_gate(parent,frames,rule='CLOSE_BOTH'),replay=replay),day,raw,warm,asof,'CURRENT')
+    variants['EXISTING_BASELINE_2']=p.simulate(SimpleNamespace(WmaGapGate=baseline2_gate(engine,frames,rule='CLOSE_BOTH'),replay=engine.replay),day,raw,warm,asof,'CURRENT')
     return variants
 
 
@@ -166,7 +175,7 @@ def write_reports(output,days,results,coverage,provenance,version,unused,stats):
         provenance[day]['three_month_control_parity']='PASS'
     totals={k:stats.stats([t for day in sorted(results) for t in results[day][k]['trades']]) for k in POLICIES}
     complete=len(results)==len(days)
-    lines=['# Confirmed entry + full-candle EMA10 support','',WARNING,'',
+    lines=['# EMA10 entry: bullish close above / bearish close below','',WARNING,'',
         f"Status: {'COMPLETE' if complete else 'INCOMPLETE'}; coverage {len(results)}/{len(days)} sessions.",'',
         '| Policy | Trades | Winning points | Losing points | Net points | Change vs own baseline | Winners | Losers | Flat | Closed-trade drawdown |',
         '|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|']
@@ -191,11 +200,13 @@ def write_reports(output,days,results,coverage,provenance,version,unused,stats):
             cells=[base.cell([t for t in v[k]['trades'] if (t['direction'],t['signal_time'])==(side,signal)]) for k in POLICIES]
             detail.append('| '+side+' | '+signal[11:16]+' | '+' | '.join(cells)+' |')
     report=dict(model=MODEL,status='COMPLETE' if complete else 'INCOMPLETE',session_dates=days,strategy_version=version,
-        coverage=coverage,provenance=provenance,comparisons=totals,warning=WARNING,orders_sent=False,observation_only=True)
+        coverage=coverage,provenance=provenance,comparisons=totals,warning=WARNING,
+        ema10_entry_rules=dict(bullish='COMPLETED_5M_CLOSE_ABOVE_EMA10_NO_SLOPE_VETO',bearish='COMPLETED_5M_CLOSE_BELOW_EMA10_NO_SLOPE_VETO'),
+        orders_sent=False,observation_only=True)
     (output/'report.json').write_text(json.dumps(report,indent=2,default=str)+'\n')
     (output/'summary.md').write_text('\n'.join(lines)+'\n')
     (output/'daily-signal-comparison.md').write_text('\n'.join(detail)+'\n')
-    validation=['# Completed five-minute EMA10 entry validation','',
+    validation=['# Completed five-minute EMA10 entry validation','',WARNING,'',
         'Checks below occur only after that policy fully confirms an entry. WAIT is not an executed trade. Times IST.','',
         '| Date | Policy | Setup | Decision | Direction | Candle label | Open | High | Low | Close | EMA10 | EMA10 slope | Outcome / reason |',
         '|---|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---|']
@@ -246,7 +257,7 @@ class Checks(unittest.TestCase):
     def test_stale_rejected(self):
         with self.assertRaises(ValueError):frame_check('BULLISH',self.frame(available_at='2026-10-16T09:55:00+05:30'),self.at)
     def test_missing_waits(self):self.assertFalse(frame_check('BULLISH',None,self.at)['passed'])
-    def harness(self,passed=True,veto=False,frame=None):
+    def harness(self,passed=True,veto=False,frame=None,rule='FULL_CANDLE'):
         at=self.at
         class Base:
             def __init__(self):
@@ -261,7 +272,7 @@ class Checks(unittest.TestCase):
                 self.owner='BULLISH';self.active=True;self.watch_side=None;self.watch_at=None
                 return ['entry'],[dict(direction='BULLISH',status='ENTRY',signal_available_at=p['available'].isoformat(),reasons=[])]
             def close(self):return 'ORIGINAL_EXIT'
-        return entry_gate(Base,{at.replace(minute=0):self.frame(low=99) if frame is None else frame})()
+        return entry_gate(Base,{at.replace(minute=0):self.frame(low=99) if frame is None else frame},rule=rule)()
     def test_failed_gate_restores_original_candidate_and_keeps_history(self):
         g=self.harness();original=dict(g.pending['BULLISH']);minute=self.at-timedelta(minutes=1)
         entries,checks=g.evaluate(minute=minute)
@@ -273,6 +284,41 @@ class Checks(unittest.TestCase):
     def test_wma_veto_not_resurrected(self):
         g=self.harness(veto=True);g.evaluate(minute=self.at-timedelta(minutes=1));self.assertFalse(g.pending);self.assertFalse(g.policy_events)
     def test_exit_unmodified(self):self.assertEqual(self.harness().close(),'ORIGINAL_EXIT')
+    def test_new_bullish_close_allows_lower_wick(self):
+        ev=frame_check('BULLISH',self.frame(low=99),self.at,rule='BULLISH_CLOSE')
+        self.assertTrue(ev['passed']);self.assertFalse(ev['entire_candle_pass'])
+    def test_new_bullish_close_allows_falling_ema(self):
+        ev=frame_check('BULLISH',self.frame(previous_ema10=101),self.at,rule='BULLISH_CLOSE')
+        self.assertTrue(ev['passed']);self.assertFalse(ev['slope_required']);self.assertFalse(ev['slope_pass'])
+    def test_new_bullish_close_equality_waits(self):
+        self.assertFalse(frame_check('BULLISH',self.frame(ema10=103),self.at,rule='BULLISH_CLOSE')['passed'])
+    def test_new_bullish_close_below_waits(self):
+        self.assertFalse(frame_check('BULLISH',self.frame(ema10=104),self.at,rule='BULLISH_CLOSE')['passed'])
+    def test_new_bearish_rule_unchanged(self):
+        for frame in (self.frame(ema10=105,previous_ema10=106),self.frame(ema10=103,previous_ema10=104),self.frame(ema10=105,previous_ema10=104)):
+            a=frame_check('BEARISH',frame,self.at,rule='BULLISH_CLOSE')
+            b=frame_check('BEARISH',frame,self.at,rule='FULL_CANDLE')
+            self.assertEqual((a['passed'],a['reasons']),(b['passed'],b['reasons']))
+    def test_new_gate_accepts_confirmed_bullish_with_lower_wick(self):
+        g=self.harness(rule='BULLISH_CLOSE');self.assertTrue(g.evaluate(minute=self.at-timedelta(minutes=1))[0])
+    def test_new_ema_permission_cannot_create_confirmation(self):
+        g=self.harness(passed=False,rule='BULLISH_CLOSE');self.assertFalse(g.evaluate(minute=self.at-timedelta(minutes=1))[0]);self.assertEqual(g.owner,'NONE')
+    def test_directional_bearish_close_allows_upper_wick(self):
+        ev=frame_check('BEARISH',self.frame(ema10=103.5,previous_ema10=104),self.at,rule='CLOSE_BOTH')
+        self.assertTrue(ev['passed']);self.assertFalse(ev['entire_candle_pass'])
+    def test_directional_bearish_close_allows_rising_ema(self):
+        ev=frame_check('BEARISH',self.frame(ema10=105,previous_ema10=104),self.at,rule='CLOSE_BOTH')
+        self.assertTrue(ev['passed']);self.assertFalse(ev['slope_required']);self.assertFalse(ev['slope_pass'])
+    def test_directional_bearish_equality_waits(self):
+        ev=frame_check('BEARISH',self.frame(ema10=103),self.at,rule='CLOSE_BOTH')
+        self.assertFalse(ev['passed']);self.assertIn('BEARISH_CLOSE_NOT_BELOW_EMA10',ev['reasons'])
+    def test_directional_bearish_close_above_waits(self):
+        self.assertFalse(frame_check('BEARISH',self.frame(),self.at,rule='CLOSE_BOTH')['passed'])
+    def test_directional_bullish_rule_matches_previous_update(self):
+        for frame in (self.frame(low=99),self.frame(previous_ema10=101),self.frame(ema10=103)):
+            a=frame_check('BULLISH',frame,self.at,rule='CLOSE_BOTH')
+            b=frame_check('BULLISH',frame,self.at,rule='BULLISH_CLOSE')
+            self.assertEqual((a['passed'],a['reasons']),(b['passed'],b['reasons']))
     def test_supported_original_confirmation_enters(self):
         g=self.harness(frame=self.frame());entries,checks=g.evaluate(minute=self.at-timedelta(minutes=1))
         self.assertEqual(entries,['entry']);self.assertEqual(g.owner,'BULLISH');self.assertFalse(g.pending)
@@ -299,7 +345,7 @@ class Checks(unittest.TestCase):
         self.assertAlmostEqual(f['previous_ema10'],100);self.assertAlmostEqual(f['ema10'],100+4/11)
         self.assertEqual(captured,[raw[1]]);self.assertEqual(len(raw),2)
 
-    def baseline2_harness(self,ema_ok=True):
+    def baseline2_harness(self,ema_ok=True,rule='FULL_CANDLE'):
         from market_lab import hilega_v2_alignment_replay_v1 as engine
         at=datetime.fromisoformat('2026-10-16T14:20:00+05:30')
         frames={}
@@ -307,7 +353,7 @@ class Checks(unittest.TestCase):
             boundary=at+timedelta(minutes=minutes)
             frames[boundary]=dict(open=100,high=101 if ema_ok else 107,low=99,close=100,
                 ema10=105,previous_ema10=106,available_at=boundary.isoformat())
-        g=baseline2_gate(engine,frames)(opposite_switch=True)
+        g=baseline2_gate(engine,frames,rule=rule)(opposite_switch=True)
         event=engine.StrategyEvent('ENTRY_BEARISH_ROUTE_B_STRUCTURAL',at-timedelta(minutes=5),None,'IDLE','ARMED',details={})
         g.signal(event,at)
         def tick(clock,ema=48,strength=1):
@@ -319,6 +365,11 @@ class Checks(unittest.TestCase):
     def test_baseline2_no_intermediate_minute_entry(self):
         g,tick,_=self.baseline2_harness();tick('14:20')
         self.assertEqual(tick('14:21',ema=45),([],[]));self.assertIsNone(g.pending['BEARISH']['armed_at'])
+    def test_baseline2_directional_close_enters_despite_upper_wick(self):
+        g,tick,_=self.baseline2_harness(ema_ok=False,rule='CLOSE_BOTH');tick('14:20')
+        entries,checks=tick('14:25',ema=47)
+        self.assertTrue(entries);self.assertFalse(checks[0]['ema10_entry']['entire_candle_pass'])
+        self.assertTrue(checks[0]['ema10_entry']['close_below_ema10'])
     def test_baseline2_first_qualifying_5m_needs_no_persistence(self):
         g,tick,_=self.baseline2_harness();tick('14:20')
         entries,checks=tick('14:25',ema=47)
@@ -374,7 +425,7 @@ def main():
         "args=ap.parse_args()\n    if args.date:\n        if any(x in ('--sessions','--end-date') or x.startswith(('--sessions=','--end-date=')) for x in sys.argv[1:]):ap.error('--date cannot be combined with --sessions or --end-date')\n        args.end_date=args.date\n        args.sessions=1\n        if not any(x=='--output' or x.startswith('--output=') for x in sys.argv[1:]):args.output=Path('data/research/hilega-ema10-entry-day-'+args.date.replace('-',''))")
     replace("days=select_sessions(calendar,parent['start_date'],args.end_date,args.sessions,extra['session_date'])",
         "days=single_session(args.date,calendar,parent['start_date'],extra['session_date'],extra['session_date']) if args.date else select_sessions(calendar,parent['start_date'],args.end_date,args.sessions,extra['session_date'])")
-    replace("data/research/hilega-and-fresh-setup-30sessions-20261016","data/research/hilega-ema10-entry-with-baseline2-3months-20261016")
+    replace("data/research/hilega-and-fresh-setup-30sessions-20261016","data/research/hilega-directional-close-ema10-baseline2-3months-20261016")
     replace('variants=dict(EXISTING=baseline,PREVIOUS_AND=old,FRESH_AND=new)',
         'variants=add_variants(engine,baseline,old,new,Gate,NewGate,fresh,p,day,raw,warm,asof)')
     namespace=dict(batch.main.__globals__,add_variants=add_variants,write_reports=write_reports,single_session=single_session,sys=sys)
