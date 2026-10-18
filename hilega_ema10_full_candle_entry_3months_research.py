@@ -373,7 +373,7 @@ def qualified_opposite_watch_gate(Parent,frames,direction):
             if opposite:
                 if not self.qualifies(side,available):return
                 self.policy_events.append(dict(event='QUALIFIED_OPPOSITE_WATCH_OVERRIDE',time=available.isoformat(),
-                    direction=side,previous_watch=self.watch_side,previous_watch_at=self.watch_at.isoformat() if self.watch_at else None))
+                    setup_available=available.isoformat(),direction=side,previous_watch=self.watch_side,previous_watch_at=self.watch_at.isoformat() if self.watch_at else None))
             return super().signal(event,available)
     return QualifiedWatch
 
@@ -671,6 +671,7 @@ class Checks(unittest.TestCase):
         self.assertTrue(g.can_signal('BEARISH',at));self.assertEqual(g.watch_side,'BULLISH')
         g.signal('BEARISH',at);self.assertEqual(g.recorded,['BEARISH']);self.assertEqual(g.watch_side,'BEARISH')
         self.assertEqual(g.policy_events[-1]['event'],'QUALIFIED_OPPOSITE_WATCH_OVERRIDE')
+        self.assertEqual(g.policy_events[-1]['setup_available'],at.isoformat())
         for changes in [dict(previous_wma21_rsi=52.2),dict(previous_ema3_rsi=47),dict(close=104,open=103),dict(previous_rsi9=42)]:
             other=dict(f,**changes);h=qualified_opposite_watch_gate(Base,{at:other},lambda event:event)()
             self.assertFalse(h.can_signal('BEARISH',at));h.signal('BEARISH',at);self.assertFalse(h.recorded)
