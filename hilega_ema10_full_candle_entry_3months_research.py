@@ -13,20 +13,20 @@ from pathlib import Path
 from types import SimpleNamespace
 import unittest
 
-MODEL='FRESH_DIRECT_5M_FOLLOWUP_COLOUR_RSI_V15'
+MODEL='FRESH_DIRECT_5M_RSI40_60_CONTINUE_WAIT_V17'
 BASES=('EXISTING','PREVIOUS_AND','FRESH_AND')
 POLICIES=tuple(k for b in BASES for k in (b,b+'_EMA10_ENTRY'))+('EXISTING_BASELINE_2',)
 WARNING=('Research only. Gross NIFTY points; no option fills or costs. Each EMA variant adds an entry gate to its own baseline. '
     'EXISTING_BASELINE_2 requires bullish completed 5m CLOSE > price EMA10 AND RSI9 crossing UP through 45 OR 55; '
-    'bearish completed 5m CLOSE < EMA10 AND RSI9 crossing DOWN through 55 OR 45. Those baseline-2 conditions must pass on the same completed candle. Fresh EMA instead requires RSI9 rising and above45 for bullish, falling and below55 for bearish; fresh crosses or directional continuation qualify. Flat RSI and threshold equality fail. Its EMA slope, candle colour and other signal checks remain mandatory. '
+    'bearish completed 5m CLOSE < EMA10 AND RSI9 crossing DOWN through 55 OR 45. Those baseline-2 conditions must pass on the same completed candle. Fresh EMA instead requires RSI9 rising and above40 for bullish, falling and below60 for bearish; fresh crosses or directional continuation qualify. Flat RSI and threshold equality fail. Its EMA slope, candle colour and other signal checks remain mandatory. '
     'Cross UP means previous RSI <= threshold and current RSI > threshold; DOWN means previous RSI >= threshold and current RSI < threshold. '
-    'No cross latch: evidence expires when a new completed 5m candle replaces it. Fresh direct 5m waits for the immediately next completed 5m close strictly above signal CLOSE OR signal midpoint for bullish, below signal CLOSE OR signal midpoint for bearish; midpoint=(signal high+low)/2, close-based comparison not intrabar touch; no entry on signal candle. Follow-up requires a green candle AND rising completed RSI9 for bullish, or a red candle AND falling completed RSI9 for bearish; doji/flat RSI fails. These mandatory checks cannot be bypassed by either price confirmation OR fresh strength/positive-expanding-gap checks. WMA lock/AND-exception permission remains mandatory for either route, as do candidate validity, flat position and cutoff. Signal candle still requires all original signal checks. No repeated RSI cross on follow-up. Failure consumes this candidate; the just-completed failed follow-up is then independently evaluated once for a fresh setup on the same boundary. A fresh qualifying signal waits for its own next completed candle; discarded close is never reused. Original cancellation, expiry and cutoff still apply. Wicks do not veto these two policies. Fresh direct 5m additionally requires rising EMA10 and green close>open for bullish, falling EMA10 and red close<open for bearish; flat EMA or doji fails. Existing baseline 2 has no slope or colour veto. '
+    'No cross latch: evidence expires when a new completed 5m candle replaces it. Fresh direct 5m starts checking at the immediately next completed 5m close strictly above signal CLOSE OR signal midpoint for bullish, below signal CLOSE OR signal midpoint for bearish; midpoint=(signal high+low)/2, close-based comparison not intrabar touch; no entry on signal candle. Follow-up requires a green candle AND rising completed RSI9 for bullish, or a red candle AND falling completed RSI9 for bearish; doji/flat RSI fails. These mandatory checks cannot be bypassed by either price confirmation OR fresh strength/positive-expanding-gap checks. For the latest FRESH_AND_EMA10_ENTRY policy, WMA direction lock and RSI/EMA lock exceptions are DISABLED. Candidate validity, flat position and cutoff remain mandatory for either route. Signal candle still requires all original signal checks. No repeated RSI cross on follow-up. When a follow-up fails entry confirmation but fresh strength>=0.75, gap>0 and expansion>0 all pass on that completed candle, retain the original signal close/midpoint and check the next completed5m candle. Do not reset candidate age. Otherwise failure consumes this candidate; the just-completed failed follow-up is independently evaluated once for a fresh setup on the same boundary. A fresh qualifying signal waits for its own next completed candle; discarded close is never reused. Original cancellation, expiry and cutoff still apply. Wicks do not veto these two policies. Fresh direct 5m additionally requires rising EMA10 and green close>open for bullish, falling EMA10 and red close<open for bearish; flat EMA or doji fails. Existing baseline 2 has no slope or colour veto. '
     'EXISTING_EMA10_ENTRY and PREVIOUS_AND_EMA10_ENTRY retain whole-candle position AND directional EMA10 slope. '
     'Strict comparisons; equality waits. EMA10 uses close, alpha 2/11, first-close seed, continuous over original warmup. '
     'FRESH_AND_EMA10_ENTRY now removes minute-gap setup vetoes, separate 1m entry evaluation and persistence. '
     'It evaluates strength >=0.75 and positive expanding gap against the previous completed 5m reference, plus close/RSI-directional-continuation, '
-    'directly at completed 5m boundaries INCLUDING the setup boundary. Original WMA lock and 40/60 AND exceptions remain mandatory. '
-    'Its ten-minute candidate window and canonical cancellation remain; an opposite direction watch may be replaced only by a full qualifying completed5m signal (alignment, strength, expansion, EMA10 position/slope, candle colour, RSI continuation, WMA/AND permission, flat and cutoff); an arm alone cannot override it; existing pending candidates are not refreshed. '
+    'directly at completed 5m boundaries INCLUDING the setup boundary. WMA direction lock and 40/60 AND exceptions are disabled only for this latest policy; WMA alignment, strength and gap calculations remain required. '
+    'Its ten-minute candidate window and canonical cancellation remain; an opposite direction watch may be replaced only by a full qualifying completed5m signal (alignment, strength, expansion, EMA10 position/slope, candle colour, RSI continuation, flat and cutoff); an arm alone cannot override it; existing pending candidates are not refreshed. '
     'Other EMA variants retain their prior confirmation rules. WMA-vetoed candidates stay consumed. Original exits and 14:55 cutoff retained. '
     'EXISTING_BASELINE_2 instead validates only completed 5m boundaries: strength >=0.75, positive gap expanding versus the prior completed 5m, '
     'plus the close/RSI-cross conjunction above. No persistence veto or time-based candidate expiry in baseline 2. '
@@ -75,7 +75,7 @@ def attach_completed_rsi(frames,baseline,dt):
 
 def frame_check(side, frame, at, rule='FULL_CANDLE'):
     if side not in ('BULLISH','BEARISH'):raise ValueError('INVALID_DIRECTION')
-    if rule not in ('FULL_CANDLE','BULLISH_CLOSE','CLOSE_BOTH','CLOSE_AND_RSI_CROSS','CLOSE_RSI_SLOPE_COLOUR','CLOSE_RSI_CONTINUATION_SLOPE_COLOUR'):raise ValueError('INVALID_EMA_ENTRY_RULE')
+    if rule not in ('FULL_CANDLE','BULLISH_CLOSE','CLOSE_BOTH','CLOSE_AND_RSI_CROSS','CLOSE_RSI_SLOPE_COLOUR','CLOSE_RSI_CONTINUATION_SLOPE_COLOUR','CLOSE_RSI40_60_SLOPE_COLOUR'):raise ValueError('INVALID_EMA_ENTRY_RULE')
     if frame is None:return dict(passed=False,reasons=['COMPLETED_5M_FRAME_MISSING'])
     available=datetime.fromisoformat(frame['available_at'])
     if available>at:raise ValueError('FUTURE_EMA_FRAME')
@@ -87,11 +87,12 @@ def frame_check(side, frame, at, rule='FULL_CANDLE'):
             raise ValueError('INVALID_EMA_FRAME:'+k)
     o,h,l,c,e,p=(float(frame[k]) for k in fields)
     if h<max(o,l,c) or l>min(o,c):raise ValueError('INVALID_OHLC')
-    continuation_rule=rule=='CLOSE_RSI_CONTINUATION_SLOPE_COLOUR'
+    continuation_rule=rule in ('CLOSE_RSI_CONTINUATION_SLOPE_COLOUR','CLOSE_RSI40_60_SLOPE_COLOUR')
+    bull_level,bear_level=(40,60) if rule=='CLOSE_RSI40_60_SLOPE_COLOUR' else (45,55)
     cross_required=rule in ('CLOSE_AND_RSI_CROSS','CLOSE_RSI_SLOPE_COLOUR')
     rsi_required=cross_required or continuation_rule
-    slope_colour=rule in ('CLOSE_RSI_SLOPE_COLOUR','CLOSE_RSI_CONTINUATION_SLOPE_COLOUR')
-    close_only=rule in ('CLOSE_BOTH','CLOSE_AND_RSI_CROSS','CLOSE_RSI_SLOPE_COLOUR','CLOSE_RSI_CONTINUATION_SLOPE_COLOUR') or (side=='BULLISH' and rule=='BULLISH_CLOSE')
+    slope_colour=rule in ('CLOSE_RSI_SLOPE_COLOUR','CLOSE_RSI_CONTINUATION_SLOPE_COLOUR','CLOSE_RSI40_60_SLOPE_COLOUR')
+    close_only=rule in ('CLOSE_BOTH','CLOSE_AND_RSI_CROSS','CLOSE_RSI_SLOPE_COLOUR','CLOSE_RSI_CONTINUATION_SLOPE_COLOUR','CLOSE_RSI40_60_SLOPE_COLOUR') or (side=='BULLISH' and rule=='BULLISH_CLOSE')
     whole_side=l>e if side=='BULLISH' else h<e
     close_side=c>e if side=='BULLISH' else c<e
     correct_side=close_side if close_only else whole_side
@@ -107,11 +108,11 @@ def frame_check(side, frame, at, rule='FULL_CANDLE'):
     continuation_pass=False
     if cross['rsi_evidence_available']:
         prior_rsi=float(frame['previous_rsi9']);current_rsi=float(frame['rsi9'])
-        continuation_pass=(current_rsi>prior_rsi and current_rsi>45) if side=='BULLISH' else (current_rsi<prior_rsi and current_rsi<55)
+        continuation_pass=(current_rsi>prior_rsi and current_rsi>bull_level) if side=='BULLISH' else (current_rsi<prior_rsi and current_rsi<bear_level)
     if rsi_required:
         if frame.get('rsi_available_at') is not None and frame['rsi_available_at']!=frame['available_at']:raise ValueError('RSI_EMA_BOUNDARY_MISMATCH')
         if not cross['rsi_evidence_available']:reasons.append('COMPLETED_RSI_CROSS_EVIDENCE_MISSING')
-        elif continuation_rule and not continuation_pass:reasons.append('RSI_NOT_RISING_ABOVE_45' if side=='BULLISH' else 'RSI_NOT_FALLING_BELOW_55')
+        elif continuation_rule and not continuation_pass:reasons.append('RSI_NOT_RISING_ABOVE_'+str(bull_level) if side=='BULLISH' else 'RSI_NOT_FALLING_BELOW_'+str(bear_level))
         elif not continuation_rule and not cross['rsi_cross_pass']:reasons.append('NO_COMPLETED_RSI_UP_CROSS_45_OR_55' if side=='BULLISH' else 'NO_COMPLETED_RSI_DOWN_CROSS_55_OR_45')
     return dict(frame,passed=not reasons,reasons=reasons,ema10_slope=e-p,
                 entire_candle_pass=whole_side,slope_pass=correct_slope,price_position_pass=correct_side,
@@ -139,10 +140,10 @@ def build_frames(engine,day,raw,warm,dt):
     return frames
 
 
-def followup_check(side, signal, frame, at, require_direction=False):
+def followup_check(side, signal, frame, at, require_direction=False,continued=False):
     if side not in ('BULLISH','BEARISH'):raise ValueError('INVALID_DIRECTION')
     reasons=[]
-    if at!=signal['due'] or at!=signal['time']+timedelta(minutes=5):reasons.append('NOT_IMMEDIATE_NEXT_5M_BOUNDARY')
+    if at!=signal['due'] or (not continued and at!=signal['time']+timedelta(minutes=5)) or (continued and (at<=signal['time'] or (at-signal['time']).total_seconds()%300!=0)):reasons.append('NOT_IMMEDIATE_NEXT_5M_BOUNDARY')
     if at.strftime('%H:%M')>='14:55':reasons.append('SESSION_CUTOFF')
     if frame is None:return dict(passed=False,reasons=reasons+['FOLLOWUP_FRAME_MISSING'],signal_close=signal['close'])
     available=datetime.fromisoformat(frame['available_at'])
@@ -171,11 +172,19 @@ def followup_check(side, signal, frame, at, require_direction=False):
                 confirmation_route='BOTH' if close_pass and midpoint_pass else 'SIGNAL_CLOSE' if close_pass else 'MIDPOINT' if midpoint_pass else 'NONE')
 
 
-def entry_gate(Parent,frames,rule='FULL_CANDLE',followup=False):
+def entry_gate(Parent,frames,rule='FULL_CANDLE',followup=False,continue_waiting=False):
     class EmaEntry(Parent):
         def __init__(self,*args,**kwargs):
             super().__init__(*args,**kwargs)
             if not hasattr(self,'policy_events'):self.policy_events=[]
+        def retain_followup(self,waiting,check,at,candidate):
+            if not continue_waiting or candidate is None or candidate['available'].isoformat()!=waiting['setup_available']:return False
+            if self.locked or at.strftime('%H:%M')>='14:55':return False
+            if not all(check.get(k) for k in ('wma_threshold_pass','gap_positive_pass','gap_expanding_pass')):return False
+            # Retain original reference and identity, never refresh candidate lifetime.
+            self.pending[waiting['direction']]=candidate
+            self.followup_signal=dict(waiting,due=at+timedelta(minutes=5))
+            return True
         def evaluate(self,**kwargs):
             at=kwargs['minute']+timedelta(minutes=1)
             # Match the parent's watch expiry before snapshotting; never resurrect stale watch.
@@ -196,7 +205,7 @@ def entry_gate(Parent,frames,rule='FULL_CANDLE',followup=False):
                     self.followup_signal=None;waiting=None
             self.followup_price_permission=None
             if followup and waiting is not None and at==waiting['due']:
-                price_ev=followup_check(waiting['direction'],waiting,frames.get(at),at,require_direction=True)
+                price_ev=followup_check(waiting['direction'],waiting,frames.get(at),at,require_direction=True,continued=continue_waiting)
                 if price_ev['passed']:self.followup_price_permission=(waiting['direction'],at)
             try:
                 entries,checks=super().evaluate(**kwargs)
@@ -204,10 +213,17 @@ def entry_gate(Parent,frames,rule='FULL_CANDLE',followup=False):
                 self.followup_price_permission=None
             if not entries:
                 if waiting is not None and at==waiting['due']:
-                    self.policy_events.append(dict(event='FOLLOWUP_CANDLE_CHECK',time=at.isoformat(),direction=waiting['direction'],setup_available=waiting['setup_available'],passed=False,reasons=['FRESH_ENTRY_CHECKS_FAILED_OR_CANDIDATE_CANCELLED'],signal_close=waiting['close'],signal_midpoint=waiting['midpoint']))
-                    self.pending.pop(waiting['direction'],None)
-                    self.followup_signal=None
-                    self.followup_failed_at=at
+                    side=waiting['direction']
+                    check=next((c for c in checks if c.get('direction')==side),{})
+                    ev=followup_check(side,waiting,frames.get(at),at,require_direction=True,continued=continue_waiting)
+                    retained=self.retain_followup(waiting,check,at,self.pending.get(side))
+                    ev.update(passed=False,continued_wait=retained)
+                    ev['reasons']=list(ev['reasons'])+(['CONTINUE_WAIT_FRESH_STRENGTH_GAP_PASSED'] if retained else ['FRESH_ENTRY_CHECKS_FAILED_OR_CANDIDATE_CANCELLED'])
+                    self.policy_events.append(dict(event='FOLLOWUP_CANDLE_CHECK',time=at.isoformat(),direction=side,setup_available=waiting['setup_available'],directional_strength=check.get('directional_wma_strength'),directional_gap=check.get('current_gap'),gap_expansion=check.get('gap_delta'),**ev))
+                    if not retained:
+                        self.pending.pop(side,None)
+                        self.followup_signal=None
+                        self.followup_failed_at=at
                 return entries,checks
             side=self.owner
             matching=[c for c in checks if c.get('status')=='ENTRY' and c['direction']==side]
@@ -215,7 +231,7 @@ def entry_gate(Parent,frames,rule='FULL_CANDLE',followup=False):
             check=matching[0];boundary=at.replace(minute=at.minute//5*5,second=0,microsecond=0)
             is_followup=followup and waiting is not None and waiting['direction']==side and at==waiting['due']
             if is_followup:
-                evidence=followup_check(side,waiting,frames.get(boundary),at,require_direction=True)
+                evidence=followup_check(side,waiting,frames.get(boundary),at,require_direction=True,continued=continue_waiting)
                 price_pass=evidence['passed']
                 fresh_pass=bool(check.get('wma_threshold_pass') and check.get('gap_positive_pass') and check.get('gap_expanding_pass'))
                 structural=[reason for reason in evidence['reasons'] if not reason.startswith('FOLLOWUP_CLOSE_NOT_')]
@@ -240,8 +256,13 @@ def entry_gate(Parent,frames,rule='FULL_CANDLE',followup=False):
             if candidate.get('armed_at') is None:candidate['armed_at']=kwargs['minute']
             self.owner='NONE';self.active=None
             if is_followup:
-                self.pending.pop(side,None)
-                self.followup_failed_at=at
+                retained=self.retain_followup(waiting,check,at,candidate)
+                evidence['continued_wait']=retained
+                if retained:evidence['reasons'].append('CONTINUE_WAIT_FRESH_STRENGTH_GAP_PASSED')
+                else:
+                    self.pending.pop(side,None)
+                    self.followup_failed_at=at
+                self.policy_events[-1].update(continued_wait=retained,reasons=list(evidence['reasons']))
             else:self.pending[side]=candidate
             self.watch_side,self.watch_at=watch
             check.update(status='EMA10_ENTRY_WAIT',reasons=list(evidence['reasons']))
@@ -359,18 +380,22 @@ def direct_fresh_replay(engine,fresh,retry_followup=False):
     return namespace['replay']
 
 
-def qualified_opposite_watch_gate(Parent,frames,direction):
+def qualified_opposite_watch_gate(Parent,frames,direction,require_wma_permission=True,signal_rule='CLOSE_RSI_CONTINUATION_SLOPE_COLOUR'):
     """Only a complete new signal may override an opposite setup watch."""
     class QualifiedWatch(Parent):
+        def __init__(self,*args,**kwargs):
+            super().__init__(*args,**kwargs)
+            if not hasattr(self,'policy_events'):self.policy_events=[]
         def qualifies(self,side,at):
             if self.owner!='NONE' or self.locked or at.minute%5 or at.strftime('%H:%M')>='14:55':return False
             frame=frames.get(at)
-            if frame is None or not frame_check(side,frame,at,rule='CLOSE_RSI_CONTINUATION_SLOPE_COLOUR')['passed']:return False
+            if frame is None or not frame_check(side,frame,at,rule=signal_rule)['passed']:return False
             keys=('rsi9','ema3_rsi','wma21_rsi','previous_ema3_rsi','previous_wma21_rsi')
             if any(frame.get(k) is None or isinstance(frame[k],bool) or not math.isfinite(float(frame[k])) for k in keys):return False
             r,e,w,pe,pw=(float(frame[k]) for k in keys);sign=1 if side=='BULLISH' else -1
             gap=sign*(e-w);previous_gap=sign*(pe-pw)
             if not (sign*(r-e)>0 and gap>0 and gap>previous_gap and sign*(w-pw)>=.75):return False
+            if not require_wma_permission:return True
             self.direction_lock.observe(at,w,pw,self.owner)
             if self.direction_lock.permits(side):return True
             import hilega_existing_ema10_wma_exception_40_60_last10_research as exception
@@ -397,12 +422,12 @@ def add_variants(engine,baseline,old,new,Gate,NewGate,fresh,p,day,raw,warm,asof,
         ('EXISTING',engine.WmaGapGate,engine.replay),
         ('PREVIOUS_AND',Gate,engine.replay),
         ('FRESH_AND',NewGate,fresh.fresh_replay(engine))):
-        rule='CLOSE_RSI_CONTINUATION_SLOPE_COLOUR' if key=='FRESH_AND' else 'FULL_CANDLE'
+        rule='CLOSE_RSI40_60_SLOPE_COLOUR' if key=='FRESH_AND' else 'FULL_CANDLE'
         if key=='FRESH_AND':
-            parent=fresh.combined_gate(SimpleNamespace(WmaGapGate=direct_five_base(engine.WmaGapGate),direction=engine.direction),{},wm,lock,None,threshold)
-            parent=qualified_opposite_watch_gate(parent,frames,engine.direction)
+            parent=direct_five_base(engine.WmaGapGate)
+            parent=qualified_opposite_watch_gate(parent,frames,engine.direction,require_wma_permission=False,signal_rule=rule)
             replay=direct_fresh_replay(engine,fresh,retry_followup=True)
-        variants[key+'_EMA10_ENTRY']=p.simulate(SimpleNamespace(WmaGapGate=entry_gate(parent,frames,rule=rule,followup=key=='FRESH_AND'),replay=replay),day,raw,warm,asof,'CURRENT')
+        variants[key+'_EMA10_ENTRY']=p.simulate(SimpleNamespace(WmaGapGate=entry_gate(parent,frames,rule=rule,followup=key=='FRESH_AND',continue_waiting=key=='FRESH_AND'),replay=replay),day,raw,warm,asof,'CURRENT')
         if key=='FRESH_AND':
             value=variants[key+'_EMA10_ENTRY']
             for row in value['setup_diagnostics']:
@@ -413,7 +438,7 @@ def add_variants(engine,baseline,old,new,Gate,NewGate,fresh,p,day,raw,warm,asof,
             for signal in value.get('alternative_signals',[]):signal['minute_gap_diagnostic_only']=True
             value['research_entry_rules']=dict(evaluation_minutes=5,strength_min=.75,positive_expanding_5m_gap=True,
                 minute_gap_setup_filter=False,persistence_required=False,setup_boundary_entry_allowed=True,
-                candidate_expiry_minutes=10,wma_lock_and_exception=True,ema_rule='CLOSE_RSI_CONTINUATION_SLOPE_COLOUR',rsi_rule='RISING_ABOVE_45_OR_FALLING_BELOW_55',ema10_slope_required=True,candle_colour_required=True,followup='PRICE_CLOSE_OR_MIDPOINT_OR_FRESH_STRENGTH_GAP',wma_permission_mandatory=True,fresh_setup_after_failed_followup_same_boundary=True,qualified_opposite_signal_overrides_watch=True)
+                candidate_expiry_minutes=10,wma_lock_and_exception=False,continue_wait_on_fresh_checks=True,ema_rule='CLOSE_RSI40_60_SLOPE_COLOUR',rsi_rule='RISING_ABOVE_40_OR_FALLING_BELOW_60',ema10_slope_required=True,candle_colour_required=True,followup='PRICE_CLOSE_OR_MIDPOINT_OR_FRESH_STRENGTH_GAP',wma_permission_mandatory=False,fresh_setup_after_failed_followup_same_boundary=True,qualified_opposite_signal_overrides_watch=True)
     variants['EXISTING_BASELINE_2']=p.simulate(SimpleNamespace(WmaGapGate=baseline2_gate(engine,frames,rule='CLOSE_AND_RSI_CROSS'),replay=engine.replay),day,raw,warm,asof,'CURRENT')
     return variants
 
@@ -457,7 +482,7 @@ def write_reports(output,days,results,coverage,provenance,version,unused,stats):
             detail.append('| '+side+' | '+signal[11:16]+' | '+' | '.join(cells)+' |')
     report=dict(model=MODEL,status='COMPLETE' if complete else 'INCOMPLETE',session_dates=days,strategy_version=version,
         coverage=coverage,provenance=provenance,comparisons=totals,warning=WARNING,
-        ema10_entry_rules={key:('CLOSE_RSI_CONTINUATION_SLOPE_COLOUR' if key=='FRESH_AND_EMA10_ENTRY' else 'CLOSE_AND_RSI_CROSS_45_OR_55' if key=='EXISTING_BASELINE_2' else 'FULL_CANDLE_AND_EMA_SLOPE')
+        ema10_entry_rules={key:('CLOSE_RSI40_60_SLOPE_COLOUR' if key=='FRESH_AND_EMA10_ENTRY' else 'CLOSE_AND_RSI_CROSS_45_OR_55' if key=='EXISTING_BASELINE_2' else 'FULL_CANDLE_AND_EMA_SLOPE')
             for key in ('EXISTING_EMA10_ENTRY','PREVIOUS_AND_EMA10_ENTRY','FRESH_AND_EMA10_ENTRY','EXISTING_BASELINE_2')},
         orders_sent=False,observation_only=True)
     (output/'report.json').write_text(json.dumps(report,indent=2,default=str)+'\n')
@@ -582,7 +607,7 @@ class Checks(unittest.TestCase):
             self.assertEqual((a['passed'],a['reasons']),(b['passed'],b['reasons']))
     def test_scoped_routing_only_two_policies_use_cross_rule(self):
         source=inspect.getsource(add_variants)
-        self.assertIn("rule='CLOSE_RSI_CONTINUATION_SLOPE_COLOUR' if key=='FRESH_AND' else 'FULL_CANDLE'",source)
+        self.assertIn("rule='CLOSE_RSI40_60_SLOPE_COLOUR' if key=='FRESH_AND' else 'FULL_CANDLE'",source)
         self.assertIn("baseline2_gate(engine,frames,rule='CLOSE_AND_RSI_CROSS')",source)
         self.assertNotIn("rule='CLOSE_BOTH'",source)
         self.assertNotIn("rule='BULLISH_CLOSE'",source)
@@ -687,6 +712,62 @@ class Checks(unittest.TestCase):
         for changes in [dict(previous_wma21_rsi=52.2),dict(previous_ema3_rsi=47),dict(close=104,open=103),dict(previous_rsi9=42)]:
             other=dict(f,**changes);h=qualified_opposite_watch_gate(Base,{at:other},lambda event:event)()
             self.assertFalse(h.can_signal('BEARISH',at));h.signal('BEARISH',at);self.assertFalse(h.recorded)
+    def test_signal_rsi40_60_thresholds_and_direction(self):
+        for side,previous,current,passed in [('BULLISH',39,41,True),('BULLISH',39,40,False),('BULLISH',43,42,False),('BEARISH',62,59,True),('BEARISH',62,60,False),('BEARISH',57,59,False)]:
+            kw=dict(open=101,close=103,ema10=100,previous_ema10=99) if side=='BULLISH' else dict(open=103,close=102,ema10=105,previous_ema10=106)
+            ev=frame_check(side,self.cross_frame(previous=previous,current=current,**kw),self.at,rule='CLOSE_RSI40_60_SLOPE_COLOUR')
+            self.assertEqual(ev['passed'],passed)
+    def test_continued_followup_retains_original_reference_then_enters(self):
+        at=self.at.replace(minute=0)
+        class Base:
+            def __init__(self):
+                self.pending={'BEARISH':dict(available=at,armed_at=None)}
+                self.owner='NONE';self.active=None;self.watch_side=None;self.watch_at=None;self.locked=False
+            def can_signal(self,*args):return True
+            def evaluate(self,**kw):
+                p=self.pending.pop('BEARISH');self.owner='BEARISH';self.active=True
+                return ['entry'],[dict(direction='BEARISH',status='ENTRY',signal_available_at=p['available'].isoformat(),reasons=[],wma_threshold_pass=True,gap_positive_pass=True,gap_expanding_pass=True)]
+        f0=self.cross_frame(previous=64,current=59,open=103,close=102,ema10=105,previous_ema10=106)
+        later=at+timedelta(minutes=5);last=at+timedelta(minutes=10)
+        f1=self.cross_frame(previous=59,current=62,open=102,close=103,available_at=later.isoformat())
+        f2=self.cross_frame(previous=62,current=55,open=103,close=101,available_at=last.isoformat())
+        g=entry_gate(Base,{at:f0,later:f1,last:f2},rule='CLOSE_RSI40_60_SLOPE_COLOUR',followup=True,continue_waiting=True)()
+        self.assertFalse(g.evaluate(minute=at-timedelta(minutes=1))[0])
+        original=dict(g.followup_signal)
+        self.assertFalse(g.evaluate(minute=later-timedelta(minutes=1))[0]);self.assertEqual(g.owner,'NONE')
+        self.assertEqual(g.followup_signal['due'],last)
+        for key in ('close','midpoint','time','setup_available'):self.assertEqual(g.followup_signal[key],original[key])
+        self.assertEqual(g.pending['BEARISH']['available'],at);self.assertIsNone(g.followup_failed_at)
+        self.assertTrue(g.policy_events[-1]['continued_wait'])
+        self.assertTrue(g.evaluate(minute=last-timedelta(minutes=1))[0]);self.assertEqual(g.owner,'BEARISH')
+    def test_continued_followup_requires_all_three_fresh_checks(self):
+        class Base:
+            def __init__(self):self.pending={};self.locked=False
+        g=entry_gate(Base,{},continue_waiting=True)();at=self.at
+        waiting=dict(direction='BEARISH',setup_available=at.isoformat(),time=at,due=at+timedelta(minutes=5),close=100,midpoint=101)
+        candidate=dict(available=at)
+        keys=('wma_threshold_pass','gap_positive_pass','gap_expanding_pass')
+        for failed in keys:
+            checks={k:k!=failed for k in keys}
+            self.assertFalse(g.retain_followup(waiting,checks,at+timedelta(minutes=5),candidate))
+        self.assertFalse(g.retain_followup(waiting,{k:True for k in keys},at+timedelta(minutes=5),None))
+        g.locked=True
+        self.assertFalse(g.retain_followup(waiting,{k:True for k in keys},at+timedelta(minutes=5),candidate))
+    def test_no_lock_watch_override_does_not_require_direction_lock(self):
+        at=self.at.replace(minute=0)
+        class Base:
+            def __init__(self):
+                self.owner='NONE';self.locked=False;self.watch_side='BULLISH';self.watch_at=at
+            def can_signal(self,*args):return False
+            def signal(self,event,available):self.watch_side=event
+        f=self.cross_frame(previous=53,current=44,open=103,close=102,ema10=105,previous_ema10=106,
+            ema3_rsi=48,wma21_rsi=52,previous_ema3_rsi=52,previous_wma21_rsi=53)
+        g=qualified_opposite_watch_gate(Base,{at:f},lambda event:event,require_wma_permission=False)()
+        self.assertFalse(hasattr(g,'direction_lock'))
+        self.assertTrue(g.can_signal('BEARISH',at));g.signal('BEARISH',at)
+        self.assertEqual(g.watch_side,'BEARISH')
+        f['previous_wma21_rsi']=52.2
+        self.assertFalse(g.qualifies('BEARISH',at))
     def test_watch_override_cannot_enter_midminute_or_while_position_active(self):
         at=self.at.replace(minute=0)
         class Base:
