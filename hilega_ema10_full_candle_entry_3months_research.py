@@ -13,14 +13,14 @@ from pathlib import Path
 from types import SimpleNamespace
 import unittest
 
-MODEL='FRESH_DIRECT_5M_EMA10_SLOPE_CANDLE_COLOUR_V8'
+MODEL='FRESH_DIRECT_5M_FOLLOWUP_CLOSE_OPTION_A_V9'
 BASES=('EXISTING','PREVIOUS_AND','FRESH_AND')
 POLICIES=tuple(k for b in BASES for k in (b,b+'_EMA10_ENTRY'))+('EXISTING_BASELINE_2',)
 WARNING=('Research only. Gross NIFTY points; no option fills or costs. Each EMA variant adds an entry gate to its own baseline. '
     'FRESH_AND_EMA10_ENTRY and EXISTING_BASELINE_2 require bullish completed 5m CLOSE > price EMA10 AND RSI9 crossing UP through 45 OR 55; '
     'bearish completed 5m CLOSE < EMA10 AND RSI9 crossing DOWN through 55 OR 45. Both conditions must pass on the same completed candle. '
     'Cross UP means previous RSI <= threshold and current RSI > threshold; DOWN means previous RSI >= threshold and current RSI < threshold. '
-    'No cross latch: evidence expires when a new completed 5m candle replaces it. Wicks do not veto these two policies. Fresh direct 5m additionally requires rising EMA10 and green close>open for bullish, falling EMA10 and red close<open for bearish; flat EMA or doji fails. Existing baseline 2 has no slope or colour veto. '
+    'No cross latch: evidence expires when a new completed 5m candle replaces it. Fresh direct 5m waits for the immediately next completed 5m close strictly above signal close for bullish, below for bearish (Option A); no entry on signal candle. Fresh parent entry checks must still pass; no repeated RSI cross on follow-up. Failure consumes this candidate; original cancellation, expiry and cutoff still apply. Wicks do not veto these two policies. Fresh direct 5m additionally requires rising EMA10 and green close>open for bullish, falling EMA10 and red close<open for bearish; flat EMA or doji fails. Existing baseline 2 has no slope or colour veto. '
     'EXISTING_EMA10_ENTRY and PREVIOUS_AND_EMA10_ENTRY retain whole-candle position AND directional EMA10 slope. '
     'Strict comparisons; equality waits. EMA10 uses close, alpha 2/11, first-close seed, continuous over original warmup. '
     'FRESH_AND_EMA10_ENTRY now removes minute-gap setup vetoes, separate 1m entry evaluation and persistence. '
@@ -128,7 +128,23 @@ def build_frames(engine,day,raw,warm,dt):
     return frames
 
 
-def entry_gate(Parent,frames,rule='FULL_CANDLE'):
+def followup_check(side, signal, frame, at):
+    if side not in ('BULLISH','BEARISH'):raise ValueError('INVALID_DIRECTION')
+    reasons=[]
+    if at!=signal['due'] or at!=signal['time']+timedelta(minutes=5):reasons.append('NOT_IMMEDIATE_NEXT_5M_BOUNDARY')
+    if at.strftime('%H:%M')>='14:55':reasons.append('SESSION_CUTOFF')
+    if frame is None:return dict(passed=False,reasons=reasons+['FOLLOWUP_FRAME_MISSING'],signal_close=signal['close'])
+    available=datetime.fromisoformat(frame['available_at'])
+    if available>at:raise ValueError('FUTURE_EMA_FRAME')
+    if available!=at:reasons.append('FOLLOWUP_FRAME_NOT_CURRENT')
+    close=frame['close'];original=signal['close']
+    if any(isinstance(v,bool) or v is None or not math.isfinite(float(v)) or float(v)<=0 for v in (close,original)):raise ValueError('INVALID_FOLLOWUP_CLOSE')
+    passed=float(close)>float(original) if side=='BULLISH' else float(close)<float(original)
+    if not passed:reasons.append('FOLLOWUP_CLOSE_NOT_ABOVE_SIGNAL_CLOSE' if side=='BULLISH' else 'FOLLOWUP_CLOSE_NOT_BELOW_SIGNAL_CLOSE')
+    return dict(frame,passed=not reasons,reasons=reasons,signal_close=original,signal_time=signal['time'].isoformat(),followup_rule='NEXT_CLOSE_VS_SIGNAL_CLOSE')
+
+
+def entry_gate(Parent,frames,rule='FULL_CANDLE',followup=False):
     class EmaEntry(Parent):
         def __init__(self,*args,**kwargs):
             super().__init__(*args,**kwargs)
@@ -140,15 +156,34 @@ def entry_gate(Parent,frames,rule='FULL_CANDLE'):
             before={side:dict(p) for side,p in self.pending.items()}
             watch=(self.watch_side,self.watch_at)
             event_start=len(self.policy_events)
+            waiting=getattr(self,'followup_signal',None)
+            if waiting is not None:
+                pending=before.get(waiting['direction'])
+                if pending is None or pending['available'].isoformat()!=waiting['setup_available'] or at>waiting['due']:
+                    self.policy_events.append(dict(event='FOLLOWUP_CANDLE_CHECK',time=at.isoformat(),direction=waiting['direction'],setup_available=waiting['setup_available'],passed=False,reasons=['FOLLOWUP_CANCELLED_OR_MISSED'],signal_close=waiting['close']))
+                    self.followup_signal=None;waiting=None
             entries,checks=super().evaluate(**kwargs)
-            if not entries:return entries,checks
+            if not entries:
+                if waiting is not None and at==waiting['due']:
+                    self.policy_events.append(dict(event='FOLLOWUP_CANDLE_CHECK',time=at.isoformat(),direction=waiting['direction'],setup_available=waiting['setup_available'],passed=False,reasons=['FRESH_ENTRY_CHECKS_FAILED_OR_CANDIDATE_CANCELLED'],signal_close=waiting['close']))
+                    self.pending.pop(waiting['direction'],None)
+                    self.followup_signal=None
+                return entries,checks
             side=self.owner
             matching=[c for c in checks if c.get('status')=='ENTRY' and c['direction']==side]
             if len(entries)!=1 or len(matching)!=1 or side not in before:raise ValueError('CONFIRMATION_IDENTITY_MISMATCH')
             check=matching[0];boundary=at.replace(minute=at.minute//5*5,second=0,microsecond=0)
-            evidence=frame_check(side,frames.get(boundary),at,rule=rule)
+            is_followup=followup and waiting is not None and waiting['direction']==side and at==waiting['due']
+            if is_followup:
+                evidence=followup_check(side,waiting,frames.get(boundary),at)
+                self.followup_signal=None
+            else:
+                evidence=frame_check(side,frames.get(boundary),at,rule=rule)
+                if followup and evidence['passed']:
+                    self.followup_signal=dict(direction=side,setup_available=check['signal_available_at'],time=at,due=at+timedelta(minutes=5),close=float(evidence['close']))
+                    evidence.update(passed=False,reasons=['WAIT_NEXT_COMPLETED_5M_CLOSE'],signal_close=evidence['close'],followup_due=(at+timedelta(minutes=5)).isoformat())
             check['ema10_entry']=evidence
-            self.policy_events.append(dict(event='EMA10_ENTRY_CHECK',time=at.isoformat(),direction=side,
+            self.policy_events.append(dict(event='FOLLOWUP_CANDLE_CHECK' if is_followup else 'EMA10_ENTRY_CHECK',time=at.isoformat(),direction=side,
                 setup_available=check['signal_available_at'],baseline_confirmed=True,
                 directional_strength=check.get('directional_wma_strength'),directional_gap=check.get('current_gap'),
                 gap_expansion=check.get('gap_delta'),**evidence))
@@ -157,7 +192,8 @@ def entry_gate(Parent,frames,rule='FULL_CANDLE'):
             if candidate['available'].isoformat()!=check['signal_available_at']:raise ValueError('CANDIDATE_IDENTITY_MISMATCH')
             if candidate.get('armed_at') is None:candidate['armed_at']=kwargs['minute']
             self.owner='NONE';self.active=None
-            self.pending[side]=candidate
+            if is_followup:self.pending.pop(side,None)
+            else:self.pending[side]=candidate
             self.watch_side,self.watch_at=watch
             check.update(status='EMA10_ENTRY_WAIT',reasons=list(evidence['reasons']))
             for event in self.policy_events[event_start:]:
@@ -258,7 +294,7 @@ def add_variants(engine,baseline,old,new,Gate,NewGate,fresh,p,day,raw,warm,asof,
         if key=='FRESH_AND':
             parent=fresh.combined_gate(SimpleNamespace(WmaGapGate=direct_five_base(engine.WmaGapGate),direction=engine.direction),{},wm,lock,None,threshold)
             replay=direct_fresh_replay(engine,fresh)
-        variants[key+'_EMA10_ENTRY']=p.simulate(SimpleNamespace(WmaGapGate=entry_gate(parent,frames,rule=rule),replay=replay),day,raw,warm,asof,'CURRENT')
+        variants[key+'_EMA10_ENTRY']=p.simulate(SimpleNamespace(WmaGapGate=entry_gate(parent,frames,rule=rule,followup=key=='FRESH_AND'),replay=replay),day,raw,warm,asof,'CURRENT')
         if key=='FRESH_AND':
             value=variants[key+'_EMA10_ENTRY']
             for row in value['setup_diagnostics']:
@@ -269,7 +305,7 @@ def add_variants(engine,baseline,old,new,Gate,NewGate,fresh,p,day,raw,warm,asof,
             for signal in value.get('alternative_signals',[]):signal['minute_gap_diagnostic_only']=True
             value['research_entry_rules']=dict(evaluation_minutes=5,strength_min=.75,positive_expanding_5m_gap=True,
                 minute_gap_setup_filter=False,persistence_required=False,setup_boundary_entry_allowed=True,
-                candidate_expiry_minutes=10,wma_lock_and_exception=True,ema_rule='CLOSE_RSI_SLOPE_COLOUR',ema10_slope_required=True,candle_colour_required=True)
+                candidate_expiry_minutes=10,wma_lock_and_exception=True,ema_rule='CLOSE_RSI_SLOPE_COLOUR',ema10_slope_required=True,candle_colour_required=True,followup='IMMEDIATE_NEXT_5M_CLOSE_OPTION_A')
     variants['EXISTING_BASELINE_2']=p.simulate(SimpleNamespace(WmaGapGate=baseline2_gate(engine,frames,rule='CLOSE_AND_RSI_CROSS'),replay=engine.replay),day,raw,warm,asof,'CURRENT')
     return variants
 
@@ -304,7 +340,7 @@ def write_reports(output,days,results,coverage,provenance,version,unused,stats):
         for k in POLICIES:
             trades.extend(dict(t,policy=k,session_date=day) for t in v[k]['trades'])
             for e in v[k].get('policy_events',[]):
-                if e['event'] not in ('EMA10_ENTRY_CHECK','COMBINED_ENTRY_DECISION'):continue
+                if e['event'] not in ('EMA10_ENTRY_CHECK','COMBINED_ENTRY_DECISION','FOLLOWUP_CANDLE_CHECK'):continue
                 identities.add((e['direction'],e['setup_available']))
                 events.append(dict(session_date=day,policy=k,**e))
         detail+=['','## '+day,'','| Direction | Setup available | '+' | '.join(POLICIES)+' |','|---|---|'+'---|'*len(POLICIES)]
@@ -328,6 +364,10 @@ def write_reports(output,days,results,coverage,provenance,version,unused,stats):
         vals=[f"{e[k]:.3f}" if e.get(k) is not None else '—' for k in ('open','high','low','close','ema10','ema10_slope','previous_rsi9','rsi9','directional_strength','directional_gap','gap_expansion')]
         outcome='PASS' if e['passed'] else 'WAIT: '+', '.join(e['reasons'])
         validation.append('| '+' | '.join([e['session_date'],e['policy'],e['setup_available'][11:16],e['time'][11:16],e['direction'],e.get('candle_label','—')[11:16]]+vals+[','.join(map(str,e.get('rsi_crossed_thresholds',[]))) or 'None',outcome])+' |')
+    validation+=['','## Follow-up candle checks','','| Date | Policy | Setup | Decision | Direction | Signal close | Follow-up close | Outcome / reason |','|---|---|---|---|---|---:|---:|---|']
+    for e in events:
+        if e['event']!='FOLLOWUP_CANDLE_CHECK':continue
+        validation.append('| '+' | '.join(str(x) for x in (e['session_date'],e['policy'],e['setup_available'][11:16],e['time'][11:16],e['direction'],e.get('signal_close','—'),e.get('close','—'),'PASS' if e['passed'] else ', '.join(e['reasons'])))+' |')
     (output/'ema10-entry-validation.md').write_text('\n'.join(validation)+'\n')
     for name,rows in (('trades.csv',trades),('losing-trades.csv',[t for t in trades if t['points']<0]),('entry-decisions.csv',events)):
         fields=sorted({k for row in rows for k in row}) or ['session_date','policy']
@@ -440,6 +480,44 @@ class Checks(unittest.TestCase):
         self.assertNotIn("rule='BULLISH_CLOSE'",source)
     def cross_frame(self,previous=44,current=46,**kw):
         return self.frame(previous_rsi9=previous,rsi9=current,rsi_available_at='2026-10-16T10:00:00+05:30',**kw)
+    def test_followup_gate_waits_then_enters_or_consumes_failure(self):
+        for close,expected in [(104,True),(102,False)]:
+            at=self.at.replace(minute=0)
+            class Base:
+                def __init__(self):
+                    self.pending={'BULLISH':dict(available=at,armed_at=None)}
+                    self.owner='NONE';self.active=None;self.watch_side=None;self.watch_at=None
+                def can_signal(self,*args):return True
+                def evaluate(self,**kw):
+                    pending=self.pending.pop('BULLISH');self.owner='BULLISH';self.active=True
+                    return ['entry'],[dict(direction='BULLISH',status='ENTRY',signal_available_at=pending['available'].isoformat(),reasons=[])]
+            frames={at:self.cross_frame(),at+timedelta(minutes=5):self.frame(close=close,available_at=(at+timedelta(minutes=5)).isoformat())}
+            g=entry_gate(Base,frames,rule='CLOSE_RSI_SLOPE_COLOUR',followup=True)()
+            entries,checks=g.evaluate(minute=at-timedelta(minutes=1))
+            self.assertFalse(entries);self.assertEqual(g.owner,'NONE');self.assertIn('BULLISH',g.pending)
+            entries,checks=g.evaluate(minute=at+timedelta(minutes=4))
+            self.assertEqual(bool(entries),expected);self.assertIsNone(g.followup_signal)
+            if not expected:self.assertEqual(g.owner,'NONE');self.assertNotIn('BULLISH',g.pending)
+    def test_followup_cancellation_cannot_restore_signal(self):
+        at=self.at.replace(minute=0)
+        g=self.harness(passed=False)
+        g.followup_signal=dict(direction='BULLISH',setup_available='different',time=at,due=at+timedelta(minutes=5),close=103)
+        g.evaluate(minute=at+timedelta(minutes=4))
+        self.assertIsNone(g.followup_signal);self.assertEqual(g.owner,'NONE')
+    def test_followup_option_a_both_directions_and_equality(self):
+        at=self.at.replace(minute=5)
+        signal=dict(time=at-timedelta(minutes=5),due=at,close=103)
+        for side,close,expected in [('BULLISH',104,True),('BULLISH',103,False),('BULLISH',102,False),('BEARISH',102,True),('BEARISH',103,False),('BEARISH',104,False)]:
+            self.assertEqual(followup_check(side,signal,dict(close=close,available_at=at.isoformat()),at)['passed'],expected)
+    def test_followup_missing_stale_and_late_fail(self):
+        at=self.at.replace(minute=5);signal=dict(time=at-timedelta(minutes=5),due=at,close=103)
+        self.assertFalse(followup_check('BULLISH',signal,None,at)['passed'])
+        self.assertFalse(followup_check('BULLISH',signal,dict(close=104,available_at=signal['time'].isoformat()),at)['passed'])
+        later=at+timedelta(minutes=5)
+        self.assertFalse(followup_check('BULLISH',signal,dict(close=104,available_at=later.isoformat()),later)['passed'])
+    def test_followup_cutoff_fails(self):
+        at=self.at.replace(hour=14,minute=55);signal=dict(time=at-timedelta(minutes=5),due=at,close=103)
+        self.assertFalse(followup_check('BULLISH',signal,dict(close=104,available_at=at.isoformat()),at)['passed'])
     def test_slope_colour_bullish_pass(self):
         self.assertTrue(frame_check('BULLISH',self.cross_frame(),self.at,rule='CLOSE_RSI_SLOPE_COLOUR')['passed'])
     def test_slope_colour_bearish_pass(self):
@@ -693,7 +771,7 @@ def main():
         "args=ap.parse_args()\n    if args.date:\n        if any(x in ('--sessions','--end-date') or x.startswith(('--sessions=','--end-date=')) for x in sys.argv[1:]):ap.error('--date cannot be combined with --sessions or --end-date')\n        args.end_date=args.date\n        args.sessions=1\n        if not any(x=='--output' or x.startswith('--output=') for x in sys.argv[1:]):args.output=Path('data/research/hilega-ema10-entry-day-'+args.date.replace('-',''))")
     replace("days=select_sessions(calendar,parent['start_date'],args.end_date,args.sessions,extra['session_date'])",
         "days=single_session(args.date,calendar,parent['start_date'],extra['session_date'],extra['session_date']) if args.date else select_sessions(calendar,parent['start_date'],args.end_date,args.sessions,extra['session_date'])")
-    replace("data/research/hilega-and-fresh-setup-30sessions-20261016","data/research/hilega-fresh-direct5m-slope-colour-3months-20261016")
+    replace("data/research/hilega-and-fresh-setup-30sessions-20261016","data/research/hilega-fresh-followup-close-3months-20261016")
     replace('variants=dict(EXISTING=baseline,PREVIOUS_AND=old,FRESH_AND=new)',
         'variants=add_variants(engine,baseline,old,new,Gate,NewGate,fresh,p,day,raw,warm,asof,wm,lock,threshold)')
     namespace=dict(batch.main.__globals__,add_variants=add_variants,write_reports=write_reports,single_session=single_session,sys=sys)
