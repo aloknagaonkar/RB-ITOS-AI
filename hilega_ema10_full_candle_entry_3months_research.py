@@ -12,15 +12,19 @@ from pathlib import Path
 from types import SimpleNamespace
 import unittest
 
-MODEL='CONFIRMED_ENTRY_FULL_CANDLE_EMA10_THREE_BASELINES_V1'
+MODEL='CONFIRMED_ENTRY_EMA10_WITH_EXISTING_BASELINE_2_V2'
 BASES=('EXISTING','PREVIOUS_AND','FRESH_AND')
-POLICIES=tuple(k for b in BASES for k in (b,b+'_EMA10_ENTRY'))
+POLICIES=tuple(k for b in BASES for k in (b,b+'_EMA10_ENTRY'))+('EXISTING_BASELINE_2',)
 WARNING=('Research only. Gross NIFTY points; no option fills or costs. Each EMA variant adds an entry gate to its own baseline. '
     'Latest completed 5m candle: bullish LOW > price EMA10 and EMA10 rising; bearish HIGH < EMA10 and EMA10 falling. '
     'Strict comparisons; equality waits. EMA10 uses close, alpha 2/11, first-close seed, continuous over original warmup. '
-    'Full baseline confirmation comes first. Failed EMA checks retain only that candidate within its original ten-minute window, '
+    'For the original three EMA variants, full baseline confirmation comes first. Failed EMA checks retain only that candidate within its original ten-minute window, '
     'with fresh baseline checks each minute. WMA-vetoed candidates stay consumed. Original exits and 14:55 cutoff retained. '
-    'No EMA exit, reversal override, retained unlimited setup, persistence removal or strength/expansion shortcut. '
+    'EXISTING_BASELINE_2 instead validates only completed 5m boundaries: strength >=0.75, positive gap expanding versus the prior completed 5m, '
+    'plus the same full-candle EMA10 entry rule. No persistence veto or time-based candidate expiry in baseline 2. '
+    'Existing setup generation, opposite-arm/setup cancellation, canonical cancellation, position ownership and exits remain in baseline 2; '
+    'no WMA direction lock or RSI/EMA exception is added. A candidate can still be cancelled by original lifecycle events. '
+    'The original first-post-setup timing and same-exit-boundary exception remain. No EMA exit or reversal override in any policy. '
     'Historical controls reproduce saved research, not historical broker execution; Oct16 recorded/API inputs are mixed. '
     'Exploratory sample already examined; no independent holdout or live changes.')
 
@@ -114,6 +118,29 @@ def entry_gate(Parent,frames):
     return EmaEntry
 
 
+def baseline2_gate(engine,frames):
+    """Original lifecycle, 5m checks, unlimited time window, no persistence veto."""
+    import textwrap
+    from hilega_five_min_confirmation_research import five_gate
+    Base=engine.WmaGapGate
+    source=textwrap.dedent(inspect.getsource(Base.evaluate))
+    old="if not persistence:reasons.append('WAIT_LATER_PERSISTENCE')"
+    if source.count(old)!=1:raise ValueError('BASELINE2_PERSISTENCE_ANCHOR_MISMATCH')
+    source=source.replace(old,'# Persistence remains diagnostic only; not an entry veto.',1)
+    filename='<hilega-baseline2-no-persistence>'
+    linecache.cache[filename]=(len(source),None,source.splitlines(True),filename)
+    namespace=dict(Base.evaluate.__globals__)
+    exec(compile(source,filename,'exec'),namespace)
+    NoPersistence=type('Baseline2NoPersistence',(Base,),{'evaluate':namespace['evaluate']})
+    Boundary=five_gate(NoPersistence,continued=True)
+    class ValidatedBoundary(Boundary):
+        def evaluate(self,**kwargs):
+            entries,checks=super().evaluate(**kwargs)
+            for c in checks:c.update(persistence_required=False,candidate_time_expiry_enabled=False,policy_name='EXISTING_BASELINE_2')
+            return entries,checks
+    return entry_gate(ValidatedBoundary,frames)
+
+
 def add_variants(engine,baseline,old,new,Gate,NewGate,fresh,p,day,raw,warm,asof):
     frames=build_frames(engine,day,raw,warm,p.dt)
     variants=dict(EXISTING=baseline,PREVIOUS_AND=old,FRESH_AND=new)
@@ -122,6 +149,7 @@ def add_variants(engine,baseline,old,new,Gate,NewGate,fresh,p,day,raw,warm,asof)
         ('PREVIOUS_AND',Gate,engine.replay),
         ('FRESH_AND',NewGate,fresh.fresh_replay(engine))):
         variants[key+'_EMA10_ENTRY']=p.simulate(SimpleNamespace(WmaGapGate=entry_gate(parent,frames),replay=replay),day,raw,warm,asof,'CURRENT')
+    variants['EXISTING_BASELINE_2']=p.simulate(SimpleNamespace(WmaGapGate=baseline2_gate(engine,frames),replay=engine.replay),day,raw,warm,asof,'CURRENT')
     return variants
 
 
@@ -143,7 +171,7 @@ def write_reports(output,days,results,coverage,provenance,version,unused,stats):
         '| Policy | Trades | Winning points | Losing points | Net points | Change vs own baseline | Winners | Losers | Flat | Closed-trade drawdown |',
         '|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|']
     for key in POLICIES:
-        s=totals[key];parent=key.removesuffix('_EMA10_ENTRY')
+        s=totals[key];parent='EXISTING' if key=='EXISTING_BASELINE_2' else key.removesuffix('_EMA10_ENTRY')
         lines.append(f"| {key} | {s['trades']} | {s['gross_winning_points']:+.2f} | {-s['gross_losing_points']:.2f} | {s['points']:+.2f} | {s['points']-totals[parent]['points']:+.2f} | {s['winners']} | {s['losers']} | {s['flat']} | {s['max_closed_trade_drawdown_points']:.2f} |")
     lines+=['','| Date | '+' | '.join(POLICIES)+' |','|---|'+'---:|'*len(POLICIES)]
     detail=['# Signal-wise actual entry / exit / points','',WARNING,'',
@@ -271,6 +299,61 @@ class Checks(unittest.TestCase):
         self.assertAlmostEqual(f['previous_ema10'],100);self.assertAlmostEqual(f['ema10'],100+4/11)
         self.assertEqual(captured,[raw[1]]);self.assertEqual(len(raw),2)
 
+    def baseline2_harness(self,ema_ok=True):
+        from market_lab import hilega_v2_alignment_replay_v1 as engine
+        at=datetime.fromisoformat('2026-10-16T14:20:00+05:30')
+        frames={}
+        for minutes in range(0,36,5):
+            boundary=at+timedelta(minutes=minutes)
+            frames[boundary]=dict(open=100,high=101 if ema_ok else 107,low=99,close=100,
+                ema10=105,previous_ema10=106,available_at=boundary.isoformat())
+        g=baseline2_gate(engine,frames)(opposite_switch=True)
+        event=engine.StrategyEvent('ENTRY_BEARISH_ROUTE_B_STRUCTURAL',at-timedelta(minutes=5),None,'IDLE','ARMED',details={})
+        g.signal(event,at)
+        def tick(clock,ema=48,strength=1):
+            t=datetime.fromisoformat('2026-10-16T'+clock+':00+05:30')
+            snap=SimpleNamespace(ready=True,rsi9=ema-1,ema3_rsi=ema,wma21_rsi=49)
+            ref=SimpleNamespace(ready=True,wma21_rsi=49+strength)
+            return g.evaluate(minute=t-timedelta(minutes=1),current=snap,reference=ref,price=100)
+        return g,tick,engine
+    def test_baseline2_no_intermediate_minute_entry(self):
+        g,tick,_=self.baseline2_harness();tick('14:20')
+        self.assertEqual(tick('14:21',ema=45),([],[]));self.assertIsNone(g.pending['BEARISH']['armed_at'])
+    def test_baseline2_first_qualifying_5m_needs_no_persistence(self):
+        g,tick,_=self.baseline2_harness();tick('14:20')
+        entries,checks=tick('14:25',ema=47)
+        self.assertTrue(entries);self.assertFalse(checks[0]['persistence_pass']);self.assertFalse(checks[0]['persistence_required'])
+    def test_baseline2_no_time_expiry(self):
+        g,tick,_=self.baseline2_harness();tick('14:20');tick('14:25');tick('14:30');tick('14:31')
+        self.assertIn('BEARISH',g.pending)
+        self.assertTrue(tick('14:35',ema=47)[0])
+    def test_baseline2_strength_still_required(self):
+        g,tick,_=self.baseline2_harness();tick('14:20')
+        entries,checks=tick('14:25',ema=47,strength=.74)
+        self.assertFalse(entries);self.assertIn('WMA_THRESHOLD_NOT_MET',checks[0]['reasons'])
+    def test_baseline2_expansion_uses_5m_not_minute(self):
+        g,tick,_=self.baseline2_harness();tick('14:20');tick('14:24',ema=40)
+        entries,checks=tick('14:25',ema=47)
+        self.assertTrue(entries);self.assertEqual(checks[0]['previous_gap'],1)
+    def test_baseline2_ema_rejection_retains_candidate_beyond_ten(self):
+        g,tick,_=self.baseline2_harness(ema_ok=False);tick('14:20');tick('14:25')
+        entries,checks=tick('14:35',ema=47)
+        # A gap is only valid against consecutive completed 5m readings.
+        self.assertFalse(entries);self.assertIn('BEARISH',g.pending)
+        entries,checks=tick('14:40',ema=46)
+        self.assertFalse(entries);self.assertEqual(checks[0]['status'],'EMA10_ENTRY_WAIT')
+        self.assertEqual(g.owner,'NONE');self.assertIn('BEARISH',g.pending)
+    def test_baseline2_cutoff_still_blocks(self):
+        g,tick,_=self.baseline2_harness();tick('14:50')
+        entries,checks=tick('14:55',ema=47)
+        self.assertFalse(entries);self.assertIn('SESSION_CUTOFF',checks[0]['reasons'])
+    def test_baseline2_original_opposite_setup_cancels(self):
+        g,tick,engine=self.baseline2_harness();tick('14:20')
+        at=datetime.fromisoformat('2026-10-16T14:25:00+05:30')
+        event=engine.StrategyEvent('ENTRY_BULLISH_ROUTE_B_STRUCTURAL',at,None,'IDLE','ARMED',details={})
+        g.signal(event,at)
+        self.assertNotIn('BEARISH',g.pending);self.assertIn('BULLISH',g.pending)
+
 
 def main():
     import hilega_and_fresh_setup_30_sessions_research as batch
@@ -291,7 +374,7 @@ def main():
         "args=ap.parse_args()\n    if args.date:\n        if any(x in ('--sessions','--end-date') or x.startswith(('--sessions=','--end-date=')) for x in sys.argv[1:]):ap.error('--date cannot be combined with --sessions or --end-date')\n        args.end_date=args.date\n        args.sessions=1\n        if not any(x=='--output' or x.startswith('--output=') for x in sys.argv[1:]):args.output=Path('data/research/hilega-ema10-entry-day-'+args.date.replace('-',''))")
     replace("days=select_sessions(calendar,parent['start_date'],args.end_date,args.sessions,extra['session_date'])",
         "days=single_session(args.date,calendar,parent['start_date'],extra['session_date'],extra['session_date']) if args.date else select_sessions(calendar,parent['start_date'],args.end_date,args.sessions,extra['session_date'])")
-    replace("data/research/hilega-and-fresh-setup-30sessions-20261016","data/research/hilega-ema10-full-candle-entry-3months-20261016")
+    replace("data/research/hilega-and-fresh-setup-30sessions-20261016","data/research/hilega-ema10-entry-with-baseline2-3months-20261016")
     replace('variants=dict(EXISTING=baseline,PREVIOUS_AND=old,FRESH_AND=new)',
         'variants=add_variants(engine,baseline,old,new,Gate,NewGate,fresh,p,day,raw,warm,asof)')
     namespace=dict(batch.main.__globals__,add_variants=add_variants,write_reports=write_reports,single_session=single_session,sys=sys)
