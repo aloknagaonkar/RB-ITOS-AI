@@ -266,9 +266,13 @@ def direct_five_base(Base):
     for old,new in replacements.items():
         if source.count(old)!=1:raise ValueError('DIRECT_5M_GATE_ANCHOR_MISMATCH:'+old)
         source=source.replace(old,new,1)
-    anchor="    if self.owner!='NONE':reasons.append('ACTIVE_TRADE_OWNER')"
-    if source.count(anchor)!=1:raise ValueError('FOLLOWUP_OR_GATE_ANCHOR_MISMATCH')
-    source=source.replace(anchor,anchor+"\n    if getattr(self,'followup_price_permission',None)==(side,minute+timedelta(minutes=1)):\n        reasons=[reason for reason in reasons if reason not in ('WMA_THRESHOLD_NOT_MET','GAP_NOT_POSITIVE','GAP_NOT_EXPANDING_OR_PREVIOUS_MINUTE_MISSING')]",1)
+    anchor_text="if self.owner!='NONE':reasons.append('ACTIVE_TRADE_OWNER')"
+    matches=[line for line in source.splitlines() if line.strip()==anchor_text]
+    if len(matches)!=1:raise ValueError('FOLLOWUP_OR_GATE_ANCHOR_MISMATCH')
+    anchor=matches[0];indent=anchor[:len(anchor)-len(anchor.lstrip())]
+    addition=("\n"+indent+"if getattr(self,'followup_price_permission',None)==(side,minute+timedelta(minutes=1)):\n"+
+        indent+"    reasons=[reason for reason in reasons if reason not in ('WMA_THRESHOLD_NOT_MET','GAP_NOT_POSITIVE','GAP_NOT_EXPANDING_OR_PREVIOUS_MINUTE_MISSING')]")
+    source=source.replace(anchor,anchor+addition,1)
     filename='<hilega-fresh-direct-five-minute-gate>'
     linecache.cache[filename]=(len(source),None,source.splitlines(True),filename)
     namespace=dict(Base.evaluate.__globals__)
