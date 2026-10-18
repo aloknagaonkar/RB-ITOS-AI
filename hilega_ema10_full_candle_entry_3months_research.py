@@ -13,14 +13,14 @@ from pathlib import Path
 from types import SimpleNamespace
 import unittest
 
-MODEL='FRESH_DIRECT_5M_QUALIFIED_OPPOSITE_WATCH_OVERRIDE_V14'
+MODEL='FRESH_DIRECT_5M_FOLLOWUP_COLOUR_RSI_V15'
 BASES=('EXISTING','PREVIOUS_AND','FRESH_AND')
 POLICIES=tuple(k for b in BASES for k in (b,b+'_EMA10_ENTRY'))+('EXISTING_BASELINE_2',)
 WARNING=('Research only. Gross NIFTY points; no option fills or costs. Each EMA variant adds an entry gate to its own baseline. '
     'EXISTING_BASELINE_2 requires bullish completed 5m CLOSE > price EMA10 AND RSI9 crossing UP through 45 OR 55; '
     'bearish completed 5m CLOSE < EMA10 AND RSI9 crossing DOWN through 55 OR 45. Those baseline-2 conditions must pass on the same completed candle. Fresh EMA instead requires RSI9 rising and above45 for bullish, falling and below55 for bearish; fresh crosses or directional continuation qualify. Flat RSI and threshold equality fail. Its EMA slope, candle colour and other signal checks remain mandatory. '
     'Cross UP means previous RSI <= threshold and current RSI > threshold; DOWN means previous RSI >= threshold and current RSI < threshold. '
-    'No cross latch: evidence expires when a new completed 5m candle replaces it. Fresh direct 5m waits for the immediately next completed 5m close strictly above signal CLOSE OR signal midpoint for bullish, below signal CLOSE OR signal midpoint for bearish; midpoint=(signal high+low)/2, close-based comparison not intrabar touch; no entry on signal candle. Follow-up accepts price confirmation OR fresh strength/positive-expanding-gap checks. WMA lock/AND-exception permission remains mandatory for either route, as do candidate validity, flat position and cutoff. Signal candle still requires all original signal checks. No repeated RSI cross on follow-up. Failure consumes this candidate; the just-completed failed follow-up is then independently evaluated once for a fresh setup on the same boundary. A fresh qualifying signal waits for its own next completed candle; discarded close is never reused. Original cancellation, expiry and cutoff still apply. Wicks do not veto these two policies. Fresh direct 5m additionally requires rising EMA10 and green close>open for bullish, falling EMA10 and red close<open for bearish; flat EMA or doji fails. Existing baseline 2 has no slope or colour veto. '
+    'No cross latch: evidence expires when a new completed 5m candle replaces it. Fresh direct 5m waits for the immediately next completed 5m close strictly above signal CLOSE OR signal midpoint for bullish, below signal CLOSE OR signal midpoint for bearish; midpoint=(signal high+low)/2, close-based comparison not intrabar touch; no entry on signal candle. Follow-up requires a green candle AND rising completed RSI9 for bullish, or a red candle AND falling completed RSI9 for bearish; doji/flat RSI fails. These mandatory checks cannot be bypassed by either price confirmation OR fresh strength/positive-expanding-gap checks. WMA lock/AND-exception permission remains mandatory for either route, as do candidate validity, flat position and cutoff. Signal candle still requires all original signal checks. No repeated RSI cross on follow-up. Failure consumes this candidate; the just-completed failed follow-up is then independently evaluated once for a fresh setup on the same boundary. A fresh qualifying signal waits for its own next completed candle; discarded close is never reused. Original cancellation, expiry and cutoff still apply. Wicks do not veto these two policies. Fresh direct 5m additionally requires rising EMA10 and green close>open for bullish, falling EMA10 and red close<open for bearish; flat EMA or doji fails. Existing baseline 2 has no slope or colour veto. '
     'EXISTING_EMA10_ENTRY and PREVIOUS_AND_EMA10_ENTRY retain whole-candle position AND directional EMA10 slope. '
     'Strict comparisons; equality waits. EMA10 uses close, alpha 2/11, first-close seed, continuous over original warmup. '
     'FRESH_AND_EMA10_ENTRY now removes minute-gap setup vetoes, separate 1m entry evaluation and persistence. '
@@ -139,7 +139,7 @@ def build_frames(engine,day,raw,warm,dt):
     return frames
 
 
-def followup_check(side, signal, frame, at):
+def followup_check(side, signal, frame, at, require_direction=False):
     if side not in ('BULLISH','BEARISH'):raise ValueError('INVALID_DIRECTION')
     reasons=[]
     if at!=signal['due'] or at!=signal['time']+timedelta(minutes=5):reasons.append('NOT_IMMEDIATE_NEXT_5M_BOUNDARY')
@@ -153,7 +153,19 @@ def followup_check(side, signal, frame, at):
     close_pass=float(close)>float(original) if side=='BULLISH' else float(close)<float(original)
     midpoint_pass=float(close)>float(midpoint) if side=='BULLISH' else float(close)<float(midpoint)
     if not (close_pass or midpoint_pass):reasons.append('FOLLOWUP_CLOSE_NOT_ABOVE_SIGNAL_CLOSE_OR_MIDPOINT' if side=='BULLISH' else 'FOLLOWUP_CLOSE_NOT_BELOW_SIGNAL_CLOSE_OR_MIDPOINT')
+    direction={}
+    if require_direction:
+        values=[frame.get(k) for k in ('open','previous_rsi9','rsi9')]
+        valid=all(v is not None and not isinstance(v,bool) and math.isfinite(float(v)) for v in values)
+        valid=valid and float(values[0])>0 and all(0<=float(v)<=100 for v in values[1:])
+        current_rsi=frame.get('rsi_available_at')==at.isoformat()
+        colour=valid and (float(close)>float(values[0]) if side=='BULLISH' else float(close)<float(values[0]))
+        rsi_direction=valid and current_rsi and (float(values[2])>float(values[1]) if side=='BULLISH' else float(values[2])<float(values[1]))
+        if not colour:reasons.append('FOLLOWUP_CANDLE_COLOUR_FAILED')
+        if not rsi_direction:reasons.append('FOLLOWUP_RSI_DIRECTION_FAILED')
+        direction=dict(followup_colour_pass=bool(colour),followup_rsi_direction_pass=bool(rsi_direction),followup_direction_required=True)
     return dict(frame,passed=not reasons,reasons=reasons,signal_close=original,signal_midpoint=midpoint,
+                **direction,
                 signal_time=signal['time'].isoformat(),followup_rule='NEXT_CLOSE_VS_SIGNAL_CLOSE_OR_MIDPOINT',
                 signal_close_comparison_pass=close_pass,signal_midpoint_comparison_pass=midpoint_pass,
                 confirmation_route='BOTH' if close_pass and midpoint_pass else 'SIGNAL_CLOSE' if close_pass else 'MIDPOINT' if midpoint_pass else 'NONE')
@@ -184,7 +196,7 @@ def entry_gate(Parent,frames,rule='FULL_CANDLE',followup=False):
                     self.followup_signal=None;waiting=None
             self.followup_price_permission=None
             if followup and waiting is not None and at==waiting['due']:
-                price_ev=followup_check(waiting['direction'],waiting,frames.get(at),at)
+                price_ev=followup_check(waiting['direction'],waiting,frames.get(at),at,require_direction=True)
                 if price_ev['passed']:self.followup_price_permission=(waiting['direction'],at)
             try:
                 entries,checks=super().evaluate(**kwargs)
@@ -203,14 +215,14 @@ def entry_gate(Parent,frames,rule='FULL_CANDLE',followup=False):
             check=matching[0];boundary=at.replace(minute=at.minute//5*5,second=0,microsecond=0)
             is_followup=followup and waiting is not None and waiting['direction']==side and at==waiting['due']
             if is_followup:
-                evidence=followup_check(side,waiting,frames.get(boundary),at)
+                evidence=followup_check(side,waiting,frames.get(boundary),at,require_direction=True)
                 price_pass=evidence['passed']
                 fresh_pass=bool(check.get('wma_threshold_pass') and check.get('gap_positive_pass') and check.get('gap_expanding_pass'))
                 structural=[reason for reason in evidence['reasons'] if not reason.startswith('FOLLOWUP_CLOSE_NOT_')]
                 evidence.update(passed=not structural and (price_pass or fresh_pass),reasons=structural,
                     followup_price_pass=price_pass,fresh_strength_gap_pass=fresh_pass,
                     entry_confirmation_route='BOTH' if price_pass and fresh_pass else 'PRICE' if price_pass else 'FRESH_CHECKS' if fresh_pass else 'NONE')
-                if not evidence['passed']:evidence['reasons'].append('FOLLOWUP_PRICE_AND_FRESH_CHECKS_FAILED')
+                if not price_pass and not fresh_pass:evidence['reasons'].append('FOLLOWUP_PRICE_AND_FRESH_CHECKS_FAILED')
                 self.followup_signal=None
             else:
                 evidence=frame_check(side,frames.get(boundary),at,rule=rule)
@@ -460,10 +472,10 @@ def write_reports(output,days,results,coverage,provenance,version,unused,stats):
         vals=[f"{e[k]:.3f}" if e.get(k) is not None else '—' for k in ('open','high','low','close','ema10','ema10_slope','previous_rsi9','rsi9','directional_strength','directional_gap','gap_expansion')]
         outcome='PASS' if e['passed'] else 'WAIT: '+', '.join(e['reasons'])
         validation.append('| '+' | '.join([e['session_date'],e['policy'],e['setup_available'][11:16],e['time'][11:16],e['direction'],e.get('candle_label','—')[11:16]]+vals+[','.join(map(str,e.get('rsi_crossed_thresholds',[]))) or 'None',outcome])+' |')
-    validation+=['','## Follow-up candle checks','','| Date | Policy | Setup | Decision | Direction | Signal close | Signal midpoint | Follow-up close | Confirmation route | Outcome / reason |','|---|---|---|---|---|---:|---:|---:|---|---|']
+    validation+=['','## Follow-up candle checks','','| Date | Policy | Setup | Decision | Direction | Signal close | Signal midpoint | Follow-up close | Open | Previous RSI9 | RSI9 | Colour pass | RSI direction pass | Entry route | Outcome / reason |','|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---|---|---|---|']
     for e in events:
         if e['event']!='FOLLOWUP_CANDLE_CHECK':continue
-        validation.append('| '+' | '.join(str(x) for x in (e['session_date'],e['policy'],e['setup_available'][11:16],e['time'][11:16],e['direction'],e.get('signal_close','—'),e.get('signal_midpoint','—'),e.get('close','—'),e.get('confirmation_route','—'),'PASS' if e['passed'] else ', '.join(e['reasons'])))+' |')
+        validation.append('| '+' | '.join(str(x) for x in (e['session_date'],e['policy'],e['setup_available'][11:16],e['time'][11:16],e['direction'],e.get('signal_close','—'),e.get('signal_midpoint','—'),e.get('close','—'),e.get('open','—'),e.get('previous_rsi9','—'),e.get('rsi9','—'),e.get('followup_colour_pass','—'),e.get('followup_rsi_direction_pass','—'),e.get('entry_confirmation_route','—'),'PASS' if e['passed'] else ', '.join(e['reasons'])))+' |')
     (output/'ema10-entry-validation.md').write_text('\n'.join(validation)+'\n')
     for name,rows in (('trades.csv',trades),('losing-trades.csv',[t for t in trades if t['points']<0]),('entry-decisions.csv',events)):
         fields=sorted({k for row in rows for k in row}) or ['session_date','policy']
@@ -589,7 +601,7 @@ class Checks(unittest.TestCase):
                 def evaluate(self,**kw):
                     pending=self.pending.pop('BULLISH');self.owner='BULLISH';self.active=True
                     return ['entry'],[dict(direction='BULLISH',status='ENTRY',signal_available_at=pending['available'].isoformat(),reasons=[])]
-            frames={at:self.cross_frame(),at+timedelta(minutes=5):self.frame(close=close,available_at=(at+timedelta(minutes=5)).isoformat())}
+            frames={at:self.cross_frame(),at+timedelta(minutes=5):self.cross_frame(close=close,available_at=(at+timedelta(minutes=5)).isoformat())}
             g=entry_gate(Base,frames,rule='CLOSE_RSI_SLOPE_COLOUR',followup=True)()
             entries,checks=g.evaluate(minute=at-timedelta(minutes=1))
             self.assertFalse(entries);self.assertEqual(g.owner,'NONE');self.assertIn('BULLISH',g.pending)
@@ -713,6 +725,34 @@ class Checks(unittest.TestCase):
             signal=dict(time=at-timedelta(minutes=5),due=at,close=103,midpoint=105 if side=='BULLISH' else 101)
             ev=followup_check(side,signal,dict(close=close,available_at=at.isoformat()),at)
             self.assertTrue(ev['passed']);self.assertEqual(ev['confirmation_route'],'SIGNAL_CLOSE')
+    def test_followup_colour_and_rsi_are_mandatory_both_directions(self):
+        at=self.at.replace(minute=5)
+        signal=dict(time=at-timedelta(minutes=5),due=at,close=103,midpoint=103)
+        for side,close,opening,previous,current in [('BULLISH',104,103,45,46),('BEARISH',102,103,55,54)]:
+            frame=dict(open=opening,close=close,previous_rsi9=previous,rsi9=current,available_at=at.isoformat(),rsi_available_at=at.isoformat())
+            self.assertTrue(followup_check(side,signal,frame,at,require_direction=True)['passed'])
+            for change in (dict(open=close),dict(open=close+1 if side=='BULLISH' else close-1),dict(rsi9=previous),dict(rsi9=previous-1 if side=='BULLISH' else previous+1),dict(rsi_available_at=signal['time'].isoformat())):
+                ev=followup_check(side,signal,dict(frame,**change),at,require_direction=True)
+                self.assertFalse(ev['passed'])
+                structural=[r for r in ev['reasons'] if not r.startswith('FOLLOWUP_CLOSE_NOT_')]
+                self.assertTrue(structural) # Fresh strength/gap success cannot remove this veto.
+    def test_followup_fresh_checks_cannot_bypass_wrong_colour_or_rsi(self):
+        at=self.at.replace(minute=0)
+        for change in (dict(open=105),dict(previous_rsi9=47,rsi9=46)):
+            class Base:
+                def __init__(self):
+                    self.pending={'BULLISH':dict(available=at,armed_at=None)}
+                    self.owner='NONE';self.active=None;self.watch_side=None;self.watch_at=None
+                def can_signal(self,*args):return True
+                def evaluate(self,**kw):
+                    p=self.pending.pop('BULLISH');self.owner='BULLISH';self.active=True
+                    return ['entry'],[dict(direction='BULLISH',status='ENTRY',signal_available_at=p['available'].isoformat(),reasons=[],wma_threshold_pass=True,gap_positive_pass=True,gap_expanding_pass=True)]
+            later=at+timedelta(minutes=5)
+            frame=self.cross_frame(close=104,available_at=later.isoformat(),**change)
+            g=entry_gate(Base,{at:self.cross_frame(),later:frame},rule='CLOSE_RSI_SLOPE_COLOUR',followup=True)()
+            self.assertFalse(g.evaluate(minute=at-timedelta(minutes=1))[0])
+            self.assertFalse(g.evaluate(minute=later-timedelta(minutes=1))[0])
+            self.assertEqual(g.owner,'NONE');self.assertNotIn('BULLISH',g.pending)
     def test_followup_option_a_both_directions_and_equality(self):
         at=self.at.replace(minute=5)
         signal=dict(time=at-timedelta(minutes=5),due=at,close=103,midpoint=103)
