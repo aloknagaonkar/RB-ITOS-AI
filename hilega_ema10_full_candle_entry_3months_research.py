@@ -13,20 +13,20 @@ from pathlib import Path
 from types import SimpleNamespace
 import unittest
 
-MODEL='FRESH_DIRECT_5M_RSI40_60_CONTINUE_WAIT_V17'
+MODEL='FRESH_DIRECT_5M_RSI40_60_UNTIL_OPPOSITE_V18'
 BASES=('EXISTING','PREVIOUS_AND','FRESH_AND')
 POLICIES=tuple(k for b in BASES for k in (b,b+'_EMA10_ENTRY'))+('EXISTING_BASELINE_2',)
 WARNING=('Research only. Gross NIFTY points; no option fills or costs. Each EMA variant adds an entry gate to its own baseline. '
     'EXISTING_BASELINE_2 requires bullish completed 5m CLOSE > price EMA10 AND RSI9 crossing UP through 45 OR 55; '
     'bearish completed 5m CLOSE < EMA10 AND RSI9 crossing DOWN through 55 OR 45. Those baseline-2 conditions must pass on the same completed candle. Fresh EMA instead requires RSI9 rising and above40 for bullish, falling and below60 for bearish; fresh crosses or directional continuation qualify. Flat RSI and threshold equality fail. Its EMA slope, candle colour and other signal checks remain mandatory. '
     'Cross UP means previous RSI <= threshold and current RSI > threshold; DOWN means previous RSI >= threshold and current RSI < threshold. '
-    'No cross latch: evidence expires when a new completed 5m candle replaces it. Fresh direct 5m starts checking at the immediately next completed 5m close strictly above signal CLOSE OR signal midpoint for bullish, below signal CLOSE OR signal midpoint for bearish; midpoint=(signal high+low)/2, close-based comparison not intrabar touch; no entry on signal candle. Follow-up requires a green candle AND rising completed RSI9 for bullish, or a red candle AND falling completed RSI9 for bearish; doji/flat RSI fails. These mandatory checks cannot be bypassed by either price confirmation OR fresh strength/positive-expanding-gap checks. For the latest FRESH_AND_EMA10_ENTRY policy, WMA direction lock and RSI/EMA lock exceptions are DISABLED. Candidate validity, flat position and cutoff remain mandatory for either route. Signal candle still requires all original signal checks. No repeated RSI cross on follow-up. When a follow-up fails entry confirmation but fresh strength>=0.75, gap>0 and expansion>0 all pass on that completed candle, retain the original signal close/midpoint and check the next completed5m candle. Do not reset candidate age. Otherwise failure consumes this candidate; the just-completed failed follow-up is independently evaluated once for a fresh setup on the same boundary. A fresh qualifying signal waits for its own next completed candle; discarded close is never reused. Original cancellation, expiry and cutoff still apply. Wicks do not veto these two policies. Fresh direct 5m additionally requires rising EMA10 and green close>open for bullish, falling EMA10 and red close<open for bearish; flat EMA or doji fails. Existing baseline 2 has no slope or colour veto. '
+    'No cross latch: evidence expires when a new completed 5m candle replaces it. Fresh direct 5m starts checking at the immediately next completed 5m close strictly above signal CLOSE OR signal midpoint for bullish, below signal CLOSE OR signal midpoint for bearish; midpoint=(signal high+low)/2, close-based comparison not intrabar touch; no entry on signal candle. Follow-up requires a green candle AND rising completed RSI9 for bullish, or a red candle AND falling completed RSI9 for bearish; doji/flat RSI fails. These mandatory checks cannot be bypassed by either price confirmation OR fresh strength/positive-expanding-gap checks. For the latest FRESH_AND_EMA10_ENTRY policy, WMA direction lock and RSI/EMA lock exceptions are DISABLED. Candidate validity, flat position and cutoff remain mandatory for either route. Signal candle still requires all original signal checks. No repeated RSI cross on follow-up. Latest policy has NO candidate or direction-watch expiry. Failed follow-ups retain the original signal close/midpoint and are rechecked at each completed5m boundary using fresh values, even when strength/gap checks temporarily fail. Opposite arms, incomplete setups and canonical pending cancellation do not discard the candidate. Only a fully qualifying opposite signal replaces the pending direction; it must then pass its own follow-up. Same-direction repeats do not reset the setup or signal reference. Actual entry clears pending candidates; session cutoff still clears them. A fresh qualifying signal waits for its own next completed candle; discarded close is never reused. Original cancellation and expiry remain only in unchanged controls; cutoff still applies to all policies. Wicks do not veto these two policies. Fresh direct 5m additionally requires rising EMA10 and green close>open for bullish, falling EMA10 and red close<open for bearish; flat EMA or doji fails. Existing baseline 2 has no slope or colour veto. '
     'EXISTING_EMA10_ENTRY and PREVIOUS_AND_EMA10_ENTRY retain whole-candle position AND directional EMA10 slope. '
     'Strict comparisons; equality waits. EMA10 uses close, alpha 2/11, first-close seed, continuous over original warmup. '
     'FRESH_AND_EMA10_ENTRY now removes minute-gap setup vetoes, separate 1m entry evaluation and persistence. '
     'It evaluates strength >=0.75 and positive expanding gap against the previous completed 5m reference, plus close/RSI-directional-continuation, '
     'directly at completed 5m boundaries INCLUDING the setup boundary. WMA direction lock and 40/60 AND exceptions are disabled only for this latest policy; WMA alignment, strength and gap calculations remain required. '
-    'Its ten-minute candidate window and canonical cancellation remain; an opposite direction watch may be replaced only by a full qualifying completed5m signal (alignment, strength, expansion, EMA10 position/slope, candle colour, RSI continuation, flat and cutoff); an arm alone cannot override it; existing pending candidates are not refreshed. '
+    'Its time expiry and canonical pending cancellation are disabled; an opposite direction watch may be replaced only by a full qualifying completed5m signal (alignment, strength, expansion, EMA10 position/slope, candle colour, RSI continuation, flat and cutoff); an arm alone cannot override it; existing pending candidates are not refreshed. '
     'Other EMA variants retain their prior confirmation rules. WMA-vetoed candidates stay consumed. Original exits and 14:55 cutoff retained. '
     'EXISTING_BASELINE_2 instead validates only completed 5m boundaries: strength >=0.75, positive gap expanding versus the prior completed 5m, '
     'plus the close/RSI-cross conjunction above. No persistence veto or time-based candidate expiry in baseline 2. '
@@ -172,7 +172,7 @@ def followup_check(side, signal, frame, at, require_direction=False,continued=Fa
                 confirmation_route='BOTH' if close_pass and midpoint_pass else 'SIGNAL_CLOSE' if close_pass else 'MIDPOINT' if midpoint_pass else 'NONE')
 
 
-def entry_gate(Parent,frames,rule='FULL_CANDLE',followup=False,continue_waiting=False):
+def entry_gate(Parent,frames,rule='FULL_CANDLE',followup=False,continue_waiting=False,until_opposite=False):
     class EmaEntry(Parent):
         def __init__(self,*args,**kwargs):
             super().__init__(*args,**kwargs)
@@ -180,7 +180,7 @@ def entry_gate(Parent,frames,rule='FULL_CANDLE',followup=False,continue_waiting=
         def retain_followup(self,waiting,check,at,candidate):
             if not continue_waiting or candidate is None or candidate['available'].isoformat()!=waiting['setup_available']:return False
             if self.locked or at.strftime('%H:%M')>='14:55':return False
-            if not all(check.get(k) for k in ('wma_threshold_pass','gap_positive_pass','gap_expanding_pass')):return False
+            if not until_opposite and not all(check.get(k) for k in ('wma_threshold_pass','gap_positive_pass','gap_expanding_pass')):return False
             # Retain original reference and identity, never refresh candidate lifetime.
             self.pending[waiting['direction']]=candidate
             self.followup_signal=dict(waiting,due=at+timedelta(minutes=5))
@@ -218,7 +218,7 @@ def entry_gate(Parent,frames,rule='FULL_CANDLE',followup=False,continue_waiting=
                     ev=followup_check(side,waiting,frames.get(at),at,require_direction=True,continued=continue_waiting)
                     retained=self.retain_followup(waiting,check,at,self.pending.get(side))
                     ev.update(passed=False,continued_wait=retained)
-                    ev['reasons']=list(ev['reasons'])+(['CONTINUE_WAIT_FRESH_STRENGTH_GAP_PASSED'] if retained else ['FRESH_ENTRY_CHECKS_FAILED_OR_CANDIDATE_CANCELLED'])
+                    ev['reasons']=list(ev['reasons'])+(['CONTINUE_WAIT_UNTIL_QUALIFIED_OPPOSITE' if until_opposite else 'CONTINUE_WAIT_FRESH_STRENGTH_GAP_PASSED'] if retained else ['FRESH_ENTRY_CHECKS_FAILED_OR_CANDIDATE_CANCELLED'])
                     self.policy_events.append(dict(event='FOLLOWUP_CANDLE_CHECK',time=at.isoformat(),direction=side,setup_available=waiting['setup_available'],directional_strength=check.get('directional_wma_strength'),directional_gap=check.get('current_gap'),gap_expansion=check.get('gap_delta'),**ev))
                     if not retained:
                         self.pending.pop(side,None)
@@ -258,7 +258,7 @@ def entry_gate(Parent,frames,rule='FULL_CANDLE',followup=False,continue_waiting=
             if is_followup:
                 retained=self.retain_followup(waiting,check,at,candidate)
                 evidence['continued_wait']=retained
-                if retained:evidence['reasons'].append('CONTINUE_WAIT_FRESH_STRENGTH_GAP_PASSED')
+                if retained:evidence['reasons'].append('CONTINUE_WAIT_UNTIL_QUALIFIED_OPPOSITE' if until_opposite else 'CONTINUE_WAIT_FRESH_STRENGTH_GAP_PASSED')
                 else:
                     self.pending.pop(side,None)
                     self.followup_failed_at=at
@@ -297,19 +297,23 @@ def baseline2_gate(engine,frames,rule='FULL_CANDLE'):
     return entry_gate(ValidatedBoundary,frames,rule=rule)
 
 
-def direct_five_base(Base):
+def direct_five_base(Base,no_expiry=False):
     """5m-only strength/gap evaluation, no persistence, same-boundary setup allowed."""
     import textwrap
     source=textwrap.dedent(inspect.getsource(Base.evaluate))
     replacements={
         "previous['minute']==minute-timedelta(minutes=1)":"previous['minute']==minute-timedelta(minutes=5)",
-        'elapsed=0<=age<10 or same_boundary':'elapsed=-1<=age<10 or same_boundary',
+        'elapsed=0<=age<10 or same_boundary':'elapsed=age>=-1 or same_boundary' if no_expiry else 'elapsed=-1<=age<10 or same_boundary',
         'if age<0 and not same_boundary:':'if age<-1 and not same_boundary:',
         "if not persistence:reasons.append('WAIT_LATER_PERSISTENCE')":'# Persistence is diagnostic only in direct 5m research.',
     }
     for old,new in replacements.items():
         if source.count(old)!=1:raise ValueError('DIRECT_5M_GATE_ANCHOR_MISMATCH:'+old)
         source=source.replace(old,new,1)
+    if no_expiry:
+        old='elif age>=10 or self.locked:del self.pending[side]'
+        if source.count(old)!=1:raise ValueError('UNLIMITED_EXPIRY_ANCHOR_MISMATCH')
+        source=source.replace(old,'elif self.locked:del self.pending[side]',1)
     anchor_text="if self.owner!='NONE':reasons.append('ACTIVE_TRADE_OWNER')"
     matches=[line for line in source.splitlines() if line.strip()==anchor_text]
     if len(matches)!=1:raise ValueError('FOLLOWUP_OR_GATE_ANCHOR_MISMATCH')
@@ -330,7 +334,7 @@ def direct_five_base(Base):
             if at.minute%5:
                 self.can_signal('BULLISH',at)
                 for side,pending in list(self.pending.items()):
-                    if self.locked or (minute-pending['available']).total_seconds()/60>=10:del self.pending[side]
+                    if self.locked or (not no_expiry and (minute-pending['available']).total_seconds()/60>=10):del self.pending[side]
                 self.previous=history
                 return [],[]
             # Use the immediately prior completed 5m indicator snapshot, including opening reference.
@@ -363,7 +367,7 @@ def followup_retry_source(source):
     return source.replace(evaluation,evaluation+'\n'+retry.rstrip('\n'),1)
 
 
-def direct_fresh_replay(engine,fresh,retry_followup=False):
+def direct_fresh_replay(engine,fresh,retry_followup=False,until_opposite=False):
     original=fresh.fresh_replay(engine)
     source=inspect.getsource(original)
     old='and aligned and gap is not None and gap>0 and expanding and not episode[side]'
@@ -372,6 +376,10 @@ def direct_fresh_replay(engine,fresh,retry_followup=False):
     old='delta=gap-pg,strength='
     if source.count(old)!=1:raise ValueError('DIRECT_SETUP_DIAGNOSTIC_ANCHOR_MISMATCH')
     source=source.replace(old,'delta=(gap-pg if gap is not None and pg is not None else None),strength=',1)
+    if until_opposite:
+        old='if e.event_type in EXIT_TYPES:g.pending.pop(direction(e),None)'
+        if source.count(old)!=1:raise ValueError('RETAIN_CANONICAL_CANCEL_ANCHOR_MISMATCH')
+        source=source.replace(old,'if False:pass # Pending survives canonical cancellation until qualifying opposite signal.',1)
     if retry_followup:source=followup_retry_source(source)
     filename='<hilega-direct-fresh-five-minute-replay>'
     linecache.cache[filename]=(len(source),None,source.splitlines(True),filename)
@@ -380,7 +388,7 @@ def direct_fresh_replay(engine,fresh,retry_followup=False):
     return namespace['replay']
 
 
-def qualified_opposite_watch_gate(Parent,frames,direction,require_wma_permission=True,signal_rule='CLOSE_RSI_CONTINUATION_SLOPE_COLOUR'):
+def qualified_opposite_watch_gate(Parent,frames,direction,require_wma_permission=True,signal_rule='CLOSE_RSI_CONTINUATION_SLOPE_COLOUR',until_opposite=False):
     """Only a complete new signal may override an opposite setup watch."""
     class QualifiedWatch(Parent):
         def __init__(self,*args,**kwargs):
@@ -401,17 +409,28 @@ def qualified_opposite_watch_gate(Parent,frames,direction,require_wma_permission
             import hilega_existing_ema10_wma_exception_40_60_last10_research as exception
             return exception.exception_allows(self.direction_lock.side,side,r,e)
         def can_signal(self,side,at):
+            if until_opposite:
+                return self.watch_side in (None,side) or self.qualifies(side,at)
             allowed=super().can_signal(side,at)
             if allowed:return True
             return self.watch_side is not None and self.watch_side!=side and self.qualifies(side,at)
         def signal(self,event,available):
             side=direction(event)
+            if until_opposite and side in self.pending:return
             opposite=self.watch_side is not None and self.watch_side!=side
             if opposite:
                 if not self.qualifies(side,available):return
                 self.policy_events.append(dict(event='QUALIFIED_OPPOSITE_WATCH_OVERRIDE',time=available.isoformat(),
                     setup_available=available.isoformat(),direction=side,previous_watch=self.watch_side,previous_watch_at=self.watch_at.isoformat() if self.watch_at else None))
             return super().signal(event,available)
+        def observe_arms(self,events,available):
+            if until_opposite:return
+            return super().observe_arms(events,available)
+        def close(self,event,at,price):
+            # Canonical cancellation while flat must not erase a retained setup.
+            # Active-position exits and session cutoff are unchanged.
+            if until_opposite and self.owner!=direction(event):return None
+            return super().close(event,at,price)
     return QualifiedWatch
 
 
@@ -424,10 +443,10 @@ def add_variants(engine,baseline,old,new,Gate,NewGate,fresh,p,day,raw,warm,asof,
         ('FRESH_AND',NewGate,fresh.fresh_replay(engine))):
         rule='CLOSE_RSI40_60_SLOPE_COLOUR' if key=='FRESH_AND' else 'FULL_CANDLE'
         if key=='FRESH_AND':
-            parent=direct_five_base(engine.WmaGapGate)
-            parent=qualified_opposite_watch_gate(parent,frames,engine.direction,require_wma_permission=False,signal_rule=rule)
-            replay=direct_fresh_replay(engine,fresh,retry_followup=True)
-        variants[key+'_EMA10_ENTRY']=p.simulate(SimpleNamespace(WmaGapGate=entry_gate(parent,frames,rule=rule,followup=key=='FRESH_AND',continue_waiting=key=='FRESH_AND'),replay=replay),day,raw,warm,asof,'CURRENT')
+            parent=direct_five_base(engine.WmaGapGate,no_expiry=True)
+            parent=qualified_opposite_watch_gate(parent,frames,engine.direction,require_wma_permission=False,signal_rule=rule,until_opposite=True)
+            replay=direct_fresh_replay(engine,fresh,retry_followup=True,until_opposite=True)
+        variants[key+'_EMA10_ENTRY']=p.simulate(SimpleNamespace(WmaGapGate=entry_gate(parent,frames,rule=rule,followup=key=='FRESH_AND',continue_waiting=key=='FRESH_AND',until_opposite=key=='FRESH_AND'),replay=replay),day,raw,warm,asof,'CURRENT')
         if key=='FRESH_AND':
             value=variants[key+'_EMA10_ENTRY']
             for row in value['setup_diagnostics']:
@@ -438,7 +457,7 @@ def add_variants(engine,baseline,old,new,Gate,NewGate,fresh,p,day,raw,warm,asof,
             for signal in value.get('alternative_signals',[]):signal['minute_gap_diagnostic_only']=True
             value['research_entry_rules']=dict(evaluation_minutes=5,strength_min=.75,positive_expanding_5m_gap=True,
                 minute_gap_setup_filter=False,persistence_required=False,setup_boundary_entry_allowed=True,
-                candidate_expiry_minutes=10,wma_lock_and_exception=False,continue_wait_on_fresh_checks=True,ema_rule='CLOSE_RSI40_60_SLOPE_COLOUR',rsi_rule='RISING_ABOVE_40_OR_FALLING_BELOW_60',ema10_slope_required=True,candle_colour_required=True,followup='PRICE_CLOSE_OR_MIDPOINT_OR_FRESH_STRENGTH_GAP',wma_permission_mandatory=False,fresh_setup_after_failed_followup_same_boundary=True,qualified_opposite_signal_overrides_watch=True)
+                candidate_expiry_minutes=None,wma_lock_and_exception=False,continue_until_qualified_opposite=True,ema_rule='CLOSE_RSI40_60_SLOPE_COLOUR',rsi_rule='RISING_ABOVE_40_OR_FALLING_BELOW_60',ema10_slope_required=True,candle_colour_required=True,followup='PRICE_CLOSE_OR_MIDPOINT_OR_FRESH_STRENGTH_GAP',wma_permission_mandatory=False,fresh_setup_after_failed_followup_same_boundary=True,qualified_opposite_signal_overrides_watch=True)
     variants['EXISTING_BASELINE_2']=p.simulate(SimpleNamespace(WmaGapGate=baseline2_gate(engine,frames,rule='CLOSE_AND_RSI_CROSS'),replay=engine.replay),day,raw,warm,asof,'CURRENT')
     return variants
 
@@ -465,7 +484,7 @@ def write_reports(output,days,results,coverage,provenance,version,unused,stats):
         lines.append(f"| {key} | {s['trades']} | {s['gross_winning_points']:+.2f} | {-s['gross_losing_points']:.2f} | {s['points']:+.2f} | {s['points']-totals[parent]['points']:+.2f} | {s['winners']} | {s['losers']} | {s['flat']} | {s['max_closed_trade_drawdown_points']:.2f} |")
     lines+=['','| Date | '+' | '.join(POLICIES)+' |','|---|'+'---:|'*len(POLICIES)]
     detail=['# Signal-wise actual entry / exit / points','',WARNING,'',
-        'Times IST. A dash means no actual entry from that exact setup, not proof of direct rejection. WAIT_EMA10_ENTRY retains the original candidate only within its existing window. BLOCKED_WMA_LOCK consumes it. See entry-decisions.csv for explicit outcomes. Different setup identities can produce the same actual trade.','']
+        'Times IST. A dash means no actual entry from that exact setup, not proof of direct rejection. WAIT_EMA10_ENTRY retains the latest-policy candidate without time expiry until entry, qualified opposite replacement or cutoff. BLOCKED_WMA_LOCK consumes it. See entry-decisions.csv for explicit outcomes. Different setup identities can produce the same actual trade.','']
     trades=[];events=[]
     for day,v in sorted(results.items()):
         lines.append('| '+day+' | '+' | '.join(f"{stats.stats(v[k]['trades'])['points']:+.2f}" for k in POLICIES)+' |')
@@ -923,10 +942,10 @@ class Checks(unittest.TestCase):
         rows=dict(audit=[dict(checkpoint=at.isoformat(),completed_5m_indicators=dict(rsi9=46),five_minute_changes=dict(rsi9=2))])
         attach_completed_rsi(frames,rows,datetime.fromisoformat)
         self.assertEqual(frames[at]['previous_rsi9'],44);self.assertEqual(frames[at]['rsi9'],46)
-    def direct_harness(self,strength=1,gap=2):
+    def direct_harness(self,strength=1,gap=2,no_expiry=False):
         from market_lab import hilega_v2_alignment_replay_v1 as engine
         at=datetime.fromisoformat('2026-10-16T14:20:00+05:30')
-        g=direct_five_base(engine.WmaGapGate)(opposite_switch=True)
+        g=direct_five_base(engine.WmaGapGate,no_expiry=no_expiry)(opposite_switch=True)
         event=engine.StrategyEvent('ENTRY_BEARISH_ROUTE_B_STRUCTURAL',at,None,'IDLE','ARMED',details={})
         g.signal(event,at)
         reference=SimpleNamespace(ready=True,wma21_rsi=50,ema3_rsi=49,rsi9=48)
@@ -954,6 +973,43 @@ class Checks(unittest.TestCase):
     def test_direct5m_original_ten_minute_expiry_retained(self):
         g,tick,_,_=self.direct_harness(gap=1);tick();tick(5);tick(10);tick(11)
         self.assertFalse(g.pending);self.assertFalse(tick(15)[0])
+    def test_no_expiry_survives_between_boundaries_and_old_age(self):
+        g,tick,at,engine=self.direct_harness(strength=.2,no_expiry=True)
+        for offset in (0,5,10,11,15,20,25):
+            self.assertFalse(tick(offset)[0]);self.assertEqual(g.pending['BEARISH']['available'],at)
+        entries,checks=tick(30,SimpleNamespace(ready=True,wma21_rsi=49,ema3_rsi=46,rsi9=45))
+        self.assertTrue(entries);self.assertTrue(checks[0]['confirmation_window_pass'])
+    def test_no_expiry_still_rejects_cutoff_entry(self):
+        g,tick,_,_=self.direct_harness(strength=.2,no_expiry=True)
+        tick(30)
+        self.assertFalse(tick(35,SimpleNamespace(ready=True,wma21_rsi=49,ema3_rsi=46,rsi9=45))[0])
+    def test_until_opposite_ignores_arms_and_repeated_setup(self):
+        from market_lab import hilega_v2_alignment_replay_v1 as engine
+        at=self.at.replace(minute=0)
+        frame=self.cross_frame(previous=53,current=44,open=103,close=102,ema10=105,previous_ema10=106,
+            ema3_rsi=48,wma21_rsi=52,previous_ema3_rsi=52,previous_wma21_rsi=53)
+        Gate=qualified_opposite_watch_gate(direct_five_base(engine.WmaGapGate,no_expiry=True),{at:frame},engine.direction,require_wma_permission=False,signal_rule='CLOSE_RSI40_60_SLOPE_COLOUR',until_opposite=True)
+        g=Gate(opposite_switch=True)
+        def event(side):return engine.StrategyEvent('ENTRY_BEARISH_ROUTE_B_STRUCTURAL' if side=='BEARISH' else 'ENTRY_BULLISH_ROUTE_B_STRUCTURAL',at,None,'IDLE','ARMED',details={})
+        # Use an original recognised bullish ENTRY type from the engine registry.
+        bull_type=next(k for k in engine.ENTRY_TYPES if engine.direction(engine.StrategyEvent(k,at,None,'IDLE','ARMED',details={}))=='BULLISH')
+        bull=engine.StrategyEvent(bull_type,at,None,'IDLE','ARMED',details={})
+        g.signal(bull,at-timedelta(minutes=20));original=g.pending['BULLISH']
+        g.signal(bull,at);self.assertIs(g.pending['BULLISH'],original)
+        arm=engine.StrategyEvent('BEARISH_PATH1_ARMED_RSI_CROSS_EMA3_DOWN',at,None,'IDLE','ARMED',details={})
+        g.observe_arms([arm],at);self.assertIn('BULLISH',g.pending)
+        self.assertEqual(g.watch_side,'BULLISH')
+        frame['previous_wma21_rsi']=52.2
+        g.signal(event('BEARISH'),at);self.assertIn('BULLISH',g.pending)
+        frame['previous_wma21_rsi']=53
+        g.signal(event('BEARISH'),at);self.assertNotIn('BULLISH',g.pending);self.assertIn('BEARISH',g.pending)
+    def test_until_opposite_replay_disables_only_pending_canonical_cancel(self):
+        from market_lab import hilega_v2_alignment_replay_v1 as engine
+        import hilega_and_fresh_setup_last10_research as fresh
+        source=inspect.getsource(direct_fresh_replay(engine,fresh,until_opposite=True))
+        self.assertNotIn('if e.event_type in EXIT_TYPES:g.pending.pop(direction(e),None)',source)
+        self.assertIn('if dual_exit(side,new):',source)
+        self.assertIn("if at.strftime('%H:%M')>='14:55':g.pending.clear()",source)
     def test_direct5m_original_engine_unchanged(self):
         from market_lab import hilega_v2_alignment_replay_v1 as engine
         source=inspect.getsource(engine.WmaGapGate.evaluate);direct_five_base(engine.WmaGapGate)
