@@ -507,7 +507,9 @@ class Checks(unittest.TestCase):
         self.assertNotIn("rule='CLOSE_BOTH'",source)
         self.assertNotIn("rule='BULLISH_CLOSE'",source)
     def cross_frame(self,previous=44,current=46,**kw):
-        return self.frame(previous_rsi9=previous,rsi9=current,rsi_available_at='2026-10-16T10:00:00+05:30',**kw)
+        values=dict(previous_rsi9=previous,rsi9=current,rsi_available_at=kw.get('available_at','2026-10-16T10:00:00+05:30'))
+        values.update(kw)
+        return self.frame(**values)
     def test_followup_gate_waits_then_enters_or_consumes_failure(self):
         for close,expected in [(104,True),(102,False)]:
             at=self.at.replace(minute=0)
