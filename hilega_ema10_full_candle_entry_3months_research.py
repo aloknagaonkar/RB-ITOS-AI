@@ -13,14 +13,14 @@ from pathlib import Path
 from types import SimpleNamespace
 import unittest
 
-MODEL='FRESH_DIRECT_5M_STRENGTH_GAP_EMA10_RSI_CROSS_V7'
+MODEL='FRESH_DIRECT_5M_EMA10_SLOPE_CANDLE_COLOUR_V8'
 BASES=('EXISTING','PREVIOUS_AND','FRESH_AND')
 POLICIES=tuple(k for b in BASES for k in (b,b+'_EMA10_ENTRY'))+('EXISTING_BASELINE_2',)
 WARNING=('Research only. Gross NIFTY points; no option fills or costs. Each EMA variant adds an entry gate to its own baseline. '
     'FRESH_AND_EMA10_ENTRY and EXISTING_BASELINE_2 require bullish completed 5m CLOSE > price EMA10 AND RSI9 crossing UP through 45 OR 55; '
     'bearish completed 5m CLOSE < EMA10 AND RSI9 crossing DOWN through 55 OR 45. Both conditions must pass on the same completed candle. '
     'Cross UP means previous RSI <= threshold and current RSI > threshold; DOWN means previous RSI >= threshold and current RSI < threshold. '
-    'No cross latch: evidence expires when a new completed 5m candle replaces it. Wick position and EMA10 slope are diagnostic only for these two policies. '
+    'No cross latch: evidence expires when a new completed 5m candle replaces it. Wicks do not veto these two policies. Fresh direct 5m additionally requires rising EMA10 and green close>open for bullish, falling EMA10 and red close<open for bearish; flat EMA or doji fails. Existing baseline 2 has no slope or colour veto. '
     'EXISTING_EMA10_ENTRY and PREVIOUS_AND_EMA10_ENTRY retain whole-candle position AND directional EMA10 slope. '
     'Strict comparisons; equality waits. EMA10 uses close, alpha 2/11, first-close seed, continuous over original warmup. '
     'FRESH_AND_EMA10_ENTRY now removes minute-gap setup vetoes, separate 1m entry evaluation and persistence. '
@@ -72,7 +72,7 @@ def attach_completed_rsi(frames,baseline,dt):
 
 def frame_check(side, frame, at, rule='FULL_CANDLE'):
     if side not in ('BULLISH','BEARISH'):raise ValueError('INVALID_DIRECTION')
-    if rule not in ('FULL_CANDLE','BULLISH_CLOSE','CLOSE_BOTH','CLOSE_AND_RSI_CROSS'):raise ValueError('INVALID_EMA_ENTRY_RULE')
+    if rule not in ('FULL_CANDLE','BULLISH_CLOSE','CLOSE_BOTH','CLOSE_AND_RSI_CROSS','CLOSE_RSI_SLOPE_COLOUR'):raise ValueError('INVALID_EMA_ENTRY_RULE')
     if frame is None:return dict(passed=False,reasons=['COMPLETED_5M_FRAME_MISSING'])
     available=datetime.fromisoformat(frame['available_at'])
     if available>at:raise ValueError('FUTURE_EMA_FRAME')
@@ -84,7 +84,9 @@ def frame_check(side, frame, at, rule='FULL_CANDLE'):
             raise ValueError('INVALID_EMA_FRAME:'+k)
     o,h,l,c,e,p=(float(frame[k]) for k in fields)
     if h<max(o,l,c) or l>min(o,c):raise ValueError('INVALID_OHLC')
-    close_only=rule in ('CLOSE_BOTH','CLOSE_AND_RSI_CROSS') or (side=='BULLISH' and rule=='BULLISH_CLOSE')
+    cross_required=rule in ('CLOSE_AND_RSI_CROSS','CLOSE_RSI_SLOPE_COLOUR')
+    slope_colour=rule=='CLOSE_RSI_SLOPE_COLOUR'
+    close_only=rule in ('CLOSE_BOTH','CLOSE_AND_RSI_CROSS','CLOSE_RSI_SLOPE_COLOUR') or (side=='BULLISH' and rule=='BULLISH_CLOSE')
     whole_side=l>e if side=='BULLISH' else h<e
     close_side=c>e if side=='BULLISH' else c<e
     correct_side=close_side if close_only else whole_side
@@ -93,16 +95,18 @@ def frame_check(side, frame, at, rule='FULL_CANDLE'):
     if not correct_side:
         if close_only:reasons.append('BULLISH_CLOSE_NOT_ABOVE_EMA10' if side=='BULLISH' else 'BEARISH_CLOSE_NOT_BELOW_EMA10')
         else:reasons.append('ENTIRE_CANDLE_NOT_ABOVE_EMA10' if side=='BULLISH' else 'ENTIRE_CANDLE_NOT_BELOW_EMA10')
-    if not close_only and not correct_slope:reasons.append('EMA10_NOT_RISING' if side=='BULLISH' else 'EMA10_NOT_FALLING')
+    if (not close_only or slope_colour) and not correct_slope:reasons.append('EMA10_NOT_RISING' if side=='BULLISH' else 'EMA10_NOT_FALLING')
     cross=rsi_cross(side,frame.get('previous_rsi9'),frame.get('rsi9'))
-    if rule=='CLOSE_AND_RSI_CROSS':
+    colour_pass=c>o if side=='BULLISH' else c<o
+    if slope_colour and not colour_pass:reasons.append('BULLISH_CANDLE_NOT_GREEN' if side=='BULLISH' else 'BEARISH_CANDLE_NOT_RED')
+    if cross_required:
         if frame.get('rsi_available_at') is not None and frame['rsi_available_at']!=frame['available_at']:raise ValueError('RSI_EMA_BOUNDARY_MISMATCH')
         if not cross['rsi_evidence_available']:reasons.append('COMPLETED_RSI_CROSS_EVIDENCE_MISSING')
         elif not cross['rsi_cross_pass']:reasons.append('NO_COMPLETED_RSI_UP_CROSS_45_OR_55' if side=='BULLISH' else 'NO_COMPLETED_RSI_DOWN_CROSS_55_OR_45')
     return dict(frame,passed=not reasons,reasons=reasons,ema10_slope=e-p,
                 entire_candle_pass=whole_side,slope_pass=correct_slope,price_position_pass=correct_side,
-                ema_entry_rule=rule,slope_required=not close_only,close_above_ema10=c>e,close_below_ema10=c<e,
-                rsi_cross_required=rule=='CLOSE_AND_RSI_CROSS',**cross)
+                ema_entry_rule=rule,slope_required=not close_only or slope_colour,candle_colour_required=slope_colour,candle_colour_pass=colour_pass,close_above_ema10=c>e,close_below_ema10=c<e,
+                rsi_cross_required=cross_required,**cross)
 
 
 def build_frames(engine,day,raw,warm,dt):
@@ -250,7 +254,7 @@ def add_variants(engine,baseline,old,new,Gate,NewGate,fresh,p,day,raw,warm,asof,
         ('EXISTING',engine.WmaGapGate,engine.replay),
         ('PREVIOUS_AND',Gate,engine.replay),
         ('FRESH_AND',NewGate,fresh.fresh_replay(engine))):
-        rule='CLOSE_AND_RSI_CROSS' if key=='FRESH_AND' else 'FULL_CANDLE'
+        rule='CLOSE_RSI_SLOPE_COLOUR' if key=='FRESH_AND' else 'FULL_CANDLE'
         if key=='FRESH_AND':
             parent=fresh.combined_gate(SimpleNamespace(WmaGapGate=direct_five_base(engine.WmaGapGate),direction=engine.direction),{},wm,lock,None,threshold)
             replay=direct_fresh_replay(engine,fresh)
@@ -265,7 +269,7 @@ def add_variants(engine,baseline,old,new,Gate,NewGate,fresh,p,day,raw,warm,asof,
             for signal in value.get('alternative_signals',[]):signal['minute_gap_diagnostic_only']=True
             value['research_entry_rules']=dict(evaluation_minutes=5,strength_min=.75,positive_expanding_5m_gap=True,
                 minute_gap_setup_filter=False,persistence_required=False,setup_boundary_entry_allowed=True,
-                candidate_expiry_minutes=10,wma_lock_and_exception=True,ema_rule='CLOSE_AND_RSI_CROSS')
+                candidate_expiry_minutes=10,wma_lock_and_exception=True,ema_rule='CLOSE_RSI_SLOPE_COLOUR',ema10_slope_required=True,candle_colour_required=True)
     variants['EXISTING_BASELINE_2']=p.simulate(SimpleNamespace(WmaGapGate=baseline2_gate(engine,frames,rule='CLOSE_AND_RSI_CROSS'),replay=engine.replay),day,raw,warm,asof,'CURRENT')
     return variants
 
@@ -309,7 +313,7 @@ def write_reports(output,days,results,coverage,provenance,version,unused,stats):
             detail.append('| '+side+' | '+signal[11:16]+' | '+' | '.join(cells)+' |')
     report=dict(model=MODEL,status='COMPLETE' if complete else 'INCOMPLETE',session_dates=days,strategy_version=version,
         coverage=coverage,provenance=provenance,comparisons=totals,warning=WARNING,
-        ema10_entry_rules={key:('CLOSE_AND_RSI_CROSS_45_OR_55' if key in ('FRESH_AND_EMA10_ENTRY','EXISTING_BASELINE_2') else 'FULL_CANDLE_AND_EMA_SLOPE')
+        ema10_entry_rules={key:('CLOSE_RSI_CROSS_SLOPE_COLOUR' if key=='FRESH_AND_EMA10_ENTRY' else 'CLOSE_AND_RSI_CROSS_45_OR_55' if key=='EXISTING_BASELINE_2' else 'FULL_CANDLE_AND_EMA_SLOPE')
             for key in ('EXISTING_EMA10_ENTRY','PREVIOUS_AND_EMA10_ENTRY','FRESH_AND_EMA10_ENTRY','EXISTING_BASELINE_2')},
         orders_sent=False,observation_only=True)
     (output/'report.json').write_text(json.dumps(report,indent=2,default=str)+'\n')
@@ -430,12 +434,32 @@ class Checks(unittest.TestCase):
             self.assertEqual((a['passed'],a['reasons']),(b['passed'],b['reasons']))
     def test_scoped_routing_only_two_policies_use_cross_rule(self):
         source=inspect.getsource(add_variants)
-        self.assertIn("rule='CLOSE_AND_RSI_CROSS' if key=='FRESH_AND' else 'FULL_CANDLE'",source)
+        self.assertIn("rule='CLOSE_RSI_SLOPE_COLOUR' if key=='FRESH_AND' else 'FULL_CANDLE'",source)
         self.assertIn("baseline2_gate(engine,frames,rule='CLOSE_AND_RSI_CROSS')",source)
         self.assertNotIn("rule='CLOSE_BOTH'",source)
         self.assertNotIn("rule='BULLISH_CLOSE'",source)
     def cross_frame(self,previous=44,current=46,**kw):
         return self.frame(previous_rsi9=previous,rsi9=current,rsi_available_at='2026-10-16T10:00:00+05:30',**kw)
+    def test_slope_colour_bullish_pass(self):
+        self.assertTrue(frame_check('BULLISH',self.cross_frame(),self.at,rule='CLOSE_RSI_SLOPE_COLOUR')['passed'])
+    def test_slope_colour_bearish_pass(self):
+        f=self.cross_frame(previous=56,current=54,open=103,close=102,ema10=105,previous_ema10=106)
+        self.assertTrue(frame_check('BEARISH',f,self.at,rule='CLOSE_RSI_SLOPE_COLOUR')['passed'])
+    def test_slope_colour_wrong_and_flat_slope_rejected_both_directions(self):
+        for side,previous,current,ema in [('BULLISH',44,46,100),('BEARISH',56,54,105)]:
+            for prior in ([100,101] if side=='BULLISH' else [105,104]):
+                f=self.cross_frame(previous=previous,current=current,open=102 if side=='BULLISH' else 103,close=103 if side=='BULLISH' else 102,ema10=ema,previous_ema10=prior)
+                ev=frame_check(side,f,self.at,rule='CLOSE_RSI_SLOPE_COLOUR')
+                self.assertFalse(ev['passed']);self.assertFalse(ev['slope_pass'])
+    def test_slope_colour_wrong_colour_and_doji_rejected(self):
+        for side in ('BULLISH','BEARISH'):
+            for opening in ([103,104] if side=='BULLISH' else [102,101]):
+                f=self.cross_frame(previous=44 if side=='BULLISH' else 56,current=46 if side=='BULLISH' else 54,open=opening,close=103 if side=='BULLISH' else 102,ema10=100 if side=='BULLISH' else 105,previous_ema10=99 if side=='BULLISH' else 106)
+                ev=frame_check(side,f,self.at,rule='CLOSE_RSI_SLOPE_COLOUR')
+                self.assertFalse(ev['passed']);self.assertFalse(ev['candle_colour_pass'])
+    def test_slope_colour_still_requires_cross_and_price(self):
+        for changes in [dict(previous=56,current=58),dict(ema10=104,previous_ema10=103)]:
+            self.assertFalse(frame_check('BULLISH',self.cross_frame(**changes),self.at,rule='CLOSE_RSI_SLOPE_COLOUR')['passed'])
     def test_rsi_bullish_either_threshold(self):
         self.assertEqual(rsi_cross('BULLISH',44,46)['rsi_crossed_thresholds'],[45])
         self.assertEqual(rsi_cross('BULLISH',54,56)['rsi_crossed_thresholds'],[55])
@@ -537,9 +561,9 @@ class Checks(unittest.TestCase):
     def test_direct5m_cross_close_gate_runs_on_setup_boundary(self):
         from market_lab import hilega_v2_alignment_replay_v1 as engine
         at=datetime.fromisoformat('2026-10-16T14:20:00+05:30')
-        frame=dict(open=100,high=107,low=99,close=100,ema10=105,previous_ema10=104,
+        frame=dict(open=101,high=107,low=99,close=100,ema10=105,previous_ema10=106,
             previous_rsi9=56,rsi9=54,available_at=at.isoformat(),rsi_available_at=at.isoformat())
-        g=entry_gate(direct_five_base(engine.WmaGapGate),{at:frame},rule='CLOSE_AND_RSI_CROSS')(opposite_switch=True)
+        g=entry_gate(direct_five_base(engine.WmaGapGate),{at:frame},rule='CLOSE_RSI_SLOPE_COLOUR')(opposite_switch=True)
         ev=engine.StrategyEvent('ENTRY_BEARISH_ROUTE_B_STRUCTURAL',at,None,'IDLE','ARMED',details={});g.signal(ev,at)
         entries,checks=g.evaluate(minute=at-timedelta(minutes=1),current=SimpleNamespace(ready=True,wma21_rsi=49,ema3_rsi=47,rsi9=46),
             reference=SimpleNamespace(ready=True,wma21_rsi=50,ema3_rsi=49,rsi9=48),price=100)
@@ -669,7 +693,7 @@ def main():
         "args=ap.parse_args()\n    if args.date:\n        if any(x in ('--sessions','--end-date') or x.startswith(('--sessions=','--end-date=')) for x in sys.argv[1:]):ap.error('--date cannot be combined with --sessions or --end-date')\n        args.end_date=args.date\n        args.sessions=1\n        if not any(x=='--output' or x.startswith('--output=') for x in sys.argv[1:]):args.output=Path('data/research/hilega-ema10-entry-day-'+args.date.replace('-',''))")
     replace("days=select_sessions(calendar,parent['start_date'],args.end_date,args.sessions,extra['session_date'])",
         "days=single_session(args.date,calendar,parent['start_date'],extra['session_date'],extra['session_date']) if args.date else select_sessions(calendar,parent['start_date'],args.end_date,args.sessions,extra['session_date'])")
-    replace("data/research/hilega-and-fresh-setup-30sessions-20261016","data/research/hilega-fresh-direct5m-ema10-rsi-3months-20261016")
+    replace("data/research/hilega-and-fresh-setup-30sessions-20261016","data/research/hilega-fresh-direct5m-slope-colour-3months-20261016")
     replace('variants=dict(EXISTING=baseline,PREVIOUS_AND=old,FRESH_AND=new)',
         'variants=add_variants(engine,baseline,old,new,Gate,NewGate,fresh,p,day,raw,warm,asof,wm,lock,threshold)')
     namespace=dict(batch.main.__globals__,add_variants=add_variants,write_reports=write_reports,single_session=single_session,sys=sys)
