@@ -13,14 +13,14 @@ from pathlib import Path
 from types import SimpleNamespace
 import unittest
 
-MODEL='FRESH_DIRECT_5M_FOLLOWUP_CLOSE_OR_MIDPOINT_V11'
+MODEL='FRESH_DIRECT_5M_FOLLOWUP_PRICE_OR_FRESH_CHECKS_V12'
 BASES=('EXISTING','PREVIOUS_AND','FRESH_AND')
 POLICIES=tuple(k for b in BASES for k in (b,b+'_EMA10_ENTRY'))+('EXISTING_BASELINE_2',)
 WARNING=('Research only. Gross NIFTY points; no option fills or costs. Each EMA variant adds an entry gate to its own baseline. '
     'FRESH_AND_EMA10_ENTRY and EXISTING_BASELINE_2 require bullish completed 5m CLOSE > price EMA10 AND RSI9 crossing UP through 45 OR 55; '
     'bearish completed 5m CLOSE < EMA10 AND RSI9 crossing DOWN through 55 OR 45. Both conditions must pass on the same completed candle. '
     'Cross UP means previous RSI <= threshold and current RSI > threshold; DOWN means previous RSI >= threshold and current RSI < threshold. '
-    'No cross latch: evidence expires when a new completed 5m candle replaces it. Fresh direct 5m waits for the immediately next completed 5m close strictly above signal CLOSE OR signal midpoint for bullish, below signal CLOSE OR signal midpoint for bearish; midpoint=(signal high+low)/2, close-based comparison not intrabar touch; no entry on signal candle. Fresh parent entry checks must still pass; no repeated RSI cross on follow-up. Failure consumes this candidate; the just-completed failed follow-up is then independently evaluated once for a fresh setup on the same boundary. A fresh qualifying signal waits for its own next completed candle; discarded close is never reused. Original cancellation, expiry and cutoff still apply. Wicks do not veto these two policies. Fresh direct 5m additionally requires rising EMA10 and green close>open for bullish, falling EMA10 and red close<open for bearish; flat EMA or doji fails. Existing baseline 2 has no slope or colour veto. '
+    'No cross latch: evidence expires when a new completed 5m candle replaces it. Fresh direct 5m waits for the immediately next completed 5m close strictly above signal CLOSE OR signal midpoint for bullish, below signal CLOSE OR signal midpoint for bearish; midpoint=(signal high+low)/2, close-based comparison not intrabar touch; no entry on signal candle. Follow-up accepts price confirmation OR fresh strength/positive-expanding-gap checks. WMA lock/AND-exception permission remains mandatory for either route, as do candidate validity, flat position and cutoff. Signal candle still requires all original signal checks. No repeated RSI cross on follow-up. Failure consumes this candidate; the just-completed failed follow-up is then independently evaluated once for a fresh setup on the same boundary. A fresh qualifying signal waits for its own next completed candle; discarded close is never reused. Original cancellation, expiry and cutoff still apply. Wicks do not veto these two policies. Fresh direct 5m additionally requires rising EMA10 and green close>open for bullish, falling EMA10 and red close<open for bearish; flat EMA or doji fails. Existing baseline 2 has no slope or colour veto. '
     'EXISTING_EMA10_ENTRY and PREVIOUS_AND_EMA10_ENTRY retain whole-candle position AND directional EMA10 slope. '
     'Strict comparisons; equality waits. EMA10 uses close, alpha 2/11, first-close seed, continuous over original warmup. '
     'FRESH_AND_EMA10_ENTRY now removes minute-gap setup vetoes, separate 1m entry evaluation and persistence. '
@@ -171,7 +171,14 @@ def entry_gate(Parent,frames,rule='FULL_CANDLE',followup=False):
                         stale=self.pending.get(waiting['direction'])
                         if stale is not None and stale['available'].isoformat()==waiting['setup_available']:self.pending.pop(waiting['direction'],None)
                     self.followup_signal=None;waiting=None
-            entries,checks=super().evaluate(**kwargs)
+            self.followup_price_permission=None
+            if followup and waiting is not None and at==waiting['due']:
+                price_ev=followup_check(waiting['direction'],waiting,frames.get(at),at)
+                if price_ev['passed']:self.followup_price_permission=(waiting['direction'],at)
+            try:
+                entries,checks=super().evaluate(**kwargs)
+            finally:
+                self.followup_price_permission=None
             if not entries:
                 if waiting is not None and at==waiting['due']:
                     self.policy_events.append(dict(event='FOLLOWUP_CANDLE_CHECK',time=at.isoformat(),direction=waiting['direction'],setup_available=waiting['setup_available'],passed=False,reasons=['FRESH_ENTRY_CHECKS_FAILED_OR_CANDIDATE_CANCELLED'],signal_close=waiting['close'],signal_midpoint=waiting['midpoint']))
@@ -186,6 +193,13 @@ def entry_gate(Parent,frames,rule='FULL_CANDLE',followup=False):
             is_followup=followup and waiting is not None and waiting['direction']==side and at==waiting['due']
             if is_followup:
                 evidence=followup_check(side,waiting,frames.get(boundary),at)
+                price_pass=evidence['passed']
+                fresh_pass=bool(check.get('wma_threshold_pass') and check.get('gap_positive_pass') and check.get('gap_expanding_pass'))
+                structural=[reason for reason in evidence['reasons'] if not reason.startswith('FOLLOWUP_CLOSE_NOT_')]
+                evidence.update(passed=not structural and (price_pass or fresh_pass),reasons=structural,
+                    followup_price_pass=price_pass,fresh_strength_gap_pass=fresh_pass,
+                    entry_confirmation_route='BOTH' if price_pass and fresh_pass else 'PRICE' if price_pass else 'FRESH_CHECKS' if fresh_pass else 'NONE')
+                if not evidence['passed']:evidence['reasons'].append('FOLLOWUP_PRICE_AND_FRESH_CHECKS_FAILED')
                 self.followup_signal=None
             else:
                 evidence=frame_check(side,frames.get(boundary),at,rule=rule)
@@ -252,6 +266,9 @@ def direct_five_base(Base):
     for old,new in replacements.items():
         if source.count(old)!=1:raise ValueError('DIRECT_5M_GATE_ANCHOR_MISMATCH:'+old)
         source=source.replace(old,new,1)
+    anchor="    if self.owner!='NONE':reasons.append('ACTIVE_TRADE_OWNER')"
+    if source.count(anchor)!=1:raise ValueError('FOLLOWUP_OR_GATE_ANCHOR_MISMATCH')
+    source=source.replace(anchor,anchor+"\n    if getattr(self,'followup_price_permission',None)==(side,minute+timedelta(minutes=1)):\n        reasons=[reason for reason in reasons if reason not in ('WMA_THRESHOLD_NOT_MET','GAP_NOT_POSITIVE','GAP_NOT_EXPANDING_OR_PREVIOUS_MINUTE_MISSING')]",1)
     filename='<hilega-fresh-direct-five-minute-gate>'
     linecache.cache[filename]=(len(source),None,source.splitlines(True),filename)
     namespace=dict(Base.evaluate.__globals__)
@@ -337,7 +354,7 @@ def add_variants(engine,baseline,old,new,Gate,NewGate,fresh,p,day,raw,warm,asof,
             for signal in value.get('alternative_signals',[]):signal['minute_gap_diagnostic_only']=True
             value['research_entry_rules']=dict(evaluation_minutes=5,strength_min=.75,positive_expanding_5m_gap=True,
                 minute_gap_setup_filter=False,persistence_required=False,setup_boundary_entry_allowed=True,
-                candidate_expiry_minutes=10,wma_lock_and_exception=True,ema_rule='CLOSE_RSI_SLOPE_COLOUR',ema10_slope_required=True,candle_colour_required=True,followup='IMMEDIATE_NEXT_5M_CLOSE_OR_MIDPOINT',fresh_setup_after_failed_followup_same_boundary=True)
+                candidate_expiry_minutes=10,wma_lock_and_exception=True,ema_rule='CLOSE_RSI_SLOPE_COLOUR',ema10_slope_required=True,candle_colour_required=True,followup='PRICE_CLOSE_OR_MIDPOINT_OR_FRESH_STRENGTH_GAP',wma_permission_mandatory=True,fresh_setup_after_failed_followup_same_boundary=True)
     variants['EXISTING_BASELINE_2']=p.simulate(SimpleNamespace(WmaGapGate=baseline2_gate(engine,frames,rule='CLOSE_AND_RSI_CROSS'),replay=engine.replay),day,raw,warm,asof,'CURRENT')
     return variants
 
@@ -574,6 +591,23 @@ class Checks(unittest.TestCase):
         self.assertIn('cc+=retry_checks',changed)
         self.assertIn("at.strftime('%H:%M')<'14:55'",changed)
         self.assertEqual(original,inspect.getsource(engine.replay))
+    def test_followup_price_permission_bypasses_strength_gap_only(self):
+        from market_lab import hilega_v2_alignment_replay_v1 as engine
+        at=datetime.fromisoformat('2026-10-16T10:05:00+05:30')
+        g=direct_five_base(engine.WmaGapGate)(opposite_switch=True)
+        ev=engine.StrategyEvent('ENTRY_PATH1_ROUTE_A_CROSS_RSI50_ABOVE_WMA21',at-timedelta(minutes=5),None,'IDLE','ARMED',details={})
+        g.signal(ev,at-timedelta(minutes=5));g.followup_price_permission=('BULLISH',at)
+        snap=SimpleNamespace(ready=True,wma21_rsi=50,ema3_rsi=49,rsi9=48)
+        entries,checks=g.evaluate(minute=at-timedelta(minutes=1),current=snap,reference=snap,price=100)
+        self.assertTrue(entries);self.assertFalse(checks[0]['wma_threshold_pass']);self.assertFalse(checks[0]['gap_positive_pass'])
+    def test_followup_price_permission_does_not_bypass_cutoff(self):
+        from market_lab import hilega_v2_alignment_replay_v1 as engine
+        at=datetime.fromisoformat('2026-10-16T14:55:00+05:30')
+        g=direct_five_base(engine.WmaGapGate)(opposite_switch=True)
+        ev=engine.StrategyEvent('ENTRY_PATH1_ROUTE_A_CROSS_RSI50_ABOVE_WMA21',at-timedelta(minutes=5),None,'IDLE','ARMED',details={})
+        g.signal(ev,at-timedelta(minutes=5));g.followup_price_permission=('BULLISH',at)
+        snap=SimpleNamespace(ready=True,wma21_rsi=50,ema3_rsi=49,rsi9=48)
+        self.assertFalse(g.evaluate(minute=at-timedelta(minutes=1),current=snap,reference=snap,price=100)[0])
     def test_midpoint_only_pass_bullish_and_bearish(self):
         at=self.at.replace(minute=5)
         for side,signal_close,midpoint,close in [('BULLISH',110,105,107),('BEARISH',100,105,103)]:
@@ -859,7 +893,7 @@ def main():
         "args=ap.parse_args()\n    if args.date:\n        if any(x in ('--sessions','--end-date') or x.startswith(('--sessions=','--end-date=')) for x in sys.argv[1:]):ap.error('--date cannot be combined with --sessions or --end-date')\n        args.end_date=args.date\n        args.sessions=1\n        if not any(x=='--output' or x.startswith('--output=') for x in sys.argv[1:]):args.output=Path('data/research/hilega-ema10-entry-day-'+args.date.replace('-',''))")
     replace("days=select_sessions(calendar,parent['start_date'],args.end_date,args.sessions,extra['session_date'])",
         "days=single_session(args.date,calendar,parent['start_date'],extra['session_date'],extra['session_date']) if args.date else select_sessions(calendar,parent['start_date'],args.end_date,args.sessions,extra['session_date'])")
-    replace("data/research/hilega-and-fresh-setup-30sessions-20261016","data/research/hilega-fresh-followup-midpoint-3months-20261016")
+    replace("data/research/hilega-and-fresh-setup-30sessions-20261016","data/research/hilega-fresh-followup-or-3months-20261016")
     replace('variants=dict(EXISTING=baseline,PREVIOUS_AND=old,FRESH_AND=new)',
         'variants=add_variants(engine,baseline,old,new,Gate,NewGate,fresh,p,day,raw,warm,asof,wm,lock,threshold)')
     namespace=dict(batch.main.__globals__,add_variants=add_variants,write_reports=write_reports,single_session=single_session,sys=sys)
