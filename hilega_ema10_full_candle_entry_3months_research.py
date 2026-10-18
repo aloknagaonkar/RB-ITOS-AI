@@ -13,7 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import unittest
 
-MODEL='FRESH_DIRECT_5M_RSI_CONTINUATION_FOLLOWUP_OR_V13'
+MODEL='FRESH_DIRECT_5M_QUALIFIED_OPPOSITE_WATCH_OVERRIDE_V14'
 BASES=('EXISTING','PREVIOUS_AND','FRESH_AND')
 POLICIES=tuple(k for b in BASES for k in (b,b+'_EMA10_ENTRY'))+('EXISTING_BASELINE_2',)
 WARNING=('Research only. Gross NIFTY points; no option fills or costs. Each EMA variant adds an entry gate to its own baseline. '
@@ -26,7 +26,7 @@ WARNING=('Research only. Gross NIFTY points; no option fills or costs. Each EMA 
     'FRESH_AND_EMA10_ENTRY now removes minute-gap setup vetoes, separate 1m entry evaluation and persistence. '
     'It evaluates strength >=0.75 and positive expanding gap against the previous completed 5m reference, plus close/RSI-directional-continuation, '
     'directly at completed 5m boundaries INCLUDING the setup boundary. Original WMA lock and 40/60 AND exceptions remain mandatory. '
-    'Its ten-minute candidate window, direction watch and canonical cancellation remain; existing pending candidates are not refreshed. '
+    'Its ten-minute candidate window and canonical cancellation remain; an opposite direction watch may be replaced only by a full qualifying completed5m signal (alignment, strength, expansion, EMA10 position/slope, candle colour, RSI continuation, WMA/AND permission, flat and cutoff); an arm alone cannot override it; existing pending candidates are not refreshed. '
     'Other EMA variants retain their prior confirmation rules. WMA-vetoed candidates stay consumed. Original exits and 14:55 cutoff retained. '
     'EXISTING_BASELINE_2 instead validates only completed 5m boundaries: strength >=0.75, positive gap expanding versus the prior completed 5m, '
     'plus the close/RSI-cross conjunction above. No persistence veto or time-based candidate expiry in baseline 2. '
@@ -66,7 +66,10 @@ def attach_completed_rsi(frames,baseline,dt):
         seen.add(at)
         current=ind.get('rsi9');delta=changes.get('rsi9')
         previous=float(current)-float(delta) if current is not None and delta is not None else None
-        frames[at].update(rsi9=current,previous_rsi9=previous,rsi_source='COMPLETED_5M_INPUT_BASELINE',rsi_available_at=at.isoformat())
+        frames[at].update(ema3_rsi=ind.get('ema3'),wma21_rsi=ind.get('wma21'),
+            previous_ema3_rsi=(float(ind['ema3'])-float(changes['ema3'])) if ind.get('ema3') is not None and changes.get('ema3') is not None else None,
+            previous_wma21_rsi=(float(ind['wma21'])-float(changes['wma21'])) if ind.get('wma21') is not None and changes.get('wma21') is not None else None,
+            rsi9=current,previous_rsi9=previous,rsi_source='COMPLETED_5M_INPUT_BASELINE',rsi_available_at=at.isoformat())
     return frames
 
 
@@ -344,6 +347,37 @@ def direct_fresh_replay(engine,fresh,retry_followup=False):
     return namespace['replay']
 
 
+def qualified_opposite_watch_gate(Parent,frames,direction):
+    """Only a complete new signal may override an opposite setup watch."""
+    class QualifiedWatch(Parent):
+        def qualifies(self,side,at):
+            if self.owner!='NONE' or self.locked or at.minute%5 or at.strftime('%H:%M')>='14:55':return False
+            frame=frames.get(at)
+            if frame is None or not frame_check(side,frame,at,rule='CLOSE_RSI_CONTINUATION_SLOPE_COLOUR')['passed']:return False
+            keys=('rsi9','ema3_rsi','wma21_rsi','previous_ema3_rsi','previous_wma21_rsi')
+            if any(frame.get(k) is None or isinstance(frame[k],bool) or not math.isfinite(float(frame[k])) for k in keys):return False
+            r,e,w,pe,pw=(float(frame[k]) for k in keys);sign=1 if side=='BULLISH' else -1
+            gap=sign*(e-w);previous_gap=sign*(pe-pw)
+            if not (sign*(r-e)>0 and gap>0 and gap>previous_gap and sign*(w-pw)>=.75):return False
+            self.direction_lock.observe(at,w,pw,self.owner)
+            if self.direction_lock.permits(side):return True
+            import hilega_existing_ema10_wma_exception_40_60_last10_research as exception
+            return exception.exception_allows(self.direction_lock.side,side,r,e)
+        def can_signal(self,side,at):
+            allowed=super().can_signal(side,at)
+            if allowed:return True
+            return self.watch_side is not None and self.watch_side!=side and self.qualifies(side,at)
+        def signal(self,event,available):
+            side=direction(event)
+            opposite=self.watch_side is not None and self.watch_side!=side
+            if opposite:
+                if not self.qualifies(side,available):return
+                self.policy_events.append(dict(event='QUALIFIED_OPPOSITE_WATCH_OVERRIDE',time=available.isoformat(),
+                    direction=side,previous_watch=self.watch_side,previous_watch_at=self.watch_at.isoformat() if self.watch_at else None))
+            return super().signal(event,available)
+    return QualifiedWatch
+
+
 def add_variants(engine,baseline,old,new,Gate,NewGate,fresh,p,day,raw,warm,asof,wm,lock,threshold):
     frames=attach_completed_rsi(build_frames(engine,day,raw,warm,p.dt),baseline,p.dt)
     variants=dict(EXISTING=baseline,PREVIOUS_AND=old,FRESH_AND=new)
@@ -354,6 +388,7 @@ def add_variants(engine,baseline,old,new,Gate,NewGate,fresh,p,day,raw,warm,asof,
         rule='CLOSE_RSI_CONTINUATION_SLOPE_COLOUR' if key=='FRESH_AND' else 'FULL_CANDLE'
         if key=='FRESH_AND':
             parent=fresh.combined_gate(SimpleNamespace(WmaGapGate=direct_five_base(engine.WmaGapGate),direction=engine.direction),{},wm,lock,None,threshold)
+            parent=qualified_opposite_watch_gate(parent,frames,engine.direction)
             replay=direct_fresh_replay(engine,fresh,retry_followup=True)
         variants[key+'_EMA10_ENTRY']=p.simulate(SimpleNamespace(WmaGapGate=entry_gate(parent,frames,rule=rule,followup=key=='FRESH_AND'),replay=replay),day,raw,warm,asof,'CURRENT')
         if key=='FRESH_AND':
@@ -366,7 +401,7 @@ def add_variants(engine,baseline,old,new,Gate,NewGate,fresh,p,day,raw,warm,asof,
             for signal in value.get('alternative_signals',[]):signal['minute_gap_diagnostic_only']=True
             value['research_entry_rules']=dict(evaluation_minutes=5,strength_min=.75,positive_expanding_5m_gap=True,
                 minute_gap_setup_filter=False,persistence_required=False,setup_boundary_entry_allowed=True,
-                candidate_expiry_minutes=10,wma_lock_and_exception=True,ema_rule='CLOSE_RSI_CONTINUATION_SLOPE_COLOUR',rsi_rule='RISING_ABOVE_45_OR_FALLING_BELOW_55',ema10_slope_required=True,candle_colour_required=True,followup='PRICE_CLOSE_OR_MIDPOINT_OR_FRESH_STRENGTH_GAP',wma_permission_mandatory=True,fresh_setup_after_failed_followup_same_boundary=True)
+                candidate_expiry_minutes=10,wma_lock_and_exception=True,ema_rule='CLOSE_RSI_CONTINUATION_SLOPE_COLOUR',rsi_rule='RISING_ABOVE_45_OR_FALLING_BELOW_55',ema10_slope_required=True,candle_colour_required=True,followup='PRICE_CLOSE_OR_MIDPOINT_OR_FRESH_STRENGTH_GAP',wma_permission_mandatory=True,fresh_setup_after_failed_followup_same_boundary=True,qualified_opposite_signal_overrides_watch=True)
     variants['EXISTING_BASELINE_2']=p.simulate(SimpleNamespace(WmaGapGate=baseline2_gate(engine,frames,rule='CLOSE_AND_RSI_CROSS'),replay=engine.replay),day,raw,warm,asof,'CURRENT')
     return variants
 
@@ -401,7 +436,7 @@ def write_reports(output,days,results,coverage,provenance,version,unused,stats):
         for k in POLICIES:
             trades.extend(dict(t,policy=k,session_date=day) for t in v[k]['trades'])
             for e in v[k].get('policy_events',[]):
-                if e['event'] not in ('EMA10_ENTRY_CHECK','COMBINED_ENTRY_DECISION','FOLLOWUP_CANDLE_CHECK'):continue
+                if e['event'] not in ('EMA10_ENTRY_CHECK','COMBINED_ENTRY_DECISION','FOLLOWUP_CANDLE_CHECK','QUALIFIED_OPPOSITE_WATCH_OVERRIDE'):continue
                 identities.add((e['direction'],e['setup_available']))
                 events.append(dict(session_date=day,policy=k,**e))
         detail+=['','## '+day,'','| Direction | Setup available | '+' | '.join(POLICIES)+' |','|---|---|'+'---|'*len(POLICIES)]
@@ -620,6 +655,33 @@ class Checks(unittest.TestCase):
         g.signal(ev,at-timedelta(minutes=5));g.followup_price_permission=('BULLISH',at)
         snap=SimpleNamespace(ready=True,wma21_rsi=50,ema3_rsi=49,rsi9=48)
         self.assertFalse(g.evaluate(minute=at-timedelta(minutes=1),current=snap,reference=snap,price=100)[0])
+    def test_qualified_opposite_watch_requires_all_signal_checks(self):
+        at=self.at.replace(minute=0)
+        import hilega_wma_threshold_only_oct14_research as threshold
+        import hilega_post_entry_wma_lock_today_research as lock
+        class Base:
+            def __init__(self):
+                self.owner='NONE';self.locked=False;self.watch_side='BULLISH';self.watch_at=at-timedelta(minutes=5)
+                self.policy_events=[];self.direction_lock=threshold.threshold_lock_class(lock.DirectionLock)();self.recorded=[]
+            def can_signal(self,side,time):return self.watch_side==side
+            def signal(self,event,available):self.recorded.append(event);self.watch_side=event
+        f=self.cross_frame(previous=53,current=44,open=103,close=102,ema10=105,previous_ema10=106,
+            ema3_rsi=48,wma21_rsi=52,previous_ema3_rsi=52,previous_wma21_rsi=53)
+        g=qualified_opposite_watch_gate(Base,{at:f},lambda event:event)()
+        self.assertTrue(g.can_signal('BEARISH',at));self.assertEqual(g.watch_side,'BULLISH')
+        g.signal('BEARISH',at);self.assertEqual(g.recorded,['BEARISH']);self.assertEqual(g.watch_side,'BEARISH')
+        self.assertEqual(g.policy_events[-1]['event'],'QUALIFIED_OPPOSITE_WATCH_OVERRIDE')
+        for changes in [dict(previous_wma21_rsi=52.2),dict(previous_ema3_rsi=47),dict(close=104,open=103),dict(previous_rsi9=42)]:
+            other=dict(f,**changes);h=qualified_opposite_watch_gate(Base,{at:other},lambda event:event)()
+            self.assertFalse(h.can_signal('BEARISH',at));h.signal('BEARISH',at);self.assertFalse(h.recorded)
+    def test_watch_override_cannot_enter_midminute_or_while_position_active(self):
+        at=self.at.replace(minute=0)
+        class Base:
+            def __init__(self):self.owner='BULLISH';self.locked=False;self.watch_side='BULLISH';self.watch_at=at
+            def can_signal(self,*args):return False
+        g=qualified_opposite_watch_gate(Base,{},lambda event:event)()
+        self.assertFalse(g.can_signal('BEARISH',at));g.owner='NONE'
+        self.assertFalse(g.can_signal('BEARISH',at+timedelta(minutes=1)))
     def test_continued_rsi_both_directions(self):
         for side,a,b,expected in [('BULLISH',46,50,True),('BULLISH',56,60,True),('BULLISH',44,46,True),('BEARISH',44.570,39.080,True),('BEARISH',53,50,True),('BEARISH',56,54,True),('BULLISH',60,58,False),('BEARISH',39,42,False),('BULLISH',50,50,False),('BEARISH',50,50,False),('BULLISH',44,45,False),('BEARISH',56,55,False)]:
             f=self.cross_frame(previous=a,current=b,open=102 if side=='BULLISH' else 103,close=103 if side=='BULLISH' else 102,ema10=100 if side=='BULLISH' else 105,previous_ema10=99 if side=='BULLISH' else 106)
@@ -917,7 +979,7 @@ def main():
         "args=ap.parse_args()\n    if args.date:\n        if any(x in ('--sessions','--end-date') or x.startswith(('--sessions=','--end-date=')) for x in sys.argv[1:]):ap.error('--date cannot be combined with --sessions or --end-date')\n        args.end_date=args.date\n        args.sessions=1\n        if not any(x=='--output' or x.startswith('--output=') for x in sys.argv[1:]):args.output=Path('data/research/hilega-ema10-entry-day-'+args.date.replace('-',''))")
     replace("days=select_sessions(calendar,parent['start_date'],args.end_date,args.sessions,extra['session_date'])",
         "days=single_session(args.date,calendar,parent['start_date'],extra['session_date'],extra['session_date']) if args.date else select_sessions(calendar,parent['start_date'],args.end_date,args.sessions,extra['session_date'])")
-    replace("data/research/hilega-and-fresh-setup-30sessions-20261016","data/research/hilega-rsi-continuation-followup-or-3months-20261016")
+    replace("data/research/hilega-and-fresh-setup-30sessions-20261016","data/research/hilega-qualified-watch-override-3months-20261016")
     replace('variants=dict(EXISTING=baseline,PREVIOUS_AND=old,FRESH_AND=new)',
         'variants=add_variants(engine,baseline,old,new,Gate,NewGate,fresh,p,day,raw,warm,asof,wm,lock,threshold)')
     namespace=dict(batch.main.__globals__,add_variants=add_variants,write_reports=write_reports,single_session=single_session,sys=sys)
