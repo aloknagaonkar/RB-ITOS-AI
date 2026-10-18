@@ -6,6 +6,7 @@ import inspect
 import json
 import linecache
 import math
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -22,6 +23,16 @@ WARNING=('Research only. Gross NIFTY points; no option fills or costs. Each EMA 
     'No EMA exit, reversal override, retained unlimited setup, persistence removal or strength/expansion shortcut. '
     'Historical controls reproduce saved research, not historical broker execution; Oct16 recorded/API inputs are mixed. '
     'Exploratory sample already examined; no independent holdout or live changes.')
+
+
+def single_session(value,calendar,start,end,extra_day):
+    try:
+        parsed=datetime.strptime(value,'%Y-%m-%d').date().isoformat()
+    except ValueError as exc:raise ValueError('DATE_MUST_BE_YYYY_MM_DD') from exc
+    if parsed!=value:raise ValueError('DATE_MUST_BE_YYYY_MM_DD')
+    if not start<=value<=end:raise ValueError('DATE_OUTSIDE_SAVED_RESEARCH_RANGE:'+start+'..'+end)
+    if value not in set(calendar)|{extra_day}:raise ValueError('REQUESTED_TRADING_SESSION_UNAVAILABLE:'+value)
+    return [value]
 
 
 def frame_check(side, frame, at):
@@ -156,12 +167,25 @@ def write_reports(output,days,results,coverage,provenance,version,unused,stats):
     (output/'report.json').write_text(json.dumps(report,indent=2,default=str)+'\n')
     (output/'summary.md').write_text('\n'.join(lines)+'\n')
     (output/'daily-signal-comparison.md').write_text('\n'.join(detail)+'\n')
+    validation=['# Completed five-minute EMA10 entry validation','',
+        'Checks below occur only after that policy fully confirms an entry. WAIT is not an executed trade. Times IST.','',
+        '| Date | Policy | Setup | Decision | Direction | Candle label | Open | High | Low | Close | EMA10 | EMA10 slope | Outcome / reason |',
+        '|---|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---|']
+    for e in events:
+        if e['event']!='EMA10_ENTRY_CHECK':continue
+        vals=[f"{e[k]:.3f}" if e.get(k) is not None else '—' for k in ('open','high','low','close','ema10','ema10_slope')]
+        outcome='PASS' if e['passed'] else 'WAIT: '+', '.join(e['reasons'])
+        validation.append('| '+' | '.join([e['session_date'],e['policy'],e['setup_available'][11:16],e['time'][11:16],e['direction'],e.get('candle_label','—')[11:16]]+vals+[outcome])+' |')
+    (output/'ema10-entry-validation.md').write_text('\n'.join(validation)+'\n')
     for name,rows in (('trades.csv',trades),('losing-trades.csv',[t for t in trades if t['points']<0]),('entry-decisions.csv',events)):
         fields=sorted({k for row in rows for k in row}) or ['session_date','policy']
         with (output/name).open('w',newline='') as f:
             writer=csv.DictWriter(f,fields);writer.writeheader()
             writer.writerows({k:json.dumps(v,default=str) if isinstance(v,(dict,list)) else v for k,v in row.items()} for row in rows)
-    print('\n'.join(lines));print('SIGNAL TABLE:',output/'daily-signal-comparison.md')
+    print('\n'.join(lines))
+    if len(days)==1:print('\n'.join(detail));print('\n'.join(validation))
+    print('SIGNAL TABLE:',output/'daily-signal-comparison.md')
+    print('EMA VALIDATION:',output/'ema10-entry-validation.md')
 
 
 class Checks(unittest.TestCase):
@@ -170,6 +194,19 @@ class Checks(unittest.TestCase):
         return dict(dict(open=102,high=104,low=101,close=103,ema10=100,previous_ema10=99,
             available_at='2026-10-16T10:00:00+05:30'),**kw)
     def test_bullish_full_candle(self):self.assertTrue(frame_check('BULLISH',self.frame(),self.at)['passed'])
+    def test_single_day_only(self):
+        self.assertEqual(single_session('2026-10-14',['2026-10-13','2026-10-14','2026-10-15'],'2026-07-16','2026-10-16','2026-10-16'),['2026-10-14'])
+    def test_single_extra_day(self):
+        self.assertEqual(single_session('2026-10-16',[],'2026-07-16','2026-10-16','2026-10-16'),['2026-10-16'])
+    def test_unavailable_single_day_rejected(self):
+        with self.assertRaisesRegex(ValueError,'UNAVAILABLE'):
+            single_session('2026-10-11',[],'2026-07-16','2026-10-16','2026-10-16')
+    def test_out_of_range_rejected(self):
+        with self.assertRaisesRegex(ValueError,'OUTSIDE'):
+            single_session('2026-07-15',[],'2026-07-16','2026-10-16','2026-10-16')
+    def test_noncanonical_date_rejected(self):
+        with self.assertRaisesRegex(ValueError,'YYYY_MM_DD'):
+            single_session('2026-8-26',[],'2026-07-16','2026-10-16','2026-10-16')
     def test_bearish_full_candle(self):self.assertTrue(frame_check('BEARISH',self.frame(ema10=105,previous_ema10=106),self.at)['passed'])
     def test_wick_fails(self):self.assertFalse(frame_check('BULLISH',self.frame(low=99),self.at)['passed'])
     def test_touch_fails(self):self.assertFalse(frame_check('BULLISH',self.frame(low=100),self.at)['passed'])
@@ -248,10 +285,16 @@ def main():
         if source.count(old)!=1:raise ValueError('BATCH_SOURCE_ANCHOR_MISMATCH:'+old)
         source=source.replace(old,new,1)
     replace("default=30)","default=65)")
+    replace("ap.add_argument('--test',action='store_true')",
+        "ap.add_argument('--test',action='store_true')\n    ap.add_argument('--date',help='Replay only this saved trading session, YYYY-MM-DD')")
+    replace('args=ap.parse_args()',
+        "args=ap.parse_args()\n    if args.date:\n        if any(x in ('--sessions','--end-date') or x.startswith(('--sessions=','--end-date=')) for x in sys.argv[1:]):ap.error('--date cannot be combined with --sessions or --end-date')\n        args.end_date=args.date\n        args.sessions=1\n        if not any(x=='--output' or x.startswith('--output=') for x in sys.argv[1:]):args.output=Path('data/research/hilega-ema10-entry-day-'+args.date.replace('-',''))")
+    replace("days=select_sessions(calendar,parent['start_date'],args.end_date,args.sessions,extra['session_date'])",
+        "days=single_session(args.date,calendar,parent['start_date'],extra['session_date'],extra['session_date']) if args.date else select_sessions(calendar,parent['start_date'],args.end_date,args.sessions,extra['session_date'])")
     replace("data/research/hilega-and-fresh-setup-30sessions-20261016","data/research/hilega-ema10-full-candle-entry-3months-20261016")
     replace('variants=dict(EXISTING=baseline,PREVIOUS_AND=old,FRESH_AND=new)',
         'variants=add_variants(engine,baseline,old,new,Gate,NewGate,fresh,p,day,raw,warm,asof)')
-    namespace=dict(batch.main.__globals__,add_variants=add_variants,write_reports=write_reports)
+    namespace=dict(batch.main.__globals__,add_variants=add_variants,write_reports=write_reports,single_session=single_session,sys=sys)
     filename='<hilega-ema10-entry-batch>'
     linecache.cache[filename]=(len(source),None,source.splitlines(True),filename)
     exec(compile(source,filename,'exec'),namespace)
