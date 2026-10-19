@@ -1,6 +1,7 @@
 """Research only: scoped close versus price EMA10 AND completed RSI9 threshold cross.
 Only Fresh AND + EMA10 and Existing baseline 2 use the new conjunction.
-No orders, API calls, installation or live strategy changes. Run from RB-ITOS-AI.
+No orders, installation or live strategy changes. Optional --fetch-today uses
+one read-only analytics request. Run from RB-ITOS-AI.
 """
 import csv
 import inspect
@@ -1181,9 +1182,46 @@ class Checks(unittest.TestCase):
         self.assertNotIn('BEARISH',g.pending);self.assertIn('BULLISH',g.pending)
 
 
+class NewSessionChecks(unittest.TestCase):
+    @staticmethod
+    def rows():
+        start=datetime.fromisoformat('2026-10-19T09:15:00+05:30')
+        return [dict(timestamp=(start+timedelta(minutes=i)).isoformat()) for i in range(340)]
+    def test_complete_pre_cutoff_grid(self):
+        validate_new_session_minutes(self.rows(),'2026-10-19')
+    def test_missing_minute_rejected(self):
+        with self.assertRaisesRegex(ValueError,'MISSING_MINUTES:09:15'):
+            validate_new_session_minutes(self.rows()[1:],'2026-10-19')
+    def test_duplicate_minute_rejected(self):
+        rows=self.rows()
+        with self.assertRaisesRegex(ValueError,'DUPLICATE_MINUTE'):
+            validate_new_session_minutes(rows+[rows[0]],'2026-10-19')
+    def test_wrong_session_rejected(self):
+        with self.assertRaisesRegex(ValueError,'WRONG_DATE'):
+            validate_new_session_minutes(self.rows(),'2026-10-20')
+
+
+def validate_new_session_minutes(raw,day):
+    """Require the complete pre-cutoff minute grid; never reuse another day."""
+    start=datetime.fromisoformat(day+'T09:15:00+05:30')
+    end=datetime.fromisoformat(day+'T14:55:00+05:30')
+    seen=set()
+    for row in raw:
+        at=datetime.fromisoformat(row['timestamp'])
+        if at.tzinfo is None:raise ValueError('NEW_SESSION_NAIVE_TIMESTAMP')
+        if at.astimezone(start.tzinfo).date()!=start.date():raise ValueError('NEW_SESSION_WRONG_DATE')
+        if at in seen:raise ValueError('NEW_SESSION_DUPLICATE_MINUTE:'+at.isoformat())
+        seen.add(at)
+    required={start+timedelta(minutes=i) for i in range(int((end-start).total_seconds()/60))}
+    missing=sorted(required-seen)
+    if missing:raise ValueError('NEW_SESSION_MISSING_MINUTES:'+','.join(x.strftime('%H:%M') for x in missing))
+
+
 def main():
     import hilega_and_fresh_setup_30_sessions_research as batch
     if '--test' in __import__('sys').argv:
+        new_result=unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromTestCase(NewSessionChecks))
+        if not new_result.wasSuccessful():raise SystemExit(1)
         result=unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromTestCase(Checks))
         if not result.wasSuccessful():raise SystemExit(1)
         batch.main()  # Original control and composition tests, too.
@@ -1198,12 +1236,22 @@ def main():
         "ap.add_argument('--test',action='store_true')\n    ap.add_argument('--date',help='Replay only this saved trading session, YYYY-MM-DD')")
     replace('args=ap.parse_args()',
         "args=ap.parse_args()\n    if args.date:\n        if any(x in ('--sessions','--end-date') or x.startswith(('--sessions=','--end-date=')) for x in sys.argv[1:]):ap.error('--date cannot be combined with --sessions or --end-date')\n        args.end_date=args.date\n        args.sessions=1\n        if not any(x=='--output' or x.startswith('--output=') for x in sys.argv[1:]):args.output=Path('data/research/hilega-ema10-entry-day-'+args.date.replace('-',''))")
+    replace("ap.add_argument('--date',help='Replay only this saved trading session, YYYY-MM-DD')",
+        "ap.add_argument('--date',help='Replay one session, YYYY-MM-DD')\n    ap.add_argument('--fetch-today',action='store_true',help='Read-only analytics fetch for a newer single session on the current IST date')\n    ap.add_argument('--session-input',type=Path,help='Captured candle JSON for a newer single session')\n    ap.add_argument('--audit',type=Path,default=Path('data/live-observation/hilega-directional-v1/step-audit.jsonl'))")
+    replace("extra=json.loads(args.today_input.read_text())",
+        "extra=json.loads(args.today_input.read_text())\n    newer_session=bool(args.date and args.date>extra['session_date'])\n    if (args.fetch_today or args.session_input) and not newer_session:ap.error('--fetch-today/--session-input require a newer --date')\n    if args.fetch_today and args.session_input:ap.error('Choose --fetch-today OR --session-input')\n    if newer_session and not (args.fetch_today or args.session_input):ap.error('Newer session requires --fetch-today or --session-input PATH')")
     replace("days=select_sessions(calendar,parent['start_date'],args.end_date,args.sessions,extra['session_date'])",
-        "days=single_session(args.date,calendar,parent['start_date'],extra['session_date'],extra['session_date']) if args.date else select_sessions(calendar,parent['start_date'],args.end_date,args.sessions,extra['session_date'])")
+        "days=single_session(args.date,calendar,parent['start_date'],args.date if newer_session else extra['session_date'],args.date if newer_session else extra['session_date']) if args.date else select_sessions(calendar,parent['start_date'],args.end_date,args.sessions,extra['session_date'])")
+    replace("if day==extra['session_date']:",
+        "if newer_session:\n                raw,warm,input_hashes=p.inputs(engine,day,args.session_input,args.fetch_today,args.output)\n                validate_new_session_minutes(raw,day)\n                saved=None\n                basis='NEW_SESSION_ANALYTICS_WITH_RECORDED_AUDIT_PARITY'\n                (args.output/'new-session-input-provenance.json').write_text(json.dumps(dict(session_date=day,input_hashes=input_hashes,audit=str(args.audit)),indent=2)+'\\n')\n            elif day==extra['session_date']:")
+    replace("if saved['session_date']!=day or saved['strategy_version']!=p.VERSION:raise ValueError('BASELINE_IDENTITY_MISMATCH')",
+        "if saved is not None and (saved['session_date']!=day or saved['strategy_version']!=p.VERSION):raise ValueError('BASELINE_IDENTITY_MISMATCH')")
+    replace("parity=stats.frozen_parity(saved,baseline)",
+        "parity=p.audit_parity(args.audit,day,asof,baseline) if newer_session else stats.frozen_parity(saved,baseline)\n            if newer_session:\n                (args.output/'new-session-baseline.json').write_text(json.dumps(baseline,indent=2,default=str)+'\\n')\n                (args.output/'new-session-parity.json').write_text(json.dumps(parity,indent=2,default=str)+'\\n')")
     replace("data/research/hilega-and-fresh-setup-30sessions-20261016","data/research/hilega-qualified-watch-override-3months-20261016")
     replace('variants=dict(EXISTING=baseline,PREVIOUS_AND=old,FRESH_AND=new)',
         'variants=add_variants(engine,baseline,old,new,Gate,NewGate,fresh,p,day,raw,warm,asof,wm,lock,threshold)')
-    namespace=dict(batch.main.__globals__,add_variants=add_variants,write_reports=write_reports,single_session=single_session,sys=sys)
+    namespace=dict(batch.main.__globals__,add_variants=add_variants,write_reports=write_reports,single_session=single_session,validate_new_session_minutes=validate_new_session_minutes,sys=sys)
     filename='<hilega-ema10-entry-batch>'
     linecache.cache[filename]=(len(source),None,source.splitlines(True),filename)
     exec(compile(source,filename,'exec'),namespace)
