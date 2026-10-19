@@ -1183,6 +1183,26 @@ class Checks(unittest.TestCase):
 
 
 class NewSessionChecks(unittest.TestCase):
+    def test_priced_checkpoint_survives_same_time_cutoff(self):
+        at='2026-10-19T14:55:00+05:30'
+        minute=dict(checkpoint=at,nifty_close=100)
+        cutoff=dict(checkpoint=at)
+        captured=[]
+        def parity(audit,day,asof,result):
+            captured.extend(result['audit'])
+            return dict(status='PASS',issues=[])
+        p=SimpleNamespace(audit_parity=parity)
+        stats=SimpleNamespace(cutoff_parity=lambda result,source:[])
+        original=dict(audit=[minute,cutoff],trades=[])
+        result=new_session_parity(p,stats,None,'2026-10-19',None,original,dict(cutoff_payloads=[]))
+        self.assertEqual(result['status'],'PASS')
+        self.assertEqual(captured,[minute])
+        self.assertEqual(original['audit'],[minute,cutoff])
+    def test_cutoff_mismatch_still_fails(self):
+        p=SimpleNamespace(audit_parity=lambda *a:dict(status='PASS',issues=[]))
+        stats=SimpleNamespace(cutoff_parity=lambda *a:['LIVE_CUTOFF_TRADE_MISMATCH'])
+        result=new_session_parity(p,stats,None,'2026-10-19',None,dict(audit=[],trades=[]),dict(cutoff_payloads=[]))
+        self.assertEqual(result['status'],'MISMATCH')
     @staticmethod
     def rows():
         start=datetime.fromisoformat('2026-10-19T09:15:00+05:30')
@@ -1199,6 +1219,21 @@ class NewSessionChecks(unittest.TestCase):
     def test_wrong_session_rejected(self):
         with self.assertRaisesRegex(ValueError,'WRONG_DATE'):
             validate_new_session_minutes(self.rows(),'2026-10-20')
+
+
+def new_session_parity(policy,stats,audit,day,asof,baseline,source):
+    # A cutoff frame shares 14:55 with the last minute decision but has no
+    # candle fields. Validate it separately, never overwrite the priced frame.
+    priced=[]
+    for frame in baseline['audit']:
+        if frame.get('nifty_close') is not None:
+            priced.append(frame)
+        elif frame.get('checkpoint')!=day+'T14:55:00+05:30':
+            raise ValueError('UNEXPECTED_PRICELESS_REPLAY_FRAME:'+str(frame.get('checkpoint')))
+    result=policy.audit_parity(audit,day,asof,dict(baseline,audit=priced))
+    result['issues'].extend(stats.cutoff_parity(baseline,source['cutoff_payloads']))
+    if result['issues']:result['status']='MISMATCH'
+    return result
 
 
 def validate_new_session_minutes(raw,day):
@@ -1243,15 +1278,15 @@ def main():
     replace("days=select_sessions(calendar,parent['start_date'],args.end_date,args.sessions,extra['session_date'])",
         "days=single_session(args.date,calendar,parent['start_date'],args.date if newer_session else extra['session_date'],args.date if newer_session else extra['session_date']) if args.date else select_sessions(calendar,parent['start_date'],args.end_date,args.sessions,extra['session_date'])")
     replace("if day==extra['session_date']:",
-        "if newer_session:\n                raw,warm,input_hashes=p.inputs(engine,day,args.session_input,args.fetch_today,args.output)\n                validate_new_session_minutes(raw,day)\n                saved=None\n                basis='NEW_SESSION_ANALYTICS_WITH_RECORDED_AUDIT_PARITY'\n                (args.output/'new-session-input-provenance.json').write_text(json.dumps(dict(session_date=day,input_hashes=input_hashes,audit=str(args.audit)),indent=2)+'\\n')\n            elif day==extra['session_date']:")
+        "if newer_session:\n                raw,warm,input_hashes=p.inputs(engine,day,args.session_input,args.fetch_today,args.output)\n                validate_new_session_minutes(raw,day)\n                raw,live_source=stats.recorded_overrides(raw,args.audit,day,p.dt)\n                (args.output/'recorded-session-input.json').write_text(json.dumps(dict(session_date=day,underlying='NSE_INDEX|Nifty 50',candles=raw),indent=2)+'\\n')\n                saved=None\n                basis='NEW_SESSION_ANALYTICS_WITH_RECORDED_AUDIT_PARITY'\n                (args.output/'new-session-input-provenance.json').write_text(json.dumps(dict(session_date=day,input_hashes=input_hashes,audit=str(args.audit)),indent=2)+'\\n')\n            elif day==extra['session_date']:")
     replace("if saved['session_date']!=day or saved['strategy_version']!=p.VERSION:raise ValueError('BASELINE_IDENTITY_MISMATCH')",
         "if saved is not None and (saved['session_date']!=day or saved['strategy_version']!=p.VERSION):raise ValueError('BASELINE_IDENTITY_MISMATCH')")
     replace("parity=stats.frozen_parity(saved,baseline)",
-        "parity=p.audit_parity(args.audit,day,asof,baseline) if newer_session else stats.frozen_parity(saved,baseline)\n            if newer_session:\n                (args.output/'new-session-baseline.json').write_text(json.dumps(baseline,indent=2,default=str)+'\\n')\n                (args.output/'new-session-parity.json').write_text(json.dumps(parity,indent=2,default=str)+'\\n')")
+        "parity=new_session_parity(p,stats,args.audit,day,asof,baseline,live_source) if newer_session else stats.frozen_parity(saved,baseline)\n            if newer_session:\n                (args.output/'new-session-baseline.json').write_text(json.dumps(baseline,indent=2,default=str)+'\\n')\n                (args.output/'new-session-parity.json').write_text(json.dumps(parity,indent=2,default=str)+'\\n')")
     replace("data/research/hilega-and-fresh-setup-30sessions-20261016","data/research/hilega-qualified-watch-override-3months-20261016")
     replace('variants=dict(EXISTING=baseline,PREVIOUS_AND=old,FRESH_AND=new)',
         'variants=add_variants(engine,baseline,old,new,Gate,NewGate,fresh,p,day,raw,warm,asof,wm,lock,threshold)')
-    namespace=dict(batch.main.__globals__,add_variants=add_variants,write_reports=write_reports,single_session=single_session,validate_new_session_minutes=validate_new_session_minutes,sys=sys)
+    namespace=dict(batch.main.__globals__,add_variants=add_variants,write_reports=write_reports,single_session=single_session,validate_new_session_minutes=validate_new_session_minutes,new_session_parity=new_session_parity,sys=sys)
     filename='<hilega-ema10-entry-batch>'
     linecache.cache[filename]=(len(source),None,source.splitlines(True),filename)
     exec(compile(source,filename,'exec'),namespace)
