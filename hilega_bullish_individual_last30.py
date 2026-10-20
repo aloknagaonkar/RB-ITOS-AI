@@ -4,6 +4,7 @@ Same CLI as hilega_bullish_gap_magnitude_stateful.py; no live changes/orders.
 """
 import sys
 import unittest
+from hilega_bullish_month_gap_research import frame_index, features
 import hilega_bullish_gap_magnitude_stateful as base
 
 SPECS=[('BULLISH_GAP2',2,0),('BULLISH_FULL_WMA2_ONLY',0,2),('BULLISH_GAP2_FULL_WMA2',2,2)]
@@ -14,22 +15,22 @@ def cell(trades):
 
 def compact(output,results,stats):
     ORIGINAL_COMPACT(output,results,stats)
-    keys=('EXISTING','FRESH_AND_EMA10_ENTRY')+tuple(name for name,_,_ in SPECS)
+    keys=('EXISTING','FRESH_AND','FRESH_AND_EMA10_ENTRY','EXISTING_BASELINE_2')+tuple(name for name,_,_ in SPECS)
     lines=['# Signal-wise individual bullish filter comparison','',
         'Research replay. Gross NIFTY points before costs. Original live-strategy reconstruction is contextual; '
         'compare each individual addition against FRESH_AND_EMA10_ENTRY to isolate its effect. '
         'Bearish entry rules and exits remain unchanged, although changed positions can affect later trades. '
         'A dash means no executed trade from that exact setup, not proof of a direct veto.','',
-        '| Date | Direction | Setup available | Existing strategy | EMA10-touch control | Bullish gap ≥2 only | Bullish magnitude ≥2 only | Both bullish filters |',
-        '|---|---|---|---|---|---|---|---|']
+        '| Date | Direction | Setup available | Existing strategy | Fresh AND baseline | Latest: EMA10-touch wait | Existing baseline 2 | Bullish gap ≥2 only | Bullish magnitude ≥2 only | Current tested: bullish gap ≥2 + magnitude ≥2 |',
+        '|---|---|---|---|---|---|---|---|---|---|']
     changed=[]
     for day,variants in sorted(results.items()):
         ids={(t['direction'],t['signal_time']) for key in keys for t in variants[key]['trades']}
         for side,setup in sorted(ids,key=lambda x:(x[1],x[0])):
             groups=[[t for t in variants[key]['trades'] if t['direction']==side and t['signal_time']==setup] for key in keys]
             lines.append('| '+' | '.join([day,side,setup[11:16]]+[cell(g) for g in groups])+' |')
-            control=groups[1]
-            for key,group in zip(keys[2:],groups[2:]):
+            control=groups[2]
+            for key,group in zip(keys[4:],groups[4:]):
                 if stats.signature(control)==stats.signature(group):continue
                 before=sum(t['points'] for t in control);after=sum(t['points'] for t in group)
                 reason='NOT_TAKEN_FROM_THIS_SETUP' if control and not group else 'NEW_ENTRY_FROM_THIS_SETUP' if group and not control else 'ENTRY_OR_EXIT_CHANGED'
@@ -51,7 +52,30 @@ def compact(output,results,stats):
                 outcomes.append('| '+' | '.join([day,key,t['direction'],t['signal_time'][11:16],
                     t['entry_time'][11:16]+'–'+t['exit_time'][11:16],f"{t['points']:+.2f}",outcome])+' |')
     (output/'all-trade-outcomes.md').write_text('\n'.join(outcomes)+'\n')
-    for name in ('daily-signal-comparison.md','changed-trades.md','all-trade-outcomes.md'):
+    values=['# Completed five-minute values for manual validation','',
+        'Values at entry are from the latest completed five-minute frame available by entry. '
+        'For original minute-entry strategies, these are five-minute context, not their minute confirmation values. '
+        'Qualified signal time is shown only when an exact successful follow-up event identifies it. '
+        'Strength/gap/expansion use the trade direction; EMA3 is EMA3 of RSI9, not price EMA10.','',
+        '| Date | Policy | Direction | Setup | Qualified signal | Entry–exit | NIFTY points | Completed frame at entry | RSI9 | EMA3 of RSI | WMA21 of RSI | Directional strength | Gap | Expansion |',
+        '|---|---|---|---|---|---|---:|---|---:|---:|---:|---:|---:|---:|']
+    for day,variants in sorted(results.items()):
+        frames=frame_index(variants['EXISTING']['audit'])
+        for key in keys:
+            for t in variants[key]['trades']:
+                times=[at for at in frames if at<=t['entry_time']]
+                if not times:raise ValueError('COMPLETED_ENTRY_CONTEXT_REQUIRED:'+t['entry_time'])
+                at=max(times);f=features(frames[at]);direction=1 if t['direction']=='BULLISH' else -1
+                signals={e.get('signal_time') for e in variants[key].get('policy_events',[])
+                    if e.get('event')=='FOLLOWUP_CANDLE_CHECK' and e.get('passed') is True
+                    and e.get('direction')==t['direction'] and e.get('time')==t['entry_time']
+                    and e.get('setup_available')==t['signal_time']}
+                signal=next(iter(signals)) if len(signals)==1 else None
+                values.append('| '+' | '.join([day,key,t['direction'],t['signal_time'][11:16],signal[11:16] if signal else '—',
+                    t['entry_time'][11:16]+'–'+t['exit_time'][11:16],f"{t['points']:+.2f}",at[11:16]]+
+                    [f"{v:.3f}" for v in (f['rsi'],f['ema'],f['wma'],direction*f['strength'],direction*f['gap'],direction*f['expansion'])])+' |')
+    (output/'signal-validation-values.md').write_text('\n'.join(values)+'\n')
+    for name in ('daily-signal-comparison.md','changed-trades.md','all-trade-outcomes.md','signal-validation-values.md'):
         print('TRADE REPORT:',output/name)
 
 class Checks(unittest.TestCase):
