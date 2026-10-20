@@ -174,8 +174,31 @@ def main():
                         record=prior.get(side.lower())
                         if not record:continue
                         if not record.get('order_id'):raise ValueError('PREVIOUS_DEMO_SUBMISSION_UNCERTAIN')
-                        ev=order_evidence(tr.order_details(order_id=record['order_id']),instrument=prior_contract['instrument_key'],side=side,quantity=record['quantity'],order_id=record['order_id'])
-                        log('PREVIOUS_DEMO_ORDER_VERIFIED',side=side,**ev)
+                        evidence_source='PROVIDER_ORDER_DETAILS'
+                        try:
+                            detail=tr.order_details(order_id=record['order_id'])
+                        except Exception as exc:
+                            # Historical 404 is acceptable only with saved,
+                            # matching, terminal zero-fill evidence.
+                            saved=record.get('evidence') or {}
+                            safe=(
+                                prior.get('done') is True
+                                and saved.get('terminal') is True
+                                and str(saved.get('order_id'))==str(record['order_id'])
+                                and str(saved.get('status','')).lower() in ('cancelled','rejected')
+                                and type(saved.get('filled')) is int
+                                and saved['filled']==0
+                                and type(saved.get('pending')) is int
+                                and saved['pending']==0
+                                and timestamp(record['submitted_at']).date()<now().date()
+                            )
+                            if 'UDAPI100010' not in str(exc) or not safe:
+                                raise
+                            ev=dict(saved)
+                            evidence_source='SAVED_TERMINAL_ZERO_FILL_PROVIDER_404'
+                        else:
+                            ev=order_evidence(detail,instrument=prior_contract['instrument_key'],side=side,quantity=record['quantity'],order_id=record['order_id'])
+                        log('PREVIOUS_DEMO_ORDER_EVIDENCE',side=side,evidence_source=evidence_source,**ev)
                         if not ev['terminal']:raise ValueError('PREVIOUS_DEMO_PENDING')
                         if side=='BUY':bought+=ev['filled']
                         else:sold+=ev['filled']

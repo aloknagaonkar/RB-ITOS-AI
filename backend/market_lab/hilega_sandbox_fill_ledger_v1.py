@@ -5,7 +5,8 @@ order tag, never resubmitted. Pending cancellations are recorded before calling
 Upstox; only terminal provider evidence permits a residual SELL attempt.
 """
 from __future__ import annotations
-import hashlib
+import hashlib, os
+from dotenv import dotenv_values
 from datetime import datetime
 from .hilega_manual_exit_v1 import order_evidence
 
@@ -58,11 +59,27 @@ def open_legs(rows):
     return result
 
 
-def _cancel_once(worker, tr, order):
+def pending_timeout_seconds(worker):
+    """Bounded, explicit Sandbox timeout; never disable reconciliation."""
+    value = os.getenv('HILEGA_SANDBOX_PENDING_TIMEOUT_SECONDS')
+    if value is None:
+        value = dotenv_values(getattr(worker, 'env', '.env')).get('HILEGA_SANDBOX_PENDING_TIMEOUT_SECONDS', '60')
+    try:
+        seconds = int(str(value))
+    except (ValueError, TypeError):
+        raise ValueError('INVALID_SANDBOX_PENDING_TIMEOUT_SECONDS')
+    if not 1 <= seconds <= 3600:
+        raise ValueError('INVALID_SANDBOX_PENDING_TIMEOUT_SECONDS')
+    return seconds
+
+
+def _cancel_once(worker, tr, order, *, reason='STRATEGY_EXIT_CANCEL_PENDING_BUY', timeout_seconds=None):
     rows = worker.store.rows()
     if any(r.get('status') == 'AUTO_CANCEL_REQUESTED' and r.get('broker_order_id') == order['broker_order_id'] for r in rows):
         return
-    worker.store.append(dict(order, status='AUTO_CANCEL_REQUESTED', terminal=False))
+    worker.store.append(dict(order, status='AUTO_CANCEL_REQUESTED', terminal=False,
+                             cancel_reason=reason, pending_timeout_seconds=timeout_seconds,
+                             cancel_requested_at=worker.clock().isoformat()))
     try:
         tr.cancel_order(order['broker_order_id'])
     except Exception:
@@ -71,6 +88,7 @@ def _cancel_once(worker, tr, order):
 
 
 def reconcile_orders(worker, tr):
+    timeout = pending_timeout_seconds(worker)
     rows = worker.store.rows()
     for requested in worker.store.uncertain():
         if not requested.get('automatic_fill_ledger_version'):
@@ -97,8 +115,8 @@ def reconcile_orders(worker, tr):
         if old != ev:
             worker.store.append(dict(order, status='ORDER_FILL_VERIFIED', evidence=ev,
                                      verified_at=worker.clock().isoformat(), terminal=ev['terminal']))
-        if not ev['terminal'] and (worker.clock() - datetime.fromisoformat(order['timestamp'])).total_seconds() >= 60:
-            _cancel_once(worker, tr, order)
+        if not ev['terminal'] and (worker.clock() - datetime.fromisoformat(order['timestamp'])).total_seconds() >= timeout:
+            _cancel_once(worker, tr, order, reason='PENDING_ORDER_TIMEOUT', timeout_seconds=timeout)
     # Validate aggregate fills before permitting another action.
     worker.store.open_legs()
     c = worker.control.read()
@@ -173,19 +191,53 @@ def apply_fill_pnl(leg, entry, rows):
     proceeds = sum(ev.get(r['request_id'], {}).get('filled', 0) * ev.get(r['request_id'], {}).get('average_price', 0) for r in sells)
     filled = buy['filled'] if buy else 0
     remaining = filled - sold
-    terminal = bool(buy and buy['terminal'] and all(ev.get(r['request_id'], {}).get('terminal') for r in sells))
+    if remaining < 0:
+        raise ValueError('SELL_QUANTITY_EXCEEDS_FILLED_BUY')
+    pending_buy = not buy or not buy['terminal']
+    pending_sell = any(not ev.get(r['request_id'], {}).get('terminal') for r in sells)
+    terminal = not pending_buy and not pending_sell
+    mark = leg.get('current_price')
+    cancellations = [r for r in rows if r.get('status') == 'AUTO_CANCEL_REQUESTED'
+                     and r.get('request_id') in {entry['request_id'], *(r['request_id'] for r in sells)}]
     leg.update(requested_quantity=entry['quantity'], quantity=filled if buy else None,
                confirmed_filled_quantity=filled if buy else None, remaining_quantity=remaining if buy else None,
-               sell_order_ids=[r['broker_order_id'] for r in sells], fill_verified_at=max((r.get('verified_at','') for r in rows if r.get('status')=='ORDER_FILL_VERIFIED' and r.get('trade_id')==entry['trade_id'] and r.get('role')==entry['role']),default=None),
+               provider_buy_status=buy['status'] if buy else 'AWAITING_ORDER_DETAILS',
+               provider_sell_statuses=[ev.get(r['request_id'], {}).get('status', 'AWAITING_ORDER_DETAILS') for r in sells],
+               pending_fill=bool(pending_buy or pending_sell),
+               cancellation_reason=cancellations[-1].get('cancel_reason', 'RECORDED_CANCELLATION') if cancellations else None,
+               sell_order_ids=[r['broker_order_id'] for r in sells],
+               fill_verified_at=max((r.get('verified_at','') for r in rows if r.get('status')=='ORDER_FILL_VERIFIED'
+                                     and r.get('trade_id')==entry['trade_id'] and r.get('role')==entry['role']), default=None),
                entry_price=buy['average_price'] if filled else None,
                exit_price=proceeds / sold if sold else None,
-               points=(proceeds / sold - buy['average_price']) if sold else None,
+               points=(mark - buy['average_price']) if remaining and mark is not None else
+                      (proceeds / sold - buy['average_price']) if sold and not remaining else None,
                realized_pnl_rupees=proceeds - sold * buy['average_price'] if buy else None,
                pnl_basis='CONFIRMED_FILLS' if terminal and remaining == 0 else 'CONFIRMED_FILLS_AND_MARK_ESTIMATE')
     if terminal and remaining == 0:
         leg.update(status='SELL_FILLED' if filled else 'CANCELLED_UNFILLED',
                    pnl_rupees=proceeds - filled * buy['average_price'], current_price=None)
     else:
-        mark = leg.get('current_price')
-        leg.update(status='FILL_RECONCILIATION_PENDING' if not terminal else 'BUY_FILLED',
-                   pnl_rupees=(proceeds - sold * buy['average_price'] + (remaining * (mark - buy['average_price']) if remaining else 0)) if buy and (remaining == 0 or mark is not None) else None)
+        status = ('SELL_PARTIALLY_FILLED' if sold else 'SELL_PENDING_FILL') if pending_sell else (
+                 ('BUY_PARTIALLY_FILLED' if filled else 'BUY_PENDING_FILL') if pending_buy else 'BUY_FILLED')
+        leg.update(status=status, pnl_rupees=(proceeds - sold * buy['average_price'] +
+                   (remaining * (mark - buy['average_price']) if remaining else 0))
+                   if filled and (remaining == 0 or mark is not None) else None)
+
+
+def apply_basket_lifecycle(trade):
+    """Display pending orders separately from execution errors; never change worker guards."""
+    legs = [leg for leg in trade['legs'] if leg.get('entry_order_id')]
+    if not legs or not any(leg.get('pnl_basis', '').startswith('CONFIRMED_FILLS') for leg in legs):
+        return
+    trade['pending_fill_orders'] = sum(bool(leg.get('pending_fill')) for leg in legs)
+    trade['confirmed_open_quantity'] = sum(leg.get('remaining_quantity') or 0 for leg in legs)
+    trade['cancelled_unfilled_legs'] = sum(leg['status'] == 'CANCELLED_UNFILLED' for leg in legs)
+    if trade['status'] == 'RECONCILIATION_REQUIRED':
+        return
+    if trade['pending_fill_orders']:
+        trade['status'] = 'EXIT_PENDING_FILL' if any(leg['status'].startswith('SELL_') and leg.get('pending_fill') for leg in legs) else 'ENTRY_PENDING_FILL'
+    elif trade['confirmed_open_quantity']:
+        trade['status'] = 'OPEN_CONFIRMED'
+    if not any(leg.get('pnl_rupees') is not None for leg in trade['legs']):
+        trade['pnl_rupees'] = None

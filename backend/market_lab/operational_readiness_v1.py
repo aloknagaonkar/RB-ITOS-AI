@@ -145,7 +145,25 @@ def evaluate(now,live,sandbox,warm,local,health,previous):
     success=dict(previous.get('last_successful',{}))
     for c in checks:
         if c['status']=='PASS':success[c['id']]=now.isoformat()
-    alerts=previous.get('alerts',[]);old={a['id']:a for a in alerts if a.get('active')};new=[];events=list(previous.get('notifications',[]))
+    # HILEGA_DISPATCH_SESSION_SCOPE_V1: retain history without claiming recovery.
+    alerts=[];archived_dispatch=[]
+    for original in previous.get('alerts',[]):
+        alert=original
+        if alert.get('active') and str(alert.get('id','')).startswith('DISPATCH_'):
+            try:
+                stamp=datetime.fromisoformat(alert['id'][9:])
+                prior=stamp.tzinfo is not None and stamp.astimezone(IST).date()<now.astimezone(IST).date()
+            except (ValueError,TypeError):
+                prior=False
+            if prior:
+                alert=dict(alert,active=False,historical_unresolved=True,
+                           archived_at=now.isoformat(),
+                           archive_reason='PRIOR_SESSION_DISPATCH_UNRESOLVED_NOT_A_CURRENT_SESSION_CHECK')
+                archived_dispatch.append(dict(kind='HISTORICAL_UNRESOLVED',timestamp=now.isoformat(),
+                                              message='Archived prior-session alert; dispatch remains unresolved: '+alert['id']))
+        alerts.append(alert)
+    old={a['id']:a for a in alerts if a.get('active')};new=[]
+    events=list(previous.get('notifications',[]))+archived_dispatch
     for i in issues:
         a=old.pop(i['id'],None)
         if a is None:

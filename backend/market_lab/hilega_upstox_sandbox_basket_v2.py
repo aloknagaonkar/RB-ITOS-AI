@@ -11,6 +11,7 @@ from .hilega_upstox_sandbox_live_worker_v1 import JsonControl,DispatchStore,arm_
 from .hilega_sandbox_event_bridge_v1 import BridgeConfig,HilegaSandboxEventBridgeV1,IntentStore,DEFAULT_SOURCE,DEFAULT_OUTPUT
 from .hilega_sandbox_prearm_exit_guard_v1 import is_prearm_exit
 from .hilega_strike_selector_v1 import StrikePolicy, rank_strikes
+from .hilega_entry_dispatch_guard_v1 import entry_dispatch_check
 MODEL='HILEGA_UPSTOX_SANDBOX_BASKET_V2'
 ROOT=Path('data/live-observation/hilega-upstox-sandbox-v2')
 CONTROL=ROOT/'control.json';JOURNAL=ROOT/'basket-events.jsonl'
@@ -145,6 +146,9 @@ class BasketWorker:
             self.store.append(dict(base,status='INTENT_COMPLETE',terminal=True));return
         opened=self.store.open_legs()
         if intent['event_type']=='ENTRY':
+            dispatch_check=entry_dispatch_check(intent['event_timestamp'],self.clock(),c['session_date'])
+            if not dispatch_check['passed']:
+                self.store.append(dict(base,status='ENTRY_NOT_TRADED',terminal=True,reason=dispatch_check['reason'],dispatch_freshness=dispatch_check));return
             if selector_mode(self.env)!=mode:
                 self.store.append(dict(base,status='ENTRY_NOT_TRADED',terminal=True,reason='SELECTOR_MODE_CHANGED_NO_ORDER'));return
             if c.get('entries_blocked') or opened or self.store.uncertain() or self.store.pending_fills():
@@ -218,6 +222,10 @@ class BasketWorker:
                 limits=selection['policy']
                 if (self.clock()-selected_at).total_seconds()>limits['max_quote_age_seconds'] or (self.clock()-signal_at).total_seconds()>limits['max_signal_age_seconds']:
                     self.store.append(dict(base,status='ENTRY_NOT_TRADED',terminal=True,reason='FROZEN_SELECTION_EXPIRED',strike_selection=selection));return
+            if transaction=='BUY':
+                dispatch_check=entry_dispatch_check(intent['event_timestamp'],self.clock(),c['session_date'])
+                if not dispatch_check['passed']:
+                    self.store.append(dict(base,status='ENTRY_NOT_TRADED',terminal=True,reason=dispatch_check['reason'],dispatch_freshness=dispatch_check));return
             request=dict(base,request_id=request_id,role=leg['role'],contract=contract,quantity=leg['quantity'],transaction_type=transaction,observed_option_price=quote,observed_option_price_at=self.clock().isoformat(),status='REQUESTED',terminal=False,automatic_fill_ledger_version=c.get('automatic_fill_ledger_version'))
             self.store.append(request)
             try:
@@ -255,12 +263,13 @@ class BasketWorker:
             return self.status('PROCESSED')
     def status(self,state='STATUS'):
         from .hilega_manual_exit_v1 import accepted_order_count
-        c=self.control.read();rs=[r for r in self.store.accepted() if r['session_date']==c.get('session_date')]
+        from .hilega_sandbox_fill_ledger_v1 import pending_timeout_seconds
+        c=self.control.read();c['pending_timeout_seconds']=pending_timeout_seconds(self);rs=[r for r in self.store.accepted() if r['session_date']==c.get('session_date')]
         return dict(c,status=state,accepted_orders_this_session=accepted_order_count(self),open_legs=len(self.store.open_legs()),pending_fill_orders=len(self.store.pending_fills()),uncertain_requests=len(self.store.uncertain()),live_order_sent=False)
 
 
 def build_dashboard(env=Path('.env')):
-    worker=BasketWorker(env=env);control=worker.control.read();day=control.get('session_date');accepted=worker.store.accepted();pairs={}
+    worker=BasketWorker(env=env);control=worker.control.read();day=control.get('session_date');rows=worker.store.rows();accepted=[r for r in rows if r.get('status')=='ACCEPTED'];uncertain=worker.store.uncertain();pairs={}
     for r in accepted:
         pair=pairs.setdefault((r['trade_id'],r['role']),{});pair[r['event_type']]=r
     cfg=SandboxConfig.from_env(env);open_keys={r['contract']['instrument_key'] for r in worker.store.open_legs()};keys=list(open_keys);quotes={};quote_error=None
@@ -274,30 +283,33 @@ def build_dashboard(env=Path('.env')):
         en=pair.get('ENTRY');ex=pair.get('EXIT')
         if not en:continue
         entry_price=en.get('observed_option_price');mark=quotes.get(en['contract']['instrument_key']) if en.get('automatic_fill_ledger_version') else ex.get('observed_option_price') if ex else quotes.get(en['contract']['instrument_key']);pts=mark-entry_price if mark is not None and entry_price is not None else None
-        leg=dict(**en['contract'],quantity=en['quantity'],entry_time=en['timestamp'],entry_signal_time=en['event_timestamp'],entry_price=entry_price,entry_order_id=en['broker_order_id'],exit_time=ex.get('timestamp') if ex else None,exit_price=ex.get('observed_option_price') if ex else None,exit_order_id=ex.get('broker_order_id') if ex else None,current_price=mark,quote_timestamp=now().isoformat() if not ex and mark is not None else None,points=pts,pnl_rupees=pts*en['quantity'] if pts is not None else None,status='SELL_ACKNOWLEDGED' if ex else 'BUY_ACKNOWLEDGED')
+        leg=dict(**en['contract'],quantity=en['quantity'],entry_time=en['timestamp'],entry_signal_time=en['event_timestamp'],entry_price=entry_price,entry_order_id=en['broker_order_id'],exit_time=ex.get('timestamp') if ex else None,exit_price=ex.get('observed_option_price') if ex else None,exit_order_id=ex.get('broker_order_id') if ex else None,current_price=mark,quote_timestamp=now().isoformat() if mark is not None and (not ex or en.get('automatic_fill_ledger_version')) else None,points=pts,pnl_rupees=pts*en['quantity'] if pts is not None else None,status='SELL_ACKNOWLEDGED' if ex else 'BUY_ACKNOWLEDGED')
         from .hilega_manual_exit_pnl_v1 import apply_manual_exit_pnl
         apply_manual_exit_pnl(leg,en,ex)
         from .hilega_sandbox_fill_ledger_v1 import apply_fill_pnl
-        if not (ex and ex.get('manual_exit_confirmed')):apply_fill_pnl(leg,en,worker.store.rows())
+        if not (ex and ex.get('manual_exit_confirmed')):apply_fill_pnl(leg,en,rows)
         trade=trades.setdefault(trade_id,dict(trade_id=trade_id,session_date=en['session_date'],direction=en['direction'],signal_time=en['event_timestamp'],strategy_id=en['strategy_id'],expiry=en['contract']['expiry'],legs=[]));trade['legs'].append(leg)
-    for plan in worker.store.rows():
+    for plan in rows:
         if plan.get('status')!='BASKET_PLANNED':continue
-        if any(r.get('intent_id')==plan['intent_id'] and r.get('status')=='ENTRY_NOT_TRADED' for r in worker.store.rows()) and not any(r.get('trade_id')==plan['trade_id'] and r.get('status')=='ACCEPTED' and r.get('event_type')=='ENTRY' for r in worker.store.rows()):continue
+        if any(r.get('intent_id')==plan['intent_id'] and r.get('status')=='ENTRY_NOT_TRADED' for r in rows) and not any(r.get('trade_id')==plan['trade_id'] and r.get('status')=='ACCEPTED' and r.get('event_type')=='ENTRY' for r in rows):continue
         t=trades.setdefault(plan['trade_id'],dict(trade_id=plan['trade_id'],session_date=plan['session_date'],direction=plan['direction'],signal_time=plan['event_timestamp'],strategy_id=plan['strategy_id'],expiry=plan['contracts'][0]['expiry'],legs=[]))
         t['expected_leg_count']=len(plan['contracts'])
         t['strike_selection']=plan.get('strike_selection')
         for contract in plan['contracts']:
             if any(l['role']==contract['role'] for l in t['legs']):continue
-            uncertain=any(r['trade_id']==plan['trade_id'] and r['role']==contract['role'] for r in worker.store.uncertain())
-            t['legs'].append(dict(role=contract['role'],**{k:v for k,v in contract.items() if k!='role'},quantity=next((x['quantity'] for x in plan.get('legs',[]) if x['role']==contract['role']),int(contract['lot_size'])*cfg.lots),entry_time=None,entry_signal_time=plan['event_timestamp'],entry_price=None,entry_order_id=None,exit_time=None,exit_price=None,exit_order_id=None,current_price=None,quote_timestamp=None,points=None,pnl_rupees=None,status='SUBMISSION_UNCERTAIN' if uncertain else 'NOT_SUBMITTED'))
+            leg_uncertain=any(r['trade_id']==plan['trade_id'] and r['role']==contract['role'] for r in uncertain)
+            t['legs'].append(dict(role=contract['role'],**{k:v for k,v in contract.items() if k!='role'},quantity=next((x['quantity'] for x in plan.get('legs',[]) if x['role']==contract['role']),int(contract['lot_size'])*cfg.lots),entry_time=None,entry_signal_time=plan['event_timestamp'],entry_price=None,entry_order_id=None,exit_time=None,exit_price=None,exit_order_id=None,current_price=None,quote_timestamp=None,points=None,pnl_rupees=None,status='SUBMISSION_UNCERTAIN' if leg_uncertain else 'NOT_SUBMITTED'))
     for t in trades.values():
-        t['legs'].sort(key=lambda l:l['role']);t['status']='RECONCILIATION_REQUIRED' if any(l['status']=='SUBMISSION_UNCERTAIN' for l in t['legs']) or any(r['trade_id']==t['trade_id'] for r in worker.store.uncertain()) else 'NOT_SUBMITTED' if not any(l['entry_order_id'] for l in t['legs']) else 'CLOSED_ACKNOWLEDGED' if all(l['exit_order_id'] for l in t['legs'] if l['entry_order_id']) else 'OPEN_ACKNOWLEDGED';t['pnl_rupees']=sum(l['pnl_rupees'] for l in t['legs'] if l['pnl_rupees'] is not None);t['missing_pnl_legs']=sum(l['pnl_rupees'] is None for l in t['legs']);t['partial_basket']=sum(bool(l['entry_order_id']) for l in t['legs'])!=t.get('expected_leg_count',5)
+        t['legs'].sort(key=lambda l:l['role']);t['status']='RECONCILIATION_REQUIRED' if any(l['status']=='SUBMISSION_UNCERTAIN' for l in t['legs']) or any(r['trade_id']==t['trade_id'] for r in uncertain) else 'NOT_SUBMITTED' if not any(l['entry_order_id'] for l in t['legs']) else 'CLOSED_ACKNOWLEDGED' if all(l['exit_order_id'] for l in t['legs'] if l['entry_order_id']) else 'OPEN_ACKNOWLEDGED';t['pnl_rupees']=sum(l['pnl_rupees'] for l in t['legs'] if l['pnl_rupees'] is not None);t['missing_pnl_legs']=sum(l['pnl_rupees'] is None for l in t['legs']);t['partial_basket']=sum(bool(l['entry_order_id']) for l in t['legs'])!=t.get('expected_leg_count',5)
     for t in trades.values():
         entered=[l for l in t['legs'] if l['entry_order_id']]
+        if t['status']=='RECONCILIATION_REQUIRED':continue
         if entered and all(l['status']=='CANCELLED_UNFILLED' for l in entered):t['status']='CANCELLED_UNFILLED'
         elif entered and all(l['status'] in {'SELL_FILLED','CANCELLED_UNFILLED','SELL_ACKNOWLEDGED'} for l in entered):t['status']='CLOSED_ACKNOWLEDGED'
         elif any(l['status'] in {'MANUAL_EXIT_EVIDENCE_INCOMPLETE','FILL_RECONCILIATION_PENDING'} for l in entered):t['status']='RECONCILIATION_REQUIRED'
         elif any(l['status']=='BUY_FILLED' for l in entered):t['status']='OPEN_CONFIRMED'
+    from .hilega_sandbox_fill_ledger_v1 import apply_basket_lifecycle
+    for trade in trades.values():apply_basket_lifecycle(trade)
     opened=[t for t in trades.values() if t['status'] not in {'CLOSED_ACKNOWLEDGED','CANCELLED_UNFILLED'}];closed=[t for t in trades.values() if t['status'] in {'CLOSED_ACKNOWLEDGED','CANCELLED_UNFILLED'}]
     def totals(selected):
         legs=[l for t in selected for l in t['legs']]
@@ -311,9 +323,9 @@ def build_dashboard(env=Path('.env')):
     try:os.kill(int(DEFAULT_PID.read_text()),0);running=True
     except (OSError,ValueError):running=False
     return dict(model=MODEL,worker=dict(worker.status(),running=running),strategy=dict(active_strategy_id=strategy(env),armed_strategy_id=control.get('strategy_id')),active_trades=opened,active_trade=next((l for t in opened for l in t['legs']),None),completed_trades=closed,
-        strike_decisions=[r for r in worker.store.rows() if r.get('strike_selection') or r.get('status')=='ENTRY_NOT_TRADED'],
+        strike_decisions=[r for r in rows if r.get('strike_selection') or r.get('status')=='ENTRY_NOT_TRADED'],
         pnl=totals(daily_trades),pnl_session_date=day,overall_pnl=overall,
-        events=[r for r in worker.store.rows() if r.get('session_date')==day and r['status'] not in {'ACCEPTED','REQUESTED','BASKET_PLANNED'}][-50:][::-1],last_refresh=now().isoformat(),quote_error=quote_error,warning='Actual Sandbox order acknowledgements; P&L estimated from observed quotes, not confirmed fills. Missing legs/prices are explicit. No daily order-count cap.',safety=dict(sandbox_only=True,live_execution_enabled=False))
+        events=[r for r in rows if r.get('session_date')==day and r['status'] not in {'ACCEPTED','REQUESTED','BASKET_PLANNED'}][-50:][::-1],last_refresh=now().isoformat(),quote_error=quote_error,warning='New sessions use confirmed filled quantities and provider average fill prices. Open P&L uses current quote estimates. Pending orders have no position P&L until filled; cancelled zero-fill orders have no position. Older untagged journals retain acknowledgement-based quote estimates. Observation P&L is separate.',safety=dict(sandbox_only=True,live_execution_enabled=False))
 
 def main():
     p=argparse.ArgumentParser();g=p.add_mutually_exclusive_group(required=True)

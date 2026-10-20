@@ -89,8 +89,15 @@ def audit_trades(records, day, version):
                 if not active or active['entry_time']!=entry_time or active['direction']!=side(name):
                     raise ValueError('UNMATCHED_BASELINE_EXIT')
                 price=number(event['price']);points=(price-active['entry_price'])*(1 if active['direction']=='BULLISH' else -1)
-                if event.get('points') is not None and abs(number(event['points'])-points)>1e-5:
-                    raise ValueError('EXIT_POINTS_MISMATCH')
+                reference=number(event['entry_price']) if event.get('entry_price') is not None else active['entry_price']
+                reference_points=(price-reference)*(1 if active['direction']=='BULLISH' else -1)
+                if event.get('points') is not None and abs(number(event['points'])-reference_points)>1e-5:
+                    raise ValueError('EXIT_EVENT_INTERNAL_POINTS_MISMATCH')
+                active.update(points_basis='FROZEN_CONFIRMED_ENTRY_TO_EXIT',
+                              recorded_exit_points=event.get('points'),
+                              exit_event_entry_reference=reference,
+                              entry_reference_delta=reference-active['entry_price'],
+                              entry_reference_changed=abs(reference-active['entry_price'])>1e-5)
                 active.update(exit_time=at,exit_price=price,points=points,exit_reason=event.get('exit_reason') or name)
                 trades.append(active);active=None
     if active:raise ValueError('OPEN_OR_MISSING_EXIT_BASELINE_TRADE')
@@ -274,7 +281,7 @@ def run(args):
     all_trades.sort(key=lambda r:dt(r['entry_time']))
     report=dict(status='COMPLETE' if all(r['status']=='AVAILABLE' for r in coverage) else 'INCOMPLETE',session_dates=days,strategy_version=args.expected_version,observation_only=True,entry_filter_enabled=False,
                 method='FIXED_BASELINE_TRADE_FILTER_COMPARISON_NOT_STATEFUL_STRATEGY_REPLAY',
-                warning='Gross NIFTY points, not option P&L. Original confirmed entry and exit times retained. Filtering may change future strategy state; this report does not model that effect. Five sessions cannot establish a robust edge. Reconstructed futures five-minute typical-price VWAP, not index VWAP.',
+                warning='Gross NIFTY points, not option P&L. Points use the original confirmed entry and recorded exit. Restored exit-entry reference differences are retained in report.json. Filtering may change future strategy state; this report does not model that effect. Five sessions cannot establish a robust edge. Reconstructed futures five-minute typical-price VWAP, not index VWAP.',
                 rules=dict(alignment='Bullish: completed futures close > VWAP; bearish: close < VWAP. At VWAP fails.',alignment_and_slope='Alignment plus cumulative session VWAP rising over the previous completed five-minute boundary for bullish, falling for bearish. Flat slope fails; unavailable slope is unknown, not blocked.'),
                 coverage=coverage,baseline=stats(all_trades),comparisons=[comparison(all_trades,key) for key in ('alignment','alignment_and_slope')],daily=daily,trades=all_trades)
     path=output/'report.json';path.write_text(json.dumps(report,indent=2)+'\n')
