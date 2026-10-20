@@ -91,6 +91,7 @@ def extend_variants(original):
 def compact(output,results,stats):
     policies=('EXISTING','FRESH_AND','FRESH_AND_EMA10_ENTRY')+EXTRAS
     lines=['# Stateful bullish gap / WMA magnitude comparison','',RULE_TEXT,'',
+        f"Coverage: {len(results)} trading sessions; {min(results) if results else 'NONE'} through {max(results) if results else 'NONE'}.",'',
         '| Scope | Policy | Trades | Winning points | Losing points | Net points | Drawdown |',
         '|---|---|---:|---:|---:|---:|---:|']
     for scope in ('ALL','BULLISH','BEARISH'):
@@ -129,6 +130,19 @@ def checked_writer(original):
     return write
 
 class Checks(unittest.TestCase):
+    def test_thirty_sessions_include_end_without_duplicates(self):
+        days=[f'2026-09-{i:02}' for i in range(1,31)]+['2026-10-19']
+        chosen=summary_days(days+days,30,'2026-10-19')
+        self.assertEqual(len(chosen),30);self.assertEqual(chosen[-1],'2026-10-19');self.assertEqual(chosen[0],'2026-09-02')
+    def test_short_summary_coverage_rejected(self):
+        with self.assertRaisesRegex(ValueError,'INSUFFICIENT'):
+            summary_days(['2026-10-19'],30,'2026-10-19')
+    def test_summary_end_required(self):
+        with self.assertRaisesRegex(ValueError,'END_SESSION'):
+            summary_days(['2026-10-16'],1,'2026-10-19')
+    def test_three_month_calendar_window(self):
+        days=['2026-07-16','2026-07-17','2026-07-20','2026-10-16','2026-10-19']
+        self.assertEqual(summary_days(days,None,'2026-10-19','2026-07-19'),days[2:])
     def test_magnitude_veto_restores_flat_then_touch_wait_can_enter(self):
         at=datetime.fromisoformat('2026-10-19T09:40:00+05:30');next_at=at+timedelta(minutes=5);last=next_at+timedelta(minutes=5)
         class Base:
@@ -166,25 +180,47 @@ class Checks(unittest.TestCase):
         self.assertIn('signal_gap_min',inspect.signature(filtered_factory()).parameters)
         self.assertIs(research.entry_gate,original)
 
+def summary_days(days,count,end,start='2026-09-19'):
+    if datetime.fromisoformat(start)>datetime.fromisoformat(end):raise ValueError('INVALID_SUMMARY_DATE_WINDOW')
+    values=sorted(set(d for d in days if d<=end))
+    if not values or values[-1]!=end:raise ValueError('SUMMARY_END_SESSION_REQUIRED')
+    if count is not None:
+        if count<1 or len(values)<count:raise ValueError('INSUFFICIENT_SUMMARY_TRADING_SESSIONS')
+        return values[-count:]
+    return [d for d in values if start<=d<=end]
+
+
 def main():
+    global ROOTS
+    controls=argparse.ArgumentParser(add_help=False)
+    controls.add_argument('--control-root',type=Path,action='append')
+    control_args,remaining=controls.parse_known_args()
+    if control_args.control_root:ROOTS=tuple(control_args.control_root)
+    sys.argv=[sys.argv[0]]+remaining
     if '--summarize-root' in sys.argv:
         ap=argparse.ArgumentParser()
         ap.add_argument('--summarize-root',type=Path,action='append',required=True)
         ap.add_argument('--output',type=Path,required=True)
+        ap.add_argument('--summary-sessions',type=int)
+        ap.add_argument('--start-date',default='2026-09-19')
+        ap.add_argument('--end-date',default='2026-10-19')
         args=ap.parse_args();results={};proof={}
+        control_days=set()
+        for root in ROOTS:
+            report=json.loads((root/'report.json').read_text())
+            if report.get('model')!='FRESH_DIRECT_5M_RSI40_60_EMA_TOUCH_WAIT_V20' or report.get('status')!='COMPLETE':
+                raise ValueError('COMPLETE_V20_SUMMARY_CONTROL_REQUIRED:'+str(root))
+            control_days.update(report['session_dates'])
+        expected=set(summary_days(control_days,args.summary_sessions,args.end_date,args.start_date))
         for root in args.summarize_root:
             report=json.loads((root/'report.json').read_text())
             if report.get('model')!=MODEL or report.get('status')!='COMPLETE':raise ValueError('COMPLETE_STATEFUL_REPORT_REQUIRED:'+str(root))
             for day in report['session_dates']:
-                if not '2026-09-19'<=day<='2026-10-19':continue
+                if day not in expected:continue
                 if report['provenance'][day].get('v20_control_parity')!='PASS':raise ValueError('V20_CONTROL_PARITY_REQUIRED:'+day)
                 if day in results:raise ValueError('DUPLICATE_SUMMARY_SESSION:'+day)
                 results[day]=json.loads((root/'sessions'/(day+'.json')).read_text());proof[day]=report['provenance'][day]
-        expected=set()
-        for root in ROOTS:
-            report=json.loads((root/'report.json').read_text())
-            expected.update(day for day in report['session_dates'] if '2026-09-19'<=day<='2026-10-19')
-        if set(results)!=expected:raise ValueError('MONTH_COVERAGE_MISMATCH:'+str(sorted(expected-set(results))))
+        if set(results)!=expected:raise ValueError('SUMMARY_COVERAGE_MISMATCH:'+str(sorted(expected-set(results))))
         import hilega_pending_previous10_research as stats
         args.output.mkdir(parents=True,exist_ok=True);compact(args.output,results,stats)
         (args.output/'report.json').write_text(json.dumps(dict(model=MODEL,status='COMPLETE',session_dates=sorted(results),provenance=proof,rules=RULE_TEXT,orders_sent=False),indent=2)+'\n')
