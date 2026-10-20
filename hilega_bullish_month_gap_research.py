@@ -19,6 +19,42 @@ RULES += [('SIGNAL_GAP_GE_'+str(g),g,0) for g in (1,2,3,4,5)]
 RULES += [('SIGNAL_STRENGTH_GE_'+str(s),0,s) for s in (1,1.25,1.5)]
 RULES += [('SIGNAL_GAP_GE_3_AND_STRENGTH_GE_1',3,1)]
 
+# Entry-time checks use only completed frames through the recorded entry.
+COMBINATIONS=[
+    ('GAP2_SIGNAL_STRENGTH1','SIGNAL','signal_strength',1),
+    ('GAP2_SUSTAINED_WMA_RISE','ENTRY','wma_rising_each_candle',True),
+    ('GAP2_ENTRY_STRENGTH075','ENTRY','entry_strength',.75),
+    ('GAP2_EMA_RISING_SIGNAL_AND_ENTRY','ENTRY','ema_rising_signal_and_entry',True),
+    ('GAP2_RSI_EMA_SEPARATION_NOT_SHRINKING','ENTRY','rsi_ema_separation_change',0),
+    ('GAP2_FULL_WMA_MAGNITUDE2','ENTRY','full_rise_wma',2),
+    ('GAP2_FULL_WMA_MAGNITUDE3','ENTRY','full_rise_wma',3),
+    ('GAP2_AVERAGE_WMA_SLOPE1','ENTRY','average_wma_slope',1),
+    ('GAP2_AVERAGE_WMA_SLOPE15','ENTRY','average_wma_slope',1.5),
+    ('GAP2_ENTRY_WMA_ACCELERATING','ENTRY','entry_wma_acceleration_positive',True),
+]
+
+def magnitude(signal,entry,intervals):
+    if intervals<1:raise ValueError('POSITIVE_INTERVAL_COUNT_REQUIRED')
+    out={}
+    for k in ('rsi','ema','wma'):
+        previous=signal[k]-signal[k+'_change']
+        out['prior_'+k]=previous
+        out['full_rise_'+k]=entry[k]-previous
+    out['full_intervals']=intervals
+    out['average_wma_slope']=out['full_rise_wma']/intervals
+    return out
+
+def combination_decision(row,field,threshold):
+    gap=row.get('signal_gap');value=row.get(field)
+    if gap is None or not math.isfinite(float(gap)):return 'UNKNOWN'
+    if gap<2:return 'BLOCK'
+    if value is None:return 'UNKNOWN'
+    if isinstance(threshold,bool):passed=value is threshold
+    else:
+        if not math.isfinite(float(value)):return 'UNKNOWN'
+        passed=value>=threshold
+    return 'PASS' if passed else 'BLOCK'
+
 def stats(rows):
     points=[float(r['points']) for r in rows]
     return dict(trades=len(points),winning_points=sum(max(p,0) for p in points),
@@ -70,9 +106,21 @@ def extract(day,session):
         interval=[(at,features(f)) for at,f in sorted(frames.items()) if signal<=at<=entry]
         expected=int((datetime.fromisoformat(entry)-datetime.fromisoformat(signal)).total_seconds()/300)+1
         if len(interval)!=expected:raise ValueError('INCOMPLETE_SIGNAL_TO_ENTRY_FRAMES:'+entry)
+        row.update(magnitude(sf,ef,expected))
+        row['prior_time']=(datetime.fromisoformat(signal)-timedelta(minutes=5)).isoformat()[11:16]
+        row['ema_rising_signal_and_entry']=sf['ema_change']>0 and ef['ema_change']>0
+        row['rsi_ema_separation_change']=(ef['rsi']-ef['ema'])-(sf['rsi']-sf['ema'])
+        previous_entry_strength=interval[-2][1]['strength']
+        row['entry_wma_acceleration']=ef['strength']-previous_entry_strength
+        row['entry_wma_acceleration_positive']=row['entry_wma_acceleration']>0
         for k in ('rsi','ema','wma'):
             row[k+'_rising_each_candle']=all(f[k+'_change']>0 for _,f in interval)
         rows.append(row)
+        # Reconstruct the exact prior levels from the signal frame's recorded
+        # changes. Do not invent that prior candle's own changes.
+        steps.append(dict(date=day,trade_entry=row['entry'],time=row['prior_time'],stage='PRE_SIGNAL',
+            rsi=row['prior_rsi'],ema=row['prior_ema'],wma=row['prior_wma'],strength=None,gap=row['prior_ema']-row['prior_wma'],
+            expansion=None,rsi_change=None,ema_change=None,wma_change=None))
         for at,f in interval:steps.append(dict(date=day,trade_entry=row['entry'],time=at[11:16],stage='SIGNAL' if at==signal else 'ENTRY' if at==entry else 'WAIT',**f))
     return rows,steps
 
@@ -90,6 +138,21 @@ def previous_month(value):
     return value.replace(year=year,month=month,day=min(value.day,calendar.monthrange(year,month)[1]))
 
 class Checks(unittest.TestCase):
+    def test_full_magnitude_includes_signal_candle(self):
+        signal=dict(rsi=55.64,ema=50.218,wma=49.664,rsi_change=6.041,ema_change=5.422,wma_change=.937)
+        entry=dict(rsi=56.823,ema=53.521,wma=50.636)
+        m=magnitude(signal,entry,2)
+        self.assertAlmostEqual(m['prior_wma'],48.727)
+        self.assertAlmostEqual(m['full_rise_wma'],1.909)
+        self.assertAlmostEqual(m['average_wma_slope'],.9545)
+    def test_average_normalizes_longer_waits(self):
+        sf=dict(rsi=50,ema=45,wma=40,rsi_change=1,ema_change=1,wma_change=1)
+        self.assertEqual(magnitude(sf,dict(rsi=53,ema=48,wma=43),4)['average_wma_slope'],1)
+    def test_combination_gap_veto_and_unknown(self):
+        self.assertEqual(combination_decision(dict(signal_gap=.555,full_rise_wma=10),'full_rise_wma',2),'BLOCK')
+        self.assertEqual(combination_decision(dict(signal_gap=3),'full_rise_wma',2),'UNKNOWN')
+        self.assertEqual(combination_decision(dict(signal_gap=2,full_rise_wma=2),'full_rise_wma',2),'PASS')
+        self.assertEqual(combination_decision(dict(signal_gap=3,wma_rising_each_candle=False),'wma_rising_each_candle',True),'BLOCK')
     def test_winners_forgone_and_losses_avoided_both_counted(self):
         rows=[dict(points=100,signal_gap=2,signal_strength=1),dict(points=-104.55,signal_gap=.555,signal_strength=.937),dict(points=20,signal_gap=4,signal_strength=1.2)]
         taken,blocked,unknown=classify(rows,3,0)
@@ -141,25 +204,42 @@ def main():
     rows=[];steps=[]
     for day,(body,_) in sorted(sources.items()):
         r,s=extract(day,json.loads(body));rows.extend(r);steps.extend(s)
-    comparisons=[]
+    comparisons=[];decisions=[]
     for name,gap,strength in RULES:
         taken,blocked,unknown=classify(rows,gap,strength);ts=stats(taken);bs=stats(blocked)
         target=[r for r in rows if r['date']=='2026-10-19' and r['entry']=='09:45']
-        comparisons.append(dict(rule=name,taken=len(taken),blocked=len(blocked),unknown=len(unknown),
+        comparisons.append(dict(rule=name,evaluated_at='SIGNAL',taken=len(taken),blocked=len(blocked),unknown=len(unknown),
             passed_points=ts['net_points'],loss_points_avoided=-bs['losing_points'],winning_points_forgone=bs['winning_points'],
             winners_blocked=sum(r['points']>0 for r in blocked),losers_blocked=sum(r['points']<0 for r in blocked),
             net_change=-bs['net_points'],oct19_0945='BLOCK' if target and target[0] in blocked else 'PASS' if target and target[0] in taken else 'UNAVAILABLE'))
+    for name,stage,field,threshold in COMBINATIONS:
+        taken=[];blocked=[];unknown=[]
+        for row in rows:
+            outcome=combination_decision(row,field,threshold)
+            {'PASS':taken,'BLOCK':blocked,'UNKNOWN':unknown}[outcome].append(row)
+            decisions.append(dict(rule=name,evaluated_at=stage,date=row['date'],setup=row['setup'],signal=row['signal'],entry=row['entry'],exit=row['exit'],points=row['points'],outcome=outcome,
+                signal_gap=row['signal_gap'],check=field,value=row.get(field),threshold=threshold,
+                reason='SIGNAL_GAP_BELOW_2' if row['signal_gap']<2 else 'ADDITIONAL_CHECK_FAILED' if outcome=='BLOCK' else 'MISSING_EVIDENCE' if outcome=='UNKNOWN' else 'ALL_CHECKS_PASS'))
+        ts=stats(taken);bs=stats(blocked)
+        target=[r for r in rows if r['date']=='2026-10-19' and r['entry']=='09:45']
+        comparisons.append(dict(rule=name,evaluated_at=stage,taken=len(taken),blocked=len(blocked),unknown=len(unknown),passed_points=ts['net_points'],
+            loss_points_avoided=-bs['losing_points'],winning_points_forgone=bs['winning_points'],
+            winners_blocked=sum(r['points']>0 for r in blocked),losers_blocked=sum(r['points']<0 for r in blocked),net_change=-bs['net_points'],
+            oct19_0945=combination_decision(target[0],field,threshold) if target else 'UNAVAILABLE'))
     lines=['# Bullish one-month gap and slope comparison','',f'Period: {start} through {end}; status: '+('INCOMPLETE' if errors else 'COMPLETE'),
            '', 'Latest V20 EMA10-touch policy. Gross NIFTY points; costs excluded. Fixed-trade screening, not stateful filtered replay. Thresholds are exploratory and evaluated on already examined data. No live changes.',
            '',f'Included sessions: {len(sources)}. Bullish trades: {len(rows)}. Issues: {errors}',
-           '', 'All filters use signal-time values, never future entry values. Positive-only tables are descriptive; filter comparisons include every bullish loser too.']
+           '', 'Original filters use signal-time values. Combinations marked ENTRY use completed data through the recorded entry, never subsequent candles. Rejection discards the recorded trade in this screen; no delayed replacement is modeled. Positive-only tables are descriptive; filter comparisons include every bullish loser too.',
+           '', 'Full magnitude = entry indicator minus indicator one completed candle BEFORE the qualified signal. Average WMA slope = full WMA change / five-minute intervals, including the signal candle. EMA means EMA3 of RSI9; WMA means WMA21 of RSI9. Prior levels are reconstructed from recorded signal changes.']
     columns=['date','setup','signal','entry','exit','points','signal_wma','signal_strength','signal_gap','signal_expansion','entry_wma','entry_strength','entry_gap','rise_rsi','rise_ema','rise_wma']
     lines+=table('## Profitable bullish trades',[r for r in rows if r['points']>0],columns)
     lines+=table('## Losing bullish trades',[r for r in rows if r['points']<0],columns)
-    lines+=table('## Filter trade-offs',comparisons,['rule','taken','blocked','unknown','passed_points','losers_blocked','loss_points_avoided','winners_blocked','winning_points_forgone','net_change','oct19_0945'])
+    lines+=table('## Full previous-candle-to-entry magnitude',rows,['date','signal','entry','exit','points','prior_time','prior_rsi','prior_ema','prior_wma','signal_wma','entry_wma','full_rise_rsi','full_rise_ema','full_rise_wma','full_intervals','average_wma_slope','wma_rising_each_candle','entry_wma_acceleration'])
+    lines+=table('## Filter trade-offs',comparisons,['rule','evaluated_at','taken','blocked','unknown','passed_points','losers_blocked','loss_points_avoided','winners_blocked','winning_points_forgone','net_change','oct19_0945'])
     lines+=table('## Candle-by-candle RSI / EMA3 / WMA magnitude',steps,['date','trade_entry','time','stage','rsi','ema','wma','rsi_change','ema_change','wma_change','gap','expansion'])
     args.output.mkdir(parents=True,exist_ok=True)
-    for name,data in [('bullish-trades.csv',rows),('candle-values.csv',steps),('filter-comparison.csv',comparisons)]:
+    lines+=table('## Combination trade decisions',decisions,['rule','date','signal','entry','exit','points','outcome','check','value','threshold','reason'])
+    for name,data in [('bullish-trades.csv',rows),('candle-values.csv',steps),('filter-comparison.csv',comparisons),('combination-decisions.csv',decisions)]:
         fields=list(data[0]) if data else ['date']
         with (args.output/name).open('w',newline='') as stream:
             w=csv.DictWriter(stream,fields);w.writeheader();w.writerows(data)
