@@ -486,12 +486,27 @@ def add_variants(engine,baseline,old,new,Gate,NewGate,fresh,p,day,raw,warm,asof,
     return variants
 
 
+def historical_control_available(day,control_provenance,session_provenance):
+    if day in control_provenance:return True
+    if not control_provenance or day<=max(control_provenance):
+        raise ValueError('HISTORICAL_CONTROL_SESSION_MISSING:'+day)
+    parity=session_provenance.get('baseline_parity') or {}
+    if (session_provenance.get('input_basis')!='NEW_SESSION_ANALYTICS_WITH_RECORDED_AUDIT_PARITY'
+        or parity.get('status')!='PASS' or not parity.get('compared') or parity.get('issues')):
+        raise ValueError('NEW_SESSION_VERIFIED_BASELINE_REQUIRED:'+day)
+    return False
+
+
 def write_reports(output,days,results,coverage,provenance,version,unused,stats):
     import hilega_existing_ema10_wma_combined_last10_research as base
     control_root=Path('data/research/hilega-and-fresh-setup-3months-20261016')
     control=json.loads((control_root/'report.json').read_text())
     if control.get('status')!='COMPLETE' or control.get('strategy_version')!=version:raise ValueError('COMPLETE_THREE_MONTH_CONTROL_REQUIRED')
     for day,variants in results.items():
+        if not historical_control_available(day,control['provenance'],provenance[day]):
+            provenance[day]['three_month_control_parity']='NOT_APPLICABLE_NEW_SESSION'
+            provenance[day]['control_validation_basis']='RECORDED_LIVE_BASELINE_PARITY_PASS; no historical policy control exists for this newer session'
+            continue
         if provenance[day]['input_sha256']!=control['provenance'][day]['input_sha256']:raise ValueError('CONTROL_INPUT_MISMATCH:'+day)
         saved=json.loads((control_root/'sessions'/(day+'.json')).read_text())
         for key in BASES:
@@ -1238,6 +1253,17 @@ class Checks(unittest.TestCase):
 
 
 class NewSessionChecks(unittest.TestCase):
+    def test_report_new_session_uses_verified_live_baseline(self):
+        source=dict(input_basis='NEW_SESSION_ANALYTICS_WITH_RECORDED_AUDIT_PARITY',baseline_parity=dict(status='PASS',compared=163,issues=[]))
+        self.assertFalse(historical_control_available('2026-10-19',{'2026-10-16':{}},source))
+    def test_report_historical_control_still_required(self):
+        self.assertTrue(historical_control_available('2026-10-16',{'2026-10-16':{}},{}))
+        with self.assertRaisesRegex(ValueError,'HISTORICAL_CONTROL_SESSION_MISSING'):
+            historical_control_available('2026-10-15',{'2026-10-16':{}},{})
+    def test_report_unverified_new_session_rejected(self):
+        for parity in [dict(status='MISMATCH',compared=163,issues=['mismatch']),dict(status='PASS',compared=0,issues=[])]:
+            with self.assertRaisesRegex(ValueError,'VERIFIED_BASELINE_REQUIRED'):
+                historical_control_available('2026-10-19',{'2026-10-16':{}},dict(input_basis='NEW_SESSION_ANALYTICS_WITH_RECORDED_AUDIT_PARITY',baseline_parity=parity))
     def test_priced_checkpoint_survives_same_time_cutoff(self):
         at='2026-10-19T14:55:00+05:30'
         minute=dict(checkpoint=at,nifty_close=100)
