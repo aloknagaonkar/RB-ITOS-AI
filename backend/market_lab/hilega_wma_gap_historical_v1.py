@@ -337,7 +337,16 @@ def build_v1_session(session_date: str, root: Path | None = None) -> dict[str, A
     ))
     control = _metrics("HILEGA_V1_REPLAY", values, signals=len(trades),
                        entries=len(trades), denied=0)
-    candidate_session = build_wma_gap_session(session_date, root)
+    try:
+        candidate_session = build_wma_gap_session(session_date, root)
+    except FileNotFoundError:
+        # Canonical rows are sufficient for V1 even when candidate artifacts are absent.
+        missing_live=_metrics("LIVE_RECORDED_V1", [], signals=0, entries=0, denied=0, available=False)
+        missing_candidate=_metrics(STRATEGY_ID, [], signals=0, entries=0, denied=0, available=False)
+        missing_candidate["unavailable_reason"]="WMA-gap candidate evidence unavailable; canonical V1 remains available"
+        candidate_session=dict(session_date=session_date,evidence_level="STRATEGY",ce_available=False,
+            manifest={},audit_chain_ok=None,audit_chain_issue="Frozen canonical evidence",
+            observation_only=True,execution_enabled=False,performance_summary=[missing_live,control,missing_candidate])
     return {
         **candidate_session,
         "source": "WMA_GAP_490_CANONICAL_CONTROL",

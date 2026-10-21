@@ -280,6 +280,8 @@ class HilegaSandboxEventBridgeV1:
                         "source_sequence": record.get("sequence"),
                         "source_record_hash": record.get("record_hash"),
                         "strategy_id": record_strategy,
+                        "strategy_version": (record.get("payload") or {}).get("strategy_version"),
+                        "policy_id": (record.get("payload") or {}).get("policy_id"),
                         "decision": decision,
                         "reason_code": reason_code,
                         "quantity_policy": "ONE_DYNAMIC_BROKER_LOT",

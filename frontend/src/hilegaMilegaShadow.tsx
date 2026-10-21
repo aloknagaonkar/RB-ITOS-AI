@@ -328,10 +328,10 @@ export default function HilegaMilegaShadow(){
 
     <div className="shadow-safety"><b>Active strategy: {status?.selected_live_shadow_strategy??'Loading'}</b><span>Structural exit · exit-first processing</span></div>
     {['HILEGA_WMA_GAP_V2_LIVE_SHADOW','HILEGA_V2_ALIGNMENT_DUAL_EXIT'].includes(status?.selected_live_shadow_strategy??'')&&<section className="panel">
-      <h2>{status?.selected_live_shadow_strategy} · minute entry confirmation audit</h2>
-      <p>Previous and current are actual adjacent completed minutes. A replacement entry on the exit boundary requires both minutes to satisfy WMA strength.</p>
+      <h2>{status?.selected_live_shadow_strategy} · entry decision audit</h2>
+      <p>BULLISH_GAP2_FULL_WMA2 uses completed five-minute signal and follow-up evidence, with no persistence or time expiry. Historical rows retain their recorded policy.</p>
       <div style={{overflowX:'auto'}}><table><thead><tr><th>Decision time</th><th>Direction</th><th>Previous gap</th><th>Current gap</th><th>Expansion</th><th>Previous WMA strength</th><th>Current WMA strength</th><th>Persistence</th><th>Decision / reason</th></tr></thead>
-      <tbody>{gapChecks.slice().reverse().map((r,i)=>{const p=r.payload??{};return <tr key={r.record_hash??i}><td>{tm(p.decision_timestamp)}</td><td>{p.direction}</td><td>{num(p.previous_gap,4)}</td><td>{num(p.current_gap,4)}</td><td>{num(p.gap_delta,4)}</td><td>{num(p.previous_directional_wma_strength,4)}</td><td>{num(p.directional_wma_strength,4)}</td><td>{p.persistence_pass?'PASS':'WAIT'}</td><td>{p.status} · {(p.reasons??[]).join(', ')||'All conditions passed'}</td></tr>})}</tbody></table></div>
+      <tbody>{gapChecks.slice().reverse().map((r,i)=>{const p=r.payload??{};return <tr key={r.record_hash??i}><td>{tm(p.decision_timestamp)}</td><td>{p.direction}</td><td>{num(p.previous_gap,4)}</td><td>{num(p.current_gap,4)}</td><td>{num(p.gap_delta,4)}</td><td>{num(p.previous_directional_wma_strength,4)}</td><td>{num(p.directional_wma_strength,4)}</td><td>{p.persistence_required===false?'NOT REQUIRED':p.persistence_pass?'PASS':'WAIT'}</td><td>{p.status} · {(p.reasons??[]).join(', ')||'All conditions passed'}</td></tr>})}</tbody></table></div>
       {!gapChecks.length&&<p>No current-session V2 evaluations yet.</p>}
     </section>}
     <HilegaExpiryWorkspace/>

@@ -20,6 +20,9 @@ def apply_manual_control(coordinator,available,*,recovered=False):
   from .hilega_milega_bearish_strategy_v1 import BearishSessionState
   before=coordinator.gate.owner
   coordinator.gate.owner='NONE';coordinator.gate.active=None;coordinator.gate.pending.clear()
+  if hasattr(coordinator,'price_frames'):
+   from .hilega_combined_policy_v1 import reset_pending
+   reset_pending(coordinator.gate)
   for name,cls in [('bullish',SessionState),('bearish',BearishSessionState)]:
    engine=getattr(coordinator.canonical,name);locked=engine.session.session_locked
    engine.session=cls(session_date=available.date(),session_locked=locked)
@@ -31,7 +34,11 @@ def apply_manual_control(coordinator,available,*,recovered=False):
    release_manual_options(coordinator,r,available)
    coordinator._audit(available,'DIRECTIONAL_MANUAL_EXIT_RESET','PROCESSED',dict(request_id=r['request_id'],trade_owner_before=before,trade_owner_after='NONE',exit_reason='MANUAL_EXIT',completed_at=r['completed_at'],accepted_events=[],entry_resume='FRESH_SETUP_ONLY'))
    acknowledge(coordinator,r,available)
- if blocked:coordinator.gate.pending.clear()
+ if blocked:
+  coordinator.gate.pending.clear()
+  if hasattr(coordinator,'price_frames'):
+   from .hilega_combined_policy_v1 import reset_pending
+   reset_pending(coordinator.gate)
  return blocked
 
 def acknowledge(coordinator,r,now):

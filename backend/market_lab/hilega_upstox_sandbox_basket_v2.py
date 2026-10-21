@@ -116,7 +116,8 @@ def arm(day,source,control,store,env=Path('.env'),at=None,check_legacy=True):
         terminal={r.get('event_id') for r in history if r.get('terminal')}
         if any(r.get('status')=='REQUESTED' and r.get('event_id') not in terminal for r in history):raise ValueError('LEGACY_UNCERTAIN_REQUEST_RECONCILE_BEFORE_SWITCH')
     c=arm_v1(session_date=day,source=source,control=control,max_orders=20,confirmation='ARM_UPSTOX_SANDBOX_ONLY',now=at)
-    c.update(model=MODEL,strategy_id=strategy(env),execution_mode=mode,
+    from .hilega_alignment_dual_exit_live_v1 import RULES
+    c.update(model=MODEL,strategy_id=strategy(env),strategy_version=RULES['version'],policy_id=RULES.get('policy_id'),execution_mode=mode,
              strike_policy_version=policy.version if policy else None,
              strike_policy_sha256=hashlib.sha256(policy_file.read_bytes()).hexdigest() if policy_file else None,
              automatic_fill_ledger_version='HILEGA_SANDBOX_FILL_LEDGER_V1',
@@ -132,7 +133,13 @@ class BasketWorker:
         from .hilega_manual_exit_v1 import suppress_intent
         if suppress_intent(self,intent):return
         c=self.control.read();rows=self.store.rows();base=dict(intent_id=intent['intent_id'],event_id=intent['event_id'],trade_id=intent['trade_id'],event_type=intent['event_type'],direction=intent['direction'],session_date=c['session_date'],event_timestamp=intent['event_timestamp'],source_sequence=intent['source_sequence'],strategy_id=c['strategy_id'])
+        base.update(strategy_version=intent.get('strategy_version'),policy_id=intent.get('policy_id'))
         if intent['intent_id'] in self.store.terminal_ids():return
+        if intent['event_type']=='ENTRY' and c.get('strategy_id')=='HILEGA_V2_ALIGNMENT_DUAL_EXIT' and (intent.get('policy_id')=='BULLISH_GAP2_FULL_WMA2' or c.get('policy_id')=='BULLISH_GAP2_FULL_WMA2'):
+            from .hilega_combined_policy_v1 import VERSION,POLICY_ID
+            if c.get('strategy_version')!=VERSION or intent.get('strategy_version')!=VERSION or intent.get('policy_id')!=POLICY_ID:
+                self.store.append(dict(base,status='SKIPPED_STRATEGY_VERSION_MISMATCH',terminal=True,reason='Rearm flat sandbox for promoted policy; never replay old BUY'))
+                return
         if is_prearm_exit(intent,intents,c,rows):self.store.append(dict(base,status='SKIPPED_PRE_ARM_TRADE_EXIT',terminal=True));return
         mode=c.get('execution_mode',FIVE_LEG_MODE)
         from .hilega_sandbox_fill_ledger_v1 import reconcile_orders, prepare_exit, submit_exit

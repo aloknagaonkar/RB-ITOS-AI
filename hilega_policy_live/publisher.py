@@ -289,6 +289,10 @@ class Publisher:
             return
         current_session = stamp(at).astimezone(IST).date() == now().astimezone(IST).date()
         stage = row.get('stage')
+        if stage == 'COMBINED_PRICE_OBSERVATION':
+            if payload.get('strategy_id')=='HILEGA_V2_ALIGNMENT_DUAL_EXIT' and current_session and row.get('status')=='PROCESSED' and payload.get('nifty_close') is not None:
+                self.state['closes'][stamp(at).astimezone(timezone.utc).isoformat()]=float(payload['nifty_close'])
+            return
         if stage == 'DIRECTIONAL_DECISION':
             if payload.get('strategy_id') != 'HILEGA_V2_ALIGNMENT_DUAL_EXIT':
                 return
@@ -313,7 +317,7 @@ class Publisher:
                 if close is None:
                     raise ValueError('CONFIRMED_SIGNAL_SPOT_MISSING')
                 context = dict(direction=direction, signal_confirmed=True, velocity_confirmed=False,
-                               signal_timestamp=at, spot=float(close), strategy_version=payload.get('strategy_version'))
+                               signal_timestamp=at, spot=float(close), strategy_version=payload.get('strategy_version'),strategy_policy_id=payload.get('policy_id'))
                 self.state['pending'][oid] = dict(context=context, audit_sequence=row['sequence'], event_type=event)
         elif stage == 'DIRECTIONAL_SESSION_CUTOFF' and row.get('status') == 'PROCESSED':
             for direction in ('BULLISH', 'BEARISH'):

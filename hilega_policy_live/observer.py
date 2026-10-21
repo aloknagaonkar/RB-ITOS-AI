@@ -170,6 +170,7 @@ class Evaluator:
         frame['velocity_evidence'] = context.get('velocity_evidence')
         frame['signal_timestamp'] = context.get('signal_timestamp')
         frame['strategy_version'] = context.get('strategy_version')
+        frame['strategy_policy_id'] = context.get('strategy_policy_id')
         frame['publisher_settings'] = event.get('publisher_settings')
         if context.get('observation_block_reason'):
             frame.update(verdict='NOT_EVALUABLE', reason=context['observation_block_reason'])

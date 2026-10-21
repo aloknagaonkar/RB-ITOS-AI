@@ -32,14 +32,15 @@ export default function HilegaIndependentObservations({sandboxTrades=[]}:{sandbo
   const trades=(data?.trades??[]).filter((t:any)=>String(t.signal_boundary??t.signal_bar??'').slice(0,10)===day)
   const refreshStale=!!error||!received||clock-received>30000
   return <section className="panel shadow-panel">
-    <div className="panel-heading"><div><h2>Independent observation · five contracts</h2><p>Confirmed bullish signal → CE · bearish signal → PE. Tracks the strategy independently of Sandbox fills.</p></div><span className="pill">{day}</span></div>
+    <div className="panel-heading"><div><h2>Independent observation · five contracts</h2><p>Confirmed bullish signal → CE · bearish signal → PE. Tracks confirmed strategy entries and exits independently of Sandbox fills; candidate and follow-up events do not open positions.</p></div><span className="pill">{day}</span></div>
     <p>Hypothetical candle-based P&amp;L. Entry/exit use exact minute opens; marks use completed minute closes. Fees, spreads and slippage excluded. These five contracts are not Greek-policy rankings.</p>
     <p>Last dashboard refresh: {ts(received?new Date(received).toISOString():null)}</p>
     {error&&<div className="banner error">{error} · retained values may be stale</div>}
     {!data?<div className="empty">Loading observation evidence…</div>:!trades.length?<div className="empty">No option lifecycle recorded for today. No entry prices have been invented.</div>:trades.map((trade:any)=>{
       const matches=sandboxTrades.filter((t:any)=>t.direction===trade.direction&&t.expiry===trade.expiry&&t.signal_time===trade.signal_boundary)
-      return <details className="panel shadow-panel" key={`${trade.direction}:${trade.signal_bar}`} open={trade.status==='ACTIVE'}>
+      return <details className="panel shadow-panel" key={`${trade.direction}:${trade.signal_bar}:${trade.strategy_version??'legacy'}`} open={trade.status==='ACTIVE'}>
         <summary style={{cursor:'pointer'}}>{trade.direction} · {trade.option_side} · {ts(trade.signal_boundary??trade.signal_bar)} · {trade.status}</summary>
+        <p>Strategy {trade.policy_id??'Legacy recorded policy'} · {trade.strategy_version??'Version not recorded'}</p>
         <p>Expiry {trade.expiry??'Unavailable'} · Source {trade.source??'Unavailable'} · Exit {trade.exit_reason??'Pending'}</p>
         {trade.issue&&<div className="banner error">{trade.issue}</div>}
         {trade.status==='MANUAL_RELEASED'&&<p>Manual exit ended this observation. An exact option closing price was not recorded; closing P&amp;L remains unavailable.</p>}

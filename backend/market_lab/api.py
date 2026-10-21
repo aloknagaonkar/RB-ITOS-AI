@@ -75,7 +75,7 @@ def create_app(engine=None, historical_gateway_factory=None):
     app.include_router(hilega_manual_exit_router)
     app.include_router(hilega_vwap_audit_router)
     app.include_router(hilega_strike_observation_router)
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "testserver", "35.200.199.19"])
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "testserver", "34.14.187.85"])
     app.add_middleware(GZipMiddleware, minimum_size=1000)
     app.add_middleware(
         CORSMiddleware,

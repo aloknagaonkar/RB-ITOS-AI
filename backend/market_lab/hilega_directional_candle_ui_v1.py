@@ -550,6 +550,9 @@ def build_live_directional_candles(session_date: str | None = None, *, audit_onl
                         "decision_timestamp": ts,
                         "source_bar_timestamp": payload.get("bar_timestamp"),
                         "strategy_id": payload.get("strategy_id"),
+                        "policy_id": payload.get("policy_id"),
+                        "strategy_version": payload.get("strategy_version"),
+                        "policy_events": payload.get("policy_events") or [],
                         "event_details": payload.get("event_details") or [],
                         "audit_status": record.get("status"),
                         "wma_gap_checks": payload.get("wma_gap_checks") or [],
@@ -562,6 +565,9 @@ def build_live_directional_candles(session_date: str | None = None, *, audit_onl
                         "ema3_rsi": indicator.get("ema3"), "wma21_rsi": indicator.get("wma21")})
             from .hilega_v2_replay_presentation_v1 import inspection
             row["strategy_steps"] = inspection({
+                "policy_id": payload.get("policy_id"),
+                "policy_events": payload.get("policy_events") or [],
+                "price_ema_frame": payload.get("price_ema_frame"),
                 "completed_5m_indicators": payload.get("completed_5m_indicators"),
                 "checks": payload.get("wma_gap_checks") or [],
                 "exit_validation": payload.get("exit_validation"),
@@ -570,11 +576,11 @@ def build_live_directional_candles(session_date: str | None = None, *, audit_onl
             row["setup_attempts"] = payload.get("setup_attempts") or []
             row["pending_switches"] = payload.get("pending_switches") or []
             for switch in row["pending_switches"]:
-                row["strategy_steps"].append({"label":"Pending direction switch", "status":"INFO", "value":switch["from_direction"]+" → "+switch["to_direction"], "requirement":"Fresh opposite arm / setup while no actual position is open", "explanation":switch["reason"]+"; old pending signal cancelled; confirmation reset"})
+                row["strategy_steps"].append({"label":"Pending direction switch", "status":"INFO", "value":switch["from_direction"]+" → "+switch["to_direction"], "requirement":"Fully qualified opposite signal while flat", "explanation":switch["reason"]+"; old pending signal cancelled; confirmation reset"})
             row["exit_validation"] = payload.get("exit_validation")
             row["exit_warning_time"] = payload.get("exit_warning_time")
             row["indicator_timestamp"] = payload.get("bar_timestamp")
-            minute_bar = payload.get("minute_ohlcv") or {}
+            minute_bar = (payload.get("price_ema_frame") if payload.get("policy_id")=="BULLISH_GAP2_FULL_WMA2" else payload.get("minute_ohlcv")) or {}
             for field in ("open", "high", "low", "volume"):
                 if field in minute_bar:
                     row[field] = minute_bar[field]
