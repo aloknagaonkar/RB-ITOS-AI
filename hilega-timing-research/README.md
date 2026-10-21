@@ -36,3 +36,49 @@ The uploaded audit extract is not a complete hash chain; matching it does not
 authenticate the original journal. Figures are gross NIFTY points, not option P&L.
 
 Prepared with static review only; tests and replay execution are left to the VM.
+
+## Previous 10 saved sessions
+
+Run these tests on the VM (no local execution has been performed):
+
+```bash
+PYTHONPATH=backend:. .venv/bin/python hilega-timing-research/test_timing.py
+PYTHONPATH=backend:. .venv/bin/python hilega-timing-research/test_batch.py
+PYTHONPATH=backend:. .venv/bin/python hilega-timing-research/batch.py \
+  --input-zip /tmp/hilega-timing-input-2026-10-21.zip \
+  --before 2026-10-21 --sessions 10 \
+  --output data/research/hilega-timing-previous10
+```
+
+The ten latest nonempty saved sessions are selected. This is a cache-based
+calendar; missing dates are not independently checked against exchange holidays.
+Each day must pass full-minute coverage and installed 5m replay trade parity.
+Incomplete days are excluded and reported explicitly, never counted as zero.
+Source hashes must match the uploaded strategy implementation.
+
+## Full 21 October session
+
+After 14:56 IST on 21 October, capture completed candles and refresh the audit:
+
+```bash
+.venv/bin/python hilega-timing-research/capture_today.py \
+  --base-zip /tmp/hilega-timing-input-2026-10-21.zip \
+  --date 2026-10-21 \
+  --output data/research/hilega-timing-full-input-20261021
+
+PYTHONPATH=backend:. .venv/bin/python hilega-timing-research/batch.py \
+  --input-zip data/research/hilega-timing-full-input-20261021/timing-input.zip \
+  --before 2026-10-21 --sessions 10 \
+  --today-input data/research/hilega-timing-full-input-20261021/session-input.json \
+  --output data/research/hilega-timing-previous10-plus-today
+```
+
+Capture makes one read-only Upstox market-data GET, reads today's audit, and
+writes only a new research input directory. No orders or services are changed.
+The intraday capture requires the date to be today. If used on another date,
+provide separately recovered historical candles and recorded audit evidence.
+Today's recorded audit must cover 14:55; otherwise today fails parity and is
+excluded. Historical parity is research reproduction, not live fill verification.
+Outputs: summary.md, daily-trade-comparison.md, report.json, sessions/*.json.
+Daily report includes setup, qualified signal, entry/exit, points and entry checks.
+Chronological sequence pairing in the daily table is not a matched signal identity.

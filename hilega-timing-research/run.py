@@ -148,6 +148,14 @@ def parity(result, records, until):
     expected_exits = sorted((e['entry_time'],e['event_time'],round(e['price'],4),round(e['points'],4)) for e in exits)
     actual_exits = sorted((e['entry_time'],e['exit_time'],round(e['exit_price'],4),round(e['points'],4)) for e in result['trades'])
     mismatches = []
+    observed=[]
+    for row in records:
+        p=row.get('payload') or {}
+        if row.get('stage') in ('DIRECTIONAL_DECISION','DIRECTIONAL_SESSION_CUTOFF'):
+            stamp=p.get('decision_timestamp') or row.get('event_time')
+            if stamp:observed.append(datetime.fromisoformat(stamp))
+    if not observed or max(observed)<until:
+        mismatches.append('RECORDED_AUDIT_DOES_NOT_COVER_REQUESTED_HORIZON')
     if expected_entries != actual_entries: mismatches.append('ENTRY_MISMATCH')
     if expected_exits != actual_exits: mismatches.append('EXIT_MISMATCH')
     # Also compare indicators and OHLC at every recorded decision boundary.
@@ -165,6 +173,14 @@ def parity(result, records, until):
         recorded_entries=expected_entries, replay_entries=actual_entries,
         recorded_exits=expected_exits, replay_exits=actual_exits)
 
+def verify_sources():
+    import market_lab
+    expected=json.loads((HERE/'source-hashes.json').read_text())
+    for name,digest in expected.items():
+        source=Path(market_lab.__file__).parent/(name+'.py')
+        if hashlib.sha256(source.read_bytes()).hexdigest()!=digest:
+            raise ValueError('SOURCE_CHANGED:'+name)
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--input-zip',type=Path,required=True)
@@ -172,12 +188,7 @@ def main():
     ap.add_argument('--as-of',default='11:55')
     ap.add_argument('--output',type=Path,required=True)
     args = ap.parse_args()
-    import market_lab
-    expected = json.loads((HERE/'source-hashes.json').read_text())
-    for name, digest in expected.items():
-        source = Path(market_lab.__file__).parent/(name+'.py')
-        if hashlib.sha256(source.read_bytes()).hexdigest()!=digest:
-            raise ValueError('SOURCE_CHANGED:'+name)
+    verify_sources()
     data = json.loads(args.session_input.read_text())
     day = data['session_date']
     until = datetime.fromisoformat(day+'T'+args.as_of+':00+05:30')
