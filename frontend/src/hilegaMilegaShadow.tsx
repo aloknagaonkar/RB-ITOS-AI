@@ -3,7 +3,9 @@ import {sessionDay,dateOptions,recentAuditDays,selectedTradeDay,TradeDateFilter}
 import HilegaPcrWorkspace from './hilegaPcrWorkspace'
 import HilegaPcrAuditCard,{usePcrContext,strikeBias} from './hilegaPcrContext'
 import HilegaExpiryWorkspace from './hilegaExpiryWorkspace'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useRef } from 'react'
+import {fetchLive,startLivePolling,useActiveLiveMarks} from './hilegaLivePolling'
+import {LiveMarkHeaders,LiveMarkCells,LiveTradeTotal} from './hilegaActiveLiveMarkCells'
 import HilegaDecisionTable,{type HilegaAudit} from './hilegaDecisionTable'
 import {overlayDirectionalTradeMarkers} from './hilegaDirectionalTradeMarkerOverlay'
 import {augmentDirectionalRowsWithTrades,overlayDirectionalAuditReports} from './hilegaDirectionalAuditOverlay'
@@ -108,7 +110,7 @@ const directionalBase='/api/live-shadow/hilega-directional'
 const bullishBase='/api/live-shadow/hilega-milega'
 
 const getFrom=async<T,>(base:string,path:string):Promise<T>=>{
-  const r=await fetch(base+path)
+  const r=await fetchLive(base+path)
   if(!r.ok){const e=await r.json().catch(()=>null);throw new Error(e?.detail||'Hilega request failed')}
   return r.json()
 }
@@ -261,23 +263,50 @@ export default function HilegaMilegaShadow(){
   const [error,setError]=useState('')
   const [tradeDate,setTradeDate]=useState('')
   const [gapChecks,setGapChecks]=useState<Record<string,any>[]>([])
+  const liveMarks=useActiveLiveMarks()
+  const dashboardRef=useRef<Dashboard|null>(null)
+  const auditBaseRef=useRef<HilegaAudit[]>([])
+  const directionalRef=useRef<any[]>([])
+  const [uiUpdates,setUiUpdates]=useState<Record<string,string>>({})
 
-  const refresh=async(active:()=>boolean)=>{
-    const [s,d,g]=await Promise.all([
-      getDirectional<DirectionalStatus>('/status?fast=true'),
-      getDirectional<Dashboard>('/trade-dashboard'),
-      getDirectional<{rows:Record<string,any>[]}>('/wma-gap-evaluations?limit=100'),
-    ])
-    if(!active())return
-    setStatus(s);setDashboard(d);setGapChecks(g.rows);setError('')
-    const [a,dr]=await Promise.all([
-      getBullish<AuditReport[]>('/audit-index?limit=200'),
-      fetch('/api/live-shadow/hilega-directional-candles/live?audit_only=true'),
-    ])
+  useEffect(()=>{
+    let active=true;const failures:Record<string,string>={};const controller=new AbortController()
+    const wrap=(name:string,fn:()=>Promise<void>)=>async()=>{
+      try{await fn();delete failures[name];if(active)setUiUpdates(v=>({...v,[name]:new Date().toISOString()}))}
+      catch(e){failures[name]=name+': '+(e as Error).message}
+      if(active)setError(Object.values(failures).join(' · '))
+    }
+    const current=()=>active
+    const stopStatus=startLivePolling(wrap('Status',async()=>{
+      const s=await getDirectional<DirectionalStatus>('/status?fast=true');if(active)setStatus(s)
+    }),10000)
+    const stopTrades=startLivePolling(wrap('Trades',async()=>{
+      const d=await getDirectional<Dashboard>('/trade-dashboard');if(active){dashboardRef.current=d;setDashboard(d)}
+    }),5000)
+    const stopChecks=startLivePolling(wrap('Entry checks',async()=>{
+      const g=await getDirectional<{rows:Record<string,any>[]}>('/wma-gap-evaluations?limit=100');if(active)setGapChecks(g.rows)
+    }),5000)
+    const stopAudit=startLivePolling(wrap('Decision candles',async()=>{
+      const day=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())
+      const dr=await fetchLive('/api/live-shadow/hilega-directional-candles/live?audit_only=true&session_date='+day,controller.signal)
+      if(!dr.ok)throw new Error('Decision audit HTTP '+dr.status+': '+await dr.text())
+      const directional=await dr.clone().json()
+      const combined=(directional.rows??[]).some((r:any)=>r.strategy_id==='HILEGA_V2_ALIGNMENT_DUAL_EXIT')
+      const results=await Promise.allSettled([
+        combined?Promise.resolve([] as AuditReport[]):getBullish<AuditReport[]>('/audit-index?limit=200'),
+        Promise.resolve(dr),
+      ])
+      let errors:string[]=[]
+      if(results[0].status==='fulfilled')auditBaseRef.current=results[0].value as HilegaAudit[]
+      else errors.push('base audit: '+String(results[0].reason))
+      if(results[1].status==='fulfilled'&&results[1].value.ok){directionalRef.current=(await results[1].value.json()).rows??[]}
+      else errors.push('directional audit request failed')
+      if(errors.length===2)throw new Error(errors.join(' · '))
+      const a=auditBaseRef.current;const d=dashboardRef.current??({trades:[]} as unknown as Dashboard)
+      const active=current
     let merged=a as HilegaAudit[]
-    if(dr.ok){
-      const directional=await dr.json()
-      const rawRows=directional.rows??[]
+    if(directionalRef.current.length){
+      const rawRows=directionalRef.current
       const directionalRows=[...augmentDirectionalRowsWithTrades(rawRows.filter((r:any)=>!['HILEGA_WMA_GAP_V2_LIVE_SHADOW','HILEGA_V2_ALIGNMENT_DUAL_EXIT'].includes(r.strategy_id)),d.trades??[]),...rawRows.filter((r:any)=>['HILEGA_WMA_GAP_V2_LIVE_SHADOW','HILEGA_V2_ALIGNMENT_DUAL_EXIT'].includes(r.strategy_id))]
       merged=overlayDirectionalAuditReports(a as HilegaAudit[],directionalRows)
     }
@@ -285,9 +314,20 @@ export default function HilegaMilegaShadow(){
     merged=overlayDirectionalTradeMarkers(merged.filter(r=>!['HILEGA_WMA_GAP_V2_LIVE_SHADOW','HILEGA_V2_ALIGNMENT_DUAL_EXIT'].includes(r.strategy?.strategy_id)),d.trades??[])
     merged=attachDirectionalTradeAuditMetadata(merged,d.trades??[])
     if(active())setRows([...merged.filter(r=>!v2Reports.some(v=>v.checkpoint.slice(0,10)===r.checkpoint.slice(0,10))),...v2Reports].sort((a,b)=>b.checkpoint.localeCompare(a.checkpoint)) as AuditReport[])
-  }
+      if(errors.length)throw new Error(errors.join(' · '))
+    }),5000)
+    return()=>{active=false;controller.abort();stopStatus();stopTrades();stopChecks();stopAudit()}
+  },[])
 
-  useEffect(()=>{let active=true;let inFlight=false;const poll=async()=>{if(!active||inFlight||document.hidden)return;inFlight=true;try{await refresh(()=>active)}catch(e){if(active)setError((e as Error).message)}finally{inFlight=false}};void poll();const t=setInterval(()=>void poll(),15000);return()=>{active=false;clearInterval(t)}},[])
+  useEffect(()=>{
+    if(!expanded)return
+    let active=true
+    const stop=startLivePolling(async()=>{
+      try{const r=await getBullish<AuditReport>('/audit-detail?checkpoint='+encodeURIComponent(expanded));if(active)setDetail(r)}
+      catch{/* Existing recorded detail stays visible; panel polling continues. */}
+    },10000)
+    return()=>{active=false;stop()}
+  },[expanded])
 
   const activity=useMemo(()=>rows.filter(r=>r.transitions.length>0||(r.strategy.events_emitted||[]).length>0),[rows])
   const entries=useMemo(()=>activity.flatMap(r=>r.transitions.filter(isEntry).map(t=>({r,t}))),[activity])
@@ -338,6 +378,7 @@ export default function HilegaMilegaShadow(){
     <HilegaPcrWorkspace/>
 
     <HilegaUpstoxSandboxDashboard/>
+    <p>Automatic updates · trades 5s · decisions 5s · live marks 2s. Last successful updates: {Object.entries(uiUpdates).map(([name,at])=>name+' '+tm(at)).join(' · ')||'Connecting…'}</p>
 
     <div className="shadow-safety">
       <b>HILEGA-MILEGA · OBSERVATION ONLY</b>
@@ -373,8 +414,9 @@ export default function HilegaMilegaShadow(){
               <b>{words(t.direction)} · {side} · Signal candle {candleWindow(t.signal_bar)}</b> · {words(t.source)} <span className="shadow-stage">ACTIVE</span>
               <small>Session {sessionDay(t.signal_bar)} · Decision boundary {tm(t.signal_boundary??plusMinutes(t.signal_bar,5))} · {side} entry {tm(entryTime)} · Expiry {t.expiry??'—'} · ATM {num(t.atm,0)} · Signal NIFTY {num(t.signal_spot)}</small>
             </div>{t.direction==='BULLISH'&&<button onClick={()=>void openTradeAudit(t.signal_bar)}>{isOpen?'Hide audit':'Audit ▾'}</button>}</div>
+            <LiveTradeTotal trade={t} find={liveMarks.find}/>
             {t.issue&&<div className="hilega-dashboard-warning">Data limitation: {t.issue}</div>}
-            {t.legs.length>0&&<div className="shadow-table-scroll"><table className="shadow-table hilega-economics-table"><thead><tr><th>{side}</th><th>Entry time</th><th>Entry premium</th><th>Latest premium</th><th>Current pts</th><th>Current %</th><th>Combined bias</th><th>MFE</th><th>MAE</th></tr></thead><tbody>{t.legs.map(l=><tr key={l.instrument_key}><td>{role(l.relation_to_atm)} · {num(l.strike,0)} {side}</td><td>{tm(l.entry_timestamp)}</td><td>{num(l.entry_open)}</td><td>{num(l.latest_close)}</td><td className={l.current_points==null?'':l.current_points>=0?'positive':'negative'}>{signed(l.current_points)}</td><td>{l.current_return_pct==null?'—':`${signed(l.current_return_pct)}%`}</td><td>{strikeBias(activePcr,l.strike,l.instrument_key)}</td><td>{num(l.mfe_points)}</td><td>{num(l.mae_points)}</td></tr>)}</tbody></table></div>}
+            {t.legs.length>0&&<div className="shadow-table-scroll"><table className="shadow-table hilega-economics-table"><thead><tr><th>{side}</th><th>Entry time</th><th>Entry premium</th><th>Latest premium</th><th>Current pts</th><th>Current %</th><th>Combined bias</th><th>MFE</th><th>MAE</th><LiveMarkHeaders/></tr></thead><tbody>{t.legs.map(l=><tr key={l.instrument_key}><td>{role(l.relation_to_atm)} · {num(l.strike,0)} {side}</td><td>{tm(l.entry_timestamp)}</td><td>{num(l.entry_open)}</td><td>{num(l.latest_close)}</td><td className={l.current_points==null?'':l.current_points>=0?'positive':'negative'}>{signed(l.current_points)}</td><td>{l.current_return_pct==null?'—':`${signed(l.current_return_pct)}%`}</td><td>{strikeBias(activePcr,l.strike,l.instrument_key)}</td><td>{num(l.mfe_points)}</td><td>{num(l.mae_points)}</td><LiveMarkCells mark={liveMarks.find(t,l.instrument_key)}/></tr>)}</tbody></table></div>}
             {isOpen&&<div className="hilega-inline-audit"><h3>Full detailed bullish audit · {t.signal_bar}</h3>{auditLoading&&<p>Refreshing detailed audit…</p>}{detail&&<AuditDetail r={detail}/>}</div>}
           </article>
         })}

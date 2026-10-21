@@ -68,13 +68,8 @@ def _hhmm(value: Any) -> str | None:
 
 
 def _read_audit(path: Path) -> list[dict[str, Any]]:
-    if not path.is_file():
-        return []
-    store = ShadowStepAuditStoreV1(path)
-    try:
-        return store.read_all()
-    except Exception:
-        return []
+    from .hilega_ui_journal_cache_v1 import read_rows
+    return read_rows(path)
 
 
 def _timestamp(row: dict[str, Any]) -> str | None:
@@ -513,18 +508,12 @@ def build_live_directional_candles(session_date: str | None = None, *, audit_onl
             "warning": "No current live candle evidence is available.",
         }
 
-    if audit_only:
-        try:
-            rows = _directional_evidence_live_rows(day, fast=True)
-        except Exception:
-            rows = {}
-        if not rows:
-            rows = _base_live_rows_legacy(day)
-    else:
-        rows = _base_live_rows(day)
+    # Audit-only UI consumes recorded strategy decisions, not a fresh indicator replay.
+    rows = {} if audit_only else _base_live_rows(day)
     directional_count = 0
-
     manual_audit_records = _read_audit(LIVE_DIRECTIONAL_AUDIT)
+    if audit_only and not any(r.get('stage')=='DIRECTIONAL_DECISION' and _iso_session((r.get('payload') or {}).get('decision_timestamp') or (r.get('payload') or {}).get('bar_timestamp') or r.get('checkpoint'))==day for r in manual_audit_records):
+        rows = _base_live_rows_legacy(day)
     for record in manual_audit_records:
         if record.get("stage") != "DIRECTIONAL_DECISION":
             continue

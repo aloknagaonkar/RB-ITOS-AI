@@ -27,7 +27,8 @@ def _store() -> ShadowStepAuditStoreV1:
 
 
 def _rows() -> list[dict[str, Any]]:
-    return _store().read_all() if STEP_AUDIT_PATH.exists() else []
+    from .hilega_ui_journal_cache_v1 import read_rows
+    return read_rows(STEP_AUDIT_PATH)
 
 
 def _record_session(row: dict[str, Any]) -> str | None:
@@ -348,7 +349,14 @@ def events(limit: int = 200):
 
 @router.get("/trade-dashboard")
 def trade_dashboard():
-    return project_directional_shadow_dashboard(_rows())
+    from .hilega_ui_journal_cache_v1 import read_dashboard
+    return read_dashboard(STEP_AUDIT_PATH)
+
+@router.get('/active-live-marks')
+def active_live_marks():
+    from .hilega_active_live_marks_v1 import load
+    from .hilega_ui_journal_cache_v1 import read_dashboard
+    return load(read_dashboard(STEP_AUDIT_PATH))
 
 
 @router.get("/wma-gap-evaluations")

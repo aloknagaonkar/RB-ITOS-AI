@@ -20,6 +20,7 @@ import httpx
 from dotenv import dotenv_values
 from filelock import FileLock
 from observer import Config, Evaluator, Store, MODEL, POLICY, dumps, fingerprint, stamp
+from active_marks import display_keys, publish as publish_active_marks
 
 IST = ZoneInfo('Asia/Kolkata')
 ROOT = Path(__file__).resolve().parents[1]
@@ -247,6 +248,7 @@ class Publisher:
         keys = {c['instrument_key'] for p in self.state['pending'].values() for c in p.get('contracts', [])}
         for (raw,) in self.store.db.execute('SELECT frame FROM state WHERE is_open=1'):
             keys.update(r['instrument_key'] for r in json.loads(raw)['top5'])
+        keys.update(display_keys(self))
         additions = keys-self.subscribed
         removed = self.subscribed-keys
         if additions:
@@ -431,6 +433,7 @@ class Publisher:
             while not self.stopping:
                 try:
                     self.drain()
+                    publish_active_marks(self)
                     self.read_audit()
                     self.prepare_entries()
                     if self.streamer:

@@ -22,7 +22,8 @@ def _store() -> ShadowStepAuditStoreV1:
 
 
 def _all_rows() -> list[dict[str, Any]]:
-    return _store().read_all() if STEP_AUDIT_PATH.exists() else []
+    from .hilega_ui_journal_cache_v1 import read_rows
+    return read_rows(STEP_AUDIT_PATH)
 
 
 def _row_session_date(row: dict[str, Any]) -> str | None:
