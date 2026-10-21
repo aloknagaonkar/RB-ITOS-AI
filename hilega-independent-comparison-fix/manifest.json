@@ -1,0 +1,18 @@
+{
+  "backend/market_lab/hilega_historical_ui_api_v1.py": {
+    "old": "7d12a04f5797f3bf6588e139120740cf98f3d387e5aa5c2a1757cdd0d8b5cb3c",
+    "new": "f24f7a700729ef4cd226dbe83e42b89935460e52f7e6f7cfe9c2221395f9bdf6"
+  },
+  "backend/market_lab/hilega_wma_gap_historical_v1.py": {
+    "old": "4f4ad14b071a191f50a8a151f62994dda422e412510c662d769e982c2b7c51b2",
+    "new": "99a1affcab38342c9f8c44fdbd45e2bc63be505b2959cfbb96098884560a5b8b"
+  },
+  "frontend/src/hilegaHistoricalReplay.tsx": {
+    "old": "7d386e142003885bff9b25f3df1a3cf304c11fe767d51e829915c0e5e4b5824d",
+    "new": "be50979966e94d6210b469d238e1454678ac2cf832a942da191ff681eaf24cb4"
+  },
+  "tests/test_hilega_independent_comparison.py": {
+    "old": null,
+    "new": "73dbc5c4408cfbb155b0eb9e12b03cf9dd969044a9b2410c82be05f3f9dd24ae"
+  }
+}
