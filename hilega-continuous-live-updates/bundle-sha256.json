@@ -1,0 +1,12 @@
+{
+  "README.md": "ffab548884eadc988f20ad2a3625d879e6b3c02f5eb8df1543f3693ee9fca2a9",
+  "files/backend/market_lab/hilega_active_live_marks_v1.py": "57c009b1d374d362e0804ee8b801c79cfab77a0f732ca034625e19770cde385b",
+  "files/frontend/src/hilegaActiveLiveMarkCells.tsx": "4dcda69a563598fee221588cf4e31c9b8fb83fae125d964fd5ddc2fa0de4342d",
+  "files/frontend/src/hilegaLivePolling.ts": "aa33b353a522b55fe9005f540b6d633427de8e183bfdf28e81adcb4a46bdab4d",
+  "files/hilega_policy_live/active_marks.py": "d7b90e7acdf9901adeae1f8adf328357ce36c308a438813ad909f86c10fd08df",
+  "files/scripts/restart_hilega_ui_api_safe.sh": "3f0456c6301d58a7b26fd4da9f77e60f959e54a99c3b84cd35e432968333b29a",
+  "files/tests/hilega_live_polling_vm.cjs": "626d93e8cd4b9c5f80db01e22d027f6e5f93a17eb0c070dd6d399550719555aa",
+  "files/tests/test_hilega_active_live_marks_v1.py": "bebae6c8321af9e8e9b8d16f1f84abfaf3f6e2442f1254142689fb66c74266cc",
+  "install.py": "77c74633171aae523af5894a910235adc0f887e9e6822a891ee7ba39fb5c62d9",
+  "transforms.json": "83f6dee91daecdd821f580b726814245584994e615e190f76d9ed19acf1943f8"
+}

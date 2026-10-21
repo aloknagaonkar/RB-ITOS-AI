@@ -1,0 +1,137 @@
+[
+  {
+    "file": "frontend/src/hilegaMilegaShadow.tsx",
+    "old": "import { useEffect, useMemo, useState } from 'react'",
+    "new": "import { useEffect, useMemo, useState, useRef } from 'react'\nimport {fetchLive,startLivePolling,useActiveLiveMarks} from './hilegaLivePolling'\nimport {LiveMarkHeaders,LiveMarkCells,LiveTradeTotal} from './hilegaActiveLiveMarkCells'",
+    "count": 1
+  },
+  {
+    "file": "frontend/src/hilegaMilegaShadow.tsx",
+    "old": "const r=await fetch(base+path)",
+    "new": "const r=await fetchLive(base+path)",
+    "count": 1
+  },
+  {
+    "file": "frontend/src/hilegaMilegaShadow.tsx",
+    "old": "  const [gapChecks,setGapChecks]=useState<Record<string,any>[]>([])",
+    "new": "  const [gapChecks,setGapChecks]=useState<Record<string,any>[]>([])\n  const liveMarks=useActiveLiveMarks()\n  const dashboardRef=useRef<Dashboard|null>(null)\n  const auditBaseRef=useRef<HilegaAudit[]>([])\n  const directionalRef=useRef<any[]>([])\n  const [uiUpdates,setUiUpdates]=useState<Record<string,string>>({})",
+    "count": 1
+  },
+  {
+    "file": "frontend/src/hilegaMilegaShadow.tsx",
+    "old": "  const refresh=async(active:()=>boolean)=>{\n    const [s,d,g]=await Promise.all([\n      getDirectional<DirectionalStatus>('/status?fast=true'),\n      getDirectional<Dashboard>('/trade-dashboard'),\n      getDirectional<{rows:Record<string,any>[]}>('/wma-gap-evaluations?limit=100'),\n    ])\n    if(!active())return\n    setStatus(s);setDashboard(d);setGapChecks(g.rows);setError('')\n    const [a,dr]=await Promise.all([\n      getBullish<AuditReport[]>('/audit-index?limit=200'),\n      fetch('/api/live-shadow/hilega-directional-candles/live?audit_only=true'),\n    ])\n    let merged=a as HilegaAudit[]\n    if(dr.ok){\n      const directional=await dr.json()\n      const rawRows=directional.rows??[]\n      const directionalRows=[...augmentDirectionalRowsWithTrades(rawRows.filter((r:any)=>!['HILEGA_WMA_GAP_V2_LIVE_SHADOW','HILEGA_V2_ALIGNMENT_DUAL_EXIT'].includes(r.strategy_id)),d.trades??[]),...rawRows.filter((r:any)=>['HILEGA_WMA_GAP_V2_LIVE_SHADOW','HILEGA_V2_ALIGNMENT_DUAL_EXIT'].includes(r.strategy_id))]\n      merged=overlayDirectionalAuditReports(a as HilegaAudit[],directionalRows)\n    }\n    const v2Reports=merged.filter(r=>['HILEGA_WMA_GAP_V2_LIVE_SHADOW','HILEGA_V2_ALIGNMENT_DUAL_EXIT'].includes(r.strategy?.strategy_id))\n    merged=overlayDirectionalTradeMarkers(merged.filter(r=>!['HILEGA_WMA_GAP_V2_LIVE_SHADOW','HILEGA_V2_ALIGNMENT_DUAL_EXIT'].includes(r.strategy?.strategy_id)),d.trades??[])\n    merged=attachDirectionalTradeAuditMetadata(merged,d.trades??[])\n    if(active())setRows([...merged.filter(r=>!v2Reports.some(v=>v.checkpoint.slice(0,10)===r.checkpoint.slice(0,10))),...v2Reports].sort((a,b)=>b.checkpoint.localeCompare(a.checkpoint)) as AuditReport[])\n  }\n\n  useEffect(()=>{let active=true;let inFlight=false;const poll=async()=>{if(!active||inFlight||document.hidden)return;inFlight=true;try{await refresh(()=>active)}catch(e){if(active)setError((e as Error).message)}finally{inFlight=false}};void poll();const t=setInterval(()=>void poll(),15000);return()=>{active=false;clearInterval(t)}},[])",
+    "new": "  useEffect(()=>{\n    let active=true;const failures:Record<string,string>={};const controller=new AbortController()\n    const wrap=(name:string,fn:()=>Promise<void>)=>async()=>{\n      try{await fn();delete failures[name];if(active)setUiUpdates(v=>({...v,[name]:new Date().toISOString()}))}\n      catch(e){failures[name]=name+': '+(e as Error).message}\n      if(active)setError(Object.values(failures).join(' · '))\n    }\n    const current=()=>active\n    const stopStatus=startLivePolling(wrap('Status',async()=>{\n      const s=await getDirectional<DirectionalStatus>('/status?fast=true');if(active)setStatus(s)\n    }),10000)\n    const stopTrades=startLivePolling(wrap('Trades',async()=>{\n      const d=await getDirectional<Dashboard>('/trade-dashboard');if(active){dashboardRef.current=d;setDashboard(d)}\n    }),5000)\n    const stopChecks=startLivePolling(wrap('Entry checks',async()=>{\n      const g=await getDirectional<{rows:Record<string,any>[]}>('/wma-gap-evaluations?limit=100');if(active)setGapChecks(g.rows)\n    }),5000)\n    const stopAudit=startLivePolling(wrap('Decision candles',async()=>{\n      const results=await Promise.allSettled([\n        getBullish<AuditReport[]>('/audit-index?limit=200'),\n        fetchLive('/api/live-shadow/hilega-directional-candles/live?audit_only=true',controller.signal),\n      ])\n      let errors:string[]=[]\n      if(results[0].status==='fulfilled')auditBaseRef.current=results[0].value as HilegaAudit[]\n      else errors.push('base audit: '+String(results[0].reason))\n      if(results[1].status==='fulfilled'&&results[1].value.ok){directionalRef.current=(await results[1].value.json()).rows??[]}\n      else errors.push('directional audit request failed')\n      if(errors.length===2)throw new Error(errors.join(' · '))\n      const a=auditBaseRef.current;const d=dashboardRef.current??({trades:[]} as unknown as Dashboard)\n      const active=current\n    let merged=a as HilegaAudit[]\n    if(directionalRef.current.length){\n      const rawRows=directionalRef.current\n      const directionalRows=[...augmentDirectionalRowsWithTrades(rawRows.filter((r:any)=>!['HILEGA_WMA_GAP_V2_LIVE_SHADOW','HILEGA_V2_ALIGNMENT_DUAL_EXIT'].includes(r.strategy_id)),d.trades??[]),...rawRows.filter((r:any)=>['HILEGA_WMA_GAP_V2_LIVE_SHADOW','HILEGA_V2_ALIGNMENT_DUAL_EXIT'].includes(r.strategy_id))]\n      merged=overlayDirectionalAuditReports(a as HilegaAudit[],directionalRows)\n    }\n    const v2Reports=merged.filter(r=>['HILEGA_WMA_GAP_V2_LIVE_SHADOW','HILEGA_V2_ALIGNMENT_DUAL_EXIT'].includes(r.strategy?.strategy_id))\n    merged=overlayDirectionalTradeMarkers(merged.filter(r=>!['HILEGA_WMA_GAP_V2_LIVE_SHADOW','HILEGA_V2_ALIGNMENT_DUAL_EXIT'].includes(r.strategy?.strategy_id)),d.trades??[])\n    merged=attachDirectionalTradeAuditMetadata(merged,d.trades??[])\n    if(active())setRows([...merged.filter(r=>!v2Reports.some(v=>v.checkpoint.slice(0,10)===r.checkpoint.slice(0,10))),...v2Reports].sort((a,b)=>b.checkpoint.localeCompare(a.checkpoint)) as AuditReport[])\n      if(errors.length)throw new Error(errors.join(' · '))\n    }),5000)\n    return()=>{active=false;controller.abort();stopStatus();stopTrades();stopChecks();stopAudit()}\n  },[])\n\n  useEffect(()=>{\n    if(!expanded)return\n    let active=true\n    const stop=startLivePolling(async()=>{\n      try{const r=await getBullish<AuditReport>('/audit-detail?checkpoint='+encodeURIComponent(expanded));if(active)setDetail(r)}\n      catch{/* Existing recorded detail stays visible; panel polling continues. */}\n    },10000)\n    return()=>{active=false;stop()}\n  },[expanded])",
+    "count": 1
+  },
+  {
+    "file": "frontend/src/hilegaMilegaShadow.tsx",
+    "old": "    <HilegaUpstoxSandboxDashboard/>",
+    "new": "    <HilegaUpstoxSandboxDashboard/>\n    <p>Automatic updates · trades 5s · decisions 5s · live marks 2s. Last successful updates: {Object.entries(uiUpdates).map(([name,at])=>name+' '+tm(at)).join(' · ')||'Connecting…'}</p>",
+    "count": 1
+  },
+  {
+    "file": "frontend/src/hilegaMilegaShadow.tsx",
+    "old": "<th>MFE</th><th>MAE</th></tr></thead><tbody>{t.legs.map(l=><tr key={l.instrument_key}>",
+    "new": "<th>MFE</th><th>MAE</th><LiveMarkHeaders/></tr></thead><tbody>{t.legs.map(l=><tr key={l.instrument_key}>",
+    "count": 1,
+    "firstOnly": true
+  },
+  {
+    "file": "frontend/src/hilegaMilegaShadow.tsx",
+    "old": "<td>{num(l.mae_points)}</td></tr>)}</tbody></table></div>}",
+    "new": "<td>{num(l.mae_points)}</td><LiveMarkCells mark={liveMarks.find(t,l.instrument_key)}/></tr>)}</tbody></table></div>}",
+    "count": 1,
+    "firstOnly": true
+  },
+  {
+    "file": "frontend/src/hilegaIndependentObservations.tsx",
+    "old": "import {useEffect,useState} from 'react'",
+    "new": "import {useEffect,useState} from 'react'\nimport {fetchLive,startLivePolling,useActiveLiveMarks} from './hilegaLivePolling'\nimport {LiveMarkHeaders,LiveMarkCells,LiveTradeTotal} from './hilegaActiveLiveMarkCells'",
+    "count": 1
+  },
+  {
+    "file": "frontend/src/hilegaIndependentObservations.tsx",
+    "old": "  const [data,setData]=useState<any>(null),[error,setError]=useState('')",
+    "new": "  const [data,setData]=useState<any>(null),[error,setError]=useState('')\n  const liveMarks=useActiveLiveMarks()",
+    "count": 1
+  },
+  {
+    "file": "frontend/src/hilegaIndependentObservations.tsx",
+    "old": "fetch('/api/live-shadow/hilega-directional/trade-dashboard',{signal:controller.signal})",
+    "new": "fetchLive('/api/live-shadow/hilega-directional/trade-dashboard',controller.signal)",
+    "count": 1
+  },
+  {
+    "file": "frontend/src/hilegaIndependentObservations.tsx",
+    "old": "const timer=setInterval(()=>void poll(),10000)",
+    "new": "const stop=startLivePolling(poll,5000)",
+    "count": 1
+  },
+  {
+    "file": "frontend/src/hilegaIndependentObservations.tsx",
+    "old": "    void poll()\n    const stop=startLivePolling(poll,5000)",
+    "new": "    const stop=startLivePolling(poll,5000)",
+    "count": 1
+  },
+  {
+    "file": "frontend/src/hilegaIndependentObservations.tsx",
+    "old": "clearInterval(timer);clearInterval(tick)",
+    "new": "stop();clearInterval(tick)",
+    "count": 1
+  },
+  {
+    "file": "frontend/src/hilegaIndependentObservations.tsx",
+    "old": "<th>Evidence</th></tr>",
+    "new": "<th>Evidence</th><LiveMarkHeaders/></tr>",
+    "count": 1
+  },
+  {
+    "file": "frontend/src/hilegaIndependentObservations.tsx",
+    "old": "              <td>{stale?'STALE / MISSING MARK':closed?'EXACT CANDLE EXIT':active?'COMPLETED MINUTE MARK':'FINAL PRICE UNAVAILABLE'}</td>",
+    "new": "              <td>{stale?'STALE / MISSING MARK':closed?'EXACT CANDLE EXIT':active?'COMPLETED MINUTE MARK':'FINAL PRICE UNAVAILABLE'}</td>\n              <LiveMarkCells mark={active?liveMarks.find(trade,leg.instrument_key):null}/>",
+    "count": 1
+  },
+  {
+    "file": "frontend/src/hilegaIndependentObservations.tsx",
+    "old": "    {error&&<div className=\"banner error\">",
+    "new": "    {liveMarks.error&&<p>Live quote update unavailable: {liveMarks.error}. Recorded candle marks are retained.</p>}\n    {error&&<div className=\"banner error\">",
+    "count": 1
+  },
+  {
+    "file": "frontend/src/hilegaMilegaShadow.tsx",
+    "old": "            {t.issue&&<div className=\"hilega-dashboard-warning\">Data limitation: {t.issue}</div>}",
+    "new": "            <LiveTradeTotal trade={t} find={liveMarks.find}/>\n            {t.issue&&<div className=\"hilega-dashboard-warning\">Data limitation: {t.issue}</div>}",
+    "count": 1,
+    "firstOnly": true
+  },
+  {
+    "file": "frontend/src/hilegaIndependentObservations.tsx",
+    "old": "        {trade.issue&&<div className=\"banner error\">{trade.issue}</div>}",
+    "new": "        <LiveTradeTotal trade={trade} find={liveMarks.find}/>\n        {trade.issue&&<div className=\"banner error\">{trade.issue}</div>}",
+    "count": 1
+  },
+  {
+    "file": "hilega_policy_live/publisher.py",
+    "old": "from observer import Config, Evaluator, Store, MODEL, POLICY, dumps, fingerprint, stamp",
+    "new": "from observer import Config, Evaluator, Store, MODEL, POLICY, dumps, fingerprint, stamp\nfrom active_marks import display_keys, publish as publish_active_marks",
+    "count": 1
+  },
+  {
+    "file": "hilega_policy_live/publisher.py",
+    "old": "        additions = keys-self.subscribed",
+    "new": "        keys.update(display_keys(self))\n        additions = keys-self.subscribed",
+    "count": 1
+  },
+  {
+    "file": "hilega_policy_live/publisher.py",
+    "old": "                    self.drain()",
+    "new": "                    self.drain()\n                    publish_active_marks(self)",
+    "count": 1
+  },
+  {
+    "file": "backend/market_lab/hilega_directional_live_shadow_ui_v1.py",
+    "old": "@router.get(\"/trade-dashboard\")\ndef trade_dashboard():\n    return project_directional_shadow_dashboard(_rows())",
+    "new": "@router.get(\"/trade-dashboard\")\ndef trade_dashboard():\n    return project_directional_shadow_dashboard(_rows())\n\n# Display-only cache, separate from strategy state and append-only evidence.\nimport threading as _marks_threading\nimport time as _marks_time\n_marks_lock=_marks_threading.Lock()\n_marks_dashboard=None\n_marks_dashboard_at=0.0\n\n@router.get('/active-live-marks')\ndef active_live_marks():\n    from .hilega_active_live_marks_v1 import load\n    global _marks_dashboard,_marks_dashboard_at\n    with _marks_lock:\n        if _marks_dashboard is None or _marks_time.monotonic()-_marks_dashboard_at>=5:\n            _marks_dashboard=project_directional_shadow_dashboard(_rows())\n            _marks_dashboard_at=_marks_time.monotonic()\n        dashboard=_marks_dashboard\n    return load(dashboard)",
+    "count": 1
+  }
+]
