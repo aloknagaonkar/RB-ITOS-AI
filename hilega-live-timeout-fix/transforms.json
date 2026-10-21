@@ -1,0 +1,56 @@
+[
+  {
+    "file": "backend/market_lab/hilega_directional_live_shadow_ui_v1.py",
+    "old": "def _rows() -> list[dict[str, Any]]:\n    return _store().read_all() if STEP_AUDIT_PATH.exists() else []",
+    "new": "def _rows() -> list[dict[str, Any]]:\n    from .hilega_ui_journal_cache_v1 import read_rows\n    return read_rows(STEP_AUDIT_PATH)",
+    "count": 1
+  },
+  {
+    "file": "backend/market_lab/hilega_directional_live_shadow_ui_v1.py",
+    "old": "def trade_dashboard():\n    return project_directional_shadow_dashboard(_rows())",
+    "new": "def trade_dashboard():\n    from .hilega_ui_journal_cache_v1 import read_dashboard\n    return read_dashboard(STEP_AUDIT_PATH)",
+    "count": 1
+  },
+  {
+    "file": "backend/market_lab/hilega_directional_live_shadow_ui_v1.py",
+    "old": "# Display-only cache, separate from strategy state and append-only evidence.\nimport threading as _marks_threading\nimport time as _marks_time\n_marks_lock=_marks_threading.Lock()\n_marks_dashboard=None\n_marks_dashboard_at=0.0\n\n@router.get('/active-live-marks')\ndef active_live_marks():\n    from .hilega_active_live_marks_v1 import load\n    global _marks_dashboard,_marks_dashboard_at\n    with _marks_lock:\n        if _marks_dashboard is None or _marks_time.monotonic()-_marks_dashboard_at>=5:\n            _marks_dashboard=project_directional_shadow_dashboard(_rows())\n            _marks_dashboard_at=_marks_time.monotonic()\n        dashboard=_marks_dashboard\n    return load(dashboard)",
+    "new": "@router.get('/active-live-marks')\ndef active_live_marks():\n    from .hilega_active_live_marks_v1 import load\n    from .hilega_ui_journal_cache_v1 import read_dashboard\n    return load(read_dashboard(STEP_AUDIT_PATH))",
+    "count": 1
+  },
+  {
+    "file": "backend/market_lab/hilega_milega_live_shadow_ui_v1.py",
+    "old": "def _all_rows() -> list[dict[str, Any]]:\n    return _store().read_all() if STEP_AUDIT_PATH.exists() else []",
+    "new": "def _all_rows() -> list[dict[str, Any]]:\n    from .hilega_ui_journal_cache_v1 import read_rows\n    return read_rows(STEP_AUDIT_PATH)",
+    "count": 1
+  },
+  {
+    "file": "backend/market_lab/hilega_directional_candle_ui_v1.py",
+    "old": "def _read_audit(path: Path) -> list[dict[str, Any]]:\n    if not path.is_file():\n        return []\n    store = ShadowStepAuditStoreV1(path)\n    try:\n        return store.read_all()\n    except Exception:\n        return []\n",
+    "new": "def _read_audit(path: Path) -> list[dict[str, Any]]:\n    from .hilega_ui_journal_cache_v1 import read_rows\n    return read_rows(path)\n",
+    "count": 1
+  },
+  {
+    "file": "backend/market_lab/hilega_directional_candle_ui_v1.py",
+    "old": "    if audit_only:\n        try:\n            rows = _directional_evidence_live_rows(day, fast=True)\n        except Exception:\n            rows = {}\n        if not rows:\n            rows = _base_live_rows_legacy(day)\n    else:\n        rows = _base_live_rows(day)\n    directional_count = 0\n\n    manual_audit_records = _read_audit(LIVE_DIRECTIONAL_AUDIT)",
+    "new": "    # Audit-only UI consumes recorded strategy decisions, not a fresh indicator replay.\n    rows = {} if audit_only else _base_live_rows(day)\n    directional_count = 0\n    manual_audit_records = _read_audit(LIVE_DIRECTIONAL_AUDIT)\n    if audit_only and not any(r.get('stage')=='DIRECTIONAL_DECISION' and _iso_session((r.get('payload') or {}).get('decision_timestamp') or (r.get('payload') or {}).get('bar_timestamp') or r.get('checkpoint'))==day for r in manual_audit_records):\n        rows = _base_live_rows_legacy(day)",
+    "count": 1
+  },
+  {
+    "file": "frontend/src/hilegaMilegaShadow.tsx",
+    "old": "      const results=await Promise.allSettled([\n        getBullish<AuditReport[]>('/audit-index?limit=200'),\n        fetchLive('/api/live-shadow/hilega-directional-candles/live?audit_only=true',controller.signal),\n      ])",
+    "new": "      const day=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())\n      const dr=await fetchLive('/api/live-shadow/hilega-directional-candles/live?audit_only=true&session_date='+day,controller.signal)\n      if(!dr.ok)throw new Error('Decision audit HTTP '+dr.status+': '+await dr.text())\n      const directional=await dr.clone().json()\n      const combined=(directional.rows??[]).some((r:any)=>r.strategy_id==='HILEGA_V2_ALIGNMENT_DUAL_EXIT')\n      const results=await Promise.allSettled([\n        combined?Promise.resolve([] as AuditReport[]):getBullish<AuditReport[]>('/audit-index?limit=200'),\n        Promise.resolve(dr),\n      ])",
+    "count": 1
+  },
+  {
+    "file": "frontend/src/hilegaLivePolling.ts",
+    "old": "    return new Response(bytes,{status:response.status,statusText:response.statusText,headers:response.headers})\n  }finally",
+    "new": "    return new Response(bytes,{status:response.status,statusText:response.statusText,headers:response.headers})\n  }catch(e){\n    if(controller.signal.aborted)throw new Error(`Display request timed out or cancelled (${timeoutMs/1000}s); strategy is unaffected`)\n    throw e\n  }finally",
+    "count": 1
+  },
+  {
+    "file": "tests/hilega_live_polling_vm.cjs",
+    "old": "await assert.rejects(request,/aborted/);",
+    "new": "await assert.rejects(request,/aborted|timed out/);",
+    "count": 1
+  }
+]
