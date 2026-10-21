@@ -1,0 +1,11 @@
+{
+  "backend/market_lab/hilega_combined_policy_v1.py": "982c4a70a06a8442eb0eb1f02977095426d3381999fdbceb4710daa774eef4ad",
+  "backend/market_lab/hilega_combined_replay_v1.py": "fd2516af3e90ff8e38b5da5c96a4a79015b2361a31b83a4a048f2e62b2d9d50f",
+  "backend/market_lab/hilega_alignment_dual_exit_live_v1.py": "ae447147bcecfda60a1205479669a80fa3998da1de92570cd3b7e5db298d2c35",
+  "backend/market_lab/hilega_combined_policy_inspection_v1.py": "12199a71f9dc3e8fd135cfd91cc13fe32dc5d8a84f7313da7e0132615f18fafd",
+  "backend/market_lab/hilega_directional_candle_ui_v1.py": "f09adda7e8697f4fad9ea285a6d026e1c3ff354b149d384ae9d8fc875b2cb0a5",
+  "frontend/src/hilegaDirectionalAuditOverlay.ts": "097a88e1b9599b6006992ba8ed8d354818bd99bb8c835793055c1b39a4c224da",
+  "frontend/src/hilegaAlignmentReplay.tsx": "d576d76d78c425f442465de3042b703d130ef9ca55e5f27a06378ff675278db7",
+  "frontend/src/hilegaAlignmentAuditInspection.tsx": "ff46cb03aba522d1ac911c0bc8c931d7949ea07f8ae5d73b82ead85e156438be",
+  "backend/market_lab/hilega_v2_replay_presentation_v1.py": "82e09e47a6ce50603f5d9b1c20486508faab77fab2ceed3d6611a783a0792e63"
+}
