@@ -3,6 +3,7 @@ import argparse,hashlib,json
 from pathlib import Path
 from datetime import datetime,date,time
 import run as study
+from daily_reports import write_daily
 core=study.core
 
 def digest(value):
@@ -19,6 +20,13 @@ def stats(trades):
 
 def write(output,rows):
     done=[r for r in rows if r['status']=='COMPLETE'];names=('DEPLOYED_5M','BODY50_1M_WAIT')
+    for row in done:
+        daily=output/'daily-reports'/(row['session_date']+'.md')
+        if not daily.exists():write_daily(output,row)
+    index=['# Daily reports','', 'Coverage is supplied saved sessions only. Each report includes executions and all recorded tested5m decisions/1m waiting decisions.','']
+    for row in done:
+        day=row['session_date'];index.append(f'- [{day}](daily-reports/{day}.md)')
+    (output/'daily-report-index.md').write_text('\n'.join(index)+'\n')
     lines=['# Wider body-breakout replay','',f'Coverage: {len(done)}/{len(rows)} selected saved sessions','Gross NIFTY points; no fills/costs. Existing route retained. No live changes.','', '| Policy | Trades | Winning points | Losing points | Net points | Winners | Losers | Drawdown |','|---|---:|---:|---:|---:|---:|---:|---:|']
     for name in names:
         s=stats([t for r in done for t in r['policies'][name]['trades']]);lines.append('| '+name+' | '+' | '.join(f'{v:.2f}' if isinstance(v,float) else str(v) for v in s)+' |')

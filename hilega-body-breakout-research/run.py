@@ -50,7 +50,7 @@ def replay(warm,raw,day,prepared=None):
                         if waiting is None or waiting['direction']!=candidate['direction']:
                             waiting=dict(**candidate,signal_time=at.isoformat(),setup_source=setup['source'],signal_frame=dict(result['frame']))
                             audit.append(dict(time=at.isoformat(),action='ARM_BODY_BREAKOUT',signal=waiting))
-            audit.append(dict(time=at.isoformat(),action='FIVE_MINUTE_EVALUATION',frame=result['frame'],setups=result['setups'],checks=result['checks'],exit_validation=result['exit_validation'],opposite_confirmation=result.get('opposite_confirmation')))
+            audit.append(dict(time=at.isoformat(),action='FIVE_MINUTE_EVALUATION',frame=result['frame'],setups=result['setups'],checks=result['checks'],exit_validation=result['exit_validation'],opposite_confirmation=result.get('opposite_confirmation'),policy_events=result['policy_events'],entries=[dict(direction=l.direction(e),time=at.isoformat(),price=e.entry_price) for e in result['entries']],exits=[dict(time=at.isoformat(),price=e.price,points=e.points,reason=e.exit_reason) for e in result['exits']]))
         if at>=cutoff:break
         if waiting and g.owner=='NONE' and at>datetime.fromisoformat(waiting['signal_time']):
             action=decision(waiting,float(minute.close))
