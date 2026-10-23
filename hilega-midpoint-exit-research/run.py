@@ -38,7 +38,8 @@ def replay(warm,raw,day,prepared=None,protect_midpoint=False):
             audit.append(dict(time=at.isoformat(),action='ACTIVE_MIDPOINT_EXIT_CHECK',
                 direction=active['direction'],close=float(minute.close),midpoint=midpoint,passed=breached))
             if breached:
-                event=p.StrategyEvent('RESEARCH_MIDPOINT_EXIT',at,None,'ACTIVE','IDLE',exit_reason='POST_ENTRY_1M_SIGNAL_MIDPOINT_REVERSED')
+                event_type='STRUCTURAL_EXIT_RSI_CROSS_BELOW_WMA21' if active['direction']=='BULLISH' else 'STRUCTURAL_EXIT_BEARISH_RSI_CROSS_ABOVE_WMA21'
+                event=p.StrategyEvent(event_type,at,None,'ACTIVE','IDLE',exit_reason='POST_ENTRY_1M_SIGNAL_MIDPOINT_REVERSED')
                 closed=g.close(event,at,float(minute.close))
                 if closed is None:raise ValueError('MIDPOINT_EXIT_NOT_CLOSED')
                 active.update(exit_time=at.isoformat(),exit_price=closed.price,points=closed.points,exit_reason=closed.exit_reason)

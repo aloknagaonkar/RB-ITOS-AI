@@ -8,8 +8,8 @@ import math
 from .hilega_v2_alignment_replay_v1 import WmaGapGate, direction, ENTRY_TYPES, EXIT_TYPES, dual_exit
 
 POLICY_ID="BULLISH_GAP2_FULL_WMA2"
-VERSION="bullish-gap2-full-wma2-1.0.0"
-RULES=dict(version=VERSION,policy_id=POLICY_ID,setup="Completed5m canonical or fresh alignment; strength>=0.75; positive expanding5m gap; price EMA10 slope/side; directional RSI40/60 and candle colour",confirmation_interval_minutes=5,persistence_required=False,window_minutes=None,bullish_signal_gap_min=2,bullish_full_wma_min=2,ema10_enabled=True,wma_direction_lock=False,followup="Directional colour/RSI AND (signal close OR midpoint OR fresh strength/gap)",failed_followup="Retain original reference only on EMA10 touch; else fresh signal",exit="Both RSI9 and EMA3 of RSI opposite WMA21",cutoff_IST="14:55",same_candle_exit_first=True)
+VERSION="bullish-gap2-full-wma2-2.0.0-wma40-reversal"
+RULES=dict(version=VERSION,policy_id=POLICY_ID,setup="Completed5m canonical or fresh alignment; strength>=0.75; positive expanding5m gap; price EMA10 slope/side; directional RSI40/60 and candle colour",confirmation_interval_minutes=5,persistence_required=False,window_minutes=None,bullish_signal_gap_min=2,bullish_full_wma_min=2,ema10_enabled=True,wma_direction_lock=False,followup="Directional colour/RSI AND (signal close OR midpoint OR fresh strength/gap)",failed_followup="Retain original reference only on EMA10 touch; else fresh signal",exit="Bullish: both RSI9 and EMA3 below WMA21. Bearish: both above WMA21 AND WMA21>40, OR fully confirmed bullish entry; exit first then reverse",cutoff_IST="14:55",same_candle_exit_first=True)
 
 
 def rsi_cross(side,previous,current):
@@ -397,12 +397,13 @@ class PriceFrames:
         return self.frames[at]
 
 def reset_pending(gate):
+    gate._bullish_exit_monitor=None
     gate.pending.clear();gate.followup_signal=None;gate.followup_price_permission=None
     gate.followup_failed_at=None;gate.watch_side=None;gate.watch_at=None
 
 from .hilega_milega_strategy_v1 import StrategyEvent
 
-def advance_boundary(c,g,bar,reference,tracker,manual_block=False):
+def _advance_standard(c,g,bar,reference,tracker,manual_block=False):
     at=bar.ts+timedelta(minutes=5);minute=at-timedelta(minutes=1)
     start=len(g.policy_events);setups=[];signals=[];events=[];exit_validation=None
     dec=c.on_bar(bar);current=c.bullish.previous_indicators
@@ -411,7 +412,9 @@ def advance_boundary(c,g,bar,reference,tracker,manual_block=False):
     if g.owner!='NONE':
         side=g.owner;sign=1 if side=='BULLISH' else -1
         exit_validation=dict(direction=side,rsi9=current.rsi9,ema3=current.ema3_rsi,wma21=current.wma21_rsi,rsi_opposite=sign*(current.rsi9-current.wma21_rsi)<0,ema_opposite=sign*(current.ema3_rsi-current.wma21_rsi)<0,dual_exit_pass=dual_exit(side,current))
-        if exit_validation['dual_exit_pass']:
+        exit_validation.update(wma40_required=side=='BEARISH',wma_above40=current.wma21_rsi>40,normal_exit_pass=exit_validation['dual_exit_pass'] and (side!='BEARISH' or current.wma21_rsi>40),reversal_confirmed=False)
+        exit_validation['action']='NORMAL_EXIT' if exit_validation['normal_exit_pass'] else 'HOLD_WMA_LE40' if exit_validation['dual_exit_pass'] else 'HOLD_NO_DUAL_EXIT'
+        if exit_validation['normal_exit_pass']:
             event=StrategyEvent('STRUCTURAL_EXIT_RSI_CROSS_BELOW_WMA21' if side=='BULLISH' else 'STRUCTURAL_EXIT_BEARISH_RSI_CROSS_ABOVE_WMA21',at,None,'ACTIVE','IDLE',exit_reason='BOTH_RSI9_EMA3_OPPOSITE_WMA21')
             closed=g.close(event,at,float(bar.close))
             if closed:events.append(closed)
@@ -444,3 +447,69 @@ def advance_boundary(c,g,bar,reference,tracker,manual_block=False):
     policy_events=deepcopy(g.policy_events[start:])
     for row in policy_events:row.update(policy_id=POLICY_ID,strategy_version=VERSION)
     return dict(decision=dec,current=current,entries=entries,exits=events,checks=checks,setups=setups,signals=signals,exit_validation=exit_validation,policy_events=policy_events,frame=frame,pending_switches=g.take_switches())
+
+
+def _start_bullish_exit_monitor(c,tracker):
+    from .hilega_v2_alignment_replay_v1 import SessionState,BearishSessionState
+    monitor=deepcopy(c)
+    monitor.bullish.session=SessionState(session_date=c.session_date)
+    monitor.bearish.session=BearishSessionState(session_date=c.session_date)
+    monitor.trade_owner='NONE'
+    prices=deepcopy(tracker)
+    gate=make_gate(prices.frames)
+    signal,can_signal=gate.signal,gate.can_signal
+    gate.signal=lambda event,available:signal(event,available) if direction(event)=='BULLISH' else None
+    gate.can_signal=lambda side,at:side=='BULLISH' and can_signal(side,at)
+    return monitor,prices,gate
+
+
+def advance_boundary(c,g,bar,reference,tracker,manual_block=False):
+    """Shared live/replay path, matching WMA40_EXIT_PLUS_CONFIRMED_REVERSAL."""
+    before=g.owner
+    at=bar.ts+timedelta(minutes=5)
+    monitor_result=None
+    monitor=getattr(g,'_bullish_exit_monitor',None)
+    if not manual_block and before=='BEARISH' and monitor:
+        mc,mt,mg=monitor
+        ref=mc.bullish.previous_indicators or reference
+        monitor_result=_advance_standard(mc,mg,bar,ref,mt)
+    result=_advance_standard(c,g,bar,reference,tracker,manual_block)
+    confirmed=(monitor_result or {}).get('entries') or []
+    if (not manual_block and before=='BEARISH' and confirmed
+            and not result['entries'] and at.time()<time(14,55)):
+        if len(confirmed)!=1 or direction(confirmed[0])!='BULLISH':
+            raise ValueError('INVALID_CONFIRMED_BULLISH_REVERSAL')
+        if g.owner=='BEARISH':
+            event=StrategyEvent('STRUCTURAL_EXIT_BEARISH_RSI_CROSS_ABOVE_WMA21',at,
+                None,'ACTIVE','IDLE',exit_reason='FULLY_CONFIRMED_OPPOSITE_BULLISH')
+            closed=g.close(event,at,float(bar.close))
+            if closed is None:raise ValueError('REVERSAL_EXIT_MISSING')
+            result['exits'].append(closed)
+        if g.owner=='NONE':
+            event=confirmed[0]
+            reset_pending(g)
+            g.owner='BULLISH';g.active=dict(time=at,price=float(bar.close))
+            result['entries']=[replace(event,price=float(bar.close),entry_price=float(bar.close))]
+            reversal_event=dict(event='CONFIRMED_OPPOSITE_BULLISH_REVERSAL',
+                time=at.isoformat(),direction='BULLISH',entry_evidence=deepcopy(event.details),
+                policy_id=POLICY_ID,strategy_version=VERSION)
+            result['policy_events'].append(reversal_event)
+            g.policy_events.append(deepcopy(reversal_event))
+            result['exit_validation'].update(reversal_confirmed=True,action='EXIT_AND_REVERSE_BULLISH')
+    if monitor_result is not None:
+        _,_,mg=monitor
+        followup=getattr(mg,'followup_signal',None)
+        result['opposite_confirmation']=dict(direction='BULLISH',monitor_only=True,
+            pending_candidates={k:v['available'].isoformat() for k,v in mg.pending.items()},
+            followup_reference={k:v.isoformat() if isinstance(v,datetime) else v for k,v in (followup or {}).items()},
+            checks=deepcopy(monitor_result['checks']),
+            policy_events=deepcopy(monitor_result['policy_events']),confirmed=bool(confirmed))
+        monitor_event=dict(event='BULLISH_REVERSAL_MONITOR_CHECK',time=at.isoformat(),
+            direction='BULLISH',confirmed=bool(confirmed),monitor_only=True,
+            checks=deepcopy(monitor_result['checks']),policy_id=POLICY_ID,strategy_version=VERSION)
+        result['policy_events'].append(monitor_event)
+        g.policy_events.append(deepcopy(monitor_event))
+    else:result['opposite_confirmation']=None
+    if manual_block or at.time()>=time(14,55) or g.owner!='BEARISH':g._bullish_exit_monitor=None
+    elif before!='BEARISH':g._bullish_exit_monitor=_start_bullish_exit_monitor(c,tracker)
+    return result

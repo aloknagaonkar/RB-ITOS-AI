@@ -25,6 +25,8 @@ def convert(name,source):
     if name=='hilega_v2_alignment_replay_v1':source=source.replace('time(14,50)','time(14,54)')
     # Diagnostic labels reflect cadence; numeric RSI/EMA/WMA thresholds stay unchanged.
     source=source.replace('COMPLETED_FIVE_MINUTE','COMPLETED_ONE_MINUTE').replace('PREVIOUS_COMPLETED_FIVE_MINUTE','PREVIOUS_COMPLETED_ONE_MINUTE').replace('5M','1M').replace('5m','1m')
+    # Preserve helper import; core.aggregate handles 1m research candles.
+    source=source.replace('aggregate_exact_1m','aggregate_exact_5m')
     return source
 
 def isolated_one(root):

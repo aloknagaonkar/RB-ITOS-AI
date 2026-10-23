@@ -109,7 +109,7 @@ def validated_session(day):
     from pathlib import Path
     import hashlib
     day=engine.date.fromisoformat(day).isoformat()
-    root=Path('data/research/hilega-combined-parity-oct16' if day=='2026-10-16' else 'data/research/hilega-combined-parity-historical')
+    root=Path('data/research/hilega-wma40-promotion-parity') if engine.VERSION.endswith('wma40-reversal') else Path('data/research/hilega-combined-parity-oct16' if day=='2026-10-16' else 'data/research/hilega-combined-parity-historical')
     proof_path=root/'validation.json';artifact=root/(day+'.json')
     if not proof_path.is_file() or not artifact.is_file():raise FileNotFoundError('VALIDATED_REPLAY_NOT_AVAILABLE:'+day)
     proof=json.loads(proof_path.read_text())
@@ -123,5 +123,5 @@ def validated_session(day):
     if data.get('session_date')!=day or data.get('strategy_version')!=engine.VERSION:raise ValueError('PARITY_ARTIFACT_IDENTITY_MISMATCH')
     total=round(sum(t['points'] for t in data.get('trades',[])),5)
     if len(data.get('trades',[]))!=row['trades'] or total!=round(row['points'],5):raise ValueError('PARITY_ARTIFACT_TOTAL_MISMATCH')
-    data['manifest']=dict(data.get('manifest') or {},input_basis='VALIDATED_FROZEN_RESEARCH',parity_report=str(proof_path),warmup_sessions=row.get('warmup_sessions'),recorded_overrides=day=='2026-10-16')
+    data['manifest']=dict(data.get('manifest') or {},input_basis='VALIDATED_FROZEN_RESEARCH',parity_report=str(proof_path),warmup_sessions=row.get('warmup_sessions'),recorded_overrides=(data.get('manifest') or {}).get('recorded_overrides',day=='2026-10-16' and not engine.VERSION.endswith('wma40-reversal')))
     return data

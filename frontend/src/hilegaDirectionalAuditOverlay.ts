@@ -4,6 +4,7 @@ export type DirectionalCandleOverlayRow={
   strategy_steps?:Array<Record<string,any>>
   setup_attempts?:Array<Record<string,any>>
   exit_validation?:Record<string,any>
+  opposite_confirmation?:Record<string,any>
   exit_warning_time?:string|null
   indicator_timestamp?:string|null
   canonical_setup?:Record<string,any>
@@ -215,7 +216,7 @@ export function overlayDirectionalAuditReports(
       const details=r.event_details??[]
       return {checkpoint:r.bar_timestamp,bar:{close:r.close,open:r.open,high:r.high,low:r.low},
         indicators:{rsi9:r.rsi9,ema3_rsi:r.ema3_rsi,wma21_rsi:r.wma21_rsi},
-        conditions:{latest_strategy_audit:true,strategy_steps:r.strategy_steps,setup_attempts:r.setup_attempts,indicator_timestamp:r.indicator_timestamp,exit_validation:r.exit_validation,exit_warning_time:r.exit_warning_time,wma_gap_checks:r.wma_gap_checks??[],canonical_setup:r.canonical_setup},
+        conditions:{latest_strategy_audit:true,strategy_steps:r.strategy_steps,setup_attempts:r.setup_attempts,indicator_timestamp:r.indicator_timestamp,exit_validation:r.exit_validation,opposite_confirmation:r.opposite_confirmation,exit_warning_time:r.exit_warning_time,wma_gap_checks:r.wma_gap_checks??[],canonical_setup:r.canonical_setup},
         strategy:{strategy_id:r.strategy_id,decision_timestamp:r.decision_timestamp,
           source_bar_timestamp:r.source_bar_timestamp,events_emitted:events,
           directional_action:r.action,state_before:r.owner_before,state_after:r.owner_after,

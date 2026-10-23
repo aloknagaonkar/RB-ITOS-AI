@@ -560,6 +560,7 @@ def build_live_directional_candles(session_date: str | None = None, *, audit_onl
                 "completed_5m_indicators": payload.get("completed_5m_indicators"),
                 "checks": payload.get("wma_gap_checks") or [],
                 "exit_validation": payload.get("exit_validation"),
+                "opposite_confirmation": payload.get("opposite_confirmation"),
                 "owner_after": payload.get("trade_owner_after"),
             })
             row["setup_attempts"] = payload.get("setup_attempts") or []
@@ -567,6 +568,7 @@ def build_live_directional_candles(session_date: str | None = None, *, audit_onl
             for switch in row["pending_switches"]:
                 row["strategy_steps"].append({"label":"Pending direction switch", "status":"INFO", "value":switch["from_direction"]+" → "+switch["to_direction"], "requirement":"Fully qualified opposite signal while flat", "explanation":switch["reason"]+"; old pending signal cancelled; confirmation reset"})
             row["exit_validation"] = payload.get("exit_validation")
+            row["opposite_confirmation"] = payload.get("opposite_confirmation")
             row["exit_warning_time"] = payload.get("exit_warning_time")
             row["indicator_timestamp"] = payload.get("bar_timestamp")
             minute_bar = (payload.get("price_ema_frame") if payload.get("policy_id")=="BULLISH_GAP2_FULL_WMA2" else payload.get("minute_ohlcv")) or {}

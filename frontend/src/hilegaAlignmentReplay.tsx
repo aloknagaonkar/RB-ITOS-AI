@@ -1,3 +1,4 @@
+import HilegaExitPolicyEvidence from './hilegaExitPolicyEvidence'
 import {useState} from 'react'
 const n=(v:any)=>v==null?'—':Number(v).toFixed(3)
 const tm=(v:any)=>v?String(v).slice(11,16):'—'
@@ -20,7 +21,7 @@ export default function HilegaAlignmentReplay({data,visibleUntil,onSelected}: {d
    <p>Provisional: RSI {n(a.indicators?.rsi9)} · EMA {n(a.indicators?.ema3)} · WMA {n(a.indicators?.wma21)}</p>
    <p>5m changes: RSI {n(a.five_minute_changes?.rsi9)} · EMA {n(a.five_minute_changes?.ema3)} · WMA {n(a.five_minute_changes?.wma21)}</p>
    {a.active_trade&&<p>Active {a.active_trade.direction} · entry {tm(a.active_trade.entry_time)} at {n(a.active_trade.entry_price)} · current Nifty points {n(a.active_trade.nifty_points)}</p>}
-   {a.exit_validation&&<p>Five-minute exit check: RSI opposite {a.exit_validation.rsi_opposite?'PASS':'WAIT'} · EMA opposite {a.exit_validation.ema_opposite?'PASS':'WAIT'} · both {a.exit_validation.dual_exit_pass?'EXIT':'HOLD'}</p>}
+   <HilegaExitPolicyEvidence evidence={a.exit_validation} monitor={a.opposite_confirmation}/>
    <p>First RSI exit warning: {tm(a.exit_warning_time)}</p>
    {(a.checks??[]).map((c:any,j:number)=><div key={j}><strong>{c.direction} · {c.status}</strong><p>Previous minute {tm(c.previous_timestamp)} → current {tm(c.minute_timestamp)}; decision {tm(c.decision_timestamp)}</p><table><thead><tr><th>Condition</th><th>Previous</th><th>Current</th><th>Result</th></tr></thead><tbody>
     <tr><td>RSI9</td><td>{n(c.previous_rsi9)}</td><td>{n(c.current_rsi9)}</td><td>Diagnostic</td></tr>

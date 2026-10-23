@@ -124,6 +124,7 @@ class HilegaAlignmentDualExitLiveCoordinator(HilegaWmaGapLiveCoordinatorV2):
                 'policy_events':result['policy_events'],'price_ema_frame':result['frame'],
                 'pending_candidates':{k:v['available'].isoformat() for k,v in self.gate.pending.items()},
                 'followup_reference':{k:(v.isoformat() if isinstance(v,datetime) else v) for k,v in getattr(self.gate,'followup_signal',{}).items()} if getattr(self.gate,'followup_signal',None) else None,
+                'opposite_confirmation':result.get('opposite_confirmation'),
                 'setup_attempts':setups,'pending_switches':pending_switches,'exit_validation':exit_validation,'exit_warning_time':self.warning_time,
                 'completed_5m_indicators':dict(rsi9=latest.rsi9,ema3=latest.ema3_rsi,wma21=latest.wma21_rsi) if latest else None,
                 'five_minute_changes':dict(rsi9=latest.rsi9-reference.rsi9,ema3=latest.ema3_rsi-reference.ema3_rsi,wma21=latest.wma21_rsi-reference.wma21_rsi) if latest and reference else None,

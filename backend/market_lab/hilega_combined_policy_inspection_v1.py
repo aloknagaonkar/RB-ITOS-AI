@@ -39,4 +39,12 @@ def inspection(a):
     v=a.get('exit_validation')
     if v:
         add('Existing dual exit',v.get('dual_exit_pass'),v,'Both RSI and EMA3 opposite WMA21; cutoff remains separate')
+        if v.get('wma40_required'):
+            add('Bearish WMA40 exit permission',v.get('wma_above40'),v.get('wma21'),'WMA21 of RSI9 strictly >40 AND existing dual exit on same completed candle')
+        if 'normal_exit_pass' in v:
+            add('Normal exit permission',v.get('normal_exit_pass'),v.get('action'),'Bullish dual exit; bearish dual exit plus WMA>40')
+            add('Confirmed bullish reversal',v.get('reversal_confirmed'),v.get('action'),'Full bullish entry including follow-up; closes bearish before bullish entry')
+    opposite=a.get('opposite_confirmation')
+    if opposite:
+        add('Bullish reversal monitor',None,opposite,'Independent signal/follow-up evaluation while bearish; no second position')
     return rows
