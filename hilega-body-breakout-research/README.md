@@ -26,3 +26,19 @@ old trade list. Full JSON records every extra route waiting/cancellation decisio
 VM validation required: tests here check pure signal/wait rules only; they do not
 prove integration parity for the new route. Baseline recorded parity is checked
 before producing a comparison. No tests or project replays run locally.
+
+## Wider sessions
+
+batch.py accepts --month (default2026-10), repeated --date, --input-zip,
+--session-input and --output. Only supplied saved sessions are selected.
+Each completed day is atomically saved with input/source fingerprint and payload
+checksum. Matching completed sessions are reused on rerun. Failed sessions are
+excluded from totals and cause a nonzero final exit. Independent installed5m
+baseline is recalculated per day; recorded audit parity is also required where
+provided. Additional-route warmup is incrementally prepared and deep-copied per
+session. No indicator periods or trading rules change from the Oct22 test.
+
+summary.md includes daily net impact; daily-trades.md includes every executed
+trade; signal-comparison.md groups by exact setup identity. Different setup
+identities are not automatically paired as the same trade. JSON holds full extra
+route waiting evidence. Costs are excluded. Run one process per output directory.

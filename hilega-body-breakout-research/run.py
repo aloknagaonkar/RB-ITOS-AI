@@ -5,14 +5,18 @@ from datetime import datetime,date,time,timedelta
 import timing_core as core
 from rules import qualify,decision
 
-def replay(warm,raw,day):
+def replay(warm,raw,day,prepared=None):
     p,l=core.policy5,core.legacy5
-    c=l.ExitFirstCanonical();tracker=p.PriceFrames();count=0
-    for d,rows in warm:
-        if d>=day:continue
-        for bar in core.aggregate(rows,d,5,datetime.combine(date.fromisoformat(d),time(15,30),core.IST)):
-            c.on_bar(bar);tracker.seed(bar)
-        count+=1
+    if prepared is not None:
+        from copy import deepcopy
+        c,tracker,count=deepcopy(prepared)
+    else:
+        c=l.ExitFirstCanonical();tracker=p.PriceFrames();count=0
+        for d,rows in warm:
+            if d>=day:continue
+            for bar in core.aggregate(rows,d,5,datetime.combine(date.fromisoformat(d),time(15,30),core.IST)):
+                c.on_bar(bar);tracker.seed(bar)
+            count+=1
     if count<20:raise ValueError('INSUFFICIENT_WARMUP')
     opening=c.bullish.previous_indicators
     c.bullish.session=l.SessionState(session_date=date.fromisoformat(day))
