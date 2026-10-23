@@ -38,19 +38,56 @@ def write(output,rows):
                 ts=[t for t in p[n]['trades'] if t['direction']==side and (t.get('setup') or '')==setup]
                 cells.append('; '.join(t['entry_time'][11:16]+'–'+t['exit_time'][11:16]+' / '+format(t['points'],'+.2f') for t in ts) or '—');points.append(sum(t['points'] for t in ts))
             signals.append(f"| {r['session_date']} | {side} | {setup[11:16]} | {cells[0]} | {cells[1]} | {points[1]-points[0]:+.2f} |")
-    for name,content in [('summary.md',lines),('daily-trades.md',details),('signal-comparison.md',signals)]:
+    lines+=['','## Separate monthly totals','', '| Month | Saved sessions | Existing points | Tested points | Impact |','|---|---:|---:|---:|---:|']
+    for month in sorted({r['session_date'][:7] for r in done}):
+        selected=[r for r in done if r['session_date'].startswith(month)]
+        totals=[sum(t['points'] for r in selected for t in r['policies'][n]['trades']) for n in names]
+        lines.append(f'| {month} | {len(selected)} | {totals[0]:+.2f} | {totals[1]:+.2f} | {totals[1]-totals[0]:+.2f} |')
+    values=['# Signal values and entry evidence','',
+        'Times IST. Signal values are completed5m values; the 1m follow-up checks price only. No 1m RSI/EMA/WMA filters. Missing evidence is —. Same-setup matching does not imply identical execution paths. Gross NIFTY points, no costs.', '',
+        '| Date | Direction | Setup available | Signal qualified | Existing entry–exit / points | Tested entry–exit / points | Route / decision | Signal RSI9 / EMA3 RSI / WMA21 | Signal strength / gap / expansion | Body % / body beyond EMA10 % / close location % | Signal price EMA10 / slope | Signal high / low / midpoint | 1m entry close / breakout level |',
+        '|---|---|---|---|---|---|---|---|---|---|---|---|---|']
+    fmt=lambda v:'—' if v is None else f'{v:.3f}'
+    for row in done:
+        policies=row['policies'];tested=policies['BODY50_1M_WAIT'];base=policies['DEPLOYED_5M']
+        for t in tested['trades']:
+            side=t['direction'];sign=1 if side=='BULLISH' else -1
+            evidence=t.get('evidence') or {};entry=t.get('entry_evidence') or {}
+            signal=t.get('qualified') or evidence.get('signal_time')
+            frame=evidence.get('signal_frame')
+            if frame is None and signal:
+                frame=next((r['frame'] for r in tested['audit'] if r.get('action')=='FIVE_MINUTE_EVALUATION' and r['time']==signal),None)
+            frame=frame or {}
+            number=lambda k:frame.get(k)
+            rsi,ema,wma=[number(k) for k in ('rsi9','ema3_rsi','wma21_rsi')]
+            strength=sign*(wma-frame['previous_wma21_rsi']) if wma is not None and frame.get('previous_wma21_rsi') is not None else None
+            gap=sign*(ema-wma) if ema is not None and wma is not None else None
+            expansion=gap-sign*(frame['previous_ema3_rsi']-frame['previous_wma21_rsi']) if gap is not None and frame.get('previous_ema3_rsi') is not None and frame.get('previous_wma21_rsi') is not None else None
+            slope=frame['ema10']-frame['previous_ema10'] if frame.get('ema10') is not None and frame.get('previous_ema10') is not None else None
+            matches=[b for b in base['trades'] if b['direction']==side and b.get('setup')==t.get('setup')]
+            old='; '.join(b['entry_time'][11:16]+'–'+b['exit_time'][11:16]+' / '+format(b['points'],'+.2f') for b in matches) or '—'
+            current=t['entry_time'][11:16]+'–'+t['exit_time'][11:16]+' / '+format(t['points'],'+.2f')
+            ratios=' / '.join(fmt(evidence[k]*100) if evidence.get(k) is not None else '—' for k in ('body_ratio','body_beyond_ema','close_location'))
+            levels=' / '.join(fmt(evidence.get(k)) for k in ('high','low','midpoint'))
+            follow=fmt((t.get('followup') or {}).get('close'))+' / '+fmt(evidence.get('high' if sign==1 else 'low'))
+            values.append('| '+' | '.join([row['session_date'],side,(t.get('setup') or '')[11:16],(signal or '')[11:16],old,current,t.get('route','EXISTING'),' / '.join(fmt(v) for v in (rsi,ema,wma)),' / '.join(fmt(v) for v in (strength,gap,expansion)),ratios,fmt(frame.get('ema10'))+' / '+fmt(slope),levels,follow])+' |')
+    for name,content in [('summary.md',lines),('daily-trades.md',details),('signal-comparison.md',signals),('signal-values.md',values)]:
         (output/name).write_text('\n'.join(content)+'\n')
     (output/'coverage.json').write_text(json.dumps([dict(session_date=r['session_date'],status=r['status'],issues=r.get('issues',[])) for r in rows],indent=2))
 
 def main():
-    ap=argparse.ArgumentParser();ap.add_argument('--input-zip',type=Path,required=True);ap.add_argument('--session-input',type=Path);ap.add_argument('--month',default='2026-10');ap.add_argument('--date',action='append');ap.add_argument('--output',type=Path,required=True);a=ap.parse_args()
+    ap=argparse.ArgumentParser();ap.add_argument('--input-zip',type=Path,required=True);ap.add_argument('--session-input',type=Path);ap.add_argument('--month',action='append');ap.add_argument('--date',action='append');ap.add_argument('--output',type=Path,required=True);a=ap.parse_args()
     if core.policy5.VERSION!='bullish-gap2-full-wma2-2.0.0-wma40-reversal':raise ValueError('POLICY_VERSION_MISMATCH')
     warm,records=core.read_inputs(a.input_zip);raws=dict(warm)
     if a.session_input:
         extra=json.loads(a.session_input.read_text());day=extra['session_date']
         if day in raws and raws[day]!=extra['candles']:raise ValueError('CONFLICTING_SESSION_INPUT')
         raws[day]=extra['candles']
-    days=sorted(set(a.date or [d for d in raws if d.startswith(a.month+'-')]))
+    months=a.month or ['2026-10']
+    if not a.date:
+        missing=[m for m in months if not any(d.startswith(m+'-') for d in raws)]
+        if missing:raise ValueError('NO_SAVED_INPUTS_FOR_MONTH:'+','.join(missing))
+    days=sorted(set(a.date or [d for d in raws if any(d.startswith(m+'-') for m in months)]))
     if not days:raise ValueError('NO_SAVED_SESSIONS')
     a.output.mkdir(parents=True,exist_ok=True)
     sources={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for root in (Path(core.policy5.__file__).parent,Path(__file__).parent) for p in root.rglob('*.py')}

@@ -38,7 +38,7 @@ def replay(warm,raw,day,prepared=None):
                 trades.append(active);active=None
             for event in result['entries']:
                 if active is not None:raise ValueError('OVERLAPPING_ENTRY')
-                active=dict(direction=l.direction(event),entry_time=at.isoformat(),entry_price=event.entry_price,route='EXISTING',setup=event.details.get('wma_gap',{}).get('signal_available_at'))
+                active=dict(direction=l.direction(event),entry_time=at.isoformat(),entry_price=event.entry_price,route='EXISTING',setup=event.details.get('wma_gap',{}).get('signal_available_at'),entry_evidence=event.details.get('combined_entry'),qualified=event.details.get('qualified_signal_time'))
                 waiting=None
             if waiting and any(e.get('event')=='QUALIFIED_OPPOSITE_WATCH_OVERRIDE' and e.get('direction')!=waiting['direction'] for e in result['policy_events']):
                 audit.append(dict(time=at.isoformat(),action='CANCEL_QUALIFIED_OPPOSITE',signal=waiting));waiting=None
@@ -48,7 +48,7 @@ def replay(warm,raw,day,prepared=None):
                     if candidate:
                         # Preserve earliest same-direction reference; new opposite eligible setup replaces it.
                         if waiting is None or waiting['direction']!=candidate['direction']:
-                            waiting=dict(**candidate,signal_time=at.isoformat(),setup_source=setup['source'])
+                            waiting=dict(**candidate,signal_time=at.isoformat(),setup_source=setup['source'],signal_frame=dict(result['frame']))
                             audit.append(dict(time=at.isoformat(),action='ARM_BODY_BREAKOUT',signal=waiting))
             audit.append(dict(time=at.isoformat(),action='FIVE_MINUTE_EVALUATION',frame=result['frame'],setups=result['setups'],checks=result['checks'],exit_validation=result['exit_validation'],opposite_confirmation=result.get('opposite_confirmation')))
         if at>=cutoff:break
@@ -58,7 +58,7 @@ def replay(warm,raw,day,prepared=None):
             if action=='CANCEL_MIDPOINT':waiting=None
             elif action=='ENTRY':
                 p.reset_pending(g);g.owner=waiting['direction'];g.active=dict(time=at,price=float(minute.close))
-                active=dict(direction=g.owner,entry_time=at.isoformat(),entry_price=float(minute.close),route='BODY50_1M_BREAKOUT',setup=waiting['signal_time'],evidence=waiting)
+                active=dict(direction=g.owner,entry_time=at.isoformat(),entry_price=float(minute.close),route='BODY50_1M_BREAKOUT',setup=waiting['signal_time'],evidence=waiting,followup=dict(open=minute.open,high=minute.high,low=minute.low,close=minute.close),qualified=waiting['signal_time'])
                 if g.owner=='BEARISH':g._bullish_exit_monitor=p._start_bullish_exit_monitor(c,tracker)
                 waiting=None
     if active:
