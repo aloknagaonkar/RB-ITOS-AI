@@ -1,0 +1,24 @@
+{
+  "archive_commit": "validated-bridge-health-milestone",
+  "files": {
+    "scripts/hilega_production_simulator_bridge.py": "114b44f5474ea880eb10388706b83fcaa335bb4546cede924ac3bb008ce7c772",
+    "scripts/hilega_sim_allocation.py": "7a1a909d1ad23f9fe6a854436ba677c6e5f19361959d4cbf185a1bce08802e4d",
+    "scripts/hilega_central_allocation_demo.py": "79d5f52ba40ee64a614b2be42475a1dccfb0b6bedd1e637c0ebaf1a31cb85c9c",
+    "tests/test_hilega_central_sim_allocation_v1.py": "39e038bae708a155a3a2439042a3a513ab830ab0b9105e019612c4499b482831",
+    "backend/market_lab/hilega_sim_allocation_v1.py": "4f507542d1880f618dbdf50ce76c224ee5f858f4157b8adfea2115c3d88934cd",
+    "backend/market_lab/hilega_production_workspace_v1.py": "52e7a43affd7093e493126587f35abf495ac5d91ea18c5b75f9a6960a1fa6ca5",
+    "backend/market_lab/hilega_production_foundation/core.py": "3f2c2bba0fab587a558c2b800e9d03bd857a09df36da33069013336b8b67ae0d",
+    "frontend/src/hilegaProductionWorkspace.tsx": "2f96e697a3fa7948ffb4fcec20437a2c2512c3521cc9f2b5a1bd80dc81532da4"
+  },
+  "expected": {
+    "scripts/hilega_production_simulator_bridge.py": "033ded68b59be1f34df99d76e460024969bfaccdf66b0173cd5cf0344de0cfd9",
+    "backend/market_lab/hilega_production_workspace_v1.py": "31440b8555455ceccc0ad93284084a412feb7eb1be8e1456a2b89733a13cb791",
+    "backend/market_lab/hilega_production_foundation/core.py": "b1acee92c9717a387aad1549287f6975cdc7b18c09c6f453a51b32ccfaa8e8d5",
+    "frontend/src/hilegaProductionWorkspace.tsx": "5129c230244ca9f9c9f0c0723d027b48cd87592111a390acaa02725a42e59c33"
+  },
+  "requires": {
+    "backend/market_lab/hilega_production_broker_observation_v1.py": "d0b0167604db78c5d0a70fa7012dcfbe18db4e86516b62a2190fcf294168aa4e",
+    "backend/market_lab/hilega_production_ownership_v1.py": "1f66565941d752c6e4fb5132a49c7ddec393acdb71a53820a645467629bfce0a",
+    "backend/market_lab/hilega_production_bridge_health_v1.py": "d7e02c6c7c8bc4697109c981fb515306db7036683028cd28248d2bd070850a93"
+  }
+}
