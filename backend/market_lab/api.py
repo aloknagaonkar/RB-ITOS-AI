@@ -1,3 +1,4 @@
+from .hilega_production_workspace_v1 import router as production_workspace_router, workspace_lifespan
 from .operational_readiness_v1 import router as operational_readiness_router
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
@@ -62,9 +63,11 @@ def create_app(engine=None, historical_gateway_factory=None):
     async def lifespan(app):
         app.state.engine = engine if engine is not None else make_engine()
         initialize(app.state.engine)
-        yield
+        async with workspace_lifespan():
+            yield
 
     app = FastAPI(title="Market Strategy Lab", version="0.1.0", lifespan=lifespan)
+    app.include_router(production_workspace_router)
     app.include_router(operational_readiness_router)
     app.include_router(hilega_pcr_context_router)
     app.include_router(live_shadow_router)
@@ -75,7 +78,7 @@ def create_app(engine=None, historical_gateway_factory=None):
     app.include_router(hilega_manual_exit_router)
     app.include_router(hilega_vwap_audit_router)
     app.include_router(hilega_strike_observation_router)
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "testserver", "136.83.134.133"])
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "testserver", "34.14.220.215"])
     app.add_middleware(GZipMiddleware, minimum_size=1000)
     app.add_middleware(
         CORSMiddleware,
