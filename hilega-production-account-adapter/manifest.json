@@ -1,0 +1,13 @@
+{
+  "archive_commit": "additive-pinned-readonly-account-adapter",
+  "files": {
+    "backend/market_lab/hilega_production_account_adapter_v1.py": "9484899b374701c211adf22b67ea5fc84d0cdb978defe061ce8250cb7313b140",
+    "scripts/hilega_production_account_adapter.py": "8b70223eec6a21deb10342fb1e7964ad70e82b9dc2b18125a757e77639007cc1",
+    "tests/test_hilega_production_account_adapter_v1.py": "b6ec13235ac04e49f20ec7a6f87c59e339fe00fe1732cac96c1e7ad3b791420f"
+  },
+  "expected": {},
+  "requires": {
+    "backend/market_lab/hilega_production_broker_observation_v1.py": "d0b0167604db78c5d0a70fa7012dcfbe18db4e86516b62a2190fcf294168aa4e",
+    "backend/market_lab/hilega_production_ownership_v1.py": "1f66565941d752c6e4fb5132a49c7ddec393acdb71a53820a645467629bfce0a"
+  }
+}
