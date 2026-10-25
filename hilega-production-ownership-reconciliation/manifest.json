@@ -1,0 +1,9 @@
+{
+  "archive_commit": "additive-offline-ownership-layer",
+  "files": {
+    "backend/market_lab/hilega_production_ownership_v1.py": "1f66565941d752c6e4fb5132a49c7ddec393acdb71a53820a645467629bfce0a",
+    "scripts/hilega_production_ownership_demo.py": "f338f449398e2ede937a9ee4e4a1c67384b4a2fd26179b72ad7e05ac57d86e47",
+    "tests/test_hilega_production_ownership_v1.py": "e373f88c973670a5cabba2892206bb1066ea39c1de4ca2df155dc38e12e6b92f"
+  },
+  "expected": {}
+}
