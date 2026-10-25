@@ -27,7 +27,8 @@ def _store() -> ShadowStepAuditStoreV1:
 
 
 def _rows() -> list[dict[str, Any]]:
-    return _store().read_all() if STEP_AUDIT_PATH.exists() else []
+    from .hilega_ui_journal_cache_v1 import read_rows
+    return read_rows(STEP_AUDIT_PATH)
 
 
 def _record_session(row: dict[str, Any]) -> str | None:
@@ -290,7 +291,8 @@ def status(fast: bool = False):
     return {
         "model": MODEL,
         "strategy_id": STRATEGY_ID,
-        "strategy_version": STRATEGY_VERSION,
+        "strategy_version": (__import__("market_lab.hilega_combined_policy_v1",fromlist=["VERSION"]).VERSION if selected=="HILEGA_V2_ALIGNMENT_DUAL_EXIT" else STRATEGY_VERSION),
+        "policy_id": "BULLISH_GAP2_FULL_WMA2" if selected=="HILEGA_V2_ALIGNMENT_DUAL_EXIT" else None,
         "selected_live_shadow_strategy": selected or None,
         "directional_mode_active": selected in {STRATEGY_ID, "HILEGA_WMA_GAP_V2_LIVE_SHADOW", "HILEGA_V2_ALIGNMENT_DUAL_EXIT"},
         "active_strategy_id": selected or STRATEGY_ID,
@@ -347,7 +349,14 @@ def events(limit: int = 200):
 
 @router.get("/trade-dashboard")
 def trade_dashboard():
-    return project_directional_shadow_dashboard(_rows())
+    from .hilega_ui_journal_cache_v1 import read_dashboard
+    return read_dashboard(STEP_AUDIT_PATH)
+
+@router.get('/active-live-marks')
+def active_live_marks():
+    from .hilega_active_live_marks_v1 import load
+    from .hilega_ui_journal_cache_v1 import read_dashboard
+    return load(read_dashboard(STEP_AUDIT_PATH))
 
 
 @router.get("/wma-gap-evaluations")
@@ -355,7 +364,7 @@ def wma_gap_evaluations(limit: int = 100):
     if not 1 <= limit <= 2000:
         raise HTTPException(422, "limit must be between 1 and 2000")
     today = datetime.now(IST).date().isoformat()
-    result = [r for r in _rows() if r.get("stage")=="WMA_GAP_MINUTE_EVALUATION"
+    result = [r for r in _rows() if r.get("stage") in {"WMA_GAP_MINUTE_EVALUATION","COMBINED_FIVE_MINUTE_EVALUATION"}
               and str((r.get("payload") or {}).get("minute_timestamp", "")).startswith(today)
               and r.get("status") != "RECOVERED"]
     return {"strategy_id": os.getenv("LIVE_SHADOW_STRATEGY", "HILEGA_WMA_GAP_V2_LIVE_SHADOW"), "rows": [r for r in result if (r.get("payload") or {}).get("strategy_id") == os.getenv("LIVE_SHADOW_STRATEGY", "HILEGA_WMA_GAP_V2_LIVE_SHADOW")][-limit:]}

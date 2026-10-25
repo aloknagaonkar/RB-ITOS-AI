@@ -14,6 +14,7 @@ def decide(now,control,status,active_strategy,expected_strategy=EXPECTED,disable
  if control.get('kill_switch'):return 'BLOCKED_MANUAL_KILL_SWITCH'
  if control.get('entries_blocked'):return 'BLOCKED_RECONCILIATION_REQUIRED'
  if status.get('open_legs',0):return 'BLOCKED_OPEN_LEGS'
+ if status.get('pending_fill_orders',0):return 'BLOCKED_PENDING_FILL_ORDERS'
  if status.get('uncertain_requests',0):return 'BLOCKED_UNCERTAIN_REQUESTS'
  if control.get('armed') and control.get('session_date')==day:return 'ALREADY_ARMED_TODAY'
  if not time(8,45)<=now.time().replace(tzinfo=None)<time(9,15):return 'SKIP_OUTSIDE_PREMARKET_WINDOW'

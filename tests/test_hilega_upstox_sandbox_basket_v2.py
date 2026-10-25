@@ -1,4 +1,6 @@
 from datetime import datetime
+import hashlib
+import json
 from pathlib import Path
 from types import SimpleNamespace
 import pytest
@@ -55,7 +57,12 @@ def test_prearm_exit_and_overlap_guard(tmp_path):
     w.process(ex,[en,ex],f,c);assert not f.calls
     fresh=intent('ENTRY','fresh');w.process(fresh,[fresh],f,c)
     other=intent('ENTRY','other',12);w.process(other,[other],f,c)
-    assert len(f.calls)==5 and w.store.rows()[-1]['status']=='ENTRY_BLOCKED'
+    assert len(f.calls)==5 and w.store.rows()[-1]['status']=='ENTRY_NOT_TRADED'
+    assert w.store.rows()[-1]['reason']=='OPEN_BASKET_OR_RECONCILIATION_REQUIRED'
+    other_exit=intent('EXIT','other',13)
+    w.process(other_exit,[other,other_exit],f,c)
+    assert len(f.calls)==5 and w.store.rows()[-1]['status']=='EXIT_NO_POSITION'
+    assert not w.control.read().get('entries_blocked')
 
 def test_nearest_expiry_five_strikes_and_missing_guard():
     rows=[dict(expiry=expiry,instrument_type=side,strike_price=22000+i*50,instrument_key=f'{expiry}-{side}-{i}',lot_size=65) for expiry in ('2026-10-06','2026-10-13','2026-10-20') for side in ('CE','PE') for i in range(10)]
@@ -93,3 +100,96 @@ def test_partial_basket_dashboard_shows_unknown_and_unsubmitted(tmp_path,monkeyp
     assert len(legs)==5
     assert [l['status'] for l in legs]==['BUY_ACKNOWLEDGED','BUY_ACKNOWLEDGED','SUBMISSION_UNCERTAIN','NOT_SUBMITTED','NOT_SUBMITTED']
     assert result['active_trades'][0]['status']=='RECONCILIATION_REQUIRED'
+
+
+def test_ranked_mode_buys_and_exits_only_selected_contract(tmp_path,monkeypatch):
+    import market_lab.hilega_upstox_sandbox_basket_v2 as m
+    from market_lab.hilega_v2_alignment_replay_v1 import RULES
+    w,c=fixture(tmp_path);f=Fake();en=intent('ENTRY');ex=intent('EXIT',seq=12)
+    policy_path=tmp_path/'approved-policy.json'
+    policy_path.write_text(json.dumps(dict(version='reviewed-v1',strategy_version=RULES['version'],approved=True,
+        ranked_ce_roles=[0,-1,1,-2,2],ranked_pe_roles=[-1,0,1,-2,2],max_spread_pct=5,
+        min_bid_quantity=65,min_ask_quantity=65,min_volume=100,max_signal_age_seconds=120,
+        max_quote_age_seconds=30,max_one_lot_premium_rupees=10000)))
+    monkeypatch.setattr(m,'selector_policy_path',lambda env: str(policy_path))
+    monkeypatch.setattr(m,'selector_mode',lambda env: m.RANKED_MODE)
+    control=w.control.read();control.update(execution_mode=m.RANKED_MODE,
+        strike_policy_sha256=hashlib.sha256(policy_path.read_bytes()).hexdigest());w.control.write(control)
+    f.option_quality_quotes=lambda keys:{key:dict(bid_price=99,ask_price=100,bid_quantity=100,
+        ask_quantity=100,volume=500,quote_time=NOW.isoformat()) for key in keys}
+    w.process(en,[en,ex],f,c);w.process(en,[en,ex],f,c)
+    assert len(f.calls)==1 and f.calls[0]['instrument_key']=='K-1'
+    plans=[r for r in w.store.rows() if r['status']=='BASKET_PLANNED']
+    assert len(plans)==1 and plans[0]['strike_selection']['selected']['role']==-1
+    w.process(ex,[en,ex],f,c)
+    assert len(f.calls)==2 and f.calls[1]['instrument_key']=='K-1' and f.calls[1]['transaction_type']=='SELL'
+
+
+def test_ranked_mode_declines_incomplete_quote_and_exit_has_no_position(tmp_path,monkeypatch):
+    import market_lab.hilega_upstox_sandbox_basket_v2 as m
+    from market_lab.hilega_v2_alignment_replay_v1 import RULES
+    w,c=fixture(tmp_path);f=Fake();en=intent('ENTRY');ex=intent('EXIT',seq=12)
+    policy_path=tmp_path/'approved-policy.json'
+    policy_path.write_text(json.dumps(dict(version='reviewed-v1',strategy_version=RULES['version'],approved=True,
+        ranked_ce_roles=[0,-1,1,-2,2],ranked_pe_roles=[-1,0,1,-2,2],max_spread_pct=5,
+        min_bid_quantity=65,min_ask_quantity=65,min_volume=100,max_signal_age_seconds=120,
+        max_quote_age_seconds=30,max_one_lot_premium_rupees=10000)))
+    monkeypatch.setattr(m,'selector_policy_path',lambda env: str(policy_path))
+    monkeypatch.setattr(m,'selector_mode',lambda env: m.RANKED_MODE)
+    control=w.control.read();control.update(execution_mode=m.RANKED_MODE,
+        strike_policy_sha256=hashlib.sha256(policy_path.read_bytes()).hexdigest());w.control.write(control)
+    f.option_quality_quotes=lambda keys:{}
+    w.process(en,[en,ex],f,c);w.process(ex,[en,ex],f,c)
+    assert not f.calls and [r['status'] for r in w.store.rows()]==['ENTRY_NOT_TRADED','EXIT_NO_POSITION']
+
+
+def test_selector_mode_change_blocks_entry_but_known_exit_still_runs(tmp_path, monkeypatch):
+    import market_lab.hilega_upstox_sandbox_basket_v2 as m
+    w,c=fixture(tmp_path);f=Fake();en=intent('ENTRY');ex=intent('EXIT',seq=12)
+    w.process(en,[en,ex],f,c)
+    monkeypatch.setattr(m,'selector_mode',lambda env:m.RANKED_MODE)
+    w.process(ex,[en,ex],f,c)
+    assert len(f.calls)==10 and not w.store.open_legs()
+    fresh=intent('ENTRY','fresh',13);w.process(fresh,[fresh],f,c)
+    assert w.store.rows()[-1]['status']=='ENTRY_NOT_TRADED' and len(f.calls)==10
+
+
+def test_quote_transport_failure_produces_no_position_exit(tmp_path,monkeypatch):
+    w,c=fixture(tmp_path);f=Fake();en=intent('ENTRY');ex=intent('EXIT',seq=12)
+    def fail(*args):raise TimeoutError()
+    f.resolve_five=fail
+    w.process(en,[en,ex],f,c);w.process(ex,[en,ex],f,c)
+    assert not f.calls and not w.control.read().get('entries_blocked')
+    assert [r['status'] for r in w.store.rows()]==['ENTRY_NOT_TRADED','EXIT_NO_POSITION']
+
+
+def test_frozen_plan_quantity_survives_config_change(tmp_path):
+    w,c=fixture(tmp_path);f=Fake();en=intent('ENTRY')
+    contracts=f.resolve_five(en['direction'],'2026-10-08')
+    w.store.append(dict(en,session_date='2026-10-08',status='BASKET_PLANNED',contracts=contracts,
+                       legs=[dict(contract=x,role=x['role'],quantity=65) for x in contracts]))
+    w.process(en,[en],f,SimpleNamespace(lots=2))
+    assert all(call['quantity']==65 for call in f.calls)
+    assert len([r for r in w.store.rows() if r['status']=='BASKET_PLANNED'])==1
+
+
+def test_observation_mode_records_unapproved_policy_without_orders(tmp_path,monkeypatch):
+    import market_lab.hilega_upstox_sandbox_basket_v2 as m
+    from market_lab.hilega_v2_alignment_replay_v1 import RULES
+    w,c=fixture(tmp_path);f=Fake();en=intent('ENTRY');ex=intent('EXIT',seq=12)
+    path=tmp_path/'observation.json'
+    path.write_text(json.dumps(dict(version='observation-example',strategy_version=RULES['version'],approved=False,
+        ranked_ce_roles=[0,-1,1,-2,2],ranked_pe_roles=[0,1,-1,2,-2],max_spread_pct=5,
+        min_bid_quantity=65,min_ask_quantity=65,min_volume=0,max_signal_age_seconds=120,
+        max_quote_age_seconds=30,max_one_lot_premium_rupees=10000)))
+    monkeypatch.setattr(m,'selector_policy_path',lambda env:str(path))
+    monkeypatch.setattr(m,'selector_mode',lambda env:m.OBSERVE_MODE)
+    control=w.control.read();control.update(execution_mode=m.OBSERVE_MODE,strike_policy_sha256=hashlib.sha256(path.read_bytes()).hexdigest());w.control.write(control)
+    f.option_quality_quotes=lambda keys:{key:dict(bid_price=99,ask_price=100,bid_quantity=100,
+        ask_quantity=100,volume=500,quote_time=NOW.isoformat()) for key in keys}
+    w.process(en,[en,ex],f,c);w.process(ex,[en,ex],f,c)
+    assert not f.calls
+    decision=w.store.rows()[0]
+    assert decision['reason']=='RANKING_OBSERVATION_ONLY'
+    assert decision['strike_selection']['observation_only'] is True
+    assert decision['strike_selection']['execution_approved'] is False

@@ -1,0 +1,6 @@
+[
+  "scripts/hilega_vwap_collector_service.py",
+  "scripts/start_hilega_vwap_collector.sh",
+  "scripts/status_hilega_vwap_collector.sh",
+  "scripts/stop_hilega_vwap_collector.sh"
+]

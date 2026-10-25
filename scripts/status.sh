@@ -71,3 +71,8 @@ if [ -f data/operational-readiness.pid ] && kill -0 "$(cat data/operational-read
 else
     echo "readiness-monitor: STOPPED"
 fi
+
+# Independent observation service status.
+bash "$ROOT/scripts/status_hilega_vwap_collector.sh" || echo "VWAP collector: status unavailable"
+
+bash "$ROOT/scripts/status_hilega_policy_observer.sh" || echo "Policy observer: status warning"

@@ -1,0 +1,30 @@
+{
+  "profile": "INITIAL_RESEARCH_1_NOT_OPTIMIZED",
+  "unit_basis": "STANDARD_MODEL_CONVENTIONS_VERIFY_AGAINST_LIVE_FEED",
+  "limits": {
+    "max_quote_age_seconds": 10,
+    "max_greeks_age_seconds": 10,
+    "max_signal_age_seconds": 60,
+    "max_spread_percent": 1.0,
+    "premium_budget_rupees": 15000,
+    "round_trip_cost_per_lot_rupees": 100,
+    "slippage_points_per_side": 0.05,
+    "gamma_shock_points": 30,
+    "max_gamma_delta_change": 0.2,
+    "max_theta_premium_fraction": 0.1,
+    "max_open_observations": 20,
+    "theta_unit": "PREMIUM_POINTS_PER_CALENDAR_DAY",
+    "vega_unit": "PREMIUM_POINTS_PER_IV_PERCENTAGE_POINT"
+  },
+  "iv_unit": "FRACTION",
+  "velocity": {
+    "lookback_minutes": 1,
+    "min_directional_points_per_minute": 3
+  },
+  "scenario": {
+    "expected_move_points": 30,
+    "holding_minutes": 15,
+    "iv_change_percentage_points": 0,
+    "invalidation_distance_points": 20
+  }
+}

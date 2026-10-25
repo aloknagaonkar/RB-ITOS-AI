@@ -1,0 +1,374 @@
+{
+  "files": {
+    "backend/market_lab/hilega_alignment_dual_exit_live_v1.py": "bab2bc00c69e87ac751406f1daf21ec05e1cebf2844aa4151102d4bb017f5043",
+    "backend/market_lab/hilega_combined_policy_inspection_v1.py": "fe1657963260ec8914a1bfc1e9fb4f443ba95a23406cfab6cc92776d071feb9a",
+    "backend/market_lab/hilega_combined_policy_v1.py": "4edab4a8b68f195942a2f1fb8c9e4a2c30ccee0c63e04b0cadbe3aca1db7c663",
+    "backend/market_lab/hilega_combined_replay_v1.py": "60046f39339f431d16891b4b54e8b7beab308b2fe6502f16d7119a77c9674dc9",
+    "backend/market_lab/hilega_directional_candle_ui_v1.py": "ace4fc4fee49f96c73e6843ddccf97ac8da5e357aa164bf4a053b2e08d63c4e8",
+    "backend/market_lab/hilega_v2_replay_presentation_v1.py": "dc3931d73e0d5ad1df6cd1267eb773684d55142cf0b5cc8ee37bf75feaf7d39c",
+    "frontend/src/hilegaAlignmentAuditInspection.tsx": "77f77207f8f8925f28e5bb786cf458f99955de5a88cc699f31cfbbd8d8b9733e",
+    "frontend/src/hilegaAlignmentReplay.tsx": "f9387c8dc9b72b86e97fe9ea67de642d86dea60f5f668b9699526161c581f174",
+    "frontend/src/hilegaDirectionalAuditOverlay.ts": "97ac319a3ef18c8a8a24b8ef9bab90b005a01d0acd11e716a2b09f4382c66374",
+    "frontend/src/hilegaExitPolicyEvidence.tsx": "9c4c586050060ee705f1e1daf02b11ecf84af558c7b85626b1797afafe038204",
+    "scripts/validate_hilega_wma40_promotion.py": "ea36ce7bfae374426dadb22366461ca0fc7d9fd2bdb56ff2a1341ed60a8eb7e4",
+    "tests/test_hilega_wma40_promotion.py": "a9212a239e07b84ebbea27a378d8c779977bd38b879e69e3a789b0adf3dca116"
+  },
+  "validation": {
+    "status": "PASS",
+    "strategy_version": "bullish-gap2-full-wma2-2.0.0-wma40-reversal",
+    "sessions": [
+      {
+        "session_date": "2026-09-01",
+        "status": "PASS",
+        "trades": 3,
+        "warmup_sessions": 479,
+        "points": 129.85,
+        "research_trade_parity": "PASS",
+        "live_replay_event_parity": "PASS",
+        "shadow_event_dispatch_parity": "PASS"
+      },
+      {
+        "session_date": "2026-09-02",
+        "status": "PASS",
+        "trades": 3,
+        "warmup_sessions": 480,
+        "points": -47.15,
+        "research_trade_parity": "PASS",
+        "live_replay_event_parity": "PASS",
+        "shadow_event_dispatch_parity": "PASS"
+      },
+      {
+        "session_date": "2026-09-03",
+        "status": "PASS",
+        "trades": 5,
+        "warmup_sessions": 481,
+        "points": -28.65,
+        "research_trade_parity": "PASS",
+        "live_replay_event_parity": "PASS",
+        "shadow_event_dispatch_parity": "PASS"
+      },
+      {
+        "session_date": "2026-09-04",
+        "status": "PASS",
+        "trades": 3,
+        "warmup_sessions": 482,
+        "points": 16.95,
+        "research_trade_parity": "PASS",
+        "live_replay_event_parity": "PASS",
+        "shadow_event_dispatch_parity": "PASS"
+      },
+      {
+        "session_date": "2026-09-07",
+        "status": "PASS",
+        "trades": 5,
+        "warmup_sessions": 483,
+        "points": 15.4,
+        "research_trade_parity": "PASS",
+        "live_replay_event_parity": "PASS",
+        "shadow_event_dispatch_parity": "PASS"
+      },
+      {
+        "session_date": "2026-09-08",
+        "status": "PASS",
+        "trades": 4,
+        "warmup_sessions": 484,
+        "points": -43.25,
+        "research_trade_parity": "PASS",
+        "live_replay_event_parity": "PASS",
+        "shadow_event_dispatch_parity": "PASS"
+      },
+      {
+        "session_date": "2026-09-09",
+        "status": "PASS",
+        "trades": 4,
+        "warmup_sessions": 485,
+        "points": 5.4,
+        "research_trade_parity": "PASS",
+        "live_replay_event_parity": "PASS",
+        "shadow_event_dispatch_parity": "PASS"
+      },
+      {
+        "session_date": "2026-09-10",
+        "status": "PASS",
+        "trades": 3,
+        "warmup_sessions": 486,
+        "points": -8.85,
+        "research_trade_parity": "PASS",
+        "live_replay_event_parity": "PASS",
+        "shadow_event_dispatch_parity": "PASS"
+      },
+      {
+        "session_date": "2026-09-11",
+        "status": "PASS",
+        "trades": 4,
+        "warmup_sessions": 487,
+        "points": -37.95,
+        "research_trade_parity": "PASS",
+        "live_replay_event_parity": "PASS",
+        "shadow_event_dispatch_parity": "PASS"
+      },
+      {
+        "session_date": "2026-09-15",
+        "status": "PASS",
+        "trades": 3,
+        "warmup_sessions": 488,
+        "points": 180.65,
+        "research_trade_parity": "PASS",
+        "live_replay_event_parity": "PASS",
+        "shadow_event_dispatch_parity": "PASS"
+      },
+      {
+        "session_date": "2026-09-16",
+        "status": "PASS",
+        "trades": 3,
+        "warmup_sessions": 489,
+        "points": -16.65,
+        "research_trade_parity": "PASS",
+        "live_replay_event_parity": "PASS",
+        "shadow_event_dispatch_parity": "PASS"
+      },
+      {
+        "session_date": "2026-09-17",
+        "status": "PASS",
+        "trades": 5,
+        "warmup_sessions": 490,
+        "points": 73.05,
+        "research_trade_parity": "PASS",
+        "live_replay_event_parity": "PASS",
+        "shadow_event_dispatch_parity": "PASS"
+      },
+      {
+        "session_date": "2026-09-18",
+        "status": "PASS",
+        "trades": 5,
+        "warmup_sessions": 491,
+        "points": -27.95,
+        "research_trade_parity": "PASS",
+        "live_replay_event_parity": "PASS",
+        "shadow_event_dispatch_parity": "PASS"
+      },
+      {
+        "session_date": "2026-09-21",
+        "status": "PASS",
+        "trades": 4,
+        "warmup_sessions": 492,
+        "points": 7.0,
+        "research_trade_parity": "PASS",
+        "live_replay_event_parity": "PASS",
+        "shadow_event_dispatch_parity": "PASS"
+      },
+      {
+        "session_date": "2026-09-22",
+        "status": "PASS",
+        "trades": 5,
+        "warmup_sessions": 493,
+        "points": -47.0,
+        "research_trade_parity": "PASS",
+        "live_replay_event_parity": "PASS",
+        "shadow_event_dispatch_parity": "PASS"
+      },
+      {
+        "session_date": "2026-09-23",
+        "status": "PASS",
+        "trades": 3,
+        "warmup_sessions": 494,
+        "points": 6.55,
+        "research_trade_parity": "PASS",
+        "live_replay_event_parity": "PASS",
+        "shadow_event_dispatch_parity": "PASS"
+      },
+      {
+        "session_date": "2026-09-24",
+        "status": "PASS",
+        "trades": 3,
+        "warmup_sessions": 495,
+        "points": 52.5,
+        "research_trade_parity": "PASS",
+        "live_replay_event_parity": "PASS",
+        "shadow_event_dispatch_parity": "PASS"
+      },
+      {
+        "session_date": "2026-09-25",
+        "status": "PASS",
+        "trades": 4,
+        "warmup_sessions": 496,
+        "points": -6.1,
+        "research_trade_parity": "PASS",
+        "live_replay_event_parity": "PASS",
+        "shadow_event_dispatch_parity": "PASS"
+      },
+      {
+        "session_date": "2026-09-28",
+        "status": "PASS",
+        "trades": 4,
+        "warmup_sessions": 497,
+        "points": 60.05,
+        "research_trade_parity": "PASS",
+        "live_replay_event_parity": "PASS",
+        "shadow_event_dispatch_parity": "PASS"
+      },
+      {
+        "session_date": "2026-09-29",
+        "status": "PASS",
+        "trades": 4,
+        "warmup_sessions": 498,
+        "points": 157.7,
+        "research_trade_parity": "PASS",
+        "live_replay_event_parity": "PASS",
+        "shadow_event_dispatch_parity": "PASS"
+      },
+      {
+        "session_date": "2026-09-30",
+        "status": "PASS",
+        "trades": 4,
+        "warmup_sessions": 499,
+        "points": 88.7,
+        "research_trade_parity": "PASS",
+        "live_replay_event_parity": "PASS",
+        "shadow_event_dispatch_parity": "PASS"
+      },
+      {
+        "session_date": "2026-10-01",
+        "status": "PASS",
+        "trades": 4,
+        "warmup_sessions": 500,
+        "points": 211.25,
+        "research_trade_parity": "PASS",
+        "live_replay_event_parity": "PASS",
+        "shadow_event_dispatch_parity": "PASS"
+      },
+      {
+        "session_date": "2026-10-05",
+        "status": "PASS",
+        "trades": 3,
+        "warmup_sessions": 501,
+        "points": 101.95,
+        "research_trade_parity": "PASS",
+        "live_replay_event_parity": "PASS",
+        "shadow_event_dispatch_parity": "PASS"
+      },
+      {
+        "session_date": "2026-10-06",
+        "status": "PASS",
+        "trades": 3,
+        "warmup_sessions": 502,
+        "points": -18.25,
+        "research_trade_parity": "PASS",
+        "live_replay_event_parity": "PASS",
+        "shadow_event_dispatch_parity": "PASS"
+      },
+      {
+        "session_date": "2026-10-07",
+        "status": "PASS",
+        "trades": 4,
+        "warmup_sessions": 503,
+        "points": -40.15,
+        "research_trade_parity": "PASS",
+        "live_replay_event_parity": "PASS",
+        "shadow_event_dispatch_parity": "PASS"
+      },
+      {
+        "session_date": "2026-10-08",
+        "status": "PASS",
+        "trades": 2,
+        "warmup_sessions": 504,
+        "points": 245.1,
+        "research_trade_parity": "PASS",
+        "live_replay_event_parity": "PASS",
+        "shadow_event_dispatch_parity": "PASS"
+      },
+      {
+        "session_date": "2026-10-09",
+        "status": "PASS",
+        "trades": 3,
+        "warmup_sessions": 505,
+        "points": 149.85,
+        "research_trade_parity": "PASS",
+        "live_replay_event_parity": "PASS",
+        "shadow_event_dispatch_parity": "PASS"
+      },
+      {
+        "session_date": "2026-10-12",
+        "status": "PASS",
+        "trades": 2,
+        "warmup_sessions": 506,
+        "points": 133.9,
+        "research_trade_parity": "PASS",
+        "live_replay_event_parity": "PASS",
+        "shadow_event_dispatch_parity": "PASS"
+      },
+      {
+        "session_date": "2026-10-13",
+        "status": "PASS",
+        "trades": 4,
+        "warmup_sessions": 507,
+        "points": 175.25,
+        "research_trade_parity": "PASS",
+        "live_replay_event_parity": "PASS",
+        "shadow_event_dispatch_parity": "PASS"
+      },
+      {
+        "session_date": "2026-10-14",
+        "status": "PASS",
+        "trades": 4,
+        "warmup_sessions": 508,
+        "points": -34.6,
+        "research_trade_parity": "PASS",
+        "live_replay_event_parity": "PASS",
+        "shadow_event_dispatch_parity": "PASS"
+      },
+      {
+        "session_date": "2026-10-15",
+        "status": "PASS",
+        "trades": 2,
+        "warmup_sessions": 509,
+        "points": 235.0,
+        "research_trade_parity": "PASS",
+        "live_replay_event_parity": "PASS",
+        "shadow_event_dispatch_parity": "PASS"
+      },
+      {
+        "session_date": "2026-10-16",
+        "status": "PASS",
+        "trades": 3,
+        "warmup_sessions": 510,
+        "points": 68.75,
+        "research_trade_parity": "PASS",
+        "live_replay_event_parity": "PASS",
+        "shadow_event_dispatch_parity": "PASS"
+      },
+      {
+        "session_date": "2026-10-19",
+        "status": "PASS",
+        "trades": 2,
+        "warmup_sessions": 511,
+        "points": 114.55,
+        "research_trade_parity": "PASS",
+        "live_replay_event_parity": "PASS",
+        "shadow_event_dispatch_parity": "PASS"
+      },
+      {
+        "session_date": "2026-10-21",
+        "status": "PASS",
+        "trades": 3,
+        "warmup_sessions": 512,
+        "points": 139.5,
+        "research_trade_parity": "PASS",
+        "live_replay_event_parity": "PASS",
+        "shadow_event_dispatch_parity": "PASS"
+      }
+    ],
+    "implementation_sha256": {
+      "backend/market_lab/hilega_combined_policy_v1.py": "4edab4a8b68f195942a2f1fb8c9e4a2c30ccee0c63e04b0cadbe3aca1db7c663",
+      "backend/market_lab/hilega_combined_replay_v1.py": "60046f39339f431d16891b4b54e8b7beab308b2fe6502f16d7119a77c9674dc9",
+      "backend/market_lab/hilega_alignment_dual_exit_live_v1.py": "bab2bc00c69e87ac751406f1daf21ec05e1cebf2844aa4151102d4bb017f5043"
+    },
+    "input_sha256": "d1091aa714035fd117edc7cdbfbb40a541e4a259d06b0865551c2e2405e39d52",
+    "orders_sent": false
+  },
+  "protected": {
+    "backend/market_lab/hilega_upstox_sandbox_basket_v2.py": "fb40a75608a3635c8867649b53556bcfabd0b2ab0fd743d46d644ada934d555a",
+    "backend/market_lab/hilega_sandbox_event_bridge_v1.py": "83fd0a76b572429ac4b734e8998ba41407ed3e089847b9bb50c00b1c1fa5b961",
+    "backend/market_lab/hilega_sandbox_fill_ledger_v1.py": "26cb5518b2cd89c101e00b35aeb63ae7a6fb2854d1b8bd0474a0a65fd790cb22"
+  }
+}

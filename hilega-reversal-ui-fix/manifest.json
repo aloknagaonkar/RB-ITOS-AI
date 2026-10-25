@@ -1,0 +1,7 @@
+{
+  "expected_source_sha256": "43de2a81964556285b86dd371bd42293b455302bb1273c74112e2deabec9843c",
+  "files": {
+    "tests/hilega_reversal_ui_vm.cjs": "d64d47c8790dbc8c0eb6c385e5a9e480f99020d52e40c939b9150118e9250659",
+    "frontend/src/hilegaDecisionTable.tsx": "d37bb1c53a74c06881ca118cba88b93c9773f77c771fcc8cfd669b7f60d1092e"
+  }
+}

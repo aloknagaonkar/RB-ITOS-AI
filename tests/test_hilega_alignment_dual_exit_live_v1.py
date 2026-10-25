@@ -81,19 +81,24 @@ class AlignmentLiveTests(unittest.TestCase):
             c=self.coordinator(d)
             old=datetime(2026,10,8,9,15,tzinfo=IST)
             raw=[dict(timestamp=(old+timedelta(minutes=i)).isoformat(),open=100,high=101,low=99,close=100,volume=1) for i in range(375)]
-            p=Path(d)/'2026-10-08.json';p.write_text(json.dumps(dict(candles=raw)))
+            warm_index={}
+            for offset in range(20):
+                prior=old-timedelta(days=19-offset)
+                rows=[dict(r,timestamp=(prior+timedelta(minutes=i)).isoformat()) for i,r in enumerate(raw)]
+                p=Path(d)/(prior.date().isoformat()+'.json');p.write_text(json.dumps(dict(candles=rows)))
+                warm_index[prior.date().isoformat()]=p
             c._bootstrapped_date=old.date();c.gate.locked=True;c.episode={'BULLISH':True,'BEARISH':True}
             c.sources=SimpleNamespace(nifty_intraday_1m=lambda **kw:[])
             c._restore_audited_option_state=lambda **kw:{}
             fresh=old+timedelta(days=1)
-            with patch.object(live,'cache_index',return_value={'2026-10-08':p}):
+            with patch.object(live,'cache_index',return_value=warm_index):
                 c.bootstrap(fresh)
             self.assertFalse(c.gate.locked)
             self.assertEqual(c.gate.owner,'NONE')
             self.assertEqual(c.canonical.session_date,fresh.date())
             self.assertFalse(any(c.episode.values()))
 
-    def test_same_exit_boundary_requires_two_strong_adjacent_minutes(self):
+    def test_legacy_gate_same_exit_boundary_remains_reproducible(self):
         t=datetime(2026,10,9,10,tzinfo=IST)
         g=live.WmaGapGate()
         g.previous=dict(minute=t-timedelta(minutes=1),snapshot=IndicatorSnapshot(34,35,40),wma_change=-.9)

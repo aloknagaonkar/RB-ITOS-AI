@@ -1,0 +1,95 @@
+{
+  "policy_id": "BULLISH_GAP2_FULL_WMA2",
+  "strategy_version": "bullish-gap2-full-wma2-1.0.0",
+  "source_commit": "88bb192d092b8915a7f2f72a31d35ac5df77b770",
+  "files": {
+    "backend/market_lab/hilega_combined_policy_v1.py": {
+      "old_sha256": null,
+      "new_sha256": "982c4a70a06a8442eb0eb1f02977095426d3381999fdbceb4710daa774eef4ad"
+    },
+    "backend/market_lab/hilega_combined_replay_v1.py": {
+      "old_sha256": null,
+      "new_sha256": "fd2516af3e90ff8e38b5da5c96a4a79015b2361a31b83a4a048f2e62b2d9d50f"
+    },
+    "backend/market_lab/hilega_combined_policy_inspection_v1.py": {
+      "old_sha256": null,
+      "new_sha256": "12199a71f9dc3e8fd135cfd91cc13fe32dc5d8a84f7313da7e0132615f18fafd"
+    },
+    "backend/market_lab/hilega_alignment_dual_exit_live_v1.py": {
+      "old_sha256": "13cae65eceec8710a388cb6f2ef02a8922f2d8bdbef3a20154dd48604635688e",
+      "new_sha256": "ae447147bcecfda60a1205479669a80fa3998da1de92570cd3b7e5db298d2c35"
+    },
+    "backend/market_lab/hilega_v2_replay_presentation_v1.py": {
+      "old_sha256": "2a928c8b331a92c0f09642b079312ab7d7b8de0f1bf1d1ba7aead20dacd5b66d",
+      "new_sha256": "ba820e3580b88592df57745081250ce3a0c6aa07381c1eb405938f99572873f0"
+    },
+    "backend/market_lab/hilega_historical_ui_api_v1.py": {
+      "old_sha256": "a36dd74b239c850be1721d67a318d22e8a8fe760a1abb4865a8107d56395fe39",
+      "new_sha256": "ecf570430ef4ae614522ffdc9a2a3ebca6e9a28a0644f4b39532a4ed10d37d7d"
+    },
+    "backend/market_lab/hilega_directional_candle_ui_v1.py": {
+      "old_sha256": "89956fa2b640ef2f6ebd31f01def86a17c06e349994c5c0ddd48dd2e26ab8104",
+      "new_sha256": "f18b86a4066589540d0d507b102aa210e2e8fbfeb65a03e757b1112b5b6954cc"
+    },
+    "backend/market_lab/hilega_directional_live_shadow_ui_v1.py": {
+      "old_sha256": "203c48b6b586478eaa8dbed3f44c7de7960d8e61c3127cb5f2fd79fea9fc9982",
+      "new_sha256": "523a2b3f9d932b936c68ac7d8c77356abe165065ae03d116fb7b180fcbdd97d4"
+    },
+    "backend/market_lab/hilega_directional_trade_dashboard_v1.py": {
+      "old_sha256": "792ffb9bce0a3fe87210de3da873f63e03922d9a1e1d8cc7b065c70305952218",
+      "new_sha256": "1f49b4bcaf902ba8d20aa23f1f6dbdc9bf7083b7960c47160938aa8fdeaf56ac"
+    },
+    "backend/market_lab/hilega_manual_exit_strategy_v1.py": {
+      "old_sha256": "5d81137d4cf01d3cefc2c4d4e4a735619e9eb8d6daafa0b5109f6adf6c7e8855",
+      "new_sha256": "4ff4647a261bcd018340b33fb78bb9fbad37e1cf2f973e8a5ec523c6072a0e32"
+    },
+    "backend/market_lab/hilega_sandbox_event_bridge_v1.py": {
+      "old_sha256": "d813c66aceb3a5c1ee24cb071d9b8441d1cd0aa3d54ee8a4982714a181e02062",
+      "new_sha256": "83fd0a76b572429ac4b734e8998ba41407ed3e089847b9bb50c00b1c1fa5b961"
+    },
+    "backend/market_lab/hilega_upstox_sandbox_basket_v2.py": {
+      "old_sha256": "aa494d5d687f07df3a3794bb67dde7875f8c4046904b4b6ec51d9a3ec53755fc",
+      "new_sha256": "fb40a75608a3635c8867649b53556bcfabd0b2ab0fd743d46d644ada934d555a"
+    },
+    "hilega_policy_live/publisher.py": {
+      "old_sha256": "6c30ce7ac06354c1d05dd329ef2afe2cc0f0ea292dd9b1a758f34f30091308e8",
+      "new_sha256": "3b14c96e1626b28806c0bd557b8356a6890658643bcbb1f38d7ec2a059991fca"
+    },
+    "hilega_policy_live/observer.py": {
+      "old_sha256": "3d16ab4bf6a318a269f5659f5d17c9ea44e40e8daa63cbf2cd78fd1d7dc006fb",
+      "new_sha256": "392267212ed769dda0489efc7edae3db0dd1e26f0476184a426fad32d55ed261"
+    },
+    "frontend/src/hilegaMilegaShadow.tsx": {
+      "old_sha256": "e246fd340b6f9df611cc81c1fb81933ae3a834179e21354b7d50cec73f9bd4d4",
+      "new_sha256": "fd65b428030025318f7e324a4b4941cdb3bdd3dacbcaa5721b502a79b5cac07e"
+    },
+    "frontend/src/hilegaDecisionTable.tsx": {
+      "old_sha256": "7ce26d66fac6de32c6dabf35b037eec5689bb5a65936d92d491626ce91409852",
+      "new_sha256": "70cbae2a03b58a046a24c733f6403c24e9cb0b8c3a8926b0180233e8fb1e5b0b"
+    },
+    "frontend/src/hilegaHistoricalReplay.tsx": {
+      "old_sha256": "1d73e19f86a82c4d36ab5d4f18f803546f80427b95346b49f704f9ce6961816e",
+      "new_sha256": "82255bf26182fdebe9c2a4801a9fab8a4f7c2b38577eafe4ebb5d79aeccfb786"
+    },
+    "frontend/src/hilegaIndependentObservations.tsx": {
+      "old_sha256": "2b299769bba880a0af890d685db00d62394d89b1a776625165d983e80ab838ad",
+      "new_sha256": "deb52a7f7d86084ace1c8bb0beb34d19ebe72a09c8d9621f97e9cd71ed11d782"
+    },
+    "frontend/src/hilegaStrikeObservations.tsx": {
+      "old_sha256": "d031e2832435943b320ff9ccc967fcce4617c5438a99fbaa308a3e4245f1fdeb",
+      "new_sha256": "0fe0711e3390545c13c6b5b1d07c6f390e227bdd46c27700cd5fd3e8ca3683e5"
+    },
+    "tests/test_hilega_combined_promotion.py": {
+      "old_sha256": null,
+      "new_sha256": "95cf4d34f4a8deb83552881a67d4091ab28d40c038703f2182d7b102dab9d8a8"
+    },
+    "tests/test_hilega_alignment_dual_exit_live_v1.py": {
+      "old_sha256": "7c9bc1c3960d05ddc3bf43f5020df23b01aac6e60981a704345cf83641bea3a7",
+      "new_sha256": "4ec8d772fa30d03b047941a9f10a78be31d8a141d7e3e3f37c2a44c4c6365e65"
+    },
+    "scripts/validate_hilega_combined_promotion.py": {
+      "old_sha256": null,
+      "new_sha256": "df21ccd8f7d6e2209afd92af642513d7722e0e60f2a6c51298975552deff2c23"
+    }
+  }
+}

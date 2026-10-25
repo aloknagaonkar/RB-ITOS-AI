@@ -1,0 +1,72 @@
+[
+  {
+    "path": "backend/market_lab/hilega_strike_selector_v1.py",
+    "before": "acd91fe6a2d5c90769f4b9dd7b85bf9564a8c3a32ceb5f2e6f2c891c4c896789",
+    "after": "7ed65870b8c12948cc3d87a2eb73fb0e4ae9e95ca070d8e33efc1139b90b2eeb"
+  },
+  {
+    "path": "backend/market_lab/hilega_upstox_sandbox_basket_v2.py",
+    "before": "2ce335ce867429de8bdfcb0aebf72a75f6b3b041c165a59159bd6c1d100fdeb1",
+    "after": "be5c624fd89001ee2bd11d72a7d60031a7637f810f1bc1136251dd9935e9ec37"
+  },
+  {
+    "path": "backend/market_lab/hilega_sandbox_event_bridge_v1.py",
+    "before": "a8a9b98c42cd695571b1f5344793f6dfbdffa700591094d58d47682567d4dc06",
+    "after": "d813c66aceb3a5c1ee24cb071d9b8441d1cd0aa3d54ee8a4982714a181e02062"
+  },
+  {
+    "path": "backend/market_lab/hilega_sandbox_fill_ledger_v1.py",
+    "before": null,
+    "after": "c98e5d6e294b61587b889863670f3b4a155ee34d6e5aee26fad96c67727a74ff"
+  },
+  {
+    "path": "backend/market_lab/hilega_manual_exit_v1.py",
+    "before": "9f333d5d628d29203cc7fc334fe1b77e1c5b49370a5463000e63d21b5da53be2",
+    "after": "fad92f3153202b1a33eb7633ee334e458134eafb918d30204381c4a3e97ec340"
+  },
+  {
+    "path": "backend/market_lab/hilega_sandbox_daily_autoarm_v1.py",
+    "before": "c08db4a45eae36fd839b508139be802f8bec37587dbbb9dbd593a83570d6765c",
+    "after": "f106ca04e8269de25e0519579b6d9f534d901f686a01dd3e25ca7a138363f7d6"
+  },
+  {
+    "path": "scripts/research_hilega_strike_ranking.py",
+    "before": "8aa88d305ec1e4ce85ab49a9222525536638f49f8591a5e73def268010ebb330",
+    "after": "eb56616514ece76eb03be69658a22d876a805043ef88da8a753a94c3e1ed4a3a"
+  },
+  {
+    "path": "frontend/src/hilegaUpstoxSandboxDashboard.tsx",
+    "before": "1600be9ff416d298f5d59bf1b9f34c03e7d550d1097530c3fe5dead8c91f9dfe",
+    "after": "6fb5f7cdd50ed93b7b3b162429ac44ae7a50bb88a38ea9a555c5327493ea29cf"
+  },
+  {
+    "path": "docs/hilega-ranked-strike-sandbox.md",
+    "before": "3f642591bbea990469d0a2fbc61d695d912a5c06065385c8e9e0196ee37dc795",
+    "after": "5bd78282b03d4a028b4a1fe6a329ea1f6d6f93a407c0fde7dd2ba07cd9b5f69b"
+  },
+  {
+    "path": "tests/test_hilega_strike_selector_v1.py",
+    "before": "acbbbff2bc2e433fd642e4ebbc5344477f3beca94ceba31470e95b9dfe69ac24",
+    "after": "3423fba1ce11226677a212bfa5a235af1d895b42beaa2d747b6a25aa614bae37"
+  },
+  {
+    "path": "tests/test_hilega_upstox_sandbox_basket_v2.py",
+    "before": "bea82bdd7ebaa574bfb19374436ba281b707f0147b54cde90758ec842bbd8ae1",
+    "after": "8252c4571090406393ae4e4e8e137e59346ebdcb11791f75225102035d0b0195"
+  },
+  {
+    "path": "tests/test_hilega_sandbox_event_bridge_v1.py",
+    "before": "f64fb93e513b8fbb95a0c09c040c3a9642fa4fe3432a1d49334032771c3ed885",
+    "after": "e446217b655717c78691336cdac186f8e67857ff63555c69906233f93ef24812"
+  },
+  {
+    "path": "tests/test_hilega_sandbox_fill_ledger_v1.py",
+    "before": null,
+    "after": "64a27ec13eb76e7db88a6a6d23d919840c65bd918b1d42e506dce59845737c41"
+  },
+  {
+    "path": "tests/test_hilega_strike_ranking_research.py",
+    "before": null,
+    "after": "1edc3177eaed5222ca2950682900fa56a8eb29c98e135a331a0e567d5c26c9a6"
+  }
+]

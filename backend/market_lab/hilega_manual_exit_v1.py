@@ -2,7 +2,7 @@
 All mutations use the existing basket worker lock. No live-order client.
 """
 from __future__ import annotations
-import fcntl,hashlib,json,os,tempfile,uuid
+import fcntl,hashlib,json,os,tempfile,uuid,math
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -67,7 +67,7 @@ def order_evidence(detail,*,instrument,side,quantity,order_id=None,tag=None):
  status=str(detail['status']).lower()
  if status=='complete' and (filled!=q or pending!=0):raise ValueError('INCONSISTENT_COMPLETE_ORDER')
  price=float(detail.get('average_price') or 0)
- if filled and price<=0:raise ValueError('MISSING_FILL_PRICE')
+ if not math.isfinite(price) or price<0 or (filled and price<=0):raise ValueError('MISSING_FILL_PRICE')
  return dict(order_id=str(detail['order_id']),status=status,filled=filled,pending=pending,average_price=price,terminal=status in TERMINAL)
 
 def recover_unknown(worker,r,tr):

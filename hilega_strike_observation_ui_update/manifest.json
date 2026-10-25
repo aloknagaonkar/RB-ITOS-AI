@@ -1,0 +1,36 @@
+[
+  {
+    "path": "backend/market_lab/api.py",
+    "before": "851bd61ea45abdfa96e6de563b4a1d50379a9bf90aed6272731ccd920d2c50b0",
+    "after": "ff9464a7ceafe55711d0b27244a4d7520b7ec7f4a8880c101d75e5a88b8674a6"
+  },
+  {
+    "path": "backend/market_lab/hilega_strike_observation_api_v1.py",
+    "before": null,
+    "after": "81169c2735f7f3d1bb97b1be76456abd5b30afe33c552df9460d113aa18bdf92"
+  },
+  {
+    "path": "backend/market_lab/hilega_strike_observation_ui_v1.py",
+    "before": null,
+    "after": "55d8e4ae8a43f62ff026c0771ca0062dd28161c8242ee8b48b3333e12856b43b"
+  },
+  {
+    "path": "frontend/src/hilegaStrikeObservations.tsx",
+    "before": null,
+    "after": "9d6bd971b7de08b328d0cffa98b26da9957a5d0fdd161a96104e9cbf5d7c3182",
+    "accepted_before": [
+      "9eaabeccadb8f7ebc8a409865838ecba129ebef9e29a79f93d33022d5dc1d237"
+    ]
+  },
+  {
+    "path": "frontend/src/hilegaUpstoxSandboxDashboard.tsx",
+    "before": "6fb5f7cdd50ed93b7b3b162429ac44ae7a50bb88a38ea9a555c5327493ea29cf",
+    "after": "a13ec07d7cf54ca5d7ef743267760826458dfedcddb9365a633f236e7cfecd50",
+    "accepted_before": [
+      "961a8c440f9ec0f509e6903ac5fb8734e391ff2d535262d8f78c3f08ab40e763",
+      "eac791eb89cc0a40891ad2f336fafe62096bcd40ffc4b2fb2fc9d661e6285367",
+      "64f0ecd36bc8507639d0461ff955e07bc4d5fac51c058c26acbd53437bc069f2",
+      "6ff3817c8837d218c1133a82ba604af3b515daa3a2bda0b3e951a6439b09d843"
+    ]
+  }
+]

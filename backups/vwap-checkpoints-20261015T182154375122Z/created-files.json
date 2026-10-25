@@ -1,0 +1,4 @@
+[
+  "tests/test_hilega_vwap_checkpoint_evidence.py",
+  "tests/test_hilega_vwap_inspection_compatibility.py"
+]

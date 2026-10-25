@@ -1,0 +1,45 @@
+[
+  {
+    "path": "hilega_vwap_signal_review/collect.py",
+    "before": "d0341893fc26bd9accb72104655c7e8b1cb1c0dc5e2b56043c0ae5835010d742",
+    "after": "d0341893fc26bd9accb72104655c7e8b1cb1c0dc5e2b56043c0ae5835010d742",
+    "accepted_before": [
+      null
+    ]
+  },
+  {
+    "path": "scripts/hilega_vwap_collector_service.py",
+    "before": null,
+    "after": "4a4cc7ca5c2ed140e37f0183a88c6ca2bd4da8c1c2ea309e49fdbf22a1619170"
+  },
+  {
+    "path": "scripts/start.sh",
+    "before": "6f0df62939b6428c8316419d7ca01c021709d63f31ad24c868c3e130b4be0ed9",
+    "after": "fe8ef03842714ec3ea00c17633f08040309e3f0ba1e59e749210cd13788799ad"
+  },
+  {
+    "path": "scripts/start_hilega_vwap_collector.sh",
+    "before": null,
+    "after": "393d649608c0e08d8ef698719104c7c1ea1de9882317656418f17e18e3a021d2"
+  },
+  {
+    "path": "scripts/status.sh",
+    "before": "2ca00acee2ba8de756034a80dc1c2cc428c746fe9bf359411ddcd3262b0c411b",
+    "after": "077cf67d108f2e7032e0354f568d6653897d8093e202b054bb12044771cb9dfb"
+  },
+  {
+    "path": "scripts/status_hilega_vwap_collector.sh",
+    "before": null,
+    "after": "ef8f226bbb1c337c51e3807c62b88dba4cef6d5d1498204b386cb60c8c96fe34"
+  },
+  {
+    "path": "scripts/stop.sh",
+    "before": "9d1504384aedf17b981ff690e6fda74370e8f19b53ab02d1989f40da59dc9aaa",
+    "after": "7f36d5b055645591a15fe06a0003c7a95158fa12b7b75728dd674a6472fd387d"
+  },
+  {
+    "path": "scripts/stop_hilega_vwap_collector.sh",
+    "before": null,
+    "after": "d879aad61ba3ffee67d221b6a23eab1e0e7643376cc1ac5c46ab1e77f1dff89a"
+  }
+]

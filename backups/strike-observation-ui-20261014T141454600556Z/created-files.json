@@ -1,0 +1,5 @@
+[
+  "backend/market_lab/hilega_strike_observation_api_v1.py",
+  "backend/market_lab/hilega_strike_observation_ui_v1.py",
+  "frontend/src/hilegaStrikeObservations.tsx"
+]

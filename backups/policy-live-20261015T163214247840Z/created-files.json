@@ -1,0 +1,11 @@
+[
+  "hilega_policy_live/config.template.json",
+  "hilega_policy_live/limits.template.json",
+  "hilega_policy_live/observer.py",
+  "hilega_policy_live/publisher.py",
+  "scripts/hilega_policy_observer_service.py",
+  "scripts/start_hilega_policy_observer.sh",
+  "scripts/status_hilega_policy_observer.sh",
+  "scripts/stop_hilega_policy_observer.sh",
+  "hilega_policy_live/config.json"
+]

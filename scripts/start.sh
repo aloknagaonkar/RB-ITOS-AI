@@ -106,6 +106,10 @@ start_service() {
 start_service "api"
 start_service "worker"
 
+# Independent VWAP observation; failure must not block core startup.
+bash "$ROOT/scripts/start_hilega_vwap_collector.sh" || echo "VWAP collector: startup warning; inspect collector status/logs"
+bash "$ROOT/scripts/start_hilega_policy_observer.sh" || echo "Policy observer: start warning"
+
 deadline=$((SECONDS + 10))
 while (( SECONDS < deadline )); do
     if curl -fsS --max-time 1 "$HEALTH_URL" >/dev/null 2>&1; then

@@ -1,0 +1,67 @@
+[
+  {
+    "path": "backend/market_lab/hilega_vwap_audit_api_v1.py",
+    "variants": [
+      {
+        "source": "files/backend/market_lab/hilega_vwap_audit_api_v1.py",
+        "before": null,
+        "after": "54736bf979afaf6520622622e168ae0b64cb21da7da19cd8aab39151f59343a0"
+      }
+    ]
+  },
+  {
+    "path": "backend/market_lab/hilega_vwap_audit_v1.py",
+    "variants": [
+      {
+        "source": "files/backend/market_lab/hilega_vwap_audit_v1.py",
+        "before": null,
+        "after": "f8336ae9cbe79e3f10e6e04cb6dc1887df5a9bf5b32ae41b162d592707a09bb8"
+      }
+    ]
+  },
+  {
+    "path": "frontend/src/hilegaDecisionTable.tsx",
+    "variants": [
+      {
+        "source": "files/frontend/src/hilegaDecisionTable.tsx",
+        "before": "532dae9336af2a6e00ed4d78b7ab17251aa234067a6ab634644b646706b21c5e",
+        "after": "7ce26d66fac6de32c6dabf35b037eec5689bb5a65936d92d491626ce91409852"
+      }
+    ]
+  },
+  {
+    "path": "frontend/src/hilegaMilegaShadow.tsx",
+    "variants": [
+      {
+        "source": "files/frontend/src/hilegaMilegaShadow.tsx",
+        "before": "2c45cfe6293fbb35288fdd59c7f7b265cb64d950f39418a2b28830ac102aa77a",
+        "after": "e246fd340b6f9df611cc81c1fb81933ae3a834179e21354b7d50cec73f9bd4d4"
+      }
+    ]
+  },
+  {
+    "path": "frontend/src/hilegaVwapAudit.tsx",
+    "variants": [
+      {
+        "source": "files/frontend/src/hilegaVwapAudit.tsx",
+        "before": null,
+        "after": "37e8641cf63aca2b3c04edb2281ecc6ae4fbefa3a1caeeed509a3b41bf1194b4"
+      }
+    ]
+  },
+  {
+    "path": "backend/market_lab/api.py",
+    "variants": [
+      {
+        "source": "variants/api-original.py",
+        "before": "851bd61ea45abdfa96e6de563b4a1d50379a9bf90aed6272731ccd920d2c50b0",
+        "after": "d699100019f08a0a33a2658a6508df5a0bc8898c78e8f1c6b7967f97237e5eb4"
+      },
+      {
+        "source": "variants/api-with-strike-observer.py",
+        "before": "ff9464a7ceafe55711d0b27244a4d7520b7ec7f4a8880c101d75e5a88b8674a6",
+        "after": "70f8115712881edf222c963071c074425d6159b121761311b1362969a15d588e"
+      }
+    ]
+  }
+]

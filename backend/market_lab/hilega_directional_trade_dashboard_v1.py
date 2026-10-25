@@ -26,7 +26,7 @@ def project_directional_shadow_dashboard(rows: Iterable[dict[str, Any]]) -> dict
     is accepted as the audited lifecycle identity; nothing is synthesized.
     """
     records = list(rows)
-    by_trade: dict[tuple[str, str], list[tuple[int, str, str | None, dict[str, Any]]]] = {}
+    by_trade: dict[tuple[str, str, str], list[tuple[int, str, str | None, dict[str, Any]]]] = {}
 
     for index, row in enumerate(records):
         direction, kind = _stage_info(row.get("stage"))
@@ -36,12 +36,12 @@ def project_directional_shadow_dashboard(rows: Iterable[dict[str, Any]]) -> dict
         signal_bar = payload.get("signal_bar")
         if not signal_bar:
             continue
-        by_trade.setdefault((direction, signal_bar), []).append(
+        by_trade.setdefault((direction, signal_bar, payload.get("strategy_version") or "LEGACY_UNVERSIONED"), []).append(
             (index, kind, row.get("status"), payload)
         )
 
     trades: list[dict[str, Any]] = []
-    for (direction, signal_bar), events in sorted(by_trade.items(), key=lambda x: x[0][1]):
+    for (direction, signal_bar, strategy_version), events in sorted(by_trade.items(), key=lambda x: x[0][1]):
         active_events = [
             e for e in events
             if e[3].get("status") == "ACTIVE" and e[1] in {"START", "ENTRY_RETRY", "UPDATE"}
@@ -77,6 +77,8 @@ def project_directional_shadow_dashboard(rows: Iterable[dict[str, Any]]) -> dict
                 "direction": direction,
                 "option_side": "CE" if direction == "BULLISH" else "PE",
                 "signal_bar": signal_bar,
+                "policy_id": payload.get("policy_id"),
+                "strategy_version": payload.get("strategy_version"),
                 "signal_boundary": payload.get("signal_boundary"),
                 "signal_spot": payload.get("signal_spot"),
                 "source": payload.get("source"),
@@ -84,7 +86,7 @@ def project_directional_shadow_dashboard(rows: Iterable[dict[str, Any]]) -> dict
                 "atm": payload.get("atm"),
                 "status": payload.get("status") or "NO_EXACT_ENTRY",
                 "complete": False,
-                "issue": payload.get("issue") or "EXACT_ENTRY_NOT_AVAILABLE",
+                "issue": payload.get("issue") or payload.get("reason") or payload.get("error") or "EXACT_ENTRY_NOT_AVAILABLE",
                 "exit_reason": payload.get("exit_reason"),
                 "pending_exit_boundary": payload.get("pending_exit_boundary"),
                 "legs": [],
@@ -147,6 +149,8 @@ def project_directional_shadow_dashboard(rows: Iterable[dict[str, Any]]) -> dict
             "direction": direction,
             "option_side": "CE" if direction == "BULLISH" else "PE",
             "signal_bar": signal_bar,
+            "policy_id": entry.get("policy_id"),
+            "strategy_version": entry.get("strategy_version"),
             "signal_boundary": entry.get("signal_boundary"),
             "signal_spot": entry.get("signal_spot"),
             "source": entry.get("source"),
@@ -159,6 +163,38 @@ def project_directional_shadow_dashboard(rows: Iterable[dict[str, Any]]) -> dict
             "pending_exit_boundary": latest.get("pending_exit_boundary"),
             "legs": legs,
         })
+
+
+    # OBSERVATION_MANUAL_RELEASE_PROJECTION_V1
+    for release_row in records:
+        stage = release_row.get("stage")
+        if stage not in {
+            "BULLISH_OPTION_MANUAL_RELEASE",
+            "BEARISH_OPTION_MANUAL_RELEASE",
+        }:
+            continue
+        side = stage.split("_", 1)[0]
+        prior = (release_row.get("payload") or {}).get("prior_snapshot") or {}
+        for trade in trades:
+            if (
+                trade["direction"] == side
+                and trade["signal_bar"] == prior.get("signal_bar")
+                and ((release_row.get("payload") or {}).get("strategy_version") is None or trade.get("strategy_version")==release_row["payload"]["strategy_version"])
+                and trade["status"] != "CLOSED"
+            ):
+                trade.update(
+                    status="MANUAL_RELEASED",
+                    complete=False,
+                    exit_reason="MANUAL_EXIT",
+                    issue="MANUAL_EXIT_OPTION_PRICE_NOT_CAPTURED",
+                )
+                for leg in trade["legs"]:
+                    leg.update(
+                        exit_timestamp=None,
+                        exit_open=None,
+                        realized_points=None,
+                        realized_return_pct=None,
+                    )
 
     by_direction = {}
     for direction in DIRECTIONS:

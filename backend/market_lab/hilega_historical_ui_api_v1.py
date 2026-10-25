@@ -386,9 +386,11 @@ def _directional_report(row: dict) -> dict:
             "ema3_rsi": row.get("ema3_rsi"),
             "wma21_rsi": row.get("wma21_rsi"),
         },
-        "conditions": {"wma_gap_checks": row.get("wma_gap_checks") or [], "canonical_setup": row.get("canonical_setup")},
+        "conditions": {"authoritative_strategy_steps": bool(row.get("strategy_steps")), "strategy_steps": row.get("strategy_steps") or [], "policy_events": row.get("policy_events") or [], "wma_gap_checks": row.get("wma_gap_checks") or [], "canonical_setup": row.get("canonical_setup")},
         "strategy": {
             "strategy_id": row.get("strategy_id"),
+            "policy_id": row.get("policy_id"),
+            "strategy_version": row.get("strategy_version"),
             "decision_timestamp": row.get("decision_timestamp"),
             "source_bar_timestamp": row.get("source_bar_timestamp"),
             "directional_action": row.get("action"),
@@ -669,17 +671,22 @@ def _v2_report(row: dict) -> dict:
 
 @router.get("/strategy-test")
 def strategy_test(session_date: str = Query(..., min_length=10, max_length=10),
-                  strategy: str = Query("V2", max_length=20)):
+                  strategy: str = Query("V2", max_length=20),
+                  input_basis: str = Query("LOCAL", pattern="^(LOCAL|VALIDATED)$")):
     try:
         day = date.fromisoformat(session_date)
     except ValueError as exc:
         raise HTTPException(422, "Invalid session date") from exc
     try:
+        if strategy.strip().upper() == "V2_ALIGN_LEGACY":
+            from . import hilega_v2_alignment_replay_v1 as legacy
+            from .hilega_v2_replay_presentation_v1 import project_session
+            return project_session(legacy.load_session(day.isoformat()))
         if strategy.strip().upper() == "V2_ALIGN":
             from .hilega_v2_replay_presentation_v1 import load_session as load_alignment
             from .hilega_v2_alignment_replay_v1 import ReplayBusyError
             try:
-                return load_alignment(day.isoformat())
+                return load_alignment(day.isoformat(),input_basis=input_basis)
             except ReplayBusyError as exc:
                 raise HTTPException(409, str(exc)) from exc
             except FileNotFoundError as exc:
@@ -757,8 +764,8 @@ def strategy_test(session_date: str = Query(..., min_length=10, max_length=10),
     except FileNotFoundError as exc:
         raise HTTPException(
             404,
-            "WMA-gap replay unavailable. Frozen evidence is preserved; the "
-            "completed session is waiting for automatic forward-confirmation publication.",
+            f"{strategy} replay evidence unavailable for {session_date}: {exc}. "
+            "Recorded live and other strategy evidence remain separate.",
         ) from exc
 
 
@@ -811,7 +818,7 @@ def load_capture(capture_id: str, root: Path = ROOT):
 def sessions():
     return {
         "model": "HILEGA_SESSION_REGISTRY_V1",
-        "sessions": __import__("market_lab.hilega_v2_alignment_replay_v1", fromlist=["merge_sessions"]).merge_sessions(list_sessions()),
+        "sessions": __import__("market_lab.hilega_combined_replay_v1", fromlist=["merge_sessions"]).merge_sessions(list_sessions()),
     }
 
 
@@ -824,3 +831,29 @@ def session(session_date: str = Query(..., min_length=10, max_length=10),
 @router.get("/capture")
 def capture(capture_id: str = Query(..., max_length=120)):
     return load_capture(capture_id)
+
+
+@router.get('/comparison-metrics')
+def comparison_metrics(session_date: str = Query(..., min_length=10, max_length=10),
+                       input_basis: str = Query('LOCAL', pattern='^(LOCAL|VALIDATED)$')):
+    """Independent evidence per row; a missing replay never hides recorded data."""
+    try:day=date.fromisoformat(session_date).isoformat()
+    except ValueError as exc:raise HTTPException(422,'Invalid session date') from exc
+    from .hilega_wma_gap_historical_v1 import recorded_live_metrics
+    rows=[]
+    for key,identifier in [('LIVE','LIVE_RECORDED_V1'),('V1','HILEGA_V1_REPLAY'),('V2','HILEGA_WMA_GAP_V2_REPLAY'),('V2_ALIGN','HILEGA_V2_ALIGNMENT_DUAL_EXIT_REPLAY_V1')]:
+        try:
+            if key=='LIVE':
+                source=load_session(day)
+                if source.get('source') not in {'LIVE_SHADOW','DIRECTIONAL_LIVE_SHADOW'}:
+                    raise FileNotFoundError('No recorded live audit for '+day+'; replay outcomes are not live evidence')
+                metric=recorded_live_metrics(source.get('reports') or [])
+            else:
+                source=strategy_test(day,strategy=key,input_basis=input_basis if key=='V2_ALIGN' else 'LOCAL')
+                metric=next((r for r in source.get('performance_summary',[]) if r.get('strategy_id')==identifier),None)
+                if metric is None:raise FileNotFoundError('No '+key+' metrics in saved strategy evidence for '+day)
+            rows.append(dict(metric,evidence_source=source.get('source')))
+        except (HTTPException,FileNotFoundError,ValueError) as exc:
+            detail=exc.detail if isinstance(exc,HTTPException) else str(exc)
+            rows.append(dict(strategy_id=identifier,available=False,unavailable_reason=str(detail)))
+    return dict(session_date=day,performance_summary=rows,observation_only=True,execution_enabled=False)

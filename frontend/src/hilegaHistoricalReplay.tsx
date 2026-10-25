@@ -18,6 +18,7 @@ type Session={
 }
 type Response={
   session_date:string;source:string;source_id:string;evidence_level:string;ce_available:boolean
+  input_comparison?:{local_net:number;validated_net:number}
   strategy_version?:string
   reports:HilegaAudit[];report_count:number;audit_chain_ok:boolean|null;audit_chain_issue:string|null
   manifest:Record<string,any>;warning:string;available_sources:string[]
@@ -35,6 +36,7 @@ const shortTime=(v:string)=>{
 export default function HilegaHistoricalReplay(){
   const [sessions,setSessions]=useState<Session[]>([])
   const [selectedDate,setSelectedDate]=useState('')
+  const [inputBasis,setInputBasis]=useState<'LOCAL'|'VALIDATED'>('LOCAL')
   const [strategyVersion,setStrategyVersion]=useState<'LIVE'|'V1'|'V2'|'V2_ALIGN'>('LIVE')
   const [data,setData]=useState<Response|null>(null)
   const [error,setError]=useState('')
@@ -91,13 +93,14 @@ export default function HilegaHistoricalReplay(){
       const strategyTestUrl=`/api/live-shadow/hilega-historical/strategy-test?session_date=${encodeURIComponent(selectedDate)}`
       const sessionUrl=`/api/live-shadow/hilega-historical/session?session_date=${encodeURIComponent(selectedDate)}`
       const v1Url=`${strategyTestUrl}&strategy=V1`
-      const [r,dr,mr,ar]=await Promise.all([
-        fetch(strategyVersion==='V2_ALIGN' ? `${strategyTestUrl}&strategy=V2_ALIGN` : strategyVersion==='V2' ? strategyTestUrl : strategyVersion==='V1' ? v1Url : sessionUrl),
+      const [r,dr,mr,ar,cr]=await Promise.all([
+        fetch(strategyVersion==='V2_ALIGN' ? `${strategyTestUrl}&strategy=V2_ALIGN&input_basis=${inputBasis}` : strategyVersion==='V2' ? strategyTestUrl : strategyVersion==='V1' ? v1Url : sessionUrl),
         (strategyVersion==='V2'||strategyVersion==='V2_ALIGN')
           ? Promise.resolve({ok:false} as globalThis.Response)
           : fetch(`/api/live-shadow/hilega-directional-candles/historical?session_date=${encodeURIComponent(selectedDate)}`),
         strategyVersion==='V2' ? Promise.resolve(null) : fetch(strategyTestUrl).catch(()=>null),
         strategyVersion==='V2_ALIGN' ? Promise.resolve(null) : fetch(`${strategyTestUrl}&strategy=V2_ALIGN`).catch(()=>null),
+        fetch(`/api/live-shadow/hilega-historical/comparison-metrics?session_date=${encodeURIComponent(selectedDate)}&input_basis=${inputBasis}`).catch(()=>null),
       ])
       if(!r.ok)throw new Error(`Session HTTP ${r.status}: ${await r.text()}`)
       const body=await r.json() as Response
@@ -117,6 +120,8 @@ export default function HilegaHistoricalReplay(){
       const baseline=await readMetrics(mr,strategyVersion==='V2'?body:null)
       const alignment=await readMetrics(ar,strategyVersion==='V2_ALIGN'?body:null)
       body.performance_summary=replayPerformance(selectedDate,body,baseline.data,alignment.data,baseline.error,alignment.error)
+      const independent=await readMetrics(cr,null)
+      if(independent.data?.session_date===selectedDate)body.performance_summary=independent.data.performance_summary
       if(strategyVersion!=='V2_ALIGN' && baseline.data)body.comparison=baseline.data.comparison
       body.strategy_version=strategyVersion==='V2_ALIGN' ? body.strategy_version : strategyVersion==='LIVE'
         ? 'LIVE_RECORDED_V1'
@@ -129,7 +134,7 @@ export default function HilegaHistoricalReplay(){
     if(selectedDate)void load()
   // A selected date is a complete replay request; no separate Load click is required.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[selectedDate,strategyVersion])
+  },[selectedDate,strategyVersion,inputBasis])
 
   useEffect(()=>{
     if(!selectedDate||strategyVersion!=='LIVE'||selected?.status==='COMPLETE')return
@@ -169,7 +174,7 @@ export default function HilegaHistoricalReplay(){
 
   return <section className="hime-replay" aria-label="Hilega historical replay">
     <h3>Hilega-Milega · Session Replay</h3>
-    <p>Review recorded live decisions, canonical Hilega v1, WMA-gap v2 and the tested V2 alignment/dual-exit replay using the shared audit flow. Replay views never change live behavior or submit orders.</p>
+    <p>Review recorded live decisions, canonical Hilega v1, WMA-gap v2 and the promoted combined gap2/WMA2 replay using the shared audit flow. Replay views never change live behavior or submit orders.</p>
 
     <div className="hime-controls">
       <label>Session date <select aria-label="Hilega historical session" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)}>
@@ -182,8 +187,9 @@ export default function HilegaHistoricalReplay(){
         <option value="LIVE">Existing live strategy (recorded)</option>
         <option value="V1">Hilega v1 (canonical historical replay)</option>
         <option value="V2">WMA-gap V2 (historical observation)</option>
-        <option value="V2_ALIGN">V2 — alignment setup + dual exit (research)</option>
+        <option value="V2_ALIGN">Combined — bullish gap2 / WMA2 + EMA10-touch follow-up</option>
       </select></label>
+      {strategyVersion==='V2_ALIGN'&&<label>Replay inputs <select value={inputBasis} onChange={e=>setInputBasis(e.target.value as 'LOCAL'|'VALIDATED')}><option value="LOCAL">Local candle cache</option><option value="VALIDATED">Validated research inputs</option></select></label>}
       <button onClick={()=>void load()} disabled={!selectedDate||busy}>{busy?'Loading…':'Reload session'}</button>
       <button onClick={()=>void refreshSessions()} disabled={refreshing}>{refreshing?'Refreshing…':'Refresh sessions'}</button>
     </div>
@@ -203,10 +209,12 @@ export default function HilegaHistoricalReplay(){
         <span>Loaded from: {data.source}</span>
         <span>Strategy: {data.strategy_version??strategyVersion}</span>
         <span>Evidence: {data.evidence_level}</span>
+        {strategyVersion==='V2_ALIGN'&&<span>Inputs: {data.manifest?.input_basis??'LOCAL CANDLE CACHE'} · Warmup sessions: {data.manifest?.warmup_sessions??'see source manifest'}</span>}
         <span>CE: {data.ce_available?'AVAILABLE':'NOT RECORDED'}</span>
         <span>Checkpoints: {reports.length}</span>
         <span>Audit chain: {data.audit_chain_ok===null?'N/A':data.audit_chain_ok?'PASS':'FAIL'}</span>
       </div>
+      {data.input_comparison&&<p className="hime-warning">Input comparison: local cache {data.input_comparison.local_net.toFixed(2)} points; validated research {data.input_comparison.validated_net.toFixed(2)} points. Select Validated research inputs to inspect the parity-tested trades. Different input histories can produce different prices and indicators.</p>}
       <p className="hime-warning">{data.warning} {data.audit_chain_issue??''}</p>
 
       {data.parity?.status==='PARITY_MISMATCH'&&<section className="hime-performance" aria-label="Forward replay parity diagnostic">

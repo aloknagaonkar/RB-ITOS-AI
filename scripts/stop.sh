@@ -69,6 +69,10 @@ stop_service() {
     rm -f "$pidfile"
 }
 
+# Stop only the independent managed VWAP collector.
+bash "$ROOT/scripts/stop_hilega_policy_observer.sh" || echo "Policy observer: stop warning"
+bash "$ROOT/scripts/stop_hilega_vwap_collector.sh" || echo "VWAP collector: stop warning"
+
 stop_service "worker"
 stop_service "api"
 

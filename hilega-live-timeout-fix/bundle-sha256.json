@@ -1,0 +1,9 @@
+{
+  "README.md": "d6ff2b6b8666833eab4e1b11b17e8229fdd78c6cb62cd84e6c57a0a3d64d8458",
+  "allowed-existing.json": "51a65afe681482502ba30a957374617edb20b102ea216a71f37c31006ea139dc",
+  "files/backend/market_lab/hilega_ui_journal_cache_v1.py": "690975e386f8483d88080a36073515ac91b16bd356503132cab05682b0773860",
+  "files/hilega_policy_live/active_marks.py": "93a196d669629046e847e1f70ac06d1184be7a67080582ddfbaf4558c0842524",
+  "files/tests/test_hilega_ui_journal_cache_v1.py": "3904db66329d18dfbdeb4939173c2bb1e98bbf6470d26f47bd8d0d376720245b",
+  "install.py": "a9022f41dbf2d242f8cf4e7d2f95d366fb7447479d21e46a0aab07d8e654fb56",
+  "transforms.json": "01147ad2721a3d72fa571a20ca30db42aa002f425b016ab313a51c5c707c73b4"
+}

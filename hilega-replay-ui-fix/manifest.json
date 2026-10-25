@@ -1,0 +1,30 @@
+{
+  "backend/market_lab/hilega_v2_replay_presentation_v1.py": {
+    "old": "ba820e3580b88592df57745081250ce3a0c6aa07381c1eb405938f99572873f0",
+    "new": "82e09e47a6ce50603f5d9b1c20486508faab77fab2ceed3d6611a783a0792e63"
+  },
+  "backend/market_lab/hilega_historical_ui_api_v1.py": {
+    "old": "ecf570430ef4ae614522ffdc9a2a3ebca6e9a28a0644f4b39532a4ed10d37d7d",
+    "new": "7d12a04f5797f3bf6588e139120740cf98f3d387e5aa5c2a1757cdd0d8b5cb3c"
+  },
+  "frontend/src/hilegaReplayTradeLedger.tsx": {
+    "old": "db52069851465541bf5d55b0b4247afe7f83263b12e5bbedee867a163961a981",
+    "new": "15e881c8f3fee505c0f3410276e1ba31d18dd20408b56232242ab4303dbf0611"
+  },
+  "frontend/src/hilegaDecisionTable.tsx": {
+    "old": "70cbae2a03b58a046a24c733f6403c24e9cb0b8c3a8926b0180233e8fb1e5b0b",
+    "new": "43de2a81964556285b86dd371bd42293b455302bb1273c74112e2deabec9843c"
+  },
+  "frontend/src/hilegaHistoricalReplay.tsx": {
+    "old": "82255bf26182fdebe9c2a4801a9fab8a4f7c2b38577eafe4ebb5d79aeccfb786",
+    "new": "7d386e142003885bff9b25f3df1a3cf304c11fe767d51e829915c0e5e4b5824d"
+  },
+  "frontend/src/hilegaHistoricalReplay.css": {
+    "old": "bb7d34ac5affdbb52081b4611ca95f5c26d7a9645d8b7b1f68cb256216959a56",
+    "new": "c578157e74022284bff201b8b1cea6c209e4086b8ad8139804d0bd006a718058"
+  },
+  "tests/test_hilega_combined_replay_display.py": {
+    "old": null,
+    "new": "9667c5ffd2282807d79977af7c986cbc3709c1ed64ae661044ff05241dfbe22c"
+  }
+}

@@ -68,13 +68,8 @@ def _hhmm(value: Any) -> str | None:
 
 
 def _read_audit(path: Path) -> list[dict[str, Any]]:
-    if not path.is_file():
-        return []
-    store = ShadowStepAuditStoreV1(path)
-    try:
-        return store.read_all()
-    except Exception:
-        return []
+    from .hilega_ui_journal_cache_v1 import read_rows
+    return read_rows(path)
 
 
 def _timestamp(row: dict[str, Any]) -> str | None:
@@ -513,18 +508,12 @@ def build_live_directional_candles(session_date: str | None = None, *, audit_onl
             "warning": "No current live candle evidence is available.",
         }
 
-    if audit_only:
-        try:
-            rows = _directional_evidence_live_rows(day, fast=True)
-        except Exception:
-            rows = {}
-        if not rows:
-            rows = _base_live_rows_legacy(day)
-    else:
-        rows = _base_live_rows(day)
+    # Audit-only UI consumes recorded strategy decisions, not a fresh indicator replay.
+    rows = {} if audit_only else _base_live_rows(day)
     directional_count = 0
-
     manual_audit_records = _read_audit(LIVE_DIRECTIONAL_AUDIT)
+    if audit_only and not any(r.get('stage')=='DIRECTIONAL_DECISION' and _iso_session((r.get('payload') or {}).get('decision_timestamp') or (r.get('payload') or {}).get('bar_timestamp') or r.get('checkpoint'))==day for r in manual_audit_records):
+        rows = _base_live_rows_legacy(day)
     for record in manual_audit_records:
         if record.get("stage") != "DIRECTIONAL_DECISION":
             continue
@@ -550,6 +539,9 @@ def build_live_directional_candles(session_date: str | None = None, *, audit_onl
                         "decision_timestamp": ts,
                         "source_bar_timestamp": payload.get("bar_timestamp"),
                         "strategy_id": payload.get("strategy_id"),
+                        "policy_id": payload.get("policy_id"),
+                        "strategy_version": payload.get("strategy_version"),
+                        "policy_events": payload.get("policy_events") or [],
                         "event_details": payload.get("event_details") or [],
                         "audit_status": record.get("status"),
                         "wma_gap_checks": payload.get("wma_gap_checks") or [],
@@ -562,19 +554,24 @@ def build_live_directional_candles(session_date: str | None = None, *, audit_onl
                         "ema3_rsi": indicator.get("ema3"), "wma21_rsi": indicator.get("wma21")})
             from .hilega_v2_replay_presentation_v1 import inspection
             row["strategy_steps"] = inspection({
+                "policy_id": payload.get("policy_id"),
+                "policy_events": payload.get("policy_events") or [],
+                "price_ema_frame": payload.get("price_ema_frame"),
                 "completed_5m_indicators": payload.get("completed_5m_indicators"),
                 "checks": payload.get("wma_gap_checks") or [],
                 "exit_validation": payload.get("exit_validation"),
+                "opposite_confirmation": payload.get("opposite_confirmation"),
                 "owner_after": payload.get("trade_owner_after"),
             })
             row["setup_attempts"] = payload.get("setup_attempts") or []
             row["pending_switches"] = payload.get("pending_switches") or []
             for switch in row["pending_switches"]:
-                row["strategy_steps"].append({"label":"Pending direction switch", "status":"INFO", "value":switch["from_direction"]+" → "+switch["to_direction"], "requirement":"Fresh opposite arm / setup while no actual position is open", "explanation":switch["reason"]+"; old pending signal cancelled; confirmation reset"})
+                row["strategy_steps"].append({"label":"Pending direction switch", "status":"INFO", "value":switch["from_direction"]+" → "+switch["to_direction"], "requirement":"Fully qualified opposite signal while flat", "explanation":switch["reason"]+"; old pending signal cancelled; confirmation reset"})
             row["exit_validation"] = payload.get("exit_validation")
+            row["opposite_confirmation"] = payload.get("opposite_confirmation")
             row["exit_warning_time"] = payload.get("exit_warning_time")
             row["indicator_timestamp"] = payload.get("bar_timestamp")
-            minute_bar = payload.get("minute_ohlcv") or {}
+            minute_bar = (payload.get("price_ema_frame") if payload.get("policy_id")=="BULLISH_GAP2_FULL_WMA2" else payload.get("minute_ohlcv")) or {}
             for field in ("open", "high", "low", "volume"):
                 if field in minute_bar:
                     row[field] = minute_bar[field]

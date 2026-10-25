@@ -1,0 +1,27 @@
+[
+  {
+    "path": "scripts/research_hilega_strike_ranking.py",
+    "before": "eb56616514ece76eb03be69658a22d876a805043ef88da8a753a94c3e1ed4a3a",
+    "after": "f34fbba07ac836e05d70fd5ac85490d3caafb249a8ede9d5c7aeba063896dd52"
+  },
+  {
+    "path": "scripts/research_hilega_atm5_coverage.py",
+    "before": null,
+    "after": "5ce475bb5042d4a01bbaa537a86c382070e60b9fc98b75b3c47653a48ddaa260"
+  },
+  {
+    "path": "tests/test_hilega_strike_ranking_research.py",
+    "before": "1edc3177eaed5222ca2950682900fa56a8eb29c98e135a331a0e567d5c26c9a6",
+    "after": "1edc3177eaed5222ca2950682900fa56a8eb29c98e135a331a0e567d5c26c9a6"
+  },
+  {
+    "path": "tests/test_hilega_atm5_coverage.py",
+    "before": null,
+    "after": "a03eb6eadda07f1a1c391195ae0954739fc44517e23959738f0a7a1cce4617c9"
+  },
+  {
+    "path": "docs/hilega-atm5-research.md",
+    "before": null,
+    "after": "61a4105fa1ccc7afb5e54fc0a53e66669667f77ca2970b4b09a4e18426a5f5ad"
+  }
+]
