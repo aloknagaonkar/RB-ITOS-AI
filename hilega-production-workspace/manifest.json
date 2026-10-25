@@ -1,0 +1,20 @@
+{
+  "archive_commit": "6c93afbb6531a7d3a4e1026141ff362aa6e736df",
+  "reported_vm_commit": "8c156daa0cf233cae449b5eafd8264bb8b915a23",
+  "files": {
+    "scripts/hilega_production_control.py": "3e242e3e94d841f4508e90a036b8238a490ab64f78b035ba49c4d1a9d13eb2dc",
+    "tests/test_hilega_production_control_foundation_v1.py": "7a39e54fbbb8870b35e395f43d87b50edf99f285686e49009752e7e53233e7dc",
+    "tests/test_hilega_production_workspace_v1.py": "426575ac022c63680bced116445514f48aedf51b389f66bc69800173e74c3e47",
+    "backend/market_lab/api.py": "4be8b24a9376045495609869e2f8d613fc0473029c17edc256273643eeab6aa1",
+    "backend/market_lab/hilega_production_workspace_v1.py": "0696d2fb51137e4dbc19831e65b8e4263820c5acd5f6fd49c66f3e9834758649",
+    "backend/market_lab/hilega_production_foundation/__init__.py": "43a1da2f20d4d4aee092e16deb92ac1fd8ba5f1b4d53886710b9d16b8d9e3baf",
+    "backend/market_lab/hilega_production_foundation/core.py": "84a5331bc2f44f280a1aa228a5cea647d83f22c72c981a547f248058f0b31dfa",
+    "frontend/src/hilegaProductionWorkspace.css": "c6f920d9cc12f8becc03d485e6a3f56a99c6742ded21f8bba77211d4abaa0c4a",
+    "frontend/src/App.tsx": "2bdf2b4b1ae9f5e8d1646606b9c4cc2aaf65c6d50eb42269a87bacbd0ea38a4a",
+    "frontend/src/hilegaProductionWorkspace.tsx": "86f869537ae85e6f7105eae77bdfb57f659acf50b01dca06ea670d05b319a7eb"
+  },
+  "expected": {
+    "backend/market_lab/api.py": "542809ad42b8e979544d504b84388f7c1f67dc384828a5513b92fdf2c38447a9",
+    "frontend/src/App.tsx": "357c05e598b4fc5468696fea1bc3e7683a6bcb721191bed1d657c29e0d5da35a"
+  }
+}
