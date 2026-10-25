@@ -1,0 +1,11 @@
+{
+  "archive_commit": "broker-observation-107-tests-validated-on-vm",
+  "files": {
+    "tests/test_hilega_production_broker_observation_v1.py": "3eab5c9bb660a3d34bdcd836ec27a3d16ceab0ee4044802b2895c5be90059777",
+    "backend/market_lab/hilega_production_broker_observation_v1.py": "d0b0167604db78c5d0a70fa7012dcfbe18db4e86516b62a2190fcf294168aa4e"
+  },
+  "expected": {
+    "tests/test_hilega_production_broker_observation_v1.py": "01b5cecd01257af8269a22e84cad28cb798b222b9b8ae4399cdc57f03bc8aa0c",
+    "backend/market_lab/hilega_production_broker_observation_v1.py": "c6972988789bbae3bd93da4b0cfbaa43c5468232d0536c49779a56e53de4db13"
+  }
+}
