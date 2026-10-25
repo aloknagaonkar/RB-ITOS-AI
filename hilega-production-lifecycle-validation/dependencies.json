@@ -1,0 +1,6 @@
+{
+  "hilega-production-intent-binding/registry.py": "8bb3e1c7cef46266679a6ba71c590b220364ecbccedde3065c2b0777f6bdcec4",
+  "hilega-production-intent-binding/provider_mapping.py": "a8c6ab675bbd1e604e7b4bc2994fadc1fde50ee4a48918298ef0db887d6f1e96",
+  "hilega-production-order-adapter-contract/adapter.py": "8ee7a21d765d2a50948ddf3db16cc9e403836331c1f01329ed9d55c84f181927",
+  "hilega-production-allocation-reservations/ledger.py": "570a2fd613be6c83f0b747765ebcf4842567bb77f297f887a3a781189e9364fd"
+}
