@@ -1,0 +1,24 @@
+{
+  "archive_commit": "288-tests-validated-simulator-bridge",
+  "files": {
+    "backend/market_lab/hilega_production_bridge_health_v1.py": "d7e02c6c7c8bc4697109c981fb515306db7036683028cd28248d2bd070850a93",
+    "backend/market_lab/hilega_production_foundation/core.py": "b1acee92c9717a387aad1549287f6975cdc7b18c09c6f453a51b32ccfaa8e8d5",
+    "backend/market_lab/hilega_production_simulator_bridge_v1.py": "18f8e5578336ba4aa516bf96cad90c60a58349104b7d710503e0e03476d6ce27",
+    "backend/market_lab/hilega_production_workspace_v1.py": "31440b8555455ceccc0ad93284084a412feb7eb1be8e1456a2b89733a13cb791",
+    "frontend/src/hilegaProductionWorkspace.tsx": "5129c230244ca9f9c9f0c0723d027b48cd87592111a390acaa02725a42e59c33",
+    "scripts/hilega_production_bridge_health_demo.py": "0a567de3bcb2c596e3e22b192d7b8b8719f897033507f4538b6c389a84584245",
+    "scripts/hilega_production_simulator_bridge.py": "033ded68b59be1f34df99d76e460024969bfaccdf66b0173cd5cf0344de0cfd9",
+    "tests/test_hilega_production_bridge_health_v1.py": "8fc2a0e0a9363a379c7d946414a59c40d3b46717fc26d7cbc1c25e425895fe93"
+  },
+  "expected": {
+    "backend/market_lab/hilega_production_foundation/core.py": "be78df20176761b3df347de31809236f29790057d2ea9a657fdba7f14996e855",
+    "backend/market_lab/hilega_production_simulator_bridge_v1.py": "38883ffc000db6ca1534614bcd376838adb59cc863d0738c309640fef72df3d9",
+    "backend/market_lab/hilega_production_workspace_v1.py": "795e5361fbba81609d95c682d6020afd5f78c0c4f2dddff299120ea858314503",
+    "frontend/src/hilegaProductionWorkspace.tsx": "26d353f2f4ea7aa6a9290051f21c50973e5f3ab23d05c782dcb82668f1f51398",
+    "scripts/hilega_production_simulator_bridge.py": "b807746e56c049abaf8d8c1ffb7896ef800bbf3a6c36b59101b3c1608e9c8d12"
+  },
+  "requires": {
+    "backend/market_lab/hilega_production_broker_observation_v1.py": "d0b0167604db78c5d0a70fa7012dcfbe18db4e86516b62a2190fcf294168aa4e",
+    "backend/market_lab/hilega_production_ownership_v1.py": "1f66565941d752c6e4fb5132a49c7ddec393acdb71a53820a645467629bfce0a"
+  }
+}
