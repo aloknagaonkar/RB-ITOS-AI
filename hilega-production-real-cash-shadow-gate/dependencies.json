@@ -1,0 +1,6 @@
+{
+  "hilega-production-cash-observation/run.py": "3d8a56ece2277968255556a4c4b56ec0f56ec0657545e7d7a3126f1e15fb9163",
+  "hilega-production-cash-observation/analysis.py": "9d4f98258585a9dea8f4af6266adb28ba32de50a20bbe7f65c8c58424534e799",
+  "backend/market_lab/hilega_production_account_adapter_v1.py": "9484899b374701c211adf22b67ea5fc84d0cdb978defe061ce8250cb7313b140",
+  "backend/market_lab/hilega_production_broker_observation_v1.py": "d0b0167604db78c5d0a70fa7012dcfbe18db4e86516b62a2190fcf294168aa4e"
+}
