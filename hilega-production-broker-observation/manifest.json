@@ -1,0 +1,14 @@
+{
+  "archive_commit": "prior-installed-production-workspace",
+  "files": {
+    "backend/market_lab/hilega_production_broker_observation_v1.py": "c6972988789bbae3bd93da4b0cfbaa43c5468232d0536c49779a56e53de4db13",
+    "backend/market_lab/hilega_production_workspace_v1.py": "795e5361fbba81609d95c682d6020afd5f78c0c4f2dddff299120ea858314503",
+    "frontend/src/hilegaProductionWorkspace.tsx": "26d353f2f4ea7aa6a9290051f21c50973e5f3ab23d05c782dcb82668f1f51398",
+    "scripts/hilega_production_broker_snapshot.py": "8d5de46b8e1fd4494ceb56ed676f85b1f354c9dacb250742ae03ebc9c840ff5a",
+    "tests/test_hilega_production_broker_observation_v1.py": "01b5cecd01257af8269a22e84cad28cb798b222b9b8ae4399cdc57f03bc8aa0c"
+  },
+  "expected": {
+    "backend/market_lab/hilega_production_workspace_v1.py": "0696d2fb51137e4dbc19831e65b8e4263820c5acd5f6fd49c66f3e9834758649",
+    "frontend/src/hilegaProductionWorkspace.tsx": "86f869537ae85e6f7105eae77bdfb57f659acf50b01dca06ea670d05b319a7eb"
+  }
+}
