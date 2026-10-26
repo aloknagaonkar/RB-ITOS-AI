@@ -138,7 +138,7 @@ def recorded_events(rows, until):
             (exits if event.get('exit_reason') else entries).append(event)
     return entries, exits
 
-def validate_rows(raw, day):
+def validate_rows(raw, day, allow_outside=False):
     import math
     seen=set()
     for row in raw:
@@ -147,7 +147,8 @@ def validate_rows(raw, day):
         stamp=stamp.astimezone(IST)
         if stamp.date().isoformat()!=day:raise ValueError('SESSION_DATE_MISMATCH')
         if stamp.second or stamp.microsecond:raise ValueError('MINUTE_ALIGNMENT_REQUIRED')
-        if not time(9,15)<=stamp.time()<time(15,30):raise ValueError('OUTSIDE_REGULAR_SESSION')
+        if not time(9,15)<=stamp.time()<time(15,30) and not allow_outside:
+            raise ValueError('OUTSIDE_REGULAR_SESSION:'+day+':'+stamp.isoformat())
         if stamp in seen:raise ValueError('DUPLICATE_MINUTE:'+stamp.isoformat())
         seen.add(stamp)
         vals=[row.get(k) for k in ('open','high','low','close')]

@@ -234,3 +234,34 @@ def test_recent_warmup_required_and_cache_refresh_readonly(tmp_path,supply_recen
         with pytest.raises(ValueError,match='MISSING_RECENT_WARMUP'):
             study.load_inputs(archive,session,[cache])
     assert hashlib.sha256(archive.read_bytes()).hexdigest()==before
+
+
+def test_historical_post_close_prints_excluded_and_logged():
+    raw=rows(375)
+    raw += [dict(raw[-1],timestamp=stamp('15:39')),dict(raw[-1],timestamp=stamp('15:59'))]
+    regular,excluded=study.regular_warmup(raw,DAY)
+    assert len(regular)==375 and excluded==[stamp('15:39'),stamp('15:59')]
+    assert len(raw)==377  # source untouched
+
+
+def test_target_post_close_prints_still_rejected():
+    raw=rows(375)+[dict(rows()[0],timestamp=stamp('15:39'))]
+    with pytest.raises(ValueError,match='OUTSIDE_REGULAR_SESSION:2026-10-26'):
+        core.validate_rows(raw,DAY)
+
+
+def test_warmup_filter_does_not_hide_missing_regular_minute():
+    raw=rows(375);del raw[10]
+    raw += [dict(raw[-1],timestamp=stamp('15:39'))]
+    regular,excluded=study.regular_warmup(raw,DAY)
+    with pytest.raises(ValueError,match='MISSING_MINUTE'):
+        core.aggregate(regular,DAY,1,dt('15:30'))
+
+
+def test_warmup_filter_does_not_hide_invalid_dates_or_duplicates():
+    raw=rows()+[dict(rows()[0],timestamp='2026-10-23T15:39:00+05:30')]
+    with pytest.raises(ValueError,match='SESSION_DATE_MISMATCH'):
+        study.regular_warmup(raw,DAY)
+    raw=rows()+[dict(rows()[0],timestamp=stamp('15:39'))]*2
+    with pytest.raises(ValueError,match='DUPLICATE_MINUTE'):
+        study.regular_warmup(raw,DAY)

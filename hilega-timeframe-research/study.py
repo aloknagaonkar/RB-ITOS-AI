@@ -13,6 +13,7 @@ import core
 
 HERE=Path(__file__).resolve().parent
 MODULES=tuple(json.loads((HERE/'source-hashes.json').read_text()))
+PACKAGE_VERSION='1.1.0-session-filter'
 EXPECTED_VERSION='bullish-gap2-full-wma2-2.0.0-wma40-reversal'
 CACHE_ROOTS=(Path('data/historical-evidence/hilega-milega-underlying-cache-v1'),
     Path('data/recovery/october-2026/replay-input/replay-warmup'),
@@ -84,6 +85,18 @@ def cleanup(interval):
         if name==prefix or name.startswith(prefix+'.'):del sys.modules[name]
 
 
+def regular_warmup(rows,day):
+    # Providers can retain post-close prints. Validate their schema first, then
+    # exclude them only from historical warmup, matching regular-bar aggregation.
+    core.validate_rows(rows,day,allow_outside=True)
+    regular=[];excluded=[]
+    for row in rows:
+        at=datetime.fromisoformat(row['timestamp']).astimezone(core.IST)
+        if time(9,15)<=at.time()<time(15,30):regular.append(row)
+        else:excluded.append(row['timestamp'])
+    return regular,excluded
+
+
 def load_inputs(archive,session,roots):
     data=json.loads(session.read_text());day=data['session_date']
     if data.get('underlying')!='NSE_INDEX|Nifty 50':raise ValueError('UNEXPECTED_UNDERLYING')
@@ -113,7 +126,11 @@ def load_inputs(archive,session,roots):
         by_day[d]=item['candles']
         provenance.append(dict(session_date=d,path=str(path),sha256=hashlib.sha256(path.read_bytes()).hexdigest()))
     for d,rows in sorted(by_day.items()):
-        core.aggregate(rows,d,1,datetime.combine(date.fromisoformat(d),time(15,30),core.IST))
+        regular,excluded=regular_warmup(rows,d)
+        if excluded:
+            provenance.append(dict(session_date=d,action='EXCLUDE_OUTSIDE_REGULAR_WARMUP',count=len(excluded),timestamps=excluded))
+        by_day[d]=regular
+        core.aggregate(regular,d,1,datetime.combine(date.fromisoformat(d),time(15,30),core.IST))
     # Known missing sessions in the supplied Oct26 export, not a holiday calendar.
     if day=='2026-10-26':
         missing=[d for d in ('2026-10-22','2026-10-23') if d not in by_day]
@@ -274,9 +291,9 @@ def main():
         installed,hashes=verify_sources()
         data,warm,records,added=load_inputs(args.input_zip,args.session_input,list(CACHE_ROOTS)+(args.cache_root or []))
         day=data['session_date'];until=datetime.combine(date.fromisoformat(day),time(14,55),core.IST)
-        manifest=dict(session_date=day,source_sha256=hashes,source_version=EXPECTED_VERSION,
+        manifest=dict(package_version=PACKAGE_VERSION,session_date=day,source_sha256=hashes,source_version=EXPECTED_VERSION,
             input_sha256={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in (args.input_zip,args.session_input)},
-            warmup_sessions=len(warm),warmup_last=warm[-1][0],added_cache_sessions=added,
+            warmup_sessions=len(warm),warmup_last=warm[-1][0],warmup_input_actions=added,
             research_sha256={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in HERE.glob('*.py')},
             interval_anchor='09:15 IST',orders_sent=False)
         (args.output/'manifest.json').write_text(json.dumps(manifest,indent=2))

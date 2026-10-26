@@ -1,5 +1,7 @@
 # Current strategy on 1m / 3m / 5m — 26 October 2026
 
+Package revision: 1.1.0-session-filter.
+
 Research only. No installer, live source changes, service restarts, order transport,
 credentials, broker/API requests or control-state changes. All tests/replay must
 run on your Ubuntu VM. Author validation is source inspection and Python AST
@@ -112,3 +114,15 @@ never backdated to their earlier entry. Future 5m outcomes only label prior aler
 A one-session result cannot establish broader reliability. No comparison has been
 executed by the author. The recorded baseline summary included in this package is
 read directly from the uploaded audit and labelled accordingly.
+
+## Revision 1.1.0: historical post-close rows
+
+The supplied archive contains 10 post-close rows at 15:39 and 15:59 IST on
+25 April, 30 April, 8 May, 13 May and 21 May 2025. Original session aggregation
+never consumed these rows. Revision 1.0 incorrectly rejected them before
+aggregation. Revision 1.1 validates all warmup row schemas/dates/duplicates,
+then excludes out-of-session warmup rows and records each timestamp in
+manifest.json / warmup_input_actions. All 375 regular minutes remain required.
+The target session retains strict regular-session validation. No candle is
+filled, shifted or synthesized. Original ZIP/cache bytes remain unchanged.
+Tests and replay have not been executed locally.
