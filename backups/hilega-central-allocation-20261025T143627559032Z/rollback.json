@@ -1,0 +1,14 @@
+{
+  "existing": [
+    "scripts/hilega_production_simulator_bridge.py",
+    "backend/market_lab/hilega_production_workspace_v1.py",
+    "backend/market_lab/hilega_production_foundation/core.py",
+    "frontend/src/hilegaProductionWorkspace.tsx"
+  ],
+  "created": [
+    "scripts/hilega_sim_allocation.py",
+    "scripts/hilega_central_allocation_demo.py",
+    "tests/test_hilega_central_sim_allocation_v1.py",
+    "backend/market_lab/hilega_sim_allocation_v1.py"
+  ]
+}

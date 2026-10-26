@@ -1,0 +1,11 @@
+{
+  "existing": [
+    "backend/market_lab/hilega_production_workspace_v1.py",
+    "frontend/src/hilegaProductionWorkspace.tsx"
+  ],
+  "created": [
+    "backend/market_lab/hilega_production_broker_observation_v1.py",
+    "scripts/hilega_production_broker_snapshot.py",
+    "tests/test_hilega_production_broker_observation_v1.py"
+  ]
+}

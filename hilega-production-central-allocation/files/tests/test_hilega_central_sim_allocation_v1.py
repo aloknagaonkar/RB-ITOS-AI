@@ -27,7 +27,7 @@ def test_direct_public_submit_cannot_bypass(env):
     with pytest.raises(Blocked,match='HALF_CASH'):entry(env)
     assert not env[1].orders()
 def test_hold_precedes_transport(env):
-    ready(env);env[1].before_accept=lambda: held(env)=='6600.00' or pytest.fail('No hold')
+    ready(env);env[1].before_accept=lambda: summary(env[0].store,env[0].now())['held_total']=='6600.00' or pytest.fail('No hold')
     entry(env);assert held(env)=='6600.00'
 def test_entry_fill_holds_exit_releases(env):
     ready(env);row=entry(env);env[1].fill(row['id'],65,'100');command(env[0],'reconcile');assert held(env)=='6600.00'
@@ -36,7 +36,24 @@ def test_partial_pause_cleanup_releases(env):
     ready(env);row=entry(env);env[1].fill(row['id'],20,'100');command(env[0],'reconcile');assert held(env)=='6600.00'
     command(env[0],'pause');assert held(env)=='0.00' and not any(env[1].positions().values())
 def test_pause_established_retains(env):
-    ready(env);row=entry(env);env[1].fill(row['id'],65,'100');command(env[0],'pause');assert held(env)=='6600.00'
+    ready(env)
+    row=entry(env)
+    env[1].fill(row['id'],65,'100')
+    command(env[0],'reconcile')
+    assert env[0].store.intents()[0]['status']=='FILLED'
+    command(env[0],'pause')
+    assert held(env)=='6600.00'
+    assert env[1].positions()['SIMULATOR|CE']==65
+
+def test_pause_unobserved_full_fill_flattens_and_releases(env):
+    ready(env)
+    row=entry(env)
+    env[1].fill(row['id'],65,'100')
+    command(env[0],'pause')
+    assert held(env)=='0.00'
+    assert not any(env[1].positions().values())
+    assert env[0].status()['control']['mode']=='PAUSED'
+    assert [f['side'] for f in env[1].fills()]==['BUY','SELL']
 def test_pending_exit_retains(env):
     ready(env);row=entry(env);env[1].fill(row['id'],65,'100');env[1].auto_fill_sells=False
     env[0].strategy_exit(position_id=row['id'],exit_id='sell',price='100');assert held(env)=='6600.00'

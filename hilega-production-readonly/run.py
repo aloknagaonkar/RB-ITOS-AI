@@ -34,7 +34,7 @@ class ReadOnlyClient:
         if name not in PATHS:
             raise ValueError('ENDPOINT_NOT_ALLOWED')
         req = Request('https://api.upstox.com'+PATHS[name],
-                      headers={'Authorization':'Bearer '+self.token,'Accept':'application/json'},method='GET')
+                      headers={'Authorization':'Bearer '+self.token,'Accept':'application/json','User-Agent':'RB-ITOS-AI/1.0 (read-only readiness validation)'},method='GET')
         try:
             with self.opener.open(req, timeout=8) as response:
                 raw = response.read(8_000_001)

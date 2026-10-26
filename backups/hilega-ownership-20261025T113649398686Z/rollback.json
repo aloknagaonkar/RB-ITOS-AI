@@ -1,0 +1,8 @@
+{
+  "existing": [],
+  "created": [
+    "backend/market_lab/hilega_production_ownership_v1.py",
+    "scripts/hilega_production_ownership_demo.py",
+    "tests/test_hilega_production_ownership_v1.py"
+  ]
+}

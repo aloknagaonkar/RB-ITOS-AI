@@ -1,0 +1,14 @@
+{
+  "existing": [
+    "backend/market_lab/hilega_production_foundation/core.py",
+    "backend/market_lab/hilega_production_simulator_bridge_v1.py",
+    "backend/market_lab/hilega_production_workspace_v1.py",
+    "frontend/src/hilegaProductionWorkspace.tsx",
+    "scripts/hilega_production_simulator_bridge.py"
+  ],
+  "created": [
+    "backend/market_lab/hilega_production_bridge_health_v1.py",
+    "scripts/hilega_production_bridge_health_demo.py",
+    "tests/test_hilega_production_bridge_health_v1.py"
+  ]
+}

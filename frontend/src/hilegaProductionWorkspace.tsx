@@ -2,7 +2,7 @@ import {useEffect,useState} from 'react'
 import {startLivePolling} from './hilegaLivePolling'
 import './hilegaProductionWorkspace.css'
 
-type Snapshot={model:string;workspace_mode:string;source:string;label:string;generated_at:string;control:any;
+type Snapshot={broker_execution_port?:any;durable_execution?:any;allocation?:any;bridge_health?:any;broker_observation?:any;model:string;workspace_mode:string;source:string;label:string;generated_at:string;control:any;
  production_execution_enabled:boolean;strategy_worker_controlled:boolean;configuration:any;policy_id:string;strategy_version:string;
  readiness_checks:any[];positions:any[];orders:any[];closed_trades:any[];events:any[];last_reconciled_at?:string}
 const money=(v:any)=>v===null||v===undefined?'Unavailable':Number(v).toLocaleString('en-IN',{style:'currency',currency:'INR'})
@@ -42,7 +42,15 @@ export default function HilegaProductionWorkspace({onOpenStrategy}:{onOpenStrate
   return()=>{active=false;controller.abort();stop()}
  },[token])
  const stale=!!error||!received||clock-received>10000
+ const broker=data?.broker_observation
+ const brokerFresh=!!broker&&!stale&&broker.status==='LIVE_READ_ONLY'&&Number.isFinite(Date.parse(broker.generated_at))&&clock-Date.parse(broker.generated_at)>=0&&clock-Date.parse(broker.generated_at)<=90000
+ const bridgeHealth=data?.bridge_health
+ const allocation=data?.allocation
+ const allocationReady=!allocation?.required||allocation?.ready===true
+ const bridgeReady=!bridgeHealth?.required||bridgeHealth?.healthy===true
  const sim=data?.workspace_mode==='SIMULATION_ONLY'
+ const durable=data?.durable_execution
+ const stopPending=durable?.stop_requested===true
  const canCommand=sim&&!stale&&!busy
  const action=async(name:string,positionId?:string)=>{
   if(!data||busy||!sim||(!['pause','flatten'].includes(name)&&stale))return
@@ -71,22 +79,45 @@ export default function HilegaProductionWorkspace({onOpenStrategy}:{onOpenStrate
   {data&&<>
    <div className="up-controls">
     <button disabled={!sim||busy} onClick={()=>void action('pause')}>Do not trade today — SIM</button>
-    <button disabled={!canCommand||data.control?.mode==='ARMED'} onClick={()=>void action('resume')}>Start — next fresh signal — SIM</button>
+    <button disabled={!canCommand||stopPending||!bridgeReady||!allocationReady||data.control?.mode==='ARMED'} onClick={()=>void action('resume')}>Start — next fresh signal — SIM</button>
     <button disabled={!sim||busy} onClick={()=>void action('flatten')}>Exit all &amp; stop today — SIM</button>
     <button disabled={!canCommand} onClick={()=>void action('reconcile')}>Reconcile simulator</button>
     <button onClick={onOpenStrategy}>Open Hilega decision audit</button>
    </div>
    <p role="status">{message}</p>
+   <section className="up-panel" aria-label="Durable simulator controls"><strong>Durable simulator controls: {stale?'DISPLAY STALE':stopPending?'STOP REQUESTED — cleanup acknowledgement pending':durable?'ACTIVE':'Awaiting server'}</strong>
+    <p>Reservation and entry intent commit together. Stop request: {fmt(durable?.stop_generation)} · Handled: {fmt(durable?.handled_generation)}. Established positions remain open on Pause; use Exit all to close them. Simulation only.</p>
+   </section>
+   <section className="up-panel" aria-label="Simulator bridge health"><strong>Simulator bridge: {stale?'DISPLAY STALE':bridgeHealth?.status??'NOT_ENABLED'}</strong>
+    <p>Heartbeat age: {fmt(bridgeHealth?.heartbeat_age_seconds)}s · Source age: {fmt(bridgeHealth?.source_age_seconds)}s · PID: {fmt(bridgeHealth?.pid)} · Instance: {fmt(bridgeHealth?.instance)}</p>
+    <p>Entry health required: {bridgeHealth?.required?'Yes':'No — optional reader not enabled'}. A healthy process does not arm trading. Recovery requires explicit Resume; exits remain available.</p>
+   </section>
+   <section className="up-panel" aria-label="Simulator allocation"><strong>Simulator allocation: {stale?'DISPLAY STALE':allocation?.status??'Awaiting server'}</strong>
+    <p>SYNTHETIC CASH ONLY · Cash: {money(allocation?.synthetic_available_cash)} · 50% cap: {money(allocation?.half_cash_cap)} · Held: {money(allocation?.held_total)} · Remaining: {money(allocation?.remaining_capacity)}</p>
+    <p>Funds age: {fmt(allocation?.funds_age_seconds)}s · Buffer per entry: {money(allocation?.buffer_per_entry)}. Single instrument only. Real broker funds and allocation approval remain pending.</p>
+   </section>
+   <section className="up-panel" aria-label="Consolidated broker execution port"><strong>Broker execution port: {stale?'DISPLAY STALE':data.broker_execution_port?.transport_gate??'Awaiting server'}</strong>
+    <p>Library version: {fmt(data.broker_execution_port?.version)}. Current execution route remains the existing simulator. Live broker routing and real funds are not connected. No production activation is available.</p>
+   </section>
    <nav className="up-tabs">{['Overview','Active positions','Orders & fills','Closed trades','Execution settings','Readiness & audit'].map(t=><button key={t} aria-pressed={tab===t} onClick={()=>setTab(t)}>{t}</button>)}</nav>
    {tab==='Overview'&&<section className="up-panel"><h2>Account overview</h2>
-    <p>Real account cash and P&amp;L: <strong>Not connected</strong>. Simulation reconciliation is not broker readiness.</p>
+    <p>Simulator controls and broker observations are separate. Broker observations cannot submit orders or update the simulator ledger.</p>
+    <h3>Upstox account — read-only evidence</h3>
+    <p role="status"><strong>{stale?'DISPLAY STALE':brokerFresh?'LIVE_READ_ONLY':broker?.status==='LIVE_READ_ONLY'?'STALE':broker?.status??'NOT_ENABLED'}</strong> · Snapshot: {fmt(broker?.generated_at)} · Server age: {fmt(broker?.age_seconds)} seconds</p>
+    <p>Net cash available to trade: <strong>{brokerFresh?money(broker?.funds?.cash_available_to_trade):'Unknown'}</strong> · 50% preview: {brokerFresh?money(broker?.funds?.half_cash_preview):'Unknown'} · Cash mapping pending account comparison; allocation is not approved.</p>
+    <p>Pledged margin (excluded from preview): {brokerFresh?money(broker?.funds?.pledge_available_to_trade):'Unknown'}. Broker P&amp;L and strategy ownership: not validated.</p>
+    <table><thead><tr><th>Read-only check</th><th>Status</th><th>Error</th></tr></thead><tbody>{(broker?.checks??[]).map((c:any)=><tr key={c.check}><td>{c.check}</td><td>{c.status}</td><td>{c.error??'—'} {c.provider_code??''}</td></tr>)}</tbody></table>
+    <p>Account snapshot diagnostics: {brokerFresh?fmt(broker?.diagnostics?.status):'Unknown'}. {(broker?.diagnostics?.issues??[]).join(', ')}</p>
+    <h3>Broker positions — account-wide, read-only</h3>
+    {!brokerFresh||broker?.positions===null?<p>Exposure unknown or stale. No flat-account claim is made.</p>:<><div className="up-scroll"><table><thead><tr><th>Instrument</th><th>Product</th><th>Quantity</th></tr></thead><tbody>{broker.positions.map((p:any,i:number)=><tr key={i}><td>{p.instrument_token}</td><td>{p.product}</td><td>{p.quantity}</td></tr>)}</tbody></table></div><p>{broker.positions.length===0?'No position rows returned at this snapshot.':'Positions are not attributed to this strategy.'}</p></>}
+    <p>Broker orders / trade fills: {brokerFresh?`${broker?.orders?.length??'Unknown'} / ${broker?.trades?.length??'Unknown'}`:'Unknown'}. These are account-wide observations, not production execution approval.</p>
     <dl><dt>Policy</dt><dd>{data.policy_id}</dd><dt>Version</dt><dd>{data.strategy_version}</dd><dt>Entry control</dt><dd>{data.control?.mode??'DISABLED'}</dd></dl>
     <h3>Blocked trades — hypothetical outcome</h3><p>Not implemented in this milestone. No hypothetical results are included in real P&amp;L.</p>
    </section>}
    {tab==='Active positions'&&<section className="up-panel"><h2>Simulator positions — no live prices</h2><div className="up-scroll"><table><thead><tr><th>Instrument</th><th>Filled / remaining</th><th>Average entry</th><th>Broker discrepancy</th><th>Live P&amp;L</th><th>Action</th></tr></thead><tbody>{data.positions.map(p=><tr key={p.position_id}><td>{p.instrument}</td><td>{p.filled_quantity} / {p.remaining_quantity}</td><td>{money(p.average_entry)}</td><td>{p.reconciliation_required?'Review required; observed '+p.external_observed_quantity:'—'}</td><td>Unavailable</td><td><button disabled={!canCommand||p.reconciliation_required} onClick={()=>void action('exit',p.position_id)}>Exit — SIM</button></td></tr>)}</tbody></table></div>{!data.positions.length&&<p>No simulated positions. Real broker exposure has not been checked.</p>}</section>}
    {tab==='Orders & fills'&&<section className="up-panel"><h2>Simulator order ledger</h2><div className="up-scroll"><table><thead><tr><th>Intent / broker ID</th><th>Instrument</th><th>Side</th><th>Quantity / filled</th><th>Status</th><th>Average</th></tr></thead><tbody>{data.orders.map(o=><tr key={o.id}><td><code>{o.id}</code><br/><code>{fmt(o.order_id)}</code></td><td>{o.instrument}</td><td>{o.side}</td><td>{o.quantity} / {o.filled}</td><td>{o.status}</td><td>{money(o.average_price)}</td></tr>)}</tbody></table></div>{!data.orders.length&&<p>No simulator orders.</p>}</section>}
    {tab==='Closed trades'&&<section className="up-panel"><h2>Closed simulator positions</h2>{data.closed_trades.map(p=><p key={p.position_id}>{p.instrument} · {p.filled_quantity} filled · remaining {p.remaining_quantity} · simulated fills only</p>)}{!data.closed_trades.length&&<p>No reconciled closed simulator trades. Realised production P&amp;L is unavailable.</p>}</section>}
-   {tab==='Execution settings'&&<section className="up-panel"><h2>Agreed initial settings — preview only</h2><dl><dt>Strike offsets</dt><dd>{data.configuration.strike_offsets.join(', ')}</dd><dt>Lots per strike</dt><dd>{data.configuration.lots_per_strike}</dd><dt>Cash cap</dt><dd>50% of available trading cash, excluding noncash collateral</dd><dt>Daily loss limit</dt><dd>UNSET</dd></dl><p>Editing and production activation are not available. Live instrument mapping, cash validation and basket reservation are pending.</p></section>}
+   {tab==='Execution settings'&&<section className="up-panel"><h2>Agreed initial settings — preview only</h2><dl><dt>Strike offsets</dt><dd>{data.configuration.strike_offsets.join(', ')}</dd><dt>Lots per strike</dt><dd>{data.configuration.lots_per_strike}</dd><dt>Cash cap</dt><dd>50% of available trading cash, excluding noncash collateral</dd><dt>Daily loss limit</dt><dd>UNSET</dd></dl><p>Editing and production activation are not available. Live instrument mapping and cash validation remain pending. Central simulator reservations support one instrument; multi-leg execution is unavailable.</p></section>}
    {tab==='Readiness & audit'&&<section className="up-panel"><h2>Production readiness — NOT CLEARED</h2><table><thead><tr><th>Check</th><th>Status</th></tr></thead><tbody>{data.readiness_checks.map(r=><tr key={r.check}><td>{r.check}</td><td>{r.status}</td></tr>)}</tbody></table><h3>Lifecycle events — latest 200</h3>{data.events.slice().reverse().map(e=><details key={e.sequence}><summary>#{e.sequence} · {e.type} · {e.at}</summary><pre>{JSON.stringify(e,null,2)}</pre></details>)}</section>}
   </>}
  </div>

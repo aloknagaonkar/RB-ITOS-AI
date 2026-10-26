@@ -1,4 +1,4 @@
-"""Authenticated disabled/simulator workspace. No live broker transport."""
+"""Authenticated simulator controls with separate opt-in GET-only broker evidence."""
 from __future__ import annotations
 import asyncio
 import hmac
@@ -11,6 +11,7 @@ from uuid import UUID
 from fastapi import APIRouter,Depends,HTTPException,Request
 from pydantic import BaseModel,ConfigDict
 from .hilega_production_foundation.core import Store,SimBroker,Service,Blocked
+from . import hilega_production_broker_observation_v1 as broker_observation
 
 MODEL='HILEGA_PRODUCTION_WORKSPACE_V1'
 router=APIRouter(prefix='/api/hilega-production',tags=['hilega-production-preparation'])
@@ -74,7 +75,10 @@ def report():
             if remaining>0 or row.get('cleanup') or item['reconciliation_required']:positions.append(item)
             elif row['filled']>0 and exits:closed.append(item)
         result.update(positions=positions,orders=rows,closed_trades=closed,events=s.store.events()[-200:],
-            control=snap['control'],label=snap['label'],last_reconciled_at=snap['control'].get('last_reconciled_at'))
+            control=snap['control'],label=snap['label'],durable_execution=snap['durable_execution'],bridge_health=snap['bridge_health'],allocation=snap['allocation'],last_reconciled_at=snap['control'].get('last_reconciled_at'))
+    from .hilega_execution_port_v1 import availability
+    result['broker_execution_port']=availability()
+    result['broker_observation']=broker_observation.display()
     return result
 
 class Command(BaseModel):
@@ -106,6 +110,7 @@ def command(body:Command,actor=Depends(authorize)):
 @asynccontextmanager
 async def workspace_lifespan():
     task=None
+    broker_task=None
     if os.getenv('HILEGA_PRODUCTION_WORKSPACE_MODE','DISABLED')=='SIMULATION_ONLY':
         s=service()
         # Startup block is durable. Broker checks run even with no browser connected.
@@ -113,15 +118,21 @@ async def workspace_lifespan():
         async def monitor():
             while True:
                 def poll():
-                    with s.store.lock():s._session();s._reconcile()
+                    with s.store.lock():s._session();s._reconcile();s._watch_bridge_locked()
                 try:await asyncio.to_thread(poll)
                 except Exception:
                     # Unavailable state cannot permit entries; exceptions are not printed.
                     pass
                 await asyncio.sleep(5)
         task=asyncio.create_task(monitor())
+    if broker_observation.enabled() and mode()=='SIMULATION_ONLY':
+        broker_task=asyncio.create_task(broker_observation.monitor())
     try:yield
     finally:
+        if broker_task:
+            broker_task.cancel()
+            try:await broker_task
+            except asyncio.CancelledError:pass
         if task:
             task.cancel()
             try:await task

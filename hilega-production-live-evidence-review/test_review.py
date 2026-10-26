@@ -66,7 +66,10 @@ def test_conflicting_id(journal):
     assert record(journal,resign(r))['reason']=='SNAPSHOT_ID_CONFLICT'
 
 def test_fill_regression(journal):
-    record(journal,report(1,buy=65));r=report(2,buy=20)
+    record(journal,report(1,buy=65))
+    r=report(2,buy=20)
+    r['orders'][0].update(quantity=65,pending=45,status='PARTIAL')
+    r=resign(r)
     assert record(journal,r)['reason']=='ORDER_FILL_REGRESSION'
 
 def test_missing_previous_order(journal):

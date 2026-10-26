@@ -46,6 +46,13 @@ class Store:
             CREATE TABLE IF NOT EXISTS requests(id TEXT PRIMARY KEY,fingerprint TEXT NOT NULL,result TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT,data TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS sim_orders(id TEXT PRIMARY KEY,intent TEXT UNIQUE NOT NULL,data TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS sim_fills(id TEXT PRIMARY KEY,order_id TEXT NOT NULL,data TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS sim_allocation_config(id INTEGER PRIMARY KEY CHECK(id=1),data TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS sim_allocation_reservations(id TEXT PRIMARY KEY,data TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS sim_stop_state(id INTEGER PRIMARY KEY CHECK(id=1),generation INTEGER NOT NULL,handled INTEGER NOT NULL);
+            INSERT OR IGNORE INTO sim_stop_state VALUES(1,0,0);
+            CREATE TABLE IF NOT EXISTS sim_stop_requests(id TEXT PRIMARY KEY,fingerprint TEXT NOT NULL,generation INTEGER NOT NULL,data TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS sim_bridge_health(id INTEGER PRIMARY KEY CHECK(id=1),data TEXT NOT NULL);
             ''')
     @contextmanager
     def db(self):
@@ -63,6 +70,23 @@ class Store:
             fcntl.flock(f,fcntl.LOCK_EX)
             try:yield
             finally:fcntl.flock(f,fcntl.LOCK_UN)
+    def queue_stop(self,rid,payload):
+        # Independent of the control flock: a pending stop vetoes new BUY.
+        uuid.UUID(rid);fp=hashlib.sha256(encode(payload).encode()).hexdigest()
+        with self.db() as d:
+            d.execute('BEGIN IMMEDIATE')
+            old=d.execute('SELECT fingerprint FROM sim_stop_requests WHERE id=?',(rid,)).fetchone()
+            if old and old[0]!=fp:raise Blocked('REQUEST_ID_REUSED_WITH_DIFFERENT_COMMAND')
+            if not old:
+                prior=d.execute('SELECT fingerprint FROM requests WHERE id=?',(rid,)).fetchone()
+                if prior and prior[0]!=fp:raise Blocked('REQUEST_ID_REUSED_WITH_DIFFERENT_COMMAND')
+                if not prior:
+                    d.execute('UPDATE sim_stop_state SET generation=generation+1 WHERE id=1')
+                    generation=d.execute('SELECT generation FROM sim_stop_state WHERE id=1').fetchone()[0]
+                    d.execute('INSERT INTO sim_stop_requests VALUES(?,?,?,?)',(rid,fp,generation,encode(payload)))
+    def stop_state(self):
+        with self.db() as d:g,h=d.execute('SELECT generation,handled FROM sim_stop_state WHERE id=1').fetchone()
+        return dict(generation=g,handled=h,pending=g>h)
     def control(self):
         with self.db() as d:r=d.execute('SELECT data FROM control WHERE id=1').fetchone()
         return json.loads(r[0]) if r else None
@@ -91,6 +115,7 @@ class SimBroker:
     def __init__(self,store):
         self.store=store;self.timeout_after_accept=False;self.unavailable=False
         self.fill_on_cancel=0;self.auto_fill_sells=True;self.before_accept=None
+        self.clock=lambda:datetime.now(IST)
     def _check(self):
         if self.unavailable:raise BrokerUnavailable('SIMULATED_BROKER_UNAVAILABLE')
     def place(self,intent):
@@ -100,10 +125,11 @@ class SimBroker:
             prior=d.execute('SELECT data FROM sim_orders WHERE intent=?',(intent['id'],)).fetchone()
             if prior:raise Blocked('DUPLICATE_BROKER_SUBMISSION')
             row=dict(order_id='SIM-'+uuid.uuid4().hex,intent_id=intent['id'],instrument=intent['instrument'],
-                     side=intent['side'],quantity=intent['quantity'],filled=0,average_price=None,status='OPEN')
+                     side=intent['side'],quantity=intent['quantity'],filled=0,average_price=None,status='OPEN',created_at=self.clock().isoformat())
             if row['side']=='SELL' and self.auto_fill_sells:
                 row.update(filled=row['quantity'],average_price=intent['price'],status='FILLED')
             d.execute('INSERT INTO sim_orders VALUES(?,?,?)',(row['order_id'],intent['id'],encode(row)))
+            if row['filled']:self._record_fill(d,row,row['filled'],money(row['average_price']))
         if self.timeout_after_accept:
             self.timeout_after_accept=False;raise OutcomeUnknown('SIMULATED_RESPONSE_LOST')
         return row
@@ -121,14 +147,39 @@ class SimBroker:
             row=self.find(intent_id)
             if row['status']!='FILLED':row['status']='CANCELLED';self._save(row)
         return self.find(intent_id)
+    def _record_fill(self,d,row,quantity,price):
+        at=self.clock()
+        if at.tzinfo is None:raise Blocked('AWARE_SIM_FILL_TIME_REQUIRED')
+        execution=dict(trade_id='SIM-FILL-'+uuid.uuid4().hex,order_id=row['order_id'],intent_id=row['intent_id'],
+            instrument=row['instrument'],side=row['side'],quantity=quantity,price=str(price),
+            filled_at=at.isoformat(),evidence_mode='SIMULATOR_GENERATED')
+        d.execute('INSERT INTO sim_fills VALUES(?,?,?)',(execution['trade_id'],row['order_id'],encode(execution)))
+    def fills(self):
+        self._check()
+        with self.store.db() as d:return [json.loads(r[0]) for r in d.execute('SELECT data FROM sim_fills ORDER BY rowid')]
+    def orders(self):
+        self._check()
+        with self.store.db() as d:return [json.loads(r[0]) for r in d.execute('SELECT data FROM sim_orders ORDER BY rowid')]
     def fill(self,intent_id,cumulative,price):
-        row=self.find(intent_id)
-        if not row or type(cumulative) is not int or not row['filled']<=cumulative<=row['quantity']:
-            raise Blocked('INVALID_SIMULATED_FILL')
-        if row['status'] in TERMINAL and cumulative!=row['filled']:raise Blocked('SIM_ORDER_ALREADY_TERMINAL')
-        row.update(filled=cumulative,average_price=str(money(price)) if cumulative else None,
-                   status='FILLED' if cumulative==row['quantity'] else 'PARTIAL')
-        self._save(row)
+        self._check();average=money(price)
+        with self.store.db() as d:
+            d.execute('BEGIN IMMEDIATE')
+            found=d.execute('SELECT data FROM sim_orders WHERE intent=?',(intent_id,)).fetchone()
+            row=json.loads(found[0]) if found else None
+            if not row or type(cumulative) is not int or not row['filled']<=cumulative<=row['quantity']:
+                raise Blocked('INVALID_SIMULATED_FILL')
+            if cumulative and average<=0:raise Blocked('FILL_PRICE_MISSING')
+            if row['status'] in TERMINAL and cumulative!=row['filled']:raise Blocked('SIM_ORDER_ALREADY_TERMINAL')
+            if cumulative==row['filled']:
+                if cumulative and money(row['average_price'])!=average:raise Blocked('SIM_FILL_PRICE_CORRECTION_REQUIRES_REVIEW')
+                return
+            delta=cumulative-row['filled']
+            old_notional=money(row['average_price'])*row['filled'] if row['filled'] else Decimal(0)
+            execution_price=(average*cumulative-old_notional)/delta
+            if execution_price<=0:raise Blocked('INVALID_INCREMENTAL_SIM_FILL_PRICE')
+            row.update(filled=cumulative,average_price=str(average),status='FILLED' if cumulative==row['quantity'] else 'PARTIAL')
+            d.execute('UPDATE sim_orders SET data=? WHERE id=?',(encode(row),row['order_id']))
+            self._record_fill(d,row,delta,execution_price)
     def positions(self):
         self._check()
         with self.store.db() as d:rows=[json.loads(r[0]) for r in d.execute('SELECT data FROM sim_orders')]
@@ -140,16 +191,22 @@ class SimBroker:
         if quantity>self.positions().get(instrument,0):raise Blocked('EXTERNAL_SELL_EXCEEDS_POSITION')
         row=dict(order_id='SIM-EXT-'+uuid.uuid4().hex,intent_id='EXTERNAL-'+uuid.uuid4().hex,
                  instrument=instrument,side='SELL',quantity=quantity,filled=quantity,
-                 average_price=str(money(price)),status='FILLED')
-        with self.store.db() as d:d.execute('INSERT INTO sim_orders VALUES(?,?,?)',(row['order_id'],row['intent_id'],encode(row)))
+                 average_price=str(money(price)),status='FILLED',created_at=self.clock().isoformat())
+        with self.store.db() as d:
+            d.execute('INSERT INTO sim_orders VALUES(?,?,?)',(row['order_id'],row['intent_id'],encode(row)))
+            self._record_fill(d,row,quantity,money(price))
         return row
 
 class Service:
     def __init__(self,store,broker,clock=None,*,worker_start=True):
         if type(broker) is not SimBroker:raise Blocked('FOUNDATION_SUPPORTS_SIM_BROKER_ONLY')
         self.store=store;self.broker=broker;self.clock=clock or (lambda:datetime.now(IST))
+        self.broker.clock=self.clock
         with store.lock():
             self._session()
+            if os.getenv('HILEGA_PRODUCTION_WORKSPACE_MODE')=='SIMULATION_ONLY':
+                from ..hilega_sim_allocation_v1 import ensure
+                ensure(store,self.now())
             if worker_start:self._block('PROCESS_START_RECONCILIATION_REQUIRED')
     def now(self):
         n=self.clock()
@@ -166,15 +223,36 @@ class Service:
     def _block(self,reason):
         c=self._session();c.update(mode='PAUSED',version=c['version']+1,reconciled=False,reason=reason)
         self.store.save_control(c);self.store.event('ENTRIES_BLOCKED',self.now().isoformat(),reason=reason,version=c['version'])
+    def _honor_stop(self,inflight_id=None):
+        state=self.store.stop_state()
+        if not state['pending']:return False
+        with self.store.db() as d:
+            requests=[json.loads(x[0]) for x in d.execute('SELECT data FROM sim_stop_requests WHERE generation>? AND generation<=?',(state['handled'],state['generation']))]
+        flatten=any(r['action']=='flatten' for r in requests)
+        self._block('DURABLE_OPERATOR_FLATTEN_REQUEST' if flatten else 'DURABLE_OPERATOR_STOP_REQUEST')
+        for entry in self.store.intents():
+            if entry['side']=='BUY' and (flatten or entry['status'] not in TERMINAL or entry['id']==inflight_id):
+                entry['cleanup']=True;self.store.put(entry)
+        with self.store.db() as d:d.execute('UPDATE sim_stop_state SET handled=? WHERE id=1',(state['generation'],))
+        return True
     def _check_fresh(self,c):
         if not c.get('reconciled') or not c.get('last_reconciled_at'):raise Blocked('RECONCILIATION_REQUIRED')
         age=(self.now()-datetime.fromisoformat(c['last_reconciled_at'])).total_seconds()
         if not 0<=age<=30:raise Blocked('RECONCILIATION_STALE')
     def _submit(self,row):
         # Intent committed BEFORE transport; crash leaves REQUESTED, never retry blindly.
+        row.setdefault('created_at',self.now().isoformat())
         self.store.put(row);self.store.event('ORDER_INTENT_PERSISTED',self.now().isoformat(),intent_id=row['id'],side=row['side'])
+        if row['side']=='BUY' and self.store.stop_state()['pending']:
+            self._honor_stop()
+            row.update(status='CANCELLED',not_submitted=True,cleanup=False)
+            self.store.put(row);self._reconcile()
+            return row
         try:
             evidence=self.broker.place(row);self._apply(row,evidence)
+            if row['side']=='BUY' and self._honor_stop(inflight_id=row['id']):
+                self._reconcile()
+                row=next(i for i in self.store.intents() if i['id']==row['id'])
         except Exception:
             row['status']='UNKNOWN';self.store.put(row);self._block('ORDER_OUTCOME_UNKNOWN')
             # Never leak arbitrary transport exception text or claim no order exists.
@@ -213,7 +291,12 @@ class Service:
                 price=entry['price'],parent=entry['id'],status='REQUESTED',filled=0,session_date=self._session()['session_date']))
     def _reconcile(self):
         try:
+            self._honor_stop()
             for row in self.store.intents():
+                if row.get('not_submitted'):
+                    if row['status']!='CANCELLED' or row['filled']!=0 or self.broker.find(row['id']) is not None:
+                        raise Blocked('NOT_SUBMITTED_EVIDENCE_CONFLICT')
+                    continue
                 e=self.broker.find(row['id'])
                 if e is None:raise Blocked('MISSING_ORDER_EVIDENCE')
                 self._apply(row,e)
@@ -221,7 +304,7 @@ class Service:
             # Simulator's external orders are individually attributable. Production
             # requires explicit ownership reconciliation; instrument alone is insufficient.
             buys=[i for i in self.store.intents() if i['side']=='BUY']
-            instruments={i['instrument'] for i in buys}
+            instruments={i['instrument'] for i in buys if not i.get('not_submitted')}
             if any(q and k not in instruments for k,q in positions.items()):raise Blocked('UNOWNED_BROKER_POSITION')
             for instrument in instruments:
                 entries=[i for i in buys if i['instrument']==instrument]
@@ -246,6 +329,8 @@ class Service:
                         latest['cleanup']=False;self.store.put(latest)
             if any(i['status'] in {'UNKNOWN','REQUESTED'} for i in self.store.intents()):
                 raise Blocked('ORDER_OUTCOME_UNKNOWN')
+            from ..hilega_sim_allocation_v1 import reconcile as reconcile_allocation
+            reconcile_allocation(self)
             c=self._session();c.update(reconciled=True,last_reconciled_at=self.now().isoformat())
             self.store.save_control(c);self.store.event('BROKER_RECONCILED',self.now().isoformat())
             return True
@@ -255,7 +340,10 @@ class Service:
         if action not in {'pause','resume','reconcile','exit','flatten'}:raise Blocked('UNKNOWN_COMMAND')
         if not actor or len(actor)>100:raise Blocked('ACTOR_REQUIRED')
         payload=dict(action=action,expected_version=expected_version,actor=actor,position_id=position_id,session_date=session_date)
+        # Stop intent is durable before waiting for an in-flight submission.
+        if action in {'pause','flatten'}:self.store.queue_stop(request_id,payload)
         with self.store.lock():
+            self._honor_stop()
             c=self._session();prior,fp=self.store.previous(request_id,payload)
             if prior:return dict(prior,idempotent_replay=True,current_status=self._status())
             # Pause/flatten are monotonic safety commands: stale browser may still stop.
@@ -269,6 +357,10 @@ class Service:
                 self._reconcile()
             elif action=='reconcile':self._reconcile()
             elif action=='resume':
+                if self.store.stop_state()['pending']:raise Blocked('DURABLE_STOP_PENDING')
+                self._check_bridge_health()
+                from ..hilega_sim_allocation_v1 import require_ready
+                require_ready(self.store,self.now())
                 self._check_fresh(c)
                 if any(i.get('cleanup') or i['status'] not in TERMINAL or 'external_observed_quantity' in i for i in self.store.intents()):
                     raise Blocked('UNRESOLVED_EXECUTION_STATE')
@@ -282,7 +374,7 @@ class Service:
             result=dict(request_id=request_id,action=action,status=self._status())
             self.store.event('CONTROL_COMMAND',self.now().isoformat(),actor=actor,request_id=request_id,action=action,version=result['status']['control']['version'])
             self.store.remember(request_id,fp,result);return result
-    def submit_entry(self,*,signal_id,signal_at,instrument,quantity,price):
+    def submit_entry(self,*,signal_id,signal_at,instrument,quantity,price,bridge_run_id=None):
         positive_int(quantity)
         if not instrument or not isinstance(signal_id,str) or not signal_id:raise Blocked('SIGNAL_AND_INSTRUMENT_REQUIRED')
         amount=money(price)
@@ -292,9 +384,10 @@ class Service:
         with self.store.lock():
             c=self._session();sid=hashlib.sha256((c['session_date']+'|'+signal_id).encode()).hexdigest()
             if any(i['id']==sid for i in self.store.intents()):raise Blocked('SIGNAL_ALREADY_CONSUMED')
-            if c['mode']!='ARMED':
+            if c['mode']!='ARMED' or self.store.stop_state()['pending']:
                 self.store.event('ENTRY_BLOCKED',self.now().isoformat(),signal_id=signal_id,reason='TRADING_PAUSED')
                 raise Blocked('TRADING_PAUSED')
+            self._check_bridge_health(run_id=bridge_run_id,submitting=True)
             self._check_fresh(c)
             if 'resumed_at' not in c or signal<=datetime.fromisoformat(c['resumed_at']):
                 raise Blocked('PRE_RESUME_SIGNAL_NOT_ELIGIBLE')
@@ -303,11 +396,59 @@ class Service:
             for row in self.store.intents():
                 if row['status'] not in TERMINAL or row.get('cleanup') or 'external_observed_quantity' in row:raise Blocked('EXPOSURE_OR_ORDER_UNRESOLVED')
                 if row['side']=='BUY' and self._remaining(row)[0]:raise Blocked('POSITION_ALREADY_OPEN')
-            # Simulation intent only. Funds/quote gates are planned but NOT wired here.
-            return self._submit(dict(id=sid,signal_id=signal_id,signal_at=signal_at,side='BUY',instrument=instrument,
-                quantity=quantity,price=str(amount),filled=0,status='REQUESTED',session_date=c['session_date']))
+            # Allocation is durably held before the first simulator BUY transport call.
+            from ..hilega_sim_allocation_v1 import reserve
+            intent=dict(id=sid,signal_id=signal_id,signal_at=signal_at,side='BUY',instrument=instrument,
+                quantity=quantity,price=str(amount),filled=0,status='REQUESTED',session_date=c['session_date'],created_at=self.now().isoformat())
+            reserve(self,sid,instrument=instrument,quantity=quantity,price=amount,intent=intent)
+            return self._submit(intent)
+    def strategy_exit(self,*,position_id,exit_id,price):
+        """Simulator-only strategy exit. Does not arm/resume or invoke manual pause."""
+        amount=money(price)
+        if amount<=0 or not isinstance(exit_id,str) or not exit_id:raise Blocked('VALID_EXIT_ID_AND_PRICE_REQUIRED')
+        with self.store.lock():
+            self._session()
+            if not self._reconcile():raise Blocked('STRATEGY_EXIT_RECONCILIATION_REQUIRED')
+            entries=[i for i in self.store.intents() if i['id']==position_id and i['side']=='BUY']
+            if len(entries)!=1:raise Blocked('POSITION_NOT_FOUND')
+            entry=entries[0]
+            try:
+                if entry['status'] not in TERMINAL:
+                    self._apply(entry,self.broker.cancel(entry['id']))
+                if entry['status'] not in TERMINAL:raise Blocked('ENTRY_CANCEL_NOT_TERMINAL')
+                remaining,exits=self._remaining(entry)
+                if any(i['status'] not in TERMINAL for i in exits):return dict(status='EXIT_PENDING',remaining=remaining)
+                if remaining==0:return dict(status='FLAT_CONFIRMED',remaining=0)
+                if self.broker.positions().get(entry['instrument'])!=remaining:raise Blocked('BROKER_POSITION_MISMATCH')
+                if any(i['id']==exit_id for i in self.store.intents()):raise Blocked('EXIT_ALREADY_CONSUMED_NO_RESUBMISSION')
+                self._submit(dict(id=exit_id,side='SELL',instrument=entry['instrument'],quantity=remaining,
+                    price=str(amount),parent=entry['id'],status='REQUESTED',filled=0,session_date=self._session()['session_date']))
+                if not self._reconcile():raise Blocked('EXIT_OUTCOME_UNCONFIRMED')
+                entry=next(i for i in self.store.intents() if i['id']==position_id)
+                remaining,exits=self._remaining(entry)
+                return dict(status='FLAT_CONFIRMED' if remaining==0 and all(i['status'] in TERMINAL for i in exits) else 'EXIT_PENDING',remaining=remaining)
+            except Exception:
+                self._block('STRATEGY_EXIT_OUTCOME_UNCONFIRMED')
+                raise Blocked('STRATEGY_EXIT_OUTCOME_UNCONFIRMED') from None
+    def _check_bridge_health(self,*,run_id=None,submitting=False):
+        from ..hilega_production_bridge_health_v1 import assert_ready,HealthBlocked
+        try:assert_ready(self.store,self.now(),run_id=run_id,submitting=submitting)
+        except HealthBlocked as exc:
+            if self._session()['mode']=='ARMED':
+                self._block(str(exc));self._reconcile()
+            raise Blocked(str(exc)) from None
+    def _watch_bridge_locked(self):
+        from ..hilega_production_bridge_health_v1 import summary
+        health=summary(self.store,self.now())
+        if health['required'] and not health['healthy'] and self._session()['mode']=='ARMED':
+            self._block('SIM_BRIDGE_'+health['status']);self._reconcile()
+        return health
+    def watch_bridge_health(self):
+        with self.store.lock():return self._watch_bridge_locked()
     def _status(self):
         c=self._session();rows=self.store.intents()
+        from ..hilega_production_bridge_health_v1 import summary
+        health=summary(self.store,self.now())
         uncertainty=any(i['status'] in {'UNKNOWN','REQUESTED'} or 'external_observed_quantity' in i for i in rows)
         cleanup=any(i.get('cleanup') for i in rows)
         pending=any(i['side']=='BUY' and i['status'] not in TERMINAL for i in rows)
@@ -320,7 +461,14 @@ class Service:
                'PAUSED_PENDING_ENTRY_REQUIRES_CANCEL' if pending and c['mode']=='PAUSED' else
                'ARMED_SIMULATION_NEXT_SIGNAL' if c['mode']=='ARMED' else
                'PAUSED_EXISTING_POSITION_OPEN' if exposure else 'PAUSED_NO_PENDING_ENTRIES')
-        return dict(control=c,label=label,pending_entry_orders=pending,ledger_remaining_quantity=exposure,
+        if health['required'] and not health['healthy']:label='BLOCKED_'+health['status']
+        from ..hilega_sim_allocation_v1 import summary as allocation_summary
+        allocation=allocation_summary(self.store,self.now())
+        if allocation['required'] and not allocation['ready'] and health.get('healthy',True):label='BLOCKED_'+allocation['status']
+        stop=self.store.stop_state()
+        if stop['pending']:label='STOP_REQUESTED_WAITING_FOR_CLEANUP'
+        return dict(control=c,label=label,bridge_health=health,allocation=allocation,
+                    durable_execution=dict(model='HILEGA_DURABLE_SIM_INTEGRATION_V1',stop_requested=stop['pending'],stop_generation=stop['generation'],handled_generation=stop['handled'],atomic_reservation_intent=True,production_execution_enabled=False),pending_entry_orders=pending,ledger_remaining_quantity=exposure,
                     positions=rows,production_execution_enabled=False,simulator_only=True,
                     notice='Simulation ledger only. Not connected to live strategy, UI or Upstox.')
     def status(self):

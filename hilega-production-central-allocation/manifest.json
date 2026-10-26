@@ -4,7 +4,7 @@
     "scripts/hilega_production_simulator_bridge.py": "114b44f5474ea880eb10388706b83fcaa335bb4546cede924ac3bb008ce7c772",
     "scripts/hilega_sim_allocation.py": "7a1a909d1ad23f9fe6a854436ba677c6e5f19361959d4cbf185a1bce08802e4d",
     "scripts/hilega_central_allocation_demo.py": "79d5f52ba40ee64a614b2be42475a1dccfb0b6bedd1e637c0ebaf1a31cb85c9c",
-    "tests/test_hilega_central_sim_allocation_v1.py": "39e038bae708a155a3a2439042a3a513ab830ab0b9105e019612c4499b482831",
+    "tests/test_hilega_central_sim_allocation_v1.py": "aad97b8188d64dcaff7789d1326c282a9340103ae35ca8936c7c6e45cca24f7e",
     "backend/market_lab/hilega_sim_allocation_v1.py": "4f507542d1880f618dbdf50ce76c224ee5f858f4157b8adfea2115c3d88934cd",
     "backend/market_lab/hilega_production_workspace_v1.py": "52e7a43affd7093e493126587f35abf495ac5d91ea18c5b75f9a6960a1fa6ca5",
     "backend/market_lab/hilega_production_foundation/core.py": "3f2c2bba0fab587a558c2b800e9d03bd857a09df36da33069013336b8b67ae0d",
