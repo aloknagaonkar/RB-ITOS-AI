@@ -1,0 +1,11 @@
+{
+  "backend/market_lab/hilega_production_account_adapter_v1.py": "9484899b374701c211adf22b67ea5fc84d0cdb978defe061ce8250cb7313b140",
+  "backend/market_lab/hilega_production_broker_observation_v1.py": "d0b0167604db78c5d0a70fa7012dcfbe18db4e86516b62a2190fcf294168aa4e",
+  "backend/market_lab/hilega_production_foundation/core.py": "ea915827ea1c3e5af2ce97808af56d1e32e316b708741a0f17de7a572014d5cb",
+  "backend/market_lab/hilega_production_bridge_health_v1.py": "d7e02c6c7c8bc4697109c981fb515306db7036683028cd28248d2bd070850a93",
+  "hilega-production-contract-preview/rules.py": "660c92d979626692898c4b154b3918be24ed6fe27424885f165ccd7ee45195e5",
+  "hilega-production-contract-preview/run.py": "bd7f8f5590a6ac1a67373804e173d3e5c7c0245db0a6a42285966a73bb99b1c0",
+  "hilega-production-cash-observation/analysis.py": "9d4f98258585a9dea8f4af6266adb28ba32de50a20bbe7f65c8c58424534e799",
+  "hilega-production-cash-observation/run.py": "3d8a56ece2277968255556a4c4b56ec0f56ec0657545e7d7a3126f1e15fb9163",
+  "hilega-production-real-cash-shadow-gate/gate.py": "5b7b0278bb877caa0f9ccd181dd8dfc24ba3ed177738d42b596540bd417f5e6a"
+}
