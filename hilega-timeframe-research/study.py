@@ -13,7 +13,7 @@ import core
 
 HERE=Path(__file__).resolve().parent
 MODULES=tuple(json.loads((HERE/'source-hashes.json').read_text()))
-PACKAGE_VERSION='1.1.0-session-filter'
+PACKAGE_VERSION='1.2.0-common-input'
 EXPECTED_VERSION='bullish-gap2-full-wma2-2.0.0-wma40-reversal'
 CACHE_ROOTS=(Path('data/historical-evidence/hilega-milega-underlying-cache-v1'),
     Path('data/recovery/october-2026/replay-input/replay-warmup'),
@@ -238,15 +238,19 @@ def stats(result):
         breakeven=sum(t['points']==0 for t in trades),net_points=net,closed_trade_drawdown=dd)
 
 
-def report(output,day,results,matches,proof,manifest):
-    lines=['# 1m / 3m / 5m research — '+day,'','Recorded 5m parity: PASS.',
+def report(output,day,results,matches,proof,manifest,common_input_drift=None):
+    common=common_input_drift is not None
+    display=lambda name: 'API_CONTROL_5M' if common and name=='DEPLOYED_5M' else name
+    lines=['# 1m / 3m / 5m research — '+day,'',
+        ('COMMON_LATER_API comparison. Recorded-5m-bar strategy reproduction: PASS. API versus recorded-live parity: '+common_input_drift['status']+'. These are separate checks.' if common else 'Recorded 5m parity: PASS.'),
+        ('Every compared timeframe uses the same later API one-minute data. Alert matches refer to API_CONTROL_5M, not recorded live entry times. No original live minute sequence is reconstructed or altered.' if common else 'Comparison control is the reproduced recorded-live 5m strategy.'),
         'Same RSI9/EMA3/WMA21/priceEMA10 periods and numeric thresholds; elapsed-time lookbacks differ. Full strategy timing changes with candle interval.',
         'Gross NIFTY completed-candle close marks; cutoff uses exact 14:55 open. No option fills, fees, slippage or execution latency. Closed-trade drawdown excludes intratrade excursions.',
         'Same current WMA40/reversal policy; only complete bars from 09:15. The final completed 3m bar before cutoff ends 14:54; no partial bar at 14:55.',
         'No live changes. This one-session study does not establish general predictive performance.','',
         '| Policy | Trades | Winners | Losers | Net points | Closed-trade drawdown |','|---|---:|---:|---:|---:|---:|']
     for name,result in results.items():
-        s=stats(result);lines.append(f"| {name} | {s['trades']} | {s['winners']} | {s['losers']} | {s['net_points']:+.2f} | {s['closed_trade_drawdown']:.2f} |")
+        s=stats(result);lines.append(f"| {display(name)} | {s['trades']} | {s['winners']} | {s['losers']} | {s['net_points']:+.2f} | {s['closed_trade_drawdown']:.2f} |")
     lines+=['','## Early-direction evidence','',
         'SETUP is an unconfirmed pending candidate, not an entry. ENTRY is fully confirmed on that timeframe. AGREEMENT starts only when both independent lower-timeframe strategies have the same active direction.',
         'Each stream is matched independently. An off-boundary alert must receive a same-direction 5m entry by the next 5m boundary while still valid. Opposite alerts or a lower-timeframe trade exit invalidate it; equality at exit is excluded. Each 5m entry can match at most one alert per stream. Earliest valid alert wins.',
@@ -267,13 +271,14 @@ def report(output,day,results,matches,proof,manifest):
     audit=['# All completed-boundary decisions','']
     for name,r in results.items():
         for t in r['trades']:
-            trades.append(f"| {name} | {t['direction']} | {hm(t.get('setup'))} | {hm(t.get('qualified'))} | {hm(t['entry_time'])} | {hm(t['exit_time'])} | {t['entry_price']:.2f} | {t['exit_price']:.2f} | {t['points']:+.2f} | {t['exit_reason']} |")
-        audit+=['## '+name,'','```json',json.dumps(r['audit'],indent=2),'```','']
+            trades.append(f"| {display(name)} | {t['direction']} | {hm(t.get('setup'))} | {hm(t.get('qualified'))} | {hm(t['entry_time'])} | {hm(t['exit_time'])} | {t['entry_price']:.2f} | {t['exit_price']:.2f} | {t['points']:+.2f} | {t['exit_reason']} |")
+        audit+=['## '+display(name),'','```json',json.dumps(r['audit'],indent=2),'```','']
     for name,content in [('comparison.md',lines),('early-direction.md',detail),('trades.md',trades),('decision-audit.md',audit)]:
         (output/name).write_text('\n'.join(content)+'\n')
-    (output/'report.json').write_text(json.dumps(dict(session_date=day,baseline_parity=proof,manifest=manifest,policies=results,early_direction=matches,statistics={k:stats(v) for k,v in results.items()},orders_sent=False),indent=2))
+    (output/'report.json').write_text(json.dumps(dict(session_date=day,comparison_basis='COMMON_LATER_API' if common else 'RECORDED_LIVE_REPRODUCTION',recorded_5m_bar_reproduction=proof if common else None,baseline_parity=proof if not common else common_input_drift,manifest=manifest,policies={display(k):v for k,v in results.items()},early_direction=matches,statistics={display(k):stats(v) for k,v in results.items()},orders_sent=False),indent=2))
     with zipfile.ZipFile(output/'results.zip','x',zipfile.ZIP_DEFLATED) as z:
-        for name in ('comparison.md','early-direction.md','trades.md','decision-audit.md','report.json','parity.json','manifest.json'):z.write(output/name,name)
+        for name in ('comparison.md','early-direction.md','trades.md','decision-audit.md','report.json','parity.json','manifest.json','recorded-bar-parity.json','recorded-bars-replay.json'):
+            if (output/name).is_file():z.write(output/name,name)
     print('\n'.join(lines),flush=True)
     print('UPLOAD:',output/'results.zip',flush=True)
 

@@ -126,3 +126,48 @@ manifest.json / warmup_input_actions. All 375 regular minutes remain required.
 The target session retains strict regular-session validation. No candle is
 filled, shifted or synthesized. Original ZIP/cache bytes remain unchanged.
 Tests and replay have not been executed locally.
+
+## Revision 1.2.0: separate common-input research mode
+
+Inspection of the uploaded cache-check archive shows the 26 October cache has
+358 minute candles, 09:15 through 15:12; its OHLC values exactly match the later
+API capture for those minutes. Only 40 of 68 aggregated 5m OHLC frames match the
+recorded decision frames. The remaining 28 differ in close. This cache does not
+recover the original live minute sequence. No raw candle is edited to force parity.
+
+The strict `study.py` command still stops on any recorded live parity failure.
+A NEW separate entry point `common_input.py` has a different experiment contract:
+
+1. Load the same validated warmup, adding cached 22/23 October.
+2. Build actual recorded 5m bars from each recorded decision's full price frame.
+   Recompute the current installed strategy using these bars and require every
+   recorded indicator, seed count, directional entry/exit and mark to reproduce.
+   Failure blocks everything. No 1m candles are invented from those 5m frames.
+3. Independently replay 5m on the complete later API minute dataset. Save its
+   recorded-live parity result honestly, including FAIL; never promote it to PASS.
+4. Run 1m and 3m using that SAME later API minute dataset. Match early signals to
+   API_CONTROL_5M entries, not the original live 5m entry list.
+
+Thus recorded-bar reproduction validates the strategy logic on actual recorded
+5m inputs, while the three-timeframe comparison tests the current rules on one
+common later dataset. It cannot show what live lower-timeframe alerts would have
+been before provider candle revisions. The two checks are separate and labelled
+in comparison.md / report.json. recorded-bars-replay.json preserves the original
+5m replay separately; recorded-bar-parity.json preserves its required proof.
+A recorded cutoff exit mark, if any, is used only in recorded-bar reproduction
+and never changes the common API dataset. The supplied day has no cutoff exit.
+
+Run the test command above first. Then, for this explicitly separate experiment:
+
+```bash
+cd ~/RB-ITOS-AI
+PYTHONPATH=backend:. .venv/bin/python -u \
+  hilega-timeframe-research/common_input.py \
+  --input-zip data/research/hilega-timeframe-input-20261026/timing-input.zip \
+  --session-input data/research/hilega-timeframe-input-20261026/session-input.json \
+  --output data/research/hilega-timeframe-common-api-20261026
+```
+
+Upload `data/research/hilega-timeframe-common-api-20261026/results.zip` when done.
+If blocked, share the short error and recorded-bar-parity.json. No tests/replays
+were run by the author; only Python AST syntax parsing and static review.

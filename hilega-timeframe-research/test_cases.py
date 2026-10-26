@@ -265,3 +265,68 @@ def test_warmup_filter_does_not_hide_invalid_dates_or_duplicates():
     raw=rows()+[dict(rows()[0],timestamp=stamp('15:39'))]*2
     with pytest.raises(ValueError,match='DUPLICATE_MINUTE'):
         study.regular_warmup(raw,DAY)
+
+
+def test_recorded_bars_use_actual_five_minute_ohlc():
+    import common_input
+    _,records=parity_fixture()
+    for row in records:
+        if row['stage']!='DIRECTIONAL_DECISION':continue
+        at=datetime.fromisoformat(row['payload']['decision_timestamp'])
+        row['payload']['price_ema_frame'].update(available_at=at.isoformat(),candle_label=(at-timedelta(minutes=5)).isoformat())
+    bars=common_input.recorded_bars(records,DAY)
+    assert len(bars)==68 and bars[0].ts==dt('09:15') and bars[-1].ts==dt('14:50')
+    assert bars[0].open==50 and bars[0].close==50
+
+
+def test_recorded_bars_missing_boundary_is_blocked():
+    import common_input
+    _,records=parity_fixture()
+    records.pop(0)
+    with pytest.raises(ValueError,match='RECORDED_5M_BOUNDARY_MISSING'):
+        common_input.recorded_bars(records,DAY)
+
+
+def test_recorded_cutoff_price_is_separate_and_source_untouched():
+    import common_input
+    raw=rows(375)
+    original=dict(next(r for r in raw if r['timestamp']==stamp('14:55')))
+    records=[dict(payload=dict(event_details=[dict(event_time=stamp('14:55'),exit_reason='SESSION_CUTOFF_1455',price=250)]))]
+    copy,basis=common_input.cutoff_source(raw,records,DAY)
+    assert next(r for r in copy if r['timestamp']==stamp('14:55'))['open']==250
+    assert next(r for r in raw if r['timestamp']==stamp('14:55'))==original
+    assert basis=='RECORDED_CUTOFF_EXIT_MARK'
+
+
+def test_common_mode_keeps_failed_live_parity_explicit(tmp_path):
+    import json
+    result=dict(trades=[],audit=[],open_trade=None,closed_points=0)
+    for name in ('manifest.json','parity.json'):(tmp_path/name).write_text('{}')
+    proof=dict(status='PASS',issues=[])
+    drift=dict(status='FAIL',issues=['PRICE_DIFFERENCE'])
+    study.report(tmp_path,DAY,{'DEPLOYED_5M':result},{},proof,{},common_input_drift=drift)
+    saved=json.loads((tmp_path/'report.json').read_text())
+    assert saved['comparison_basis']=='COMMON_LATER_API'
+    assert saved['baseline_parity']['status']=='FAIL'
+    assert saved['recorded_5m_bar_reproduction']['status']=='PASS'
+    assert 'API_CONTROL_5M' in saved['policies'] and 'DEPLOYED_5M' not in saved['policies']
+    assert 'API versus recorded-live parity: FAIL' in (tmp_path/'comparison.md').read_text()
+
+
+def test_failed_recorded_bar_reproduction_blocks_common_mode(tmp_path,monkeypatch):
+    import common_input,json
+    archive=tmp_path/'input.zip';archive.write_bytes(b'placeholder')
+    session=tmp_path/'input.json';session.write_text('{}')
+    output=tmp_path/'out'
+    monkeypatch.setattr(sys,'argv',['common_input.py','--input-zip',str(archive),'--session-input',str(session),'--output',str(output)])
+    monkeypatch.setattr(study,'verify_sources',lambda:(tmp_path,{}))
+    monkeypatch.setattr(study,'load_inputs',lambda *a:(dict(session_date=DAY,candles=[]),[('2026-10-23',[])],[],[]))
+    monkeypatch.setattr(common_input,'recorded_bars',lambda *a:[])
+    calls=[]
+    def fake_run(*a,**kw):calls.append(kw);return dict(trades=[])
+    monkeypatch.setattr(core,'run',fake_run)
+    monkeypatch.setattr(core,'parity',lambda *a:dict(status='FAIL',issues=['INDICATORS_CHANGED']))
+    with pytest.raises(SystemExit) as error:common_input.main()
+    assert error.value.code==2 and len(calls)==1
+    assert not (output/'report.json').exists()
+    assert json.loads((output/'recorded-bar-parity.json').read_text())['status']=='FAIL'

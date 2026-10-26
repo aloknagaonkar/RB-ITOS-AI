@@ -51,7 +51,7 @@ def aggregate(raw, day, interval, until):
         label += timedelta(minutes=interval)
     return result
 
-def run(policy, legacy, warm, raw, day, interval, until):
+def run(policy, legacy, warm, raw, day, interval, until, target_bars=None):
     c = legacy.ExitFirstCanonical()
     tracker = policy.PriceFrames()
     count = 0
@@ -76,7 +76,7 @@ def run(policy, legacy, warm, raw, day, interval, until):
     gate = policy.make_gate(tracker.frames)
     closed, audit, active = [], [], None
     cutoff = datetime.combine(date.fromisoformat(day), time(14,55), IST)
-    for bar in aggregate(raw, day, interval, min(until, cutoff)):
+    for bar in (aggregate(raw, day, interval, min(until, cutoff)) if target_bars is None else target_bars):
         reference = c.bullish.previous_indicators or opening
         result = policy.advance_boundary(c, gate, bar, reference, tracker)
         at = bar.ts + timedelta(minutes=interval)
