@@ -1,0 +1,32 @@
+{
+  "model": "APPLICATION_PREPARATION_PACKAGE_V1",
+  "files": {
+    "backend/market_lab/hilega_preparation_runtime_v1/__init__.py": "048e5833b9f3f7bd033bc397ec833c0cd392a57cce93f0c1d504dfa82c4f3f8f",
+    "backend/market_lab/hilega_preparation_runtime_v1/collect.py": "2b27984062db6079457c7039c68abe10194faa2fcf0865001f5ef80d739ca386",
+    "backend/market_lab/hilega_preparation_runtime_v1/dependencies.json": "ffacb9e578c445244b44d7f5ffd2603604b73ba83f7930cf2be6955978e7d82f",
+    "backend/market_lab/hilega_preparation_runtime_v1/evidence.py": "9b72ab5a48b7f8e4f87c217cf641ea853cfd91a22e1402e540c84c5b3127bbec",
+    "backend/market_lab/hilega_preparation_runtime_v1/source.py": "4644d221b53473995d05151eb4e3b874ef3df96d6a5928a0caf9de9859bb2b74",
+    "backend/market_lab/hilega_production_foundation/core.py": "40fd7f1f0d7bd0ce0b1d57d188079a338884196c97a8325ccb9bb29f99214d62",
+    "backend/market_lab/hilega_production_workspace_v1.py": "3895c65c6b9af20c7b539f3ded849bc7942197c3321996fafc73a8cdf94692fb",
+    "scripts/hilega_production_simulator_bridge.py": "9fd8bc6b22af63229f59743722cfb156b12feb0ca279bc2117a103d02670de98",
+    "tests/hilega_application_preparation_fixtures.py": "57633cd6c0507bb5da594b24420746a0cc81a6335fa55787a7140e2c580f06c4",
+    "tests/test_hilega_application_preparation_v1.py": "36a25ed06be3e1efb8b58324f9b736f6efee391a7fd4bbe45de73b4692cd57f9"
+  },
+  "expected": {
+    "backend/market_lab/hilega_production_foundation/core.py": "ea915827ea1c3e5af2ce97808af56d1e32e316b708741a0f17de7a572014d5cb",
+    "backend/market_lab/hilega_production_workspace_v1.py": "b8dea61c37975ce79d5a5a3743bbb0d5e119904dd4054ab4f07756e7c2ffff72",
+    "scripts/hilega_production_simulator_bridge.py": "114b44f5474ea880eb10388706b83fcaa335bb4546cede924ac3bb008ce7c772"
+  },
+  "dependencies": {
+    "backend/market_lab/hilega_production_account_adapter_v1.py": "9484899b374701c211adf22b67ea5fc84d0cdb978defe061ce8250cb7313b140",
+    "backend/market_lab/hilega_production_broker_observation_v1.py": "d0b0167604db78c5d0a70fa7012dcfbe18db4e86516b62a2190fcf294168aa4e",
+    "backend/market_lab/hilega_production_bridge_health_v1.py": "d7e02c6c7c8bc4697109c981fb515306db7036683028cd28248d2bd070850a93",
+    "hilega-production-contract-preview/rules.py": "660c92d979626692898c4b154b3918be24ed6fe27424885f165ccd7ee45195e5",
+    "hilega-production-contract-preview/run.py": "bd7f8f5590a6ac1a67373804e173d3e5c7c0245db0a6a42285966a73bb99b1c0",
+    "hilega-production-cash-observation/analysis.py": "9d4f98258585a9dea8f4af6266adb28ba32de50a20bbe7f65c8c58424534e799",
+    "hilega-production-cash-observation/run.py": "3d8a56ece2277968255556a4c4b56ec0f56ec0657545e7d7a3126f1e15fb9163",
+    "hilega-production-real-cash-shadow-gate/gate.py": "5b7b0278bb877caa0f9ccd181dd8dfc24ba3ed177738d42b596540bd417f5e6a",
+    "backend/market_lab/hilega_production_simulator_bridge_v1.py": "18f8e5578336ba4aa516bf96cad90c60a58349104b7d710503e0e03476d6ce27",
+    "backend/market_lab/hilega_combined_policy_v1.py": "4edab4a8b68f195942a2f1fb8c9e4a2c30ccee0c63e04b0cadbe3aca1db7c663"
+  }
+}
