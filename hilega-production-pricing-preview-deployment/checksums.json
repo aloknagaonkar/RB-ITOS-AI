@@ -1,0 +1,6 @@
+{
+  "release.json": "3f583f5cd16034382cc773a4a4c08396c79675885905f6394bad8dd3b6b79369",
+  "deploy.py": "b6ddfab274331f1e859720f76b343a6f5bfac5a0f05b3d1490c681c2f70b76ca",
+  "managed_processes.py": "83c6d960bf47571f6e5e1ed5647a7fa97da4d011fce71791a7e4a5045c905119",
+  "test_deploy.py": "ed807d8217bf8c8f65b5bbb21eb049553aa78405d37f7a3adb3e5479be981b90"
+}

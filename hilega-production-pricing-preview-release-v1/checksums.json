@@ -1,0 +1,15 @@
+{
+  "README.md": "01ffc29de55919c97c48c3c60c6c6ff6493a95fca95938d157a773b4661abdab",
+  "files/backend/market_lab/hilega_nifty_option_price_grid_v1.py": "4c687b701b2ec00fedd22d0c3eaace0e6ce937559102d1b1b04e65a09d837575",
+  "files/backend/market_lab/hilega_preparation_runtime_v1/pricing_preview.py": "47a75db7553805017fc9b98650f784708e94a7d1196da068264d7d5a88603e8b",
+  "files/backend/market_lab/hilega_preparation_runtime_v1/pricing_state.py": "92270ff0f3801b44071701152a103a525d192f9ac979b3d7e81d518a04eac6c9",
+  "files/backend/market_lab/hilega_preparation_runtime_v1/source.py": "18b35e67658bc14ef9fb5c196d904d519590472c8ea0a2258dd8ff83487c420f",
+  "files/backend/market_lab/hilega_production_workspace_v1.py": "33fe59ac8d76aae7c509f46dc30707fb3b98ffa142948ea13f143eb77e76573d",
+  "files/tests/test_hilega_nifty_option_price_grid_v1.py": "8f72d288716556f6665da6741816e744b40f14aa20e5fa4fd5c151a4ac192a5c",
+  "files/tests/test_hilega_preparation_pricing_preview_v1.py": "d9c4bc3159ae8d59ed16c37b2b2ce592495d502b1abd5df5c34aa5b71e6af281",
+  "files/tests/test_hilega_preparation_pricing_wiring_v1.py": "6a36b88723138fa8f5d88838a77d87675fb7dde2da3c09461d37c8995b0fd4af",
+  "manifest.json": "3f583f5cd16034382cc773a4a4c08396c79675885905f6394bad8dd3b6b79369",
+  "validation/APPLICATION_PREPARATION_STAGED.json": "7758dd3ba186508cd90c23c09e2519965f43e7113be7a8f886c8ba43bd90e2f5",
+  "validation/PRICING_PREVIEW_REGRESSION_V1.json": "f4add5f4666b32862e8bd41c677bf15c180c44df2f3f2d5ff889cee25c89f3d4",
+  "validation/PRICING_PREVIEW_STAGED.json": "fdd0b2457e5a1fcb327e616a19ecb89d2b08bc432506395b56757f500a675acd"
+}

@@ -1,0 +1,10 @@
+{
+  "model": "HILEGA_ROUTE_ACTIVATION_TRANSACTION_V1",
+  "phase": "ENROLLED_SERVICES_STILL_STOPPED",
+  "root": "/home/aloknagaonkar46/RB-ITOS-AI",
+  "database": "/home/aloknagaonkar46/RB-ITOS-AI/data/research/hilega-production-workspace/sim.sqlite",
+  "baseline_logical_hash": "743f7cab319e80abd9c8db90247a1705d05a1ff3f5dfa6372f31920355acb9c3",
+  "env_mode": 384,
+  "production_execution_enabled": false,
+  "post_enrollment_logical_hash": "612c47856343c9b94d42ac67a78da1af7b969424eb20e81422d10ec2577c3c8a"
+}
