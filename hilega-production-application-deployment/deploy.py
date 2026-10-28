@@ -158,6 +158,15 @@ def verify_units(units):
         need(set(values.get('TriggeredBy','').split())<=selected,'TRIGGERING_UNIT_MUST_ALSO_BE_REVIEWED_AND_STOPPED')
 
 
+
+def verify_quiescence(root,units,process_mode):
+    if process_mode=='systemd':return verify_units(units)
+    need(process_mode=='pid-managed' and not units,'PID_MANAGED_MODE_CANNOT_USE_SYSTEMD_UNITS')
+    from managed_processes import require_stopped,ManagedBlocked
+    try:return require_stopped(root)
+    except ManagedBlocked as exc:raise Blocked(str(exc)) from None
+
+
 def fsync_directory(path):
     fd=os.open(path,os.O_RDONLY|os.O_DIRECTORY)
     try:os.fsync(fd)
@@ -188,9 +197,9 @@ def deployment_lock(root):
         finally:fcntl.flock(stream,fcntl.LOCK_UN)
 
 
-def rollback(root,backup,workspace_db,units,*,services_stopped,checkpoint=lambda name:None):
+def rollback(root,backup,workspace_db,units,*,services_stopped,checkpoint=lambda name:None,process_mode='systemd'):
     need(services_stopped,'ALL_API_AND_WORKER_PROCESSES_MUST_BE_STOPPED')
-    verify_units(units);configuration(root);workspace(workspace_db)
+    verify_quiescence(root,units,process_mode);configuration(root);workspace(workspace_db)
     root=Path(root).resolve();backup=Path(backup).resolve()
     state=read_json(backup/'deployment.json')
     need(state.get('model')==MODEL and state.get('root')==str(root) and
@@ -206,6 +215,7 @@ def rollback(root,backup,workspace_db,units,*,services_stopped,checkpoint=lambda
         if old is not None:need(sha(target(backup/'original',name))==old,'BACKUP_CONTENT_CHANGED_'+name)
     state['phase']='ROLLING_BACK';journal(backup,state)
     for name in reversed(list(state['files'])):
+        verify_quiescence(root,units,process_mode)
         path=target(root,name);old=state['before'][name]
         actual=sha(path) if path.is_file() else None
         if old is None:
@@ -218,9 +228,9 @@ def rollback(root,backup,workspace_db,units,*,services_stopped,checkpoint=lambda
                 configuration_changed=False,database_modified=False,production_execution_enabled=False)
 
 
-def apply(root,release,stage,report,workspace_db,units,*,services_stopped,checkpoint=lambda name:None):
+def apply(root,release,stage,report,workspace_db,units,*,services_stopped,checkpoint=lambda name:None,process_mode='systemd'):
     need(services_stopped,'ALL_API_AND_WORKER_PROCESSES_MUST_BE_STOPPED')
-    verify_units(units)
+    verify_quiescence(root,units,process_mode)
     checked=check(root,release,stage,report,workspace_db)
     need(checked['status']!='ALREADY_DEPLOYED','CODE_ALREADY_DEPLOYED_NO_REAPPLY')
     root=Path(root).resolve();manifest=checked['manifest']
@@ -235,11 +245,12 @@ def apply(root,release,stage,report,workspace_db,units,*,services_stopped,checkp
     state=dict(model=MODEL,phase='BACKUP_COMPLETE',root=str(root),files=manifest['files'],
         before=checked['before'],modes=modes,release_manifest_sha256=PINNED_MANIFEST,
         validation_report_sha256=checked['validation_report_sha256'],units=list(units),
-        workspace_db=str(Path(workspace_db).resolve()),production_execution_enabled=False)
+        workspace_db=str(Path(workspace_db).resolve()),process_mode=process_mode,production_execution_enabled=False)
     journal(backup,state)
     state['phase']='APPLYING';journal(backup,state)
     try:
         for name,wanted in manifest['files'].items():
+            verify_quiescence(root,units,process_mode)
             path=target(root,name);old=state['before'][name]
             actual=sha(path) if path.is_file() else None
             need(actual==old,'TARGET_CHANGED_DURING_DEPLOYMENT_'+name)
@@ -267,6 +278,7 @@ def main():
     p.add_argument('--workspace-db',type=Path,default=Path('data/research/hilega-production-workspace/sim.sqlite'))
     p.add_argument('--backup',type=Path)
     p.add_argument('--unit',action='append',default=[])
+    p.add_argument('--process-mode',choices=['systemd','pid-managed'],default='systemd')
     p.add_argument('--services-stopped',action='store_true')
     p.add_argument('--confirmation')
     a=p.parse_args();root=a.root.resolve()
@@ -275,14 +287,19 @@ def main():
         if a.action=='check':
             result=check(root,resolve(a.release),a.stage,resolve(a.validation),resolve(a.workspace_db))
             result.pop('manifest');result.pop('before')
+            if a.process_mode=='pid-managed':
+                need(not a.unit,'PID_MANAGED_MODE_CANNOT_USE_SYSTEMD_UNITS')
+                from managed_processes import inspect
+                result['managed_processes']=inspect(root)
+                result['process_mode']='pid-managed'
         else:
             need(a.confirmation==('APPLY_VALIDATED_CODE_ONLY' if a.action=='apply' else 'ROLLBACK_CODE_ONLY'),
                  'EXPLICIT_CODE_ACTION_CONFIRMATION_REQUIRED')
             with deployment_lock(root):
-                if a.action=='apply':result=apply(root,resolve(a.release),a.stage,resolve(a.validation),resolve(a.workspace_db),a.unit,services_stopped=a.services_stopped)
+                if a.action=='apply':result=apply(root,resolve(a.release),a.stage,resolve(a.validation),resolve(a.workspace_db),a.unit,services_stopped=a.services_stopped,process_mode=a.process_mode)
                 else:
                     need(a.backup is not None,'RECORDED_BACKUP_REQUIRED')
-                    result=rollback(root,resolve(a.backup),resolve(a.workspace_db),a.unit,services_stopped=a.services_stopped)
+                    result=rollback(root,resolve(a.backup),resolve(a.workspace_db),a.unit,services_stopped=a.services_stopped,process_mode=a.process_mode)
         print(json.dumps(result));return 0
     except Exception as exc:
         reason=str(exc) if isinstance(exc,Blocked) else 'LOCAL_PREFLIGHT_OR_DEPLOYMENT_ERROR'

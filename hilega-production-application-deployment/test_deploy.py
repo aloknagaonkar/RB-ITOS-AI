@@ -168,3 +168,32 @@ def test_modified_backup_file_map_rejected(env):
     result=apply(env);path=Path(result['backup'])/'deployment.json';state=d.read_json(path)
     state['files']['helper.py']=d.sha(env['root']/'helper.py');path.write_text(json.dumps(state))
     with pytest.raises(d.Blocked,match='BACKUP_FILE_MAP_DIFFERS_FROM_RELEASE'):rollback(env,result['backup'])
+
+
+def test_pid_managed_apply_checks_quiescence_before_each_write(env,monkeypatch):
+    import managed_processes
+    observed=[]
+    monkeypatch.setattr(managed_processes,'require_stopped',lambda root:observed.append(root))
+    result=d.apply(env['root'],env['release'],env['stage'],env['report'],env['db'],[],
+                   services_stopped=True,process_mode='pid-managed')
+    assert len(observed)==1+len(env['manifest']['files'])
+    state=d.read_json(Path(result['backup'])/'deployment.json')
+    assert state['process_mode']=='pid-managed'
+    d.rollback(env['root'],result['backup'],env['db'],[],services_stopped=True,process_mode='pid-managed')
+    assert (env['root']/'backend/existing.py').read_text()=='original\n'
+
+
+def test_pid_managed_running_process_blocks_before_backup(env,monkeypatch):
+    import managed_processes
+    def running(root):raise managed_processes.ManagedBlocked('REPO_API_WORKER_OR_PRODUCTION_SOURCE_STILL_RUNNING')
+    monkeypatch.setattr(managed_processes,'require_stopped',running)
+    with pytest.raises(d.Blocked,match='STILL_RUNNING'):
+        d.apply(env['root'],env['release'],env['stage'],env['report'],env['db'],[],
+                services_stopped=True,process_mode='pid-managed')
+    assert not (env['root']/'backups').exists()
+
+
+def test_pid_mode_cannot_substitute_unrelated_systemd_units(env):
+    with pytest.raises(d.Blocked,match='CANNOT_USE_SYSTEMD_UNITS'):
+        d.apply(env['root'],env['release'],env['stage'],env['report'],env['db'],['bridge.service'],
+                services_stopped=True,process_mode='pid-managed')

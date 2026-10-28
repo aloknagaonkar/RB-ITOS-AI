@@ -7,6 +7,69 @@ The release is the application-preparation package whose manifest SHA256 is
 This tool does not rerun or independently attest those 151 results. It checks the
 local PASS report, stage, source/dependency hashes and exact release identity.
 
+## PID-managed deployment update
+
+The VM inventory identified market_lab.runtime worker (observed PID 1149) and
+market_lab.runtime api (observed PID 10478), matching data/runtime/worker.json
+and api.json and this repository. PIDs are observations, never constants for a
+future kill command. The two systemd server:app services run from ~/bridge and
+are unrelated. Strategy observers, collectors and sandbox workers are outside
+this deployment's stop scope.
+
+The original tool's systemd-only quiescence guard does not fit this deployment.
+The update adds an explicit --process-mode pid-managed alternative; it does not
+remove the systemd default or allow unrelated units to satisfy the guard.
+The application release, manifest and prior 151-test validation are UNCHANGED.
+Only deployment tooling/tests/instructions have changed.
+
+Run these updated tool tests on the VM (no real process signals are used):
+
+```bash
+cd ~/RB-ITOS-AI
+PYTHONPATH=backend:. .venv/bin/python -m pytest -q \
+  hilega-production-application-deployment/test_deploy.py \
+  hilega-production-application-deployment/test_managed_processes.py
+```
+
+Then run the read-only check for the actual process model:
+
+```bash
+.venv/bin/python hilega-production-application-deployment/deploy.py check \
+  --process-mode pid-managed
+```
+
+The check includes safe identities from /proc and the two repo-owned PID records.
+Running API/worker processes are expected at this point; apply_ready stays false.
+It prints no full command line, environment or credentials. It sends no signals.
+Duplicate roles, mismatched PID records or unreadable identity require review.
+
+For a later authorized apply/rollback, --process-mode pid-managed requires NO
+--unit arguments. It rechecks that no API, general runtime worker or production
+source worker is running from this repo, both initially and before every file
+mutation. PID records must remain present for identity review; do not use broad
+scripts/stop.sh, remove PID files or stop all Python processes. Exited zombies
+cannot read code and do not count as running workers. Unrelated repo processes
+and historical/research runtime subcommands are not selected for stopping.
+
+No stop/start automation is included. The final reviewed maintenance sequence is:
+1. Reverify current PID identities and canonical API/worker launcher/configuration.
+2. With explicit authorization, gracefully stop ONLY those affected processes,
+   retaining their PID records; ensure no scheduler/supervisor will respawn them.
+3. Run the existing guarded code-only apply with pid-managed mode. All original
+   release/report/hash, paused/empty DB, backup/journal and route checks remain.
+4. Verify applied source, then restart only the approved API/worker using the
+   confirmed launcher configuration and existing logs. Verify API health and
+   SIMULATOR/PAUSED state. PREPARATION_ONLY activation is still separate.
+
+The process scan is not an OS-wide maintenance lock. Operator attestation still
+covers disabled respawn sources/manual launches and complete process ownership.
+A newly spawned relevant process causes a per-file guard to stop the deployment;
+the journal/backup supports reviewed recovery, not automatic service restart.
+
+The rest of this document describes the original guards and the systemd option.
+Where it mentions a required unit list, that applies only to systemd mode; for
+this VM use the explicit pid-managed mode after the required authorization.
+
 ## Scope
 
 Ten application files: three replacements (controller core, workspace API module,
