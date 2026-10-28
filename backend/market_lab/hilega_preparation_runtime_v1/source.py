@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 from dotenv import dotenv_values
 from . import route,ensure_route,pending
+from .pricing_preview import preview as pricing_preview
+from market_lab.hilega_nifty_option_price_grid_v1 import PROFILE
 from .evidence import FLAGS,Blocked,need,evaluate,validate,digest,day,aware,readonly
 from market_lab.hilega_production_foundation.core import Service,encode
 from market_lab.hilega_production_simulator_bridge_v1 import verified_records,accepted,POLICY,VERSION
@@ -110,7 +112,10 @@ class Source:
                 expected_version=c['version'],bridge_run_id=self.run_id,signal_at=event['event_at'])
             if result['status']!='READ_ONLY_PREFLIGHT_CHECKS_PASS':
                 self._record_result_unlocked(event,cursor,result['reasons']);return
-            plan=result['preparation_preview']
+            priced=pricing_preview(bundle,pin,as_of=self.s.now().isoformat(),profile=PROFILE)
+            plan=next(p for p in priced['plans'] if p['direction']==event['direction'])
+            if not plan['evidence_checks_passed']:
+                self._record_result_unlocked(event,cursor,plan['reasons']);return
             self.checkpoint('BEFORE_TRANSACTION')
             # Keep a read transaction on the local closed adapter through the
             # controller commit. This is not atomicity with the remote broker.
@@ -125,7 +130,7 @@ class Source:
                      'CONTROL_CHANGED_OR_STOP_PENDING')
                 need(not db.execute('SELECT 1 FROM preparation_plans LIMIT 1').fetchone(),'UNRESOLVED_PREPARATION')
                 # Independently recheck all signed input freshness after DB waits.
-                again=next(p for p in validate(bundle,pin,as_of=self.s.now().isoformat()) if p['direction']==event['direction'])
+                again=next(p for p in pricing_preview(bundle,pin,as_of=self.s.now().isoformat(),profile=PROFILE)['plans'] if p['direction']==event['direction'])
                 need(again['evidence_checks_passed'] and all(again[k]==plan[k] for k in (
                     'bundle_fingerprint','cash_capture_fingerprint','contract_fingerprint','quote_fingerprint',
                     'instrument','quantity','proposed_cost_cents')), 'EVIDENCE_CHANGED_OR_STALE_BEFORE_COMMIT')

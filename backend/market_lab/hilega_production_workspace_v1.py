@@ -97,6 +97,18 @@ class Command(BaseModel):
     position_id:str|None=None
     confirmation:str
 
+@router.get('/execution-preparation/pricing')
+def execution_preparation_pricing(actor=Depends(authorize)):
+    if mode()!='SIMULATION_ONLY':
+        raise HTTPException(409,'PRODUCTION_SUBMISSION_DISABLED')
+    try:
+        from .hilega_preparation_runtime_v1.pricing_state import pricing_state
+        path=Path(os.getenv('HILEGA_PRODUCTION_SIM_DB','data/research/hilega-production-workspace/sim.sqlite'))
+        return pricing_state(path)
+    except HTTPException:raise
+    except Exception:
+        raise HTTPException(503,'PREPARATION_PRICING_UNAVAILABLE') from None
+
 @router.get('/execution-preparation')
 def execution_preparation(actor=Depends(authorize)):
     try:

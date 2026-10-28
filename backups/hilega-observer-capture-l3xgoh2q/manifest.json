@@ -1,0 +1,19 @@
+{
+  "status": "OBSERVER_ROLLOUT_PREFLIGHT_PASS",
+  "root": "/home/aloknagaonkar46/RB-ITOS-AI",
+  "observer_pid": 1238,
+  "observer_start_ticks": 10824,
+  "strategy": "HILEGA_V2_ALIGNMENT_DUAL_EXIT",
+  "source_blobs": {
+    "backend/market_lab/hilega_candle_evidence_v1.py": "175e051e164a00e1db299feda60ad505a22aba99",
+    "backend/market_lab/upstox_live_shadow_sources_v1.py": "9a9a1cc41ffbcff6252513df93834d188c883915",
+    "backend/market_lab/hilega_alignment_dual_exit_live_v1.py": "33a43768ad6ca72b673aa24650441336ba23a130",
+    "tests/test_hilega_candle_evidence_v1.py": "f599e1e7bf1c34ac4346353305033c658c0a2d96",
+    "tests/test_hilega_candle_evidence_audit_link_v1.py": "fd8e3d6b0a76f4846a4cbcefd5a6094f425a2522"
+  },
+  "env_file_sha256": "d651e0e8d7c36ba7ed5eeb257ddd3bd3676c158b734035e812d9c2c7ed32138a",
+  "backup": "/home/aloknagaonkar46/RB-ITOS-AI/backups/hilega-observer-capture-l3xgoh2q",
+  "capture_enabled": false,
+  "processes_signalled": false,
+  "services_started": false
+}
