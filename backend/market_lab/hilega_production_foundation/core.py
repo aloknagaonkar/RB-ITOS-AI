@@ -203,6 +203,8 @@ class Service:
         self.store=store;self.broker=broker;self.clock=clock or (lambda:datetime.now(IST))
         self.broker.clock=self.clock
         with store.lock():
+            from ..hilega_preparation_runtime_v1 import ensure_route
+            ensure_route(store)
             self._session()
             if os.getenv('HILEGA_PRODUCTION_WORKSPACE_MODE')=='SIMULATION_ONLY':
                 from ..hilega_sim_allocation_v1 import ensure
@@ -240,6 +242,9 @@ class Service:
         age=(self.now()-datetime.fromisoformat(c['last_reconciled_at'])).total_seconds()
         if not 0<=age<=30:raise Blocked('RECONCILIATION_STALE')
     def _submit(self,row):
+        from ..hilega_preparation_runtime_v1 import route,pending
+        if row['side']=='BUY' and (route()!='SIMULATOR' or pending(self.store)):
+            raise Blocked('SIMULATOR_BUY_BLOCKED_BY_PREPARATION_ROUTE')
         # Intent committed BEFORE transport; crash leaves REQUESTED, never retry blindly.
         row.setdefault('created_at',self.now().isoformat())
         self.store.put(row);self.store.event('ORDER_INTENT_PERSISTED',self.now().isoformat(),intent_id=row['id'],side=row['side'])
@@ -291,6 +296,18 @@ class Service:
                 price=entry['price'],parent=entry['id'],status='REQUESTED',filled=0,session_date=self._session()['session_date']))
     def _reconcile(self):
         try:
+            from ..hilega_preparation_runtime_v1 import pending,route,ensure_route
+            ensure_route(self.store)
+            self._honor_stop()
+            if pending(self.store):
+                self._block('UNSENT_PREPARATION_REQUIRES_REVIEW')
+                return False
+            if route()=='PREPARATION_ONLY':
+                self._honor_stop()
+                if self.store.intents() or self.broker.orders() or self.broker.fills():raise Blocked('SIMULATOR_STATE_ON_PREPARATION_ROUTE')
+                c=self._session();c.update(reconciled=True,last_reconciled_at=self.now().isoformat(),reason='PREPARATION_LOCAL_BASELINE_ONLY')
+                self.store.save_control(c);self.store.event('PREPARATION_LOCAL_BASELINE_NOT_BROKER_PROOF',self.now().isoformat())
+                return True
             self._honor_stop()
             for row in self.store.intents():
                 if row.get('not_submitted'):
@@ -338,12 +355,17 @@ class Service:
             self._block('RECONCILIATION_REQUIRED');return False
     def command(self,action,*,request_id,expected_version,actor,position_id=None,session_date=None):
         if action not in {'pause','resume','reconcile','exit','flatten'}:raise Blocked('UNKNOWN_COMMAND')
+        from ..hilega_preparation_runtime_v1 import route
+        if route()=='PREPARATION_ONLY' and action in {'exit','flatten'}:raise Blocked('LIVE_EXIT_NOT_IMPLEMENTED_ON_PREPARATION_ROUTE')
         if not actor or len(actor)>100:raise Blocked('ACTOR_REQUIRED')
         payload=dict(action=action,expected_version=expected_version,actor=actor,position_id=position_id,session_date=session_date)
         # Stop intent is durable before waiting for an in-flight submission.
         if action in {'pause','flatten'}:self.store.queue_stop(request_id,payload)
         with self.store.lock():
             self._honor_stop()
+            from ..hilega_preparation_runtime_v1 import ensure_route,pending
+            ensure_route(self.store)
+            if action=='resume' and pending(self.store):raise Blocked('UNSENT_PREPARATION_REQUIRES_REVIEW')
             c=self._session();prior,fp=self.store.previous(request_id,payload)
             if prior:return dict(prior,idempotent_replay=True,current_status=self._status())
             # Pause/flatten are monotonic safety commands: stale browser may still stop.
@@ -360,7 +382,7 @@ class Service:
                 if self.store.stop_state()['pending']:raise Blocked('DURABLE_STOP_PENDING')
                 self._check_bridge_health()
                 from ..hilega_sim_allocation_v1 import require_ready
-                require_ready(self.store,self.now())
+                if route()=='SIMULATOR':require_ready(self.store,self.now())
                 self._check_fresh(c)
                 if any(i.get('cleanup') or i['status'] not in TERMINAL or 'external_observed_quantity' in i for i in self.store.intents()):
                     raise Blocked('UNRESOLVED_EXECUTION_STATE')
@@ -375,6 +397,11 @@ class Service:
             self.store.event('CONTROL_COMMAND',self.now().isoformat(),actor=actor,request_id=request_id,action=action,version=result['status']['control']['version'])
             self.store.remember(request_id,fp,result);return result
     def submit_entry(self,*,signal_id,signal_at,instrument,quantity,price,bridge_run_id=None):
+        from ..hilega_preparation_runtime_v1 import route,ensure_route,pending
+        with self.store.lock():
+            ensure_route(self.store)
+            if route()!='SIMULATOR':raise Blocked('CONFIRMED_PREPARATION_SOURCE_REQUIRED_NO_SIMULATOR_BUY')
+            if pending(self.store):raise Blocked('UNSENT_PREPARATION_REQUIRES_REVIEW')
         positive_int(quantity)
         if not instrument or not isinstance(signal_id,str) or not signal_id:raise Blocked('SIGNAL_AND_INSTRUMENT_REQUIRED')
         amount=money(price)
@@ -382,6 +409,8 @@ class Service:
         signal=datetime.fromisoformat(signal_at)
         if signal.tzinfo is None:raise Blocked('AWARE_SIGNAL_TIME_REQUIRED')
         with self.store.lock():
+            ensure_route(self.store)
+            if route()!='SIMULATOR' or pending(self.store):raise Blocked('EXECUTION_ROUTE_CHANGED_OR_PREPARATION_PENDING')
             c=self._session();sid=hashlib.sha256((c['session_date']+'|'+signal_id).encode()).hexdigest()
             if any(i['id']==sid for i in self.store.intents()):raise Blocked('SIGNAL_ALREADY_CONSUMED')
             if c['mode']!='ARMED' or self.store.stop_state()['pending']:
@@ -467,10 +496,18 @@ class Service:
         if allocation['required'] and not allocation['ready'] and health.get('healthy',True):label='BLOCKED_'+allocation['status']
         stop=self.store.stop_state()
         if stop['pending']:label='STOP_REQUESTED_WAITING_FOR_CLEANUP'
+        from ..hilega_preparation_runtime_v1 import route,pending as preparation_pending
+        if route()=='PREPARATION_ONLY':
+            if stop['pending']:label='STOP_REQUESTED_WAITING_FOR_CLEANUP'
+            elif preparation_pending(self.store):label='PAUSED_UNSENT_PREPARATION_REQUIRES_REVIEW'
+            elif health['required'] and not health['healthy']:label='BLOCKED_PREPARATION_'+health['status']
+            elif not c['reconciled'] or stale:label='BLOCKED_PREPARATION_LOCAL_RECONCILIATION'
+            else:label='ARMED_PREPARATION_ONLY_NEXT_CONFIRMED_SIGNAL' if c['mode']=='ARMED' else 'PAUSED_PREPARATION_ONLY'
+            allocation=dict(required=False,ready=False,status='REAL_CASH_CHECKED_PER_SIGNAL_NO_REAL_RESERVATION',production_execution_enabled=False)
         return dict(control=c,label=label,bridge_health=health,allocation=allocation,
                     durable_execution=dict(model='HILEGA_DURABLE_SIM_INTEGRATION_V1',stop_requested=stop['pending'],stop_generation=stop['generation'],handled_generation=stop['handled'],atomic_reservation_intent=True,production_execution_enabled=False),pending_entry_orders=pending,ledger_remaining_quantity=exposure,
                     positions=rows,production_execution_enabled=False,simulator_only=True,
-                    notice='Simulation ledger only. Not connected to live strategy, UI or Upstox.')
+                    notice=('Application preparation route only; no real orders, fills, cash reservation or exit authority.' if route()=='PREPARATION_ONLY' else 'Simulation ledger only. Not connected to live strategy, UI or Upstox.'))
     def status(self):
         with self.store.lock():return self._status()
 

@@ -78,6 +78,13 @@ def report():
             control=snap['control'],label=snap['label'],durable_execution=snap['durable_execution'],bridge_health=snap['bridge_health'],allocation=snap['allocation'],last_reconciled_at=snap['control'].get('last_reconciled_at'))
     from .hilega_execution_port_v1 import availability
     result['broker_execution_port']=availability()
+    from .hilega_preparation_runtime_v1 import summary
+    result['application_preparation']=summary(s.store) if mode()=='SIMULATION_ONLY' else None
+    if result['application_preparation'] and result['application_preparation']['route']=='PREPARATION_ONLY':
+        result['source']='EVIDENCE_PREPARATION_ONLY'
+        result['broker_execution_port']['active_execution_route']='APPLICATION_PREPARATION_ONLY'
+        result['label']=snap['label']
+        result['configuration']['note']='One-lot evidence-bound unsent preparation; pricing policy and real reservation still pending'
     result['broker_observation']=broker_observation.display()
     return result
 
@@ -89,6 +96,14 @@ class Command(BaseModel):
     session_date:str|None=None
     position_id:str|None=None
     confirmation:str
+
+@router.get('/execution-preparation')
+def execution_preparation(actor=Depends(authorize)):
+    try:
+        from .hilega_preparation_runtime_v1 import summary
+        return summary(service().store)
+    except HTTPException:raise
+    except Exception:raise HTTPException(503,'PREPARATION_STATE_UNAVAILABLE') from None
 
 @router.get('/status')
 def status(actor=Depends(authorize)):
