@@ -1,0 +1,26 @@
+{
+  "model": "HILEGA_ATOMIC_BINDING_CODE_TRANSACTION_V1",
+  "root": "/home/aloknagaonkar46/RB-ITOS-AI",
+  "plan_sha256": "a4545ade1cfacc761267eb2a0e464cef11c520fbc77f7a5b854b2b11ecb67c72",
+  "before": {
+    "backend/market_lab/hilega_execution_port_v1/adapter.py": "cf404f631dfd0a5ca1079d258587e6d16e39e527c579f1a0e560b3650b31a0db",
+    "backend/market_lab/hilega_preparation_runtime_v1/source.py": "193ffe5d5d46478d8e8e56f92c9678976afef64dc4819dd5bfbcfcfdd04b5d8c",
+    "backend/market_lab/hilega_preparation_runtime_v1/atomic_binding.py": null,
+    "tests/test_hilega_atomic_disabled_binding_v1.py": null
+  },
+  "files": {
+    "backend/market_lab/hilega_execution_port_v1/adapter.py": "d2d8146cf8cc3334ce1d7d4715d73285d7755bc93201651be2d1798b34ee9e27",
+    "backend/market_lab/hilega_preparation_runtime_v1/source.py": "14d1509a8d16b7eebf17983eaef64bbdebc873534cb8b60f5f8d284f238a6b25",
+    "backend/market_lab/hilega_preparation_runtime_v1/atomic_binding.py": "594fa9ba1492515569a6e6333f11490b49d4471980714a75ca1092ef7ac9cbf0",
+    "tests/test_hilega_atomic_disabled_binding_v1.py": "9e493bcfd5bbe41aca6bf40ee578302a06c707cb56fecd66a8bdd5f31a8e3aa5"
+  },
+  "modes": {
+    "backend/market_lab/hilega_execution_port_v1/adapter.py": 436,
+    "backend/market_lab/hilega_preparation_runtime_v1/atomic_binding.py": 420,
+    "backend/market_lab/hilega_preparation_runtime_v1/source.py": 420,
+    "tests/test_hilega_atomic_disabled_binding_v1.py": 420
+  },
+  "phase": "APPLIED",
+  "database_fingerprint": "86204d2f6a2517e577a8bf4621e90f1e89c7bc82c079b5afd2bafd26261ba513",
+  "production_execution_enabled": false
+}

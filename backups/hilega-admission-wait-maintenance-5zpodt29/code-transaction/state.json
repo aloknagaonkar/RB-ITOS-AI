@@ -1,0 +1,20 @@
+{
+  "model": "HILEGA_ADMISSION_WAIT_CODE_TRANSACTION_V1",
+  "root": "/home/aloknagaonkar46/RB-ITOS-AI",
+  "plan_sha256": "be2b037252ec707691e1e335c6792f5079daf2340b425483f413c596ffeee562",
+  "before": {
+    "backend/market_lab/hilega_preparation_runtime_v1/source.py": "14d1509a8d16b7eebf17983eaef64bbdebc873534cb8b60f5f8d284f238a6b25",
+    "tests/test_hilega_preparation_wait_admission_v1.py": null
+  },
+  "files": {
+    "backend/market_lab/hilega_preparation_runtime_v1/source.py": "049b877d43a38bc90621f06e1b28ce0ffb37bc5b7f0e9794d7d66b298ac0222e",
+    "tests/test_hilega_preparation_wait_admission_v1.py": "fd2865c19c9a392eb7213dcd80f44e33347a56d85a6af8b4df4df1a753541bad"
+  },
+  "modes": {
+    "backend/market_lab/hilega_preparation_runtime_v1/source.py": 420,
+    "tests/test_hilega_preparation_wait_admission_v1.py": 420
+  },
+  "phase": "APPLIED",
+  "database_fingerprint": "a728959fe99c57f7aa9480adf05507a73a9d6a56c59f8815095f55b4cd0d04f1",
+  "production_execution_enabled": false
+}

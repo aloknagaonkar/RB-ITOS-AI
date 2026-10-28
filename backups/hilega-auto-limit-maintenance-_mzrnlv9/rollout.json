@@ -1,0 +1,37 @@
+{
+  "phase": "AUTO_LIMIT_CODE_DEPLOYED_PAUSED_VERIFIED",
+  "original_processes": [
+    {
+      "pid": 9999,
+      "role": "api",
+      "start_ticks": 2526429
+    },
+    {
+      "pid": 10000,
+      "role": "production-source-worker",
+      "start_ticks": 2526431
+    },
+    {
+      "pid": 9998,
+      "role": "worker",
+      "start_ticks": 2526428
+    }
+  ],
+  "children": {
+    "worker": {
+      "pid": 14017,
+      "start_ticks": 3683117
+    },
+    "api": {
+      "pid": 14018,
+      "start_ticks": 3683118
+    },
+    "production-source-worker": {
+      "pid": 14019,
+      "start_ticks": 3683119
+    }
+  },
+  "tool_sha256": "1ca4d882d9a4dbfaafd97a902f8efc5af17a1b2cf8c6540f50c15770cfe2b2bb",
+  "production_execution_enabled": false,
+  "code_transaction": "/home/aloknagaonkar46/RB-ITOS-AI/backups/hilega-auto-limit-maintenance-_mzrnlv9/code-transaction"
+}

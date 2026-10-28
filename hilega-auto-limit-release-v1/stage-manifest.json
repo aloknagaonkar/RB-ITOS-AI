@@ -1,0 +1,41 @@
+{
+  "model": "HILEGA_AUTO_LIMIT_CANDIDATE_STAGE_V1",
+  "status": "STAGED_NOT_DEPLOYED",
+  "runtime_repository_modified": false,
+  "production_execution_enabled": false,
+  "tests": [
+    "tests/test_hilega_auto_limit_wiring_v1.py",
+    "tests/test_hilega_limit_candidate_v1.py",
+    "tests/test_hilega_application_preparation_v1.py",
+    "tests/test_hilega_preparation_admission_v1.py",
+    "tests/test_hilega_preparation_pricing_wiring_v1.py",
+    "tests/test_hilega_preparation_reference_review_v1.py",
+    "tests/test_hilega_preparation_pricing_preview_v1.py",
+    "tests/test_hilega_nifty_option_price_grid_v1.py",
+    "tests/test_hilega_consolidated_adapter_v1.py"
+  ],
+  "files": {
+    "backend/market_lab/hilega_preparation_runtime_v1/dependencies.json": "ffacb9e578c445244b44d7f5ffd2603604b73ba83f7930cf2be6955978e7d82f",
+    "backend/market_lab/hilega_preparation_runtime_v1/limit_candidate.py": "7fb67ce2e86c69d3abb1cc8853995bcc6d80c58f196617ee93da40b90b5e2e94",
+    "backend/market_lab/hilega_preparation_runtime_v1/source.py": "193ffe5d5d46478d8e8e56f92c9678976afef64dc4819dd5bfbcfcfdd04b5d8c",
+    "backend/market_lab/hilega_production_account_adapter_v1.py": "9484899b374701c211adf22b67ea5fc84d0cdb978defe061ce8250cb7313b140",
+    "backend/market_lab/hilega_production_bridge_health_v1.py": "d7e02c6c7c8bc4697109c981fb515306db7036683028cd28248d2bd070850a93",
+    "backend/market_lab/hilega_production_broker_observation_v1.py": "d0b0167604db78c5d0a70fa7012dcfbe18db4e86516b62a2190fcf294168aa4e",
+    "backend/market_lab/hilega_production_foundation/core.py": "40fd7f1f0d7bd0ce0b1d57d188079a338884196c97a8325ccb9bb29f99214d62",
+    "hilega-production-cash-observation/analysis.py": "9d4f98258585a9dea8f4af6266adb28ba32de50a20bbe7f65c8c58424534e799",
+    "hilega-production-cash-observation/run.py": "3d8a56ece2277968255556a4c4b56ec0f56ec0657545e7d7a3126f1e15fb9163",
+    "hilega-production-contract-preview/rules.py": "660c92d979626692898c4b154b3918be24ed6fe27424885f165ccd7ee45195e5",
+    "hilega-production-contract-preview/run.py": "bd7f8f5590a6ac1a67373804e173d3e5c7c0245db0a6a42285966a73bb99b1c0",
+    "hilega-production-real-cash-shadow-gate/gate.py": "5b7b0278bb877caa0f9ccd181dd8dfc24ba3ed177738d42b596540bd417f5e6a",
+    "tests/hilega_application_preparation_fixtures.py": "57633cd6c0507bb5da594b24420746a0cc81a6335fa55787a7140e2c580f06c4",
+    "tests/test_hilega_application_preparation_v1.py": "36a25ed06be3e1efb8b58324f9b736f6efee391a7fd4bbe45de73b4692cd57f9",
+    "tests/test_hilega_auto_limit_wiring_v1.py": "9ba0f49be34750663a854268627d10ba3c3057b34ad5b903bfb095782165b756",
+    "tests/test_hilega_consolidated_adapter_v1.py": "b6d401cefea29f86af825e0f07683ebc0e32b646eb54585e1a9b2c3e61f5e547",
+    "tests/test_hilega_limit_candidate_v1.py": "01b1f81c9e326a240e0daa35a71f42f2d0d914edc21e965b8edb0aa82b4c3ecf",
+    "tests/test_hilega_nifty_option_price_grid_v1.py": "8f72d288716556f6665da6741816e744b40f14aa20e5fa4fd5c151a4ac192a5c",
+    "tests/test_hilega_preparation_admission_v1.py": "cf68d4300575336b4a3bda46e5e49dc09e2c71242494f4b21fd18554cb4d120e",
+    "tests/test_hilega_preparation_pricing_preview_v1.py": "d9c4bc3159ae8d59ed16c37b2b2ce592495d502b1abd5df5c34aa5b71e6af281",
+    "tests/test_hilega_preparation_pricing_wiring_v1.py": "6a36b88723138fa8f5d88838a77d87675fb7dde2da3c09461d37c8995b0fd4af",
+    "tests/test_hilega_preparation_reference_review_v1.py": "576f0a864abe52666583df1ace9e2e588f1641d1e228002bf9ab1a9d63c5bb92"
+  }
+}

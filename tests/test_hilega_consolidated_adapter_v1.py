@@ -140,10 +140,23 @@ def test_request_id_conflict(env):
     with pytest.raises(Blocked,match='REQUEST_ID_CONFLICT'):a.prepare(r,signal_id='signal-entry',signal_at=AT,direction='BULLISH',reservation_reference='EXPLICIT_FIXTURE_HOLD_REFERENCE',as_of=AT)
 
 def signed_capture():
-    from market_lab.hilega_production_account_adapter_v1 import sign,MODEL,LIVE
-    pin=dict(scope='EXPLICIT_SYNTHETIC_PIN_SCOPE',key='11'*32)
-    r=dict(model=MODEL,evidence_mode=LIVE,account_scope=pin['scope'],snapshot_id='test-cap',generated_at=AT,completed_at=AT,session_date=AT[:10],status='READ_ONLY_CAPTURED',account_identity_verified=True,production_execution_enabled=False,entry_permission=False,orders_sent=False,diagnostics=dict(status='EMPTY_ACCOUNT_SNAPSHOT_ONLY',issues=[]),orders=[],trades=[],positions=[])
-    r['signature']=sign(r,pin);return r,pin
+    from market_lab.hilega_production_account_adapter_v1 import (
+        sign, MODEL, LIVE, normalise,
+    )
+    pin = dict(scope="EXPLICIT_SYNTHETIC_PIN_SCOPE", key="11" * 32)
+    empty = {"status": "success", "data": []}
+    normalized = normalise(empty, empty, empty, observed_at=AT)
+    report = dict(
+        model=MODEL, evidence_mode=LIVE, account_scope=pin["scope"],
+        snapshot_id="synthetic-test-capture",
+        generated_at=AT, completed_at=AT, session_date=AT[:10],
+        status="READ_ONLY_CAPTURED", account_identity_verified=True,
+        profile_verified_before_and_after=True, source_atomic=False,
+        production_execution_enabled=False, entry_permission=False,
+        orders_sent=False, **normalized,
+    )
+    report["signature"] = sign(report, pin)
+    return report, pin
 
 def test_read_only_empty_baseline_no_ownership_claim(tmp_path):
     cap,pin=signed_capture();a=Adapter(Store(tmp_path/'live.sqlite',pin['scope'],'LIVE_CLOSED'),HttpTransport(lambda:'unused'))
@@ -152,10 +165,36 @@ def test_read_only_empty_baseline_no_ownership_claim(tmp_path):
     assert not a.status()['attempts']
 
 def test_read_only_account_activity_remains_review(tmp_path):
-    from market_lab.hilega_production_account_adapter_v1 import sign
-    cap,pin=signed_capture();cap.pop('signature');cap['orders']=[dict(order_id='unowned')];cap['signature']=sign(cap,pin)
-    a=Adapter(Store(tmp_path/'live.sqlite',pin['scope'],'LIVE_CLOSED'),HttpTransport(lambda:'unused'))
-    assert a.reconcile_read_only(cap,pin,as_of=AT)['status']=='READ_ONLY_OWNERSHIP_REVIEW'
+    from market_lab.hilega_production_account_adapter_v1 import (
+        sign, normalise,
+    )
+    cap, pin = signed_capture()
+    cap.pop("signature")
+    order = dict(
+        order_id="unowned", instrument_token="NSE_FO|12345",
+        product="I", transaction_type="BUY", quantity=65,
+        filled_quantity=0, pending_quantity=65, status="open",
+        order_timestamp=AT,
+    )
+    empty = {"status": "success", "data": []}
+    cap.update(normalise(
+        {"status": "success", "data": [order]},
+        empty, empty, observed_at=AT,
+    ))
+    cap["signature"] = sign(cap, pin)
+    adapter = Adapter(
+        Store(tmp_path / "live.sqlite", pin["scope"], "LIVE_CLOSED"),
+        HttpTransport(lambda: pytest.fail("Token must not be accessed")),
+    )
+    result = adapter.reconcile_read_only(cap, pin, as_of=AT)
+    assert result["status"] == "READ_ONLY_OWNERSHIP_REVIEW"
+    assert result["ownership_verified"] is False
+    assert result["matched_known_order_count"] == 0
+    terminal = result["terminal_account_review"]
+    assert "NON_TERMINAL_ORDERS" in terminal["reasons"]
+    assert terminal["reservation_release_permission"] is False
+    assert adapter.status()["requests"] == []
+    assert adapter.status()["attempts"] == []
 
 def test_live_capture_cannot_enter_fixture(env):
     cap,pin=signed_capture()

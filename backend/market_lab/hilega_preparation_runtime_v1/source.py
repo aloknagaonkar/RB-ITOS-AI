@@ -6,6 +6,8 @@ from pathlib import Path
 from dotenv import dotenv_values
 from . import route,ensure_route,pending
 from .pricing_preview import preview as pricing_preview
+from .limit_candidate import build_candidate, fresh_plan
+from .atomic_binding import source_transaction, bind_disabled_request
 from market_lab.hilega_nifty_option_price_grid_v1 import PROFILE
 from .evidence import FLAGS,Blocked,need,evaluate,validate,digest,day,aware,readonly
 from market_lab.hilega_production_foundation.core import Service,encode
@@ -106,6 +108,22 @@ class Source:
         with self.s.store.lock():
             ensure_route(self.s.store)
             current=self.s._session()
+
+            # PREPARATION_ONLY reconciliation is a local baseline, not broker proof.
+            # Refresh only an expired, valid same-session baseline while the
+            # original Resume remains authoritative. Every evidence gate below
+            # still runs against the fresh signal and signed account snapshot.
+            checked_at=self.s.now()
+            previous=current.get("last_reconciled_at")
+            if (current["mode"]=="ARMED" and current["version"]==c["version"]
+                    and current.get("reconciled") is True and previous
+                    and day(aware(previous))==day(checked_at)
+                    and (checked_at-aware(previous)).total_seconds()>30):
+                if not self.s._reconcile():
+                    self._record_result_unlocked(
+                        event,cursor,["PREPARATION_LOCAL_BASELINE_REFRESH_FAILED"])
+                    return
+                current=self.s._session()
             adapter_path=Path(os.getenv('HILEGA_PREPARATION_ADAPTER_DB','data/research/hilega-broker-adapter-closed/adapter.sqlite'))
             result=evaluate(bundle,pin,direction=event['direction'],as_of=self.s.now().isoformat(),
                 controller_db=self.s.store.path,adapter_db=adapter_path,
@@ -119,8 +137,7 @@ class Source:
             self.checkpoint('BEFORE_TRANSACTION')
             # Keep a read transaction on the local closed adapter through the
             # controller commit. This is not atomicity with the remote broker.
-            with readonly(adapter_path) as adapter,self.s.store.db() as db:
-                db.execute('BEGIN IMMEDIATE')
+            with source_transaction(self.s.store,adapter_path) as (adapter,db):
                 meta=adapter.execute('SELECT data FROM meta WHERE id=1').fetchone()
                 need(meta is not None and json.loads(meta[0])==dict(scope=pin['scope'],mode='LIVE_CLOSED'),'ADAPTER_SCOPE_CHANGED_BEFORE_COMMIT')
                 need(not any(adapter.execute('SELECT 1 FROM '+t+' LIMIT 1').fetchone() for t in ('requests','attempts','receipts')),'ADAPTER_ACTIVITY_CHANGED_BEFORE_COMMIT')
@@ -152,6 +169,10 @@ class Source:
                 outbox=dict(id=event['id'],reservation_reference=event['id'],
                     bundle_fingerprint=plan['bundle_fingerprint'],instrument=plan['instrument'],quantity=plan['quantity'],
                     status='NON_EXECUTABLE_PRICING_POLICY_PENDING',request_body=None,**FLAGS)
+                outbox["disabled_request_candidate"]=build_candidate(
+                    bound,hold,outbox,bundle,pin,now=self.s.now(),
+                    session_date=latest["session_date"],
+                    fee_buffer_cents=10_000,profile=PROFILE)
                 old_bundle=db.execute('SELECT data FROM preparation_evidence WHERE digest=?',(plan['bundle_fingerprint'],)).fetchone()
                 need(old_bundle is None or json.loads(old_bundle[0])==bundle,'PERSISTED_EVIDENCE_CONFLICT')
                 db.execute('INSERT OR IGNORE INTO preparation_evidence VALUES(?,?)',(plan['bundle_fingerprint'],encode(bundle)))
@@ -159,11 +180,23 @@ class Source:
                 self.checkpoint('AFTER_PLAN_INSERT')
                 db.execute('INSERT INTO preparation_shadow_holds VALUES(?,?)',(event['id'],encode(hold)))
                 db.execute('INSERT INTO preparation_outbox VALUES(?,?)',(event['id'],encode(outbox)))
+                if bind_disabled_request(db,bound,hold,outbox,bundle,pin,now=self.s.now()):
+                    self.checkpoint('AFTER_ADAPTER_REQUEST_INSERT')
                 db.execute('INSERT INTO preparation_consumed VALUES(?,?)',(event['id'],fp))
                 latest.update(mode='PAUSED',version=latest['version']+1,reconciled=False,reason='APPLICATION_UNSENT_PREPARATION_REQUIRES_REVIEW')
                 db.execute('UPDATE control SET data=? WHERE id=1',(encode(latest),))
                 self._audit(db,'EVIDENCE_LINKED_UNSENT',['PRICING_POLICY_AND_REAL_RESERVATION_PENDING'])
                 self._cursor(db,cursor);self.checkpoint('BEFORE_COMMIT')
+                final_now=self.s.now()
+                final=fresh_plan(bundle,pin,event["direction"],final_now,PROFILE)
+                need(all(final[k]==plan[k] for k in (
+                    "bundle_fingerprint","cash_capture_fingerprint",
+                    "contract_fingerprint","quote_fingerprint",
+                    "instrument","quantity","proposed_cost_cents")),
+                    "CANDIDATE_EVIDENCE_CHANGED_BEFORE_COMMIT")
+                request_at=aware(outbox["disabled_request_candidate"]["draft"]["created_at"])
+                need(0<=(final_now-request_at).total_seconds()<=10,
+                     "CANDIDATE_STALE_BEFORE_COMMIT")
             self.checkpoint('AFTER_COMMIT')
 
     def _pause_in_transaction(self,db):

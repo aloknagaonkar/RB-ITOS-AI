@@ -1,0 +1,45 @@
+{
+  "model": "HILEGA_ADMISSION_WAIT_MAINTENANCE_PLAN_V1",
+  "status": "MAINTENANCE_PREPARED_NOT_APPLIED",
+  "root": "/home/aloknagaonkar46/RB-ITOS-AI",
+  "package": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-admission-wait-release-v1",
+  "backup": "/home/aloknagaonkar46/RB-ITOS-AI/backups/hilega-admission-wait-maintenance-5zpodt29",
+  "database": "/home/aloknagaonkar46/RB-ITOS-AI/data/research/hilega-production-workspace/sim.sqlite",
+  "manifest_sha256": "781000c45ab1a6a19f92c2d36a4ea4c5ebda0233cf61f8901fb76add8767783e",
+  "env_sha256": "a9ee4c6bcf427885594b1359908105347641fa71f36137e7342e52d4feaaaee1",
+  "startup_sha256": "dc37c00a7b8f4d2e2a572a11f70f0064c5fe7112d4fa691361adb200f5ed81c4",
+  "processes": [
+    {
+      "pid": 15945,
+      "role": "api",
+      "start_ticks": 4313023
+    },
+    {
+      "pid": 15946,
+      "role": "production-source-worker",
+      "start_ticks": 4313024
+    },
+    {
+      "pid": 15944,
+      "role": "worker",
+      "start_ticks": 4313022
+    }
+  ],
+  "metadata_paths": [
+    "data/runtime/api.json",
+    "data/runtime/worker.json",
+    "data/runtime/hilega-preparation-source.json",
+    "backups/hilega-preparation-activation-cvtlkibq/maintenance.json"
+  ],
+  "stopped_database_backup_required": true,
+  "automatic_database_restore_allowed": false,
+  "guard_files": {
+    "check-preparation-paused.py": "99d6045eac312fcc0e4cda49ad67427abe05bb59d9c698d6d8ca5442e20abc6b",
+    "hilega-production-application-deployment/deploy.py": "44dd109e11c3ae6a2d2d01719aef345b1f0d9e83c79aac5c167dca3b1e6ab866",
+    "hilega-production-application-deployment/managed_processes.py": "83c6d960bf47571f6e5e1ed5647a7fa97da4d011fce71791a7e4a5045c905119",
+    "scripts/hilega_production_simulator_bridge.py": "9fd8bc6b22af63229f59743722cfb156b12feb0ca279bc2117a103d02670de98"
+  },
+  "configuration_change_included": false,
+  "applied": false,
+  "production_execution_enabled": false
+}

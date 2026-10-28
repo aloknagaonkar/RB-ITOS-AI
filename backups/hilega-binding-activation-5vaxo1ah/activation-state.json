@@ -1,0 +1,8 @@
+{
+  "model": "HILEGA_LOCAL_BINDING_CONFIGURATION_TRANSACTION_V1",
+  "root": "/home/aloknagaonkar46/RB-ITOS-AI",
+  "plan_sha256": "44bef25e2036ffa0aa104f5f5d2f74a7d93b14245efc1d998eb7728faaa5b05d",
+  "phase": "APPLIED",
+  "original_mode": 384,
+  "production_execution_enabled": false
+}

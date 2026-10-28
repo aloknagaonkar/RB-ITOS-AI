@@ -1,0 +1,26 @@
+{
+  "model": "HILEGA_AUTO_LIMIT_CODE_TRANSACTION_V1",
+  "root": "/home/aloknagaonkar46/RB-ITOS-AI",
+  "plan_sha256": "5d352e4ec40848793a8497f301a6c06ea20642052859fd941a256bbf3387d227",
+  "before": {
+    "backend/market_lab/hilega_preparation_runtime_v1/source.py": "18b35e67658bc14ef9fb5c196d904d519590472c8ea0a2258dd8ff83487c420f",
+    "backend/market_lab/hilega_preparation_runtime_v1/limit_candidate.py": "f258a022f074556eb72388cda18fe9c73f475f4d5b00d0ca7f3c0ce0408362e7",
+    "tests/test_hilega_limit_candidate_v1.py": "f1d5f2ff945425618a99967b7ca59d07400a4ea74aa1fb54a8cf3cbb95a18a2e",
+    "tests/test_hilega_auto_limit_wiring_v1.py": null
+  },
+  "files": {
+    "backend/market_lab/hilega_preparation_runtime_v1/source.py": "193ffe5d5d46478d8e8e56f92c9678976afef64dc4819dd5bfbcfcfdd04b5d8c",
+    "backend/market_lab/hilega_preparation_runtime_v1/limit_candidate.py": "7fb67ce2e86c69d3abb1cc8853995bcc6d80c58f196617ee93da40b90b5e2e94",
+    "tests/test_hilega_limit_candidate_v1.py": "01b1f81c9e326a240e0daa35a71f42f2d0d914edc21e965b8edb0aa82b4c3ecf",
+    "tests/test_hilega_auto_limit_wiring_v1.py": "9ba0f49be34750663a854268627d10ba3c3057b34ad5b903bfb095782165b756"
+  },
+  "modes": {
+    "backend/market_lab/hilega_preparation_runtime_v1/limit_candidate.py": 436,
+    "backend/market_lab/hilega_preparation_runtime_v1/source.py": 420,
+    "tests/test_hilega_auto_limit_wiring_v1.py": 420,
+    "tests/test_hilega_limit_candidate_v1.py": 436
+  },
+  "phase": "APPLIED",
+  "database_fingerprint": "8c64753d26490715aca35f3372a5f5765beeca533d5693b221b5cbaae1508ece",
+  "production_execution_enabled": false
+}

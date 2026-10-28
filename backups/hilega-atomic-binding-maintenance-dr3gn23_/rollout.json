@@ -1,0 +1,37 @@
+{
+  "phase": "ATOMIC_BINDING_CODE_DEPLOYED_PAUSED_VERIFIED",
+  "original_processes": [
+    {
+      "pid": 14018,
+      "role": "api",
+      "start_ticks": 3683118
+    },
+    {
+      "pid": 14019,
+      "role": "production-source-worker",
+      "start_ticks": 3683119
+    },
+    {
+      "pid": 14017,
+      "role": "worker",
+      "start_ticks": 3683117
+    }
+  ],
+  "children": {
+    "worker": {
+      "pid": 15577,
+      "start_ticks": 4199112
+    },
+    "api": {
+      "pid": 15578,
+      "start_ticks": 4199112
+    },
+    "production-source-worker": {
+      "pid": 15579,
+      "start_ticks": 4199113
+    }
+  },
+  "tool_sha256": "322227c3ed7f9724723e06e529d2128b1b9769caca8bcfc937e5b7ef1ba4b133",
+  "production_execution_enabled": false,
+  "code_transaction": "/home/aloknagaonkar46/RB-ITOS-AI/backups/hilega-atomic-binding-maintenance-dr3gn23_/code-transaction"
+}

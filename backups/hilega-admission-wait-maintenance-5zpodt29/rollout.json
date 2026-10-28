@@ -1,0 +1,37 @@
+{
+  "phase": "ADMISSION_WAIT_CODE_DEPLOYED_PAUSED_VERIFIED",
+  "original_processes": [
+    {
+      "pid": 15945,
+      "role": "api",
+      "start_ticks": 4313023
+    },
+    {
+      "pid": 15946,
+      "role": "production-source-worker",
+      "start_ticks": 4313024
+    },
+    {
+      "pid": 15944,
+      "role": "worker",
+      "start_ticks": 4313022
+    }
+  ],
+  "children": {
+    "worker": {
+      "pid": 17033,
+      "start_ticks": 4642760
+    },
+    "api": {
+      "pid": 17034,
+      "start_ticks": 4642760
+    },
+    "production-source-worker": {
+      "pid": 17035,
+      "start_ticks": 4642761
+    }
+  },
+  "tool_sha256": "418e781d44aaff8981567c334ff7a80b93c676b50610f137249e76e7db8845b3",
+  "production_execution_enabled": false,
+  "code_transaction": "/home/aloknagaonkar46/RB-ITOS-AI/backups/hilega-admission-wait-maintenance-5zpodt29/code-transaction"
+}

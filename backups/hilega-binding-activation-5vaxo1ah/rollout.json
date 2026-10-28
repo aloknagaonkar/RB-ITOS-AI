@@ -1,0 +1,37 @@
+{
+  "phase": "LOCAL_BINDING_ENABLED_PAUSED_VERIFIED",
+  "original_processes": [
+    {
+      "pid": 15578,
+      "role": "api",
+      "start_ticks": 4199112
+    },
+    {
+      "pid": 15579,
+      "role": "production-source-worker",
+      "start_ticks": 4199113
+    },
+    {
+      "pid": 15577,
+      "role": "worker",
+      "start_ticks": 4199112
+    }
+  ],
+  "children": {
+    "worker": {
+      "pid": 15944,
+      "start_ticks": 4313022
+    },
+    "api": {
+      "pid": 15945,
+      "start_ticks": 4313023
+    },
+    "production-source-worker": {
+      "pid": 15946,
+      "start_ticks": 4313024
+    }
+  },
+  "tool_sha256": "a49973a9dc78a5d94259f0490dde3dffd7070250bc418ca0c03ced34ef0e49b6",
+  "production_execution_enabled": false,
+  "configuration_backup": "/home/aloknagaonkar46/RB-ITOS-AI/backups/hilega-binding-activation-5vaxo1ah"
+}

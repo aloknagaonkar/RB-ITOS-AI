@@ -1,0 +1,44 @@
+{
+  "model": "HILEGA_AUTO_LIMIT_MAINTENANCE_PLAN_V1",
+  "status": "MAINTENANCE_PREPARED_NOT_APPLIED",
+  "root": "/home/aloknagaonkar46/RB-ITOS-AI",
+  "package": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-auto-limit-release-v1",
+  "backup": "/home/aloknagaonkar46/RB-ITOS-AI/backups/hilega-auto-limit-maintenance-_mzrnlv9",
+  "manifest_sha256": "13f052acf497ca10ac4b1f3a289f6ede36559b37e273a5143c5a15ebf6773665",
+  "env_sha256": "53db2a87853392fc69a2641709c31a98a05329968ef64dc50927bb187f00b892",
+  "startup_sha256": "6174e85e233891694229c48a9f832163b9d79449bc63c2ff391dfd7f1ea083d1",
+  "processes": [
+    {
+      "pid": 9999,
+      "role": "api",
+      "start_ticks": 2526429
+    },
+    {
+      "pid": 10000,
+      "role": "production-source-worker",
+      "start_ticks": 2526431
+    },
+    {
+      "pid": 9998,
+      "role": "worker",
+      "start_ticks": 2526428
+    }
+  ],
+  "database": "/home/aloknagaonkar46/RB-ITOS-AI/data/research/hilega-production-workspace/sim.sqlite",
+  "stopped_database_backup_required": true,
+  "automatic_database_restore_allowed": false,
+  "metadata_paths": [
+    "data/runtime/api.json",
+    "data/runtime/worker.json",
+    "data/runtime/hilega-preparation-source.json",
+    "backups/hilega-preparation-activation-cvtlkibq/maintenance.json"
+  ],
+  "guard_files": {
+    "check-preparation-paused.py": "99d6045eac312fcc0e4cda49ad67427abe05bb59d9c698d6d8ca5442e20abc6b",
+    "hilega-production-application-deployment/managed_processes.py": "83c6d960bf47571f6e5e1ed5647a7fa97da4d011fce71791a7e4a5045c905119",
+    "scripts/hilega_production_simulator_bridge.py": "9fd8bc6b22af63229f59743722cfb156b12feb0ca279bc2117a103d02670de98"
+  },
+  "applied": false,
+  "processes_signalled": false,
+  "production_execution_enabled": false
+}
