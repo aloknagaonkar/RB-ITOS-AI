@@ -1,0 +1,47 @@
+{
+  "model": "APPLICATION_PREPARATION_CODE_DEPLOYMENT_V1",
+  "phase": "APPLIED",
+  "root": "/home/aloknagaonkar46/RB-ITOS-AI",
+  "files": {
+    "backend/market_lab/hilega_preparation_runtime_v1/__init__.py": "048e5833b9f3f7bd033bc397ec833c0cd392a57cce93f0c1d504dfa82c4f3f8f",
+    "backend/market_lab/hilega_preparation_runtime_v1/collect.py": "2b27984062db6079457c7039c68abe10194faa2fcf0865001f5ef80d739ca386",
+    "backend/market_lab/hilega_preparation_runtime_v1/dependencies.json": "ffacb9e578c445244b44d7f5ffd2603604b73ba83f7930cf2be6955978e7d82f",
+    "backend/market_lab/hilega_preparation_runtime_v1/evidence.py": "9b72ab5a48b7f8e4f87c217cf641ea853cfd91a22e1402e540c84c5b3127bbec",
+    "backend/market_lab/hilega_preparation_runtime_v1/source.py": "4644d221b53473995d05151eb4e3b874ef3df96d6a5928a0caf9de9859bb2b74",
+    "backend/market_lab/hilega_production_foundation/core.py": "40fd7f1f0d7bd0ce0b1d57d188079a338884196c97a8325ccb9bb29f99214d62",
+    "backend/market_lab/hilega_production_workspace_v1.py": "3895c65c6b9af20c7b539f3ded849bc7942197c3321996fafc73a8cdf94692fb",
+    "scripts/hilega_production_simulator_bridge.py": "9fd8bc6b22af63229f59743722cfb156b12feb0ca279bc2117a103d02670de98",
+    "tests/hilega_application_preparation_fixtures.py": "57633cd6c0507bb5da594b24420746a0cc81a6335fa55787a7140e2c580f06c4",
+    "tests/test_hilega_application_preparation_v1.py": "36a25ed06be3e1efb8b58324f9b736f6efee391a7fd4bbe45de73b4692cd57f9"
+  },
+  "before": {
+    "backend/market_lab/hilega_preparation_runtime_v1/__init__.py": null,
+    "backend/market_lab/hilega_preparation_runtime_v1/collect.py": null,
+    "backend/market_lab/hilega_preparation_runtime_v1/dependencies.json": null,
+    "backend/market_lab/hilega_preparation_runtime_v1/evidence.py": null,
+    "backend/market_lab/hilega_preparation_runtime_v1/source.py": null,
+    "backend/market_lab/hilega_production_foundation/core.py": "ea915827ea1c3e5af2ce97808af56d1e32e316b708741a0f17de7a572014d5cb",
+    "backend/market_lab/hilega_production_workspace_v1.py": "b8dea61c37975ce79d5a5a3743bbb0d5e119904dd4054ab4f07756e7c2ffff72",
+    "scripts/hilega_production_simulator_bridge.py": "114b44f5474ea880eb10388706b83fcaa335bb4546cede924ac3bb008ce7c772",
+    "tests/hilega_application_preparation_fixtures.py": null,
+    "tests/test_hilega_application_preparation_v1.py": null
+  },
+  "modes": {
+    "backend/market_lab/hilega_preparation_runtime_v1/__init__.py": 420,
+    "backend/market_lab/hilega_preparation_runtime_v1/collect.py": 420,
+    "backend/market_lab/hilega_preparation_runtime_v1/dependencies.json": 420,
+    "backend/market_lab/hilega_preparation_runtime_v1/evidence.py": 420,
+    "backend/market_lab/hilega_preparation_runtime_v1/source.py": 420,
+    "backend/market_lab/hilega_production_foundation/core.py": 436,
+    "backend/market_lab/hilega_production_workspace_v1.py": 436,
+    "scripts/hilega_production_simulator_bridge.py": 436,
+    "tests/hilega_application_preparation_fixtures.py": 420,
+    "tests/test_hilega_application_preparation_v1.py": 420
+  },
+  "release_manifest_sha256": "4754916d28da64ea12f8b1186365ad9b7a0f27793e982c065f127cc90bea54f7",
+  "validation_report_sha256": "726c8d0901be91bd2e96f2fc69a42a32607b48071cf7a2078a546db098cc27aa",
+  "units": [],
+  "workspace_db": "/home/aloknagaonkar46/RB-ITOS-AI/data/research/hilega-production-workspace/sim.sqlite",
+  "process_mode": "pid-managed",
+  "production_execution_enabled": false
+}

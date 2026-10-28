@@ -1,5 +1,6 @@
 """Live observation adapter for the tested historical alignment + dual-exit policy."""
 from copy import deepcopy
+from .hilega_candle_evidence_v1 import input_context, audit_fields
 from datetime import datetime, timedelta, time
 import json
 from .hilega_v2_alignment_replay_v1 import cache_index, candles, aggregate_exact_5m
@@ -23,6 +24,20 @@ class HilegaAlignmentDualExitLiveCoordinator(HilegaWmaGapLiveCoordinatorV2):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._reset_policy_session()
+
+    def _consume(self, intraday, now, *, recovered):
+        with input_context(self, intraday):
+            return super()._consume(intraday, now, recovered=recovered)
+
+    def _audit(self, now, stage, status, payload=None, **kwargs):
+        if stage in {
+            "DIRECTIONAL_DECISION", "DIRECTIONAL_SESSION_CUTOFF",
+            "COMBINED_PRICE_OBSERVATION", "COMBINED_FIVE_MINUTE_EVALUATION",
+        }:
+            fields = audit_fields(self)
+            if fields:
+                payload = {**(payload or {}), **fields}
+        return super()._audit(now, stage, status, payload, **kwargs)
 
     def _reset_policy_session(self):
         self.episode = {'BULLISH': False, 'BEARISH': False}
@@ -153,6 +168,10 @@ class HilegaAlignmentDualExitLiveCoordinator(HilegaWmaGapLiveCoordinatorV2):
         return decision
 
     def process_cutoff(self, now, *, intraday):
+        with input_context(self, intraday):
+            return self._process_cutoff_from_rows(now, intraday=intraday)
+
+    def _process_cutoff_from_rows(self, now, *, intraday):
         at=datetime.combine(now.date(),time(14,55),tzinfo=IST)
         if now<at or self._cutoff_done_date==now.date():return None
         price=self._minute_open(intraday,at)

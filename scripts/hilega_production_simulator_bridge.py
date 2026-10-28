@@ -71,11 +71,18 @@ def main():
     from market_lab.hilega_combined_policy_v1 import POLICY_ID,VERSION as installed
     if (POLICY_ID,installed)!=(POLICY,VERSION):raise Blocked('INSTALLED_STRATEGY_VERSION_MISMATCH')
     store=Store(Path(os.getenv('HILEGA_PRODUCTION_SIM_DB','data/research/hilega-production-workspace/sim.sqlite')))
+    from market_lab.hilega_preparation_runtime_v1 import route
+    preparation_only=route()=='PREPARATION_ONLY'
+    if preparation_only and (a.synthetic_cash is not None or a.synthetic_fills):raise Blocked('SYNTHETIC_OPTIONS_FORBIDDEN_ON_PREPARATION_ROUTE')
     from market_lab.hilega_production_bridge_health_v1 import worker_lock,claim,heartbeat,finish
     with worker_lock(store.path):
         s=Service(store,SimBroker(store))
         run=claim(s)
-        bridge=Bridge(s,Path(str(store.path)+'.ownership-fixture.sqlite'),auto_fill_entries=a.synthetic_fills,run_id=run)
+        if preparation_only:
+            from market_lab.hilega_preparation_runtime_v1.source import Source
+            bridge=Source(s,run_id=run)
+        else:
+            bridge=Bridge(s,Path(str(store.path)+'.ownership-fixture.sqlite'),auto_fill_entries=a.synthetic_fills,run_id=run)
         try:
             while True:
                 if a.synthetic_cash is not None:
@@ -83,7 +90,8 @@ def main():
                     synthetic_funds(s,a.synthetic_cash)
                 result=bridge.run_source_once(a.source)
                 proof=bridge.poll()
-                problem=None if proof['status']=='RECONCILED_OFFLINE_FIXTURE' else 'OWNERSHIP_RECONCILIATION_REQUIRED'
+                allowed='PREPARATION_ONLY_NO_BROKER_RECONCILIATION' if preparation_only else 'RECONCILED_OFFLINE_FIXTURE'
+                problem=None if proof['status']==allowed else 'OWNERSHIP_RECONCILIATION_REQUIRED'
                 health=heartbeat(s,run,source_at=result.get('source_at'),problem=problem)
                 s.watch_bridge_health()
                 print(json.dumps(dict(result,bridge_health=health)),flush=True)

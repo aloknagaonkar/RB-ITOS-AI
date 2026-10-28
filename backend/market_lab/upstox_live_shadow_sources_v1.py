@@ -1,5 +1,6 @@
 from __future__ import annotations
-from datetime import date,datetime,timedelta
+from datetime import date,datetime,timedelta,timezone
+from .hilega_candle_evidence_v1 import enabled, capture
 from urllib.parse import quote
 from .domain import IST
 from .gateways import normalize_upstox_historical_candles
@@ -105,8 +106,12 @@ class UpstoxLiveShadowSourcesV1:
     def nifty_intraday_1m(self,*,now:datetime|None=None):
         local=(now or datetime.now(IST)).astimezone(IST);instrument_key="NSE_INDEX|Nifty 50"
         encoded=quote(instrument_key,safe="")
+        recording=enabled()
+        started=datetime.now(timezone.utc) if recording else None
         body=self.gateway._get(f"/v3/historical-candle/intraday/{encoded}/minutes/1")
-        return normalize_upstox_historical_candles(instrument_key,local.date(),body)
+        received=datetime.now(timezone.utc) if recording else None
+        rows=normalize_upstox_historical_candles(instrument_key,local.date(),body)
+        return capture(rows,body,local.date(),started,received) if recording else rows
 
     def nifty_futures_intraday_1m(self,*,now:datetime|None=None):
         local=(now or datetime.now(IST)).astimezone(IST)

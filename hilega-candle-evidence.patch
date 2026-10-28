@@ -1,0 +1,353 @@
+--- a/backend/market_lab/upstox_live_shadow_sources_v1.py
++++ b/backend/market_lab/upstox_live_shadow_sources_v1.py
+@@ -1,5 +1,6 @@
+ from __future__ import annotations
+-from datetime import date,datetime,timedelta
++from datetime import date,datetime,timedelta,timezone
++from .hilega_candle_evidence_v1 import enabled, capture
+ from urllib.parse import quote
+ from .domain import IST
+ from .gateways import normalize_upstox_historical_candles
+@@ -105,8 +106,12 @@
+     def nifty_intraday_1m(self,*,now:datetime|None=None):
+         local=(now or datetime.now(IST)).astimezone(IST);instrument_key="NSE_INDEX|Nifty 50"
+         encoded=quote(instrument_key,safe="")
++        recording=enabled()
++        started=datetime.now(timezone.utc) if recording else None
+         body=self.gateway._get(f"/v3/historical-candle/intraday/{encoded}/minutes/1")
+-        return normalize_upstox_historical_candles(instrument_key,local.date(),body)
++        received=datetime.now(timezone.utc) if recording else None
++        rows=normalize_upstox_historical_candles(instrument_key,local.date(),body)
++        return capture(rows,body,local.date(),started,received) if recording else rows
+ 
+     def nifty_futures_intraday_1m(self,*,now:datetime|None=None):
+         local=(now or datetime.now(IST)).astimezone(IST)
+--- a/backend/market_lab/hilega_alignment_dual_exit_live_v1.py
++++ b/backend/market_lab/hilega_alignment_dual_exit_live_v1.py
+@@ -1,5 +1,6 @@
+ """Live observation adapter for the tested historical alignment + dual-exit policy."""
+ from copy import deepcopy
++from .hilega_candle_evidence_v1 import input_context, audit_fields
+ from datetime import datetime, timedelta, time
+ import json
+ from .hilega_v2_alignment_replay_v1 import cache_index, candles, aggregate_exact_5m
+@@ -23,6 +24,20 @@
+     def __init__(self, **kwargs):
+         super().__init__(**kwargs)
+         self._reset_policy_session()
++
++    def _consume(self, intraday, now, *, recovered):
++        with input_context(self, intraday):
++            return super()._consume(intraday, now, recovered=recovered)
++
++    def _audit(self, now, stage, status, payload=None, **kwargs):
++        if stage in {
++            "DIRECTIONAL_DECISION", "DIRECTIONAL_SESSION_CUTOFF",
++            "COMBINED_PRICE_OBSERVATION", "COMBINED_FIVE_MINUTE_EVALUATION",
++        }:
++            fields = audit_fields(self)
++            if fields:
++                payload = {**(payload or {}), **fields}
++        return super()._audit(now, stage, status, payload, **kwargs)
+ 
+     def _reset_policy_session(self):
+         self.episode = {'BULLISH': False, 'BEARISH': False}
+@@ -153,6 +168,10 @@
+         return decision
+ 
+     def process_cutoff(self, now, *, intraday):
++        with input_context(self, intraday):
++            return self._process_cutoff_from_rows(now, intraday=intraday)
++
++    def _process_cutoff_from_rows(self, now, *, intraday):
+         at=datetime.combine(now.date(),time(14,55),tzinfo=IST)
+         if now<at or self._cutoff_done_date==now.date():return None
+         price=self._minute_open(intraday,at)
+--- /dev/null
++++ b/backend/market_lab/hilega_candle_evidence_v1.py
+@@ -0,0 +1,164 @@
++"""Opt-in provenance for decoded NIFTY candle inputs; no order transport."""
++from contextlib import contextmanager
++from copy import deepcopy
++from datetime import date, datetime, timezone
++import hashlib
++import json
++import os
++from pathlib import Path
++import re
++
++from .gateways import normalize_upstox_historical_candles
++
++FLAG = "HILEGA_CANDLE_EVIDENCE_ENABLED"
++MODEL = "HILEGA_CANDLE_INPUT_V1"
++INSTRUMENT = "NSE_INDEX|Nifty 50"
++
++
++def enabled():
++    flag = os.getenv(FLAG, "0")
++    if flag not in {"0", "1"}:
++        raise ValueError("CANDLE_EVIDENCE_FLAG_INVALID")
++    return flag == "1"
++
++
++def root():
++    path = Path(os.getenv(
++        "HILEGA_CANDLE_EVIDENCE_ROOT",
++        "data/live-observation/hilega-candle-input-v1",
++    )).absolute()
++    for part in (*reversed(path.parents), path):
++        if part.is_symlink():
++            raise ValueError("CANDLE_EVIDENCE_SYMLINK")
++    path.mkdir(parents=True, exist_ok=True, mode=0o700)
++    if not path.is_dir() or path.stat().st_mode & 0o077:
++        raise ValueError("CANDLE_EVIDENCE_PRIVATE_DIRECTORY_REQUIRED")
++    return path
++
++
++def encoded(value):
++    return json.dumps(value, sort_keys=True, separators=(",", ":"),
++                      allow_nan=False).encode()
++
++
++def values(rows):
++    return [
++        dict(timestamp=c.timestamp.isoformat(),
++             open=float(c.open), high=float(c.high),
++             low=float(c.low), close=float(c.close),
++             volume=getattr(c, "volume", None),
++             open_interest=getattr(c, "open_interest", None))
++        for c in rows
++    ]
++
++
++class CapturedCandles(list):
++    def __init__(self, rows, reference):
++        super().__init__(rows)
++        self._reference = deepcopy(reference)
++
++    @property
++    def candle_evidence(self):
++        return deepcopy(self._reference)
++
++
++def reference(snapshot, digest):
++    return {
++        "model": MODEL, "snapshot_id": digest,
++        **{k: snapshot[k] for k in (
++            "instrument_key", "session_date",
++            "request_started_at", "response_received_at",
++        )},
++    }
++
++
++def capture(rows, body, session_date, started, received):
++    if started.tzinfo is None or received.tzinfo is None or received < started:
++        raise ValueError("CANDLE_EVIDENCE_TIME_INVALID")
++    snapshot = dict(
++        model=MODEL, instrument_key=INSTRUMENT,
++        session_date=session_date.isoformat(),
++        request_started_at=started.astimezone(timezone.utc).isoformat(),
++        response_received_at=received.astimezone(timezone.utc).isoformat(),
++        response={"status": body.get("status"),
++                  "data": {"candles": body["data"]["candles"]}},
++    )
++    content = encoded(snapshot)
++    digest = hashlib.sha256(content).hexdigest()
++    path = root() / (digest + ".json")
++    try:
++        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
++                     os.O_NOFOLLOW, 0o600)
++    except FileExistsError:
++        if path.is_symlink() or not path.is_file() or path.read_bytes() != content:
++            raise ValueError("CANDLE_EVIDENCE_EXISTING_FILE_CHANGED")
++        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
++        try:
++            os.fsync(fd)
++        finally:
++            os.close(fd)
++    else:
++        with os.fdopen(fd, "wb") as stream:
++            stream.write(content)
++            stream.flush()
++            os.fsync(stream.fileno())
++    directory_fd = os.open(root(), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
++    try:
++        os.fsync(directory_fd)
++    finally:
++        os.close(directory_fd)
++    batch = CapturedCandles(rows, reference(snapshot, digest))
++    verify(batch)
++    return batch
++
++
++def verify(batch):
++    if not isinstance(batch, CapturedCandles):
++        raise ValueError("CANDLE_EVIDENCE_BATCH_REQUIRED")
++    ref = batch.candle_evidence
++    digest = ref.get("snapshot_id")
++    if not isinstance(digest, str) or not re.fullmatch("[0-9a-f]{64}", digest):
++        raise ValueError("CANDLE_EVIDENCE_ID_INVALID")
++    path = root() / (digest + ".json")
++    if path.is_symlink() or not path.is_file():
++        raise ValueError("CANDLE_EVIDENCE_REGULAR_FILE_REQUIRED")
++    content = path.read_bytes()
++    if hashlib.sha256(content).hexdigest() != digest:
++        raise ValueError("CANDLE_EVIDENCE_HASH_MISMATCH")
++    snapshot = json.loads(content)
++    if (snapshot.get("model") != MODEL
++            or snapshot.get("instrument_key") != INSTRUMENT
++            or ref != reference(snapshot, digest)):
++        raise ValueError("CANDLE_EVIDENCE_REFERENCE_MISMATCH")
++    started = datetime.fromisoformat(snapshot["request_started_at"])
++    received = datetime.fromisoformat(snapshot["response_received_at"])
++    if started.tzinfo is None or received.tzinfo is None or received < started:
++        raise ValueError("CANDLE_EVIDENCE_TIME_INVALID")
++    original = normalize_upstox_historical_candles(
++        INSTRUMENT, date.fromisoformat(snapshot["session_date"]),
++        snapshot["response"],
++    )
++    if encoded(values(original)) != encoded(values(batch)):
++        raise ValueError("CANDLE_EVIDENCE_ROWS_CHANGED")
++    return ref
++
++
++@contextmanager
++def input_context(owner, rows):
++    previous = getattr(owner, "_active_candle_evidence", None)
++    ref = verify(rows) if enabled() else None
++    owner._active_candle_evidence = ref
++    try:
++        yield
++    finally:
++        owner._active_candle_evidence = previous
++
++
++def audit_fields(owner):
++    ref = getattr(owner, "_active_candle_evidence", None)
++    if ref is None:
++        return {}
++    return dict(
++        candle_evidence=deepcopy(ref),
++        audit_payload_created_at=datetime.now(timezone.utc).isoformat(),
++    )
+--- /dev/null
++++ b/tests/test_hilega_candle_evidence_v1.py
+@@ -0,0 +1,118 @@
++"""Offline evidence tests: temporary files and mocked GET only."""
++from datetime import datetime, timedelta
++from types import SimpleNamespace
++
++import pytest
++
++from market_lab import hilega_candle_evidence_v1 as e
++from market_lab.domain import IST
++from market_lab.gateways import normalize_upstox_historical_candles
++from market_lab.upstox_live_shadow_sources_v1 import UpstoxLiveShadowSourcesV1
++from market_lab.hilega_alignment_dual_exit_live_v1 import HilegaAlignmentDualExitLiveCoordinator
++from market_lab.hilega_wma_gap_live_v2 import HilegaWmaGapLiveCoordinatorV2
++
++
++@pytest.fixture
++def configured(tmp_path, monkeypatch):
++    monkeypatch.setenv(e.FLAG, "1")
++    monkeypatch.setenv("HILEGA_CANDLE_EVIDENCE_ROOT", str(tmp_path / "inputs"))
++    return tmp_path / "inputs"
++
++
++def body():
++    return {"status": "success", "data": {"candles": [
++        ["2026-10-28T10:59:00+05:30", 100, 102, 99, 101, 0]
++    ]}}
++
++
++def batch():
++    start = datetime(2026, 10, 28, 11, tzinfo=IST)
++    rows = normalize_upstox_historical_candles(e.INSTRUMENT, start.date(), body())
++    return e.capture(rows, body(), start.date(), start, start+timedelta(seconds=1))
++
++
++def test_source_links_saved_response(configured):
++    calls = []
++    source = object.__new__(UpstoxLiveShadowSourcesV1)
++    def get(path):
++        calls.append(path)
++        return body()
++    source.gateway = SimpleNamespace(_get=get)
++    rows = source.nifty_intraday_1m(now=datetime(2026, 10, 28, 11, tzinfo=IST))
++    ref = e.verify(rows)
++    assert len(calls) == 1
++    assert (configured / (ref["snapshot_id"] + ".json")).is_file()
++    assert configured.stat().st_mode & 0o077 == 0
++
++
++def test_tampered_snapshot_rejected(configured):
++    rows = batch()
++    (configured / (rows.candle_evidence["snapshot_id"] + ".json")).write_text("{}")
++    with pytest.raises(ValueError, match="HASH_MISMATCH"):
++        e.verify(rows)
++
++
++def test_changed_rows_rejected(configured):
++    rows = batch()
++    rows.clear()
++    with pytest.raises(ValueError, match="ROWS_CHANGED"):
++        e.verify(rows)
++
++
++def test_missing_evidence_stops_before_consume(configured, monkeypatch):
++    calls = []
++    monkeypatch.setattr(HilegaWmaGapLiveCoordinatorV2, "_consume",
++                        lambda *a, **kw: calls.append(True))
++    owner = object.__new__(HilegaAlignmentDualExitLiveCoordinator)
++    with pytest.raises(ValueError, match="BATCH_REQUIRED"):
++        owner._consume([], datetime.now(IST), recovered=False)
++    assert calls == []
++
++
++def test_context_cleared_on_failure(configured, monkeypatch):
++    rows = batch()
++    owner = object.__new__(HilegaAlignmentDualExitLiveCoordinator)
++    observed = []
++    def consume(self, *args, **kwargs):
++        observed.append(e.audit_fields(self))
++        raise RuntimeError("synthetic")
++    monkeypatch.setattr(HilegaWmaGapLiveCoordinatorV2, "_consume", consume)
++    with pytest.raises(RuntimeError):
++        owner._consume(rows, datetime.now(IST), recovered=False)
++    assert observed[0]["candle_evidence"] == rows.candle_evidence
++    assert e.audit_fields(owner) == {}
++
++
++def test_cutoff_links_its_input(configured, monkeypatch):
++    owner = object.__new__(HilegaAlignmentDualExitLiveCoordinator)
++    rows = batch()
++    monkeypatch.setattr(
++        HilegaAlignmentDualExitLiveCoordinator, "_process_cutoff_from_rows",
++        lambda self, now, *, intraday: e.audit_fields(self),
++    )
++    result = owner.process_cutoff(datetime.now(IST), intraday=rows)
++    assert result["candle_evidence"] == rows.candle_evidence
++    assert e.audit_fields(owner) == {}
++
++
++def test_disabled_source_remains_plain_list(configured, monkeypatch):
++    monkeypatch.setenv(e.FLAG, "0")
++    source = object.__new__(UpstoxLiveShadowSourcesV1)
++    source.gateway = SimpleNamespace(_get=lambda path: body())
++    rows = source.nifty_intraday_1m(now=datetime(2026, 10, 28, 11, tzinfo=IST))
++    assert type(rows) is list
++    assert not configured.exists()
++
++
++def test_recording_wrapper_preserves_link(configured):
++    from market_lab.hilega_market_evidence_v1 import EvidenceJournalV1, RecordingHilegaSourcesV1
++    rows = batch()
++    journal = EvidenceJournalV1(configured / "tape.jsonl")
++    wrapped = RecordingHilegaSourcesV1(
++        SimpleNamespace(nifty_intraday_1m=lambda **kw: rows), journal
++    )
++    try:
++        assert wrapped.nifty_intraday_1m(now=datetime.now(IST)) is rows
++        assert e.verify(rows) == rows.candle_evidence
++    finally:
++        journal.close()
