@@ -1,0 +1,21 @@
+{
+  "status": "SOURCE_SYNTAX_PARSED_ONLY",
+  "tests_run": false,
+  "replays_run": false,
+  "python_files": 11,
+  "sha256": {
+    "README.md": "38ebac4f530cbfab0d8d26e18f412ff339d9f7151891bcba164d039fd39e4f4c",
+    "common_input.py": "36152e3f7206df1bf1a4b514fadb39d95394f80560ae9e106bb1ee7c59b41845",
+    "core.py": "c96ab72a7aa837ec9b560f824bc5b1adddb4f02c7eaf8e86e4dd72a015546f4a",
+    "hybrid.py": "8725064372fa1d76c5dbf3170cb9db3b83c37708d409964535fafd463759d982",
+    "reference_protected.py": "e920379a13d44f4f66e3df91acca41f42719df631cd44b8b5d4d9e68866b9e88",
+    "reference_unprotected.py": "9eff6f70b5a9b544902e06455d20fee86c536a4706810bb831f213722ea908fe",
+    "rules.py": "62cf94eacac06273ef1e80a75087b5636dcc490f6820311326c67e00a810a0d1",
+    "run.py": "56d642212473c81bedf0024bb111d4e8ae849019bd6372692f0921874a236206",
+    "source-hashes.json": "0dc2eece5785eec686ec22003cdb2596942e1de177846e26f0a647295ea677dc",
+    "study.py": "effbef1ad08fcb08a29e94ed42d0dc189f3c4345b7617b3b71c56a6289f2e9f2",
+    "test_independent.py": "e272fab2275e0af21c22edaa864040e982a888058c822ca8cbe12342413d517a",
+    "test_midpoint.py": "cef23f470ce2b30b4a3d7258c198f948bbfbd98409830a00e6ec7ec9c2fa9804",
+    "test_timeframes.py": "c2cb652470ee9b36d5df9b2af4bc0f1059299735546454caa54a125f1f464e58"
+  }
+}
