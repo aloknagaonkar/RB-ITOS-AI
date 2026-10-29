@@ -1,6 +1,6 @@
 # Hilega: shadow-to-live tracker
 
-Updated 29 October 2026. This records terminal evidence supplied by the operator; it is not a live connection to the VM. Last supplied market/account capture: 11:03 IST. Current controller state must be read again before any operation.
+Updated 29 October 2026. This records terminal evidence supplied by the operator; it is not a live connection to the VM. Last supplied market/account capture: 12:23:42 IST. Current controller state must be read again before any operation.
 
 **Goal:** confirmed signal → account/cash/risk checks → option and quantity → Upstox submission → fills → exit → reconciliation and hold release.
 
@@ -11,7 +11,7 @@ Updated 29 October 2026. This records terminal evidence supplied by the operator
 | Step | Evidence completed | Acceptance gate still pending |
 |---|---|---|
 | Confirmed signal | Shadow decisions, snapshot links, journal verification and selected replay checks tested | Fresh, non-reconstructed signal admitted by the running preparation route |
-| Account/cash/risk | Pinned account read access works. Signed capture reports market open, cash ₹0 before/after and half-cash cap ₹0. Captured candidates reject insufficient capacity | Compare funds mapping with pinned Upstox display; approve and validate production capital/exposure/daily-loss limits |
+| Account/cash/risk | Pinned account read access works. Signed capture reports market open, cash ₹0 before/after and half-cash cap ₹0. Captured candidates reject insufficient capacity | Operator declared the zero-cash display comparison during test runs; broader production funds mapping and capital/exposure/daily-loss approvals remain pending |
 | Option/quantity/price | One-lot preparation and disabled limit candidate deployed; quote freshness and price-grid components tested | Production tick-unit, pricing, slippage and fee approvals; actual quote/candidate linkage for a fresh signal |
 | Request binding | Atomic local binding enabled; admission-wait correction deployed | Observe consistent plan/hold/outbox/adapter binding in the running application; local binding is not broker cash locking |
 | Upstox submission | Isolated adapter components tested | Implement and authorize live routing, acknowledgement/timeout handling and durable duplicate prevention |
@@ -30,7 +30,7 @@ Updated 29 October 2026. This records terminal evidence supplied by the operator
 - Launcher binds to a saved `.env` hash and private startup configuration. Token/configuration changes need a reviewed refresh; do not edit the saved hashes merely to suppress a rejection.
 - Keep private startup files, stage configuration and credential backups out of GitHub and shared attachments.
 
-## Latest capture
+## Archived capture at 11:03 IST
 
 Evidence folder: `data/research/hilega-session-readiness-qyjt3xpg`.
 
@@ -43,7 +43,7 @@ Quotes were approximately 0.6 seconds old with no quote-specific rejection. `tic
 
 ## Next milestone: bounded preparation rejection test
 
-1. Keep the controller PAUSED while preparing the test. Funds-display comparison remains UNCONFIRMED; “go ahead” is not evidence that the display matches.
+1. Keep the controller PAUSED outside a specifically authorized bounded test. Operator zero-cash display confirmation was explicitly supplied with the run flags; reconfirm current circumstances before later sessions.
 2. Recheck today's session, fresh source/heartbeat, service identity, journal prefix, closed transport, PREPARATION_ONLY route and empty application/adapter activity.
 3. Prepare and test the session harness before arming anything. It must have a finite deadline, a durable independent pause deadline, single-attempt command IDs, explicit handling of uncertain acknowledgements, and pause/cleanup on error or interruption. Never automatically retry Resume.
 4. If a zero-cash rejection test is authorized, preserve the measured cash result. Do not insert artificial balances, replay an old event into the production journal, loosen freshness checks or enable broker transport.
@@ -52,8 +52,10 @@ Quotes were approximately 0.6 seconds old with no quote-specific rejection. `tic
 7. Return to PAUSED on the first relevant outcome or deadline. Recheck all counts, request/receipt history, source health and control state; retain a private assessment report.
 8. No eligible entry before the deadline means INCONCLUSIVE, not PASS. Successful funded preparation and the live execution lifecycle remain separate milestones.
 
-**Current test status: NOT ARMED; harness not yet delivered; no live-signal admission clearance.**
+**Current test status: BOUNDED SESSION COMPLETED, INCONCLUSIVE_NO_ELIGIBLE_ENTRY. V3 passed 55 VM tests. The latest run captured zero-cash evidence at 12:23:42 IST, attempted controlled Resume, completed the five-minute observation window and verified PAUSED cleanup. No broker submission was attempted. No eligible ENTRY arrived, so live signal-to-cash rejection and successful funded admission remain unverified. Direct refresh was exercised: dashboard age 30.5 seconds, direct evidence age 0.414525 seconds, pin verified before and after. Latest report: `data/research/hilega-preparation-session-test-2rxqunub/report.json`. Preserve all earlier reports. The result does not independently establish that the external deadline timer itself fired.**
 
 ## Go-live release gate
 
 Before pilot approval: confirm applicable broker authentication/network/permission prerequisites; approve funds mapping, risk and pricing policies; verify submission/fill/exit/reconciliation/release behavior including failure recovery; establish monitoring and an emergency-stop procedure; review deployment/rollback and credentials; complete an isolated full-lifecycle rehearsal. Tests and read-only connectivity alone do not clear live trading.
+
+Next action: inspect current shadow ownership/setup context read-only, then select a bounded window before a new eligible entry or in a future trading session. No code change is required by an inconclusive outcome. Do not replay old entries, manufacture signals, loosen rules or automatically extend arming.
