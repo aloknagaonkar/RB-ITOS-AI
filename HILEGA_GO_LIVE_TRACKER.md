@@ -1,6 +1,6 @@
 # Hilega: shadow-to-live tracker
 
-Updated 29 October 2026. This records terminal evidence supplied by the operator; it is not a live connection to the VM. Last supplied market/account capture: 12:23:42 IST. Current controller state must be read again before any operation.
+Updated 29 October 2026. This records terminal evidence supplied by the operator; it is not a live connection to the VM. Latest supplied account reference capture: 16:01 IST; aggregate FO fee report capture: 16:51 IST. These do not refresh the available-cash evidence. Current controller state must be read again before any operation.
 
 **Goal:** confirmed signal → account/cash/risk checks → option and quantity → Upstox submission → fills → exit → reconciliation and hold release.
 
@@ -11,7 +11,7 @@ Updated 29 October 2026. This records terminal evidence supplied by the operator
 | Step | Evidence completed | Acceptance gate still pending |
 |---|---|---|
 | Confirmed signal | Shadow decisions, snapshot links, journal verification and selected replay checks tested | Fresh, non-reconstructed signal admitted by the running preparation route |
-| Account/cash/risk | Pinned account read access works. Signed capture reports market open, cash ₹0 before/after and half-cash cap ₹0. Captured candidates reject insufficient capacity | Operator declared the zero-cash display comparison during test runs; broader production funds mapping and capital/exposure/daily-loss approvals remain pending |
+| Account/cash/risk | Pinned account read access works. Signed capture reports market open, cash ₹0 before/after and half-cash cap ₹0. Captured candidates reject insufficient capacity | Operator chose a 50% verified available-cash entry cap with no daily-loss limit. Broader production funds mapping, reservation/debit attribution, ownership and pricing/fee-buffer approvals remain pending |
 | Option/quantity/price | One-lot preparation and disabled limit candidate deployed; quote freshness and price-grid components tested | Production tick-unit, pricing, slippage and fee approvals; actual quote/candidate linkage for a fresh signal |
 | Request binding | Atomic local binding enabled; admission-wait correction deployed | Observe consistent plan/hold/outbox/adapter binding in the running application; local binding is not broker cash locking |
 | Upstox submission | Isolated adapter components tested | Implement and authorize live routing, acknowledgement/timeout handling and durable duplicate prevention |
@@ -74,4 +74,20 @@ Pending: authenticated live strategy-owned P&L and fees; approved account-specif
 
 ## Current engineering priority
 
-Next work is an evidence-to-risk integration contract: identify durable acknowledged request/receipt/order/trade ownership and complete fee/P&L sources; keep unavailable ownership/P&L blocked; then rehearse atomic risk, latch and reservation checks together in isolation before runtime integration. A cached flat account or shadow trade is not proof of strategy-owned live P&L. Production risk amounts/approvals and live submission authorization are still pending. No additional runtime activation is justified by the fixture tests.
+Next work is an evidence-to-risk integration contract: identify durable acknowledged request/receipt/order/trade ownership and complete fee/P&L sources; keep unavailable ownership/P&L blocked; then rehearse atomic risk, latch and reservation checks together in isolation before runtime integration. A cached flat account or shadow trade is not proof of strategy-owned live P&L. The operator has now selected a 50% cash entry cap and deliberately left daily loss unconfigured. Fee-buffer/pricing approvals, runtime reservation integration and live submission acceptance remain pending. No additional runtime activation is justified by the fixture tests.
+
+
+### Read-only risk-evidence source audit — VM validation completed
+
+Implemented a separate read-only CLI to inspect the existing application and adapter databases, verify plan/hold/outbox/atomic-binding hashes, reuse the historical receipt/acknowledgement checker semantics, and enumerate missing risk inputs. Thirty-one local tests passed, including byte-for-byte source preservation, malformed/orphan references and refusal to interpret empty execution history as verified zero P&L. CLI pins the reviewed receipt/mapping versions and does not construct their writing Store. No current broker reads, ownership authentication, fee completeness, live P&L or entry authority is granted. 31 VM tests and the source audit passed; the audit correctly remained blocked on evidence gaps. This is a source-gap diagnostic layer; authenticated fill/fee/P&L integration and atomic runtime risk enforcement are still pending. No production code, controller or database was changed.
+
+## Current operator policy — supersedes earlier daily-loss proposals
+
+The operator explicitly declined a daily maximum loss for now and requested 50% of verified available trading cash for entry. Daily loss is deliberately NOT CONFIGURED and is not a required setting for the current allocation policy. Do not request a daily-loss value again as a prerequisite for this policy. There is no separate fixed rupee entry-cost ceiling: premium plus fees/buffer must fit within floor(available cash paise / 2). Whole lots and contract/freeze limits apply. Existing one-lot preparation is preserved; changing lot sizing requires a separate implementation choice. Manual Pause, stop requests, ownership checks and execution closure remain intact.
+
+Latest VM validations supplied: 85 reference-bridge tests, 100 staged exit-intent tests, 115 atomic exit-binding tests, 130 acknowledgement tests, 150 exit-fill tests, and 196 gross-P&L tests passed. These are cumulative suites, not additive totals. Exit and gross-P&L stages remain synthetic fixtures with runtime_integration=false. The separate 26-test fee provider passed; a live pinned-profile capture returned account-wide FO charges of zero with IPFT null. Report completeness/finality and strategy fee attribution remain unverified. Net P&L remains unknown.
+
+Next component prepared: half-cash allocation and separate local reference reservation book. 30 local tests and the fixture demonstration passed; VM validation pending. It includes premium/buffer in the half-cash cap, preserves one lot, serializes concurrent entries, checks signed cash freshness again under the transaction, and retains unknown holds. No release API or broker cash locking exists. No runtime entry path, service, configuration or production database has been changed by this component.
+
+Current goal milestone remains account/cash/risk and runtime lifecycle integration, not production clearance. Next substantive deployment work is atomic local reservation plus application request/intent integration, followed by current evidence checks, live lifecycle/recovery validation and controlled-pilot acceptance. Daily-loss enforcement is not a blocker required by the operator's current policy. Production execution remains disabled in all supplied reports.
+
