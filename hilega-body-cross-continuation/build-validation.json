@@ -1,0 +1,26 @@
+{
+  "status": "AST_SYNTAX_ONLY",
+  "tests_run": false,
+  "replays_run": false,
+  "files": 15,
+  "sha256": {
+    "README.md": "430ab48f797f2ea7f3444423e32240c30b8c88c862084d7c86d57c120cabb227",
+    "common_input.py": "36152e3f7206df1bf1a4b514fadb39d95394f80560ae9e106bb1ee7c59b41845",
+    "core.py": "c96ab72a7aa837ec9b560f824bc5b1adddb4f02c7eaf8e86e4dd72a015546f4a",
+    "expected-controls.json": "aef7bc9bd2670008b7640072bf0f8cf5a3bc9707271d1fc073beae4586afab7c",
+    "hybrid.py": "8725064372fa1d76c5dbf3170cb9db3b83c37708d409964535fafd463759d982",
+    "reference_protected.py": "c175458ab1608e7710d4be7ffb2e64f9fde567d8814b061703cc46dff8382cba",
+    "reference_unprotected.py": "873acc20fabeaf681d46f1b83e482a5d114875288f7104fafd85c07f437f12af",
+    "reporting.py": "17008ef6bab9f422c75bdffd39d09f7919804ad63dad0e9f1089b64e20235ce9",
+    "rules.py": "98ce6285c9d8cbd2621771f1a9e57980e26981f82c3a92f284730ff4d24532d2",
+    "run.py": "49c2340589e93d916b6279a193f7caf6acf6977041356dc6cc372e8fb0c360df",
+    "source-hashes.json": "0dc2eece5785eec686ec22003cdb2596942e1de177846e26f0a647295ea677dc",
+    "strict_hybrid.py": "d97bb7bda2c8c833522d97c6b2aa0f9e49ad3e225fcfa3051d40cb86fc5a134f",
+    "strict_rules.py": "62cf94eacac06273ef1e80a75087b5636dcc490f6820311326c67e00a810a0d1",
+    "study.py": "effbef1ad08fcb08a29e94ed42d0dc189f3c4345b7617b3b71c56a6289f2e9f2",
+    "test_continuation.py": "37b05c57ce0aa13e3c7cab9285e34316fae3f45976a8e05282eae02c8849346e",
+    "test_independent.py": "728c045f4a1ea3287dbf3a103b523171ddf6a491c089bfdf1424aa7c2fe45ada",
+    "test_midpoint.py": "cef23f470ce2b30b4a3d7258c198f948bbfbd98409830a00e6ec7ec9c2fa9804",
+    "test_timeframes.py": "c2cb652470ee9b36d5df9b2af4bc0f1059299735546454caa54a125f1f464e58"
+  }
+}
