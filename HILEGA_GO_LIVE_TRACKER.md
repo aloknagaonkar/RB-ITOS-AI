@@ -59,3 +59,19 @@ Quotes were approximately 0.6 seconds old with no quote-specific rejection. `tic
 Before pilot approval: confirm applicable broker authentication/network/permission prerequisites; approve funds mapping, risk and pricing policies; verify submission/fill/exit/reconciliation/release behavior including failure recovery; establish monitoring and an emergency-stop procedure; review deployment/rollback and credentials; complete an isolated full-lifecycle rehearsal. Tests and read-only connectivity alone do not clear live trading.
 
 Next action: inspect current shadow ownership/setup context read-only, then select a bounded window before a new eligible entry or in a future trading session. No code change is required by an inconclusive outcome. Do not replay old entries, manufacture signals, loosen rules or automatically extend arming.
+
+
+### Independent risk-development milestone
+
+Standalone offline daily-loss input reviewer implemented; 39 VM tests passed and the missing-input example correctly returned BLOCKED. Missing limits/PNL/fees/reconciliation/latch state block review. Proposed no-profit-offset accounting and budget checks grant no entry or execution authority. No production amounts were chosen, no daily-loss latch was persisted and no running application was changed. Production risk evidence, approval, durable enforcement and wiring remain pending. Latest supplied shadow context stayed BEARISH through 12:45 IST; no pending setup during the read-only watch. The 12:30 shadow entry is historical and must not be adopted or replayed.
+
+### Durable latch rehearsal — VM validation completed
+
+A fixture-only SQLite latch package passed all 76 tests on the operator VM (39 reviewer tests plus 37 latch tests), with ResourceWarning treated as an error. The VM demo returned ISOLATED_LATCH_DEMO_PASS and removed its temporary database. Tests cover commit persistence across separate writer/reader processes, concurrent state updates, immutable same-session policy, idempotent reviews, rollback of latch/audit/rollover changes, and explicit reconciled fixture session rollover. Real account scopes, unrelated databases, symlinks and WAL conversion are rejected. All outputs deny entry and execution authority. VM fixture validation is complete; production integration and authenticated live P&L remain unimplemented. No running application/configuration/database was changed.
+
+Completed: offline reviewer VM validation; fixture latch implementation, local validation and 76-test VM validation.
+Pending: authenticated live strategy-owned P&L and fees; approved account-specific risk policies; durable production entry-boundary integration; remaining signal admission, submission, fill, exit, reconciliation and pilot gates. No production loss limit is selected or enforced by the fixture package.
+
+## Current engineering priority
+
+Next work is an evidence-to-risk integration contract: identify durable acknowledged request/receipt/order/trade ownership and complete fee/P&L sources; keep unavailable ownership/P&L blocked; then rehearse atomic risk, latch and reservation checks together in isolation before runtime integration. A cached flat account or shadow trade is not proof of strategy-owned live P&L. Production risk amounts/approvals and live submission authorization are still pending. No additional runtime activation is justified by the fixture tests.
