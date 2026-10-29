@@ -44,8 +44,17 @@ PY
     fi
 }
 
+if "$PYTHON" "$ROOT/scripts/hilega_supervised_control.py" mode; then
+    "$PYTHON" "$ROOT/scripts/hilega_supervised_control.py" status
+else
+    supervision_rc=$?
+    if [[ "$supervision_rc" -ne 10 ]]; then
+        echo "ERROR: supervision requires review; legacy launch/stop blocked."
+        exit "$supervision_rc"
+    fi
 service_status "api"
 service_status "worker"
+fi
 
 PUBLISHER_PID_FILE="$ROOT/data/midpoint-historical-publisher.pid"
 if [[ -f "$PUBLISHER_PID_FILE" ]]; then

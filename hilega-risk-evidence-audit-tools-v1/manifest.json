@@ -1,0 +1,16 @@
+{
+  "model": "HILEGA_READ_ONLY_RISK_EVIDENCE_AUDIT_PACKAGE_V1",
+  "local_tests_passed": 31,
+  "vm_validation_pending": true,
+  "application_integration": false,
+  "production_ready": false,
+  "source_commit": "aa9d4d8",
+  "receipt_review_git_blob": "964330975e601694f3aa7731f6b2062d514eca72",
+  "mapping_git_blob": "734aa39c6ce5f3b2dbc06cfcf9975b8764b4862b",
+  "files": {
+    "README.md": "ea2f28172faf5537ea4d089687c291cddb4c45462b0c89b914a3079cd839106f",
+    "historical_receipt_checks.py": "a362da0d2d1255e69fcc5b816ca70187833b2c9b1d34b02f5b18b5d35e66a62b",
+    "risk_evidence_audit.py": "42e7b60efc4a67e98d6ef8f2bc2fda08c17d4fcfa8e2b468d1f239c73061121e",
+    "test_risk_evidence_audit.py": "2cf9df2b7f3a3d89f1b10bea3c7ca5581b9c22263f1ad49bfd9b5c4df736b60f"
+  }
+}

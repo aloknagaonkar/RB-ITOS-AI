@@ -1,0 +1,14 @@
+{
+  "phase": "SOURCE_RECOVERED_PAUSED",
+  "previous_maintenance": {
+    "phase": "PREPARATION_ONLY_ACTIVE_PAUSED",
+    "children": {
+      "api": 1388,
+      "worker": 1397,
+      "source": 2306
+    },
+    "production_execution_enabled": false
+  },
+  "pid": 2306,
+  "start_ticks": 374026
+}

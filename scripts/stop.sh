@@ -73,8 +73,17 @@ stop_service() {
 bash "$ROOT/scripts/stop_hilega_policy_observer.sh" || echo "Policy observer: stop warning"
 bash "$ROOT/scripts/stop_hilega_vwap_collector.sh" || echo "VWAP collector: stop warning"
 
+if "$PYTHON" "$ROOT/scripts/hilega_supervised_control.py" mode; then
+    "$PYTHON" "$ROOT/scripts/hilega_supervised_control.py" stop
+else
+    supervision_rc=$?
+    if [[ "$supervision_rc" -ne 10 ]]; then
+        echo "ERROR: supervision requires review; legacy launch/stop blocked."
+        exit "$supervision_rc"
+    fi
 stop_service "worker"
 stop_service "api"
+fi
 
 
 # ===== LIVE SHADOW WORKER V1 =====

@@ -1,0 +1,16 @@
+{
+  "model": "HILEGA_ISOLATED_LOSS_LATCH_PACKAGE_V1",
+  "scope": "FIXTURE_REHEARSAL_ONLY",
+  "local_tests_passed": 76,
+  "vm_tests_executed": false,
+  "production_integration": false,
+  "files": {
+    "CHECKLIST.md": "5edb3ffac622a59fb91d1e94e6d5883f82669ca08f555a94ee33e81ef0407a88",
+    "README.md": "78ce328d925a363ef0f0c325b85630dda6645f4b503b58292cd76ed35a869b50",
+    "hilega_daily_loss_latch_v1.py": "a111de88d3eed253e112a397b6304ee7a3b9ce49b4c93556c514b81d1aaa1dbd",
+    "hilega_daily_loss_review_v1.py": "067dc2f901b37af396d1cc4c2d0f224ecb53d4656071a198e2d1c03259004f2c",
+    "test_daily_loss_latch.py": "4c6b310b341d2a1544fcbbd7d2043ab3abda1567a406ee9fb02c05da2eee18dd",
+    "test_daily_loss_review.py": "d9a596770b3937bd1d6e1b1c443234c315dfd77a3e1104b5617c8aff43ccf52c",
+    "validate_fixture.py": "ac1477f050964a864f1c412881b020a3b1dde8409162b0689ba96acf90afe005"
+  }
+}

@@ -103,8 +103,17 @@ start_service() {
     exit 1
 }
 
+if "$PYTHON" "$ROOT/scripts/hilega_supervised_control.py" mode; then
+    "$PYTHON" "$ROOT/scripts/hilega_supervised_control.py" start
+else
+    supervision_rc=$?
+    if [[ "$supervision_rc" -ne 10 ]]; then
+        echo "ERROR: supervision requires review; legacy launch/stop blocked."
+        exit "$supervision_rc"
+    fi
 start_service "api"
 start_service "worker"
+fi
 
 # Independent VWAP observation; failure must not block core startup.
 bash "$ROOT/scripts/start_hilega_vwap_collector.sh" || echo "VWAP collector: startup warning; inspect collector status/logs"
