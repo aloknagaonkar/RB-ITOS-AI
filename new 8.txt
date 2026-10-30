@@ -1,0 +1,8 @@
+
+1) Cluster details AKS
+2) name space 
+3) Build Administrator and endpoint administrator to project access to : Team.Support.EIAP.Deployment.Approvers  ( if global data project no access required)
+4) create a template repo ( argo CD ) if DPS cluster 2 repo created  argocd-config sample reference project
+
+
+IF EIAP no argocd eiter argo or helm

@@ -1,0 +1,30 @@
+prod
+
+-connections_office365_1_name office365_prod -location southcentralus -resource_group pep-dps-e2emon-prod-scus-01-rg
+
+-connections_azureblob_name azureblob_prod -azure_blob_access_key $(Storage_blob_access_key) -storage_account_name pepibpe2emonprodadls -location southcentralus
+
+-workflows_ibp_e2emon_logicapp_name ibp-e2emon-logicapps-prod -connections_azureblob_externalid /subscriptions/4f85ea10-aee0-4b46-82cc-4416208c1485/resourceGroups/pep-dps-e2emon-prod-scus-01-rg/providers/Microsoft.Web/connections/azureblob_prod -connections_office365_1_externalid /subscriptions/4f85ea10-aee0-4b46-82cc-4416208c1485/resourceGroups/pep-dps-e2emon-prod-scus-01-rg/providers/Microsoft.Web/connections/office365_prod -connections_office365_1_connection_name office365_prod -connections_azureblob_connection_name azureblob_prod -location southcentralus
+
+
+pre-prod
+-connections_office365_1_name office365-preprod -location southcentralus -resource_group pep-dps-e2emon-preprod-scus-01-rg
+
+-connections_azureblob_name azureblobpreprod -azure_blob_access_key $(Storage_blob_access_key) -storage_account_name pepibpe2emonpreprodadls -location southcentralus
+
+-workflows_ibp_e2emon_logicapp_name ibp-e2emon-logicapps-preprod -connections_azureblob_externalid /subscriptions/93c33431-a080-4b4a-a362-3b7c5a36b6dc/resourceGroups/pep-dps-e2emon-preprod-scus-01-rg/providers/Microsoft.Web/connections/azureblobpreprod -connections_office365_1_externalid /subscriptions/93c33431-a080-4b4a-a362-3b7c5a36b6dc/resourceGroups/pep-dps-e2emon-preprod-scus-01-rg/providers/Microsoft.Web/connections/office365-preprod -connections_office365_1_connection_name office365-preprod -connections_azureblob_connection_name azureblobpreprod  -location southcentralus
+
+dev
+
+-connections_office365_1_name office365 location eastus -resource_group pep-dps-e2emon-nonprod-eus-01-rg
+
+-connections_azureblob_name azureblob -azure_blob_access_key $(Storage_blob_access_key) -storage_account_name pepibpe2emondevadls -location eastus
+
+-workflows_ibp_e2emon_logicapp_name ibp-e2emon-logicapp -connections_azureblob_externalid /subscriptions/93c33431-a080-4b4a-a362-3b7c5a36b6dc/resourceGroups/pep-dps-e2emon-nonprod-eus-01-rg/providers/Microsoft.Web/connections/azureblob -connections_office365_1_externalid /subscriptions/93c33431-a080-4b4a-a362-3b7c5a36b6dc/resourceGroups/pep-dps-e2emon-nonprod-eus-01-rg/providers/Microsoft.Web/connections/office365 -connections_office365_1_connection_name office365 -connections_azureblob_connection_name azureblob -location eastus
+
+qa
+-connections_office365_1_name pep_ibpe2emon_qa_dps_office365 -location eastus -resource_group pep-dps-e2emon-qa-eus-01-rg
+
+-connections_azureblob_name pep_ibpe2emon_qa_dps_azureblob -azure_blob_access_key $(Storage_blob_access_key) -storage_account_name dpsibpe2emonqaadls -location eastus
+
+-workflows_ibp_e2emon_logicapp_name pep-ibpe2emon-dps-qa-eus-02-logicapp -connections_azureblob_externalid /subscriptions/93c33431-a080-4b4a-a362-3b7c5a36b6dc/resourceGroups/pep-dps-e2emon-qa-eus-01-rg/providers/Microsoft.Web/connections/pep_ibpe2emon_qa_dps_azureblob -connections_office365_1_externalid /subscriptions/93c33431-a080-4b4a-a362-3b7c5a36b6dc/resourceGroups/pep-dps-e2emon-qa-eus-01-rg/providers/Microsoft.Web/connections/pep_ibpe2emon_qa_dps_office365 -connections_office365_1_connection_name pep_ibpe2emon_qa_dps_office365 -connections_azureblob_connection_name pep_ibpe2emon_qa_dps_azureblob  -location eastus
