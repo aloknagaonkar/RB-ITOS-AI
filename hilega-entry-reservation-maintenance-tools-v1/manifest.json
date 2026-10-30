@@ -1,0 +1,11 @@
+{
+  "model": "HILEGA_ENTRY_RESERVATION_MAINTENANCE_PACKAGE_V1",
+  "files": {
+    "maintain.py": "70f1db3b369e1e3cbab766ddebc03fbf69ebc20c688b594afbeef77656a79e8c",
+    "test_maintain.py": "571417f440f02c969e465d2a44568ea4ce9ae5a8be78d1afad1a1326b6b5f4da"
+  },
+  "integration_manifest_sha256": "5800f8c5690b7750e1eed3846cc38a4845a42e07112ddf1e20aa058d48acf553",
+  "local_tests_passed": 22,
+  "vm_maintenance_pending": true,
+  "production_execution_enabled": false
+}

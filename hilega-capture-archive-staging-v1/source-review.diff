@@ -1,0 +1,91 @@
+--- installed/ownership_state.py
++++ staged/ownership_state.py
+@@ -56,6 +56,60 @@
+     need(header[:16]==b'SQLite format 3\x00' and header[18:20]==b'\x01\x01',
+          'ROLLBACK_JOURNAL_SOURCE_REQUIRED')
+     return path
++
++
++
++def archive_authenticated_capture(db, snapshot, pin, *, as_of):
++    """Store original authenticated account evidence; no ownership permission."""
++    need(db.in_transaction, "CAPTURE_ARCHIVE_TRANSACTION_REQUIRED")
++    verify(snapshot, pin, as_of=as_of)
++    need(
++        snapshot.get("profile_verified_before_and_after") is True
++        and snapshot.get("account_position_rows_complete") is True
++        and snapshot.get("source_atomic") is False
++        and snapshot.get("position_fill_linkage_verified") is False
++        and snapshot.get("live_pnl") is None,
++        "CAPTURE_ARCHIVE_AUTHORITY_INVALID",
++    )
++    need(
++        all(isinstance(snapshot.get(k), list)
++            for k in ("orders", "trades", "positions")),
++        "CAPTURE_ARCHIVE_LISTS_REQUIRED",
++    )
++    from .ownership_checks.bridge import validate_account_rows
++    validate_account_rows(snapshot)
++    sid = snapshot.get("snapshot_id")
++    need(
++        isinstance(sid, str) and 0 < len(sid) <= 200
++        and sid.strip() == sid
++        and not any(ord(c) < 32 for c in sid),
++        "CAPTURE_ARCHIVE_ID_INVALID",
++    )
++    raw = json.dumps(
++        snapshot, sort_keys=True, separators=(",", ":"), allow_nan=False
++    )
++    need(len(raw.encode()) <= 2_000_000, "CAPTURE_ARCHIVE_TOO_LARGE")
++    fingerprint = sha(snapshot)
++    db.execute(
++        "CREATE TABLE IF NOT EXISTS preparation_account_captures("
++        "id TEXT PRIMARY KEY,fingerprint TEXT NOT NULL,data TEXT NOT NULL)"
++    )
++    old = db.execute(
++        "SELECT fingerprint,data FROM preparation_account_captures WHERE id=?",
++        (sid,),
++    ).fetchone()
++    if old:
++        need(
++            old[0] == fingerprint == sha(json.loads(old[1])),
++            "CAPTURE_ARCHIVE_ID_CONFLICT",
++        )
++        need(json.loads(old[1]) == snapshot, "CAPTURE_ARCHIVE_CONTENT_CONFLICT")
++    else:
++        db.execute(
++            "INSERT INTO preparation_account_captures VALUES(?,?,?)",
++            (sid, fingerprint, raw),
++        )
++    return True
+ 
+ 
+ def record_entry_review(application,adapter,snapshot,pin,*,clock=utcnow,
+@@ -107,6 +161,18 @@
+             except Exception as exc:
+                 text=str(exc)
+                 reason=text if re.fullmatch(r'[A-Z][A-Z0-9_]{0,179}',text) else 'OWNERSHIP_REVIEW_INVALID'
++            archived = False
++            if capture_valid:
++                try:
++                    archived = archive_authenticated_capture(
++                        db, snapshot, pin, as_of=as_of)
++                except Exception as exc:
++                    text = str(exc)
++                    reason = (
++                        text if re.fullmatch(r'[A-Z][A-Z0-9_]{0,179}', text)
++                        else 'CAPTURE_ARCHIVE_INVALID'
++                    )
++                    report = None
+             passed=report is not None and report['reviewed_remaining_entry_quantity'] is not None
+             if capture_valid and (not highwater or aware(snapshot['generated_at'])>aware(highwater)):
+                 highwater=snapshot['generated_at']
+@@ -123,7 +189,7 @@
+                 entry_signal_at=plan['signal_at'] if passed else None,
+                 reasons=report['reasons'] if report else [reason],
+                 scope='SINGLE_CURRENT_FULLY_FILLED_BUY_ENTRY_READ_ONLY',
+-                evidence_sources_atomic=False,raw_account_capture_persisted=False,
++                evidence_sources_atomic=False,raw_account_capture_persisted=archived,
+                 fees_complete=False,realized_net_pnl_paise=None,open_net_pnl_paise=None,
+                 production_ready=False)
+             row['signature']=sign(row,pin)

@@ -1,0 +1,30 @@
+{
+  "status": "PASS",
+  "pytest_exit_code": 0,
+  "local_unit_tests_passed": 14,
+  "regression_tests": [
+    "tests/test_hilega_atomic_disabled_binding_v1.py",
+    "tests/test_hilega_application_preparation_v1.py",
+    "tests/test_hilega_preparation_wait_admission_v1.py",
+    "tests/test_hilega_preparation_pricing_wiring_v1.py",
+    "tests/test_hilega_limit_candidate_v1.py",
+    "tests/test_hilega_consolidated_adapter_v1.py",
+    "test_runtime_reservation.py"
+  ],
+  "package_manifest_sha256": "5800f8c5690b7750e1eed3846cc38a4845a42e07112ddf1e20aa058d48acf553",
+  "baseline_sha256": {
+    "backend/market_lab/hilega_production_account_adapter_v1.py": "9484899b374701c211adf22b67ea5fc84d0cdb978defe061ce8250cb7313b140",
+    "backend/market_lab/hilega_execution_port_v1/adapter.py": "d2d8146cf8cc3334ce1d7d4715d73285d7755bc93201651be2d1798b34ee9e27",
+    "backend/market_lab/hilega_execution_port_v1/mapping.py": "a8c6ab675bbd1e604e7b4bc2994fadc1fde50ee4a48918298ef0db887d6f1e96",
+    "backend/market_lab/hilega_execution_port_v1/receipt_review.py": "ac97a3f5f0df3b7d79ddcbe4719b169e83aebd2568dfb18c175e0994d8c6a418",
+    "backend/market_lab/hilega_preparation_runtime_v1/atomic_binding.py": "594fa9ba1492515569a6e6333f11490b49d4471980714a75ca1092ef7ac9cbf0",
+    "backend/market_lab/hilega_preparation_runtime_v1/source.py": "049b877d43a38bc90621f06e1b28ce0ffb37bc5b7f0e9794d7d66b298ac0222e",
+    "backend/market_lab/hilega_preparation_runtime_v1/evidence.py": "9b72ab5a48b7f8e4f87c217cf641ea853cfd91a22e1402e540c84c5b3127bbec",
+    "backend/market_lab/hilega_preparation_runtime_v1/cash_reservation.py": null,
+    "check-preparation-paused.py": "99d6045eac312fcc0e4cda49ad67427abe05bb59d9c698d6d8ca5442e20abc6b"
+  },
+  "applied": false,
+  "services_restarted": false,
+  "database_migration_performed": false,
+  "production_execution_enabled": false
+}

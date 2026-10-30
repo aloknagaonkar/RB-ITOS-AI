@@ -8,6 +8,15 @@ from market_lab.domain import IST
 from market_lab.hilega_production_bridge_health_v1 import effective
 from market_lab.hilega_production_simulator_bridge_v1 import verified_records
 
+def local_reservation_count(db):
+    exists = db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='preparation_cash_reservations'"
+    ).fetchone()
+    return db.execute(
+        "SELECT COUNT(*) FROM preparation_cash_reservations"
+    ).fetchone()[0] if exists else 0
+
+
 repo = Path.cwd().resolve()
 sys.path.insert(0, str(repo / "hilega-production-application-deployment"))
 from managed_processes import inspect as inventory
@@ -55,6 +64,7 @@ try:
         n: db.execute("SELECT COUNT(*) FROM "+n).fetchone()[0]
         for n in names
     }
+    local_cash_count = local_reservation_count(db)
     recent = [
         json.loads(r[0]) for r in db.execute(
             "SELECT data FROM preparation_events ORDER BY seq DESC LIMIT 3"
@@ -93,6 +103,7 @@ safe = (
         "model": "APPLICATION_PREPARATION_ROUTE_V1",
     }
     and not any(counts.values())
+    and local_cash_count == 0
     and prefix_matches
 )
 
@@ -109,6 +120,7 @@ print(json.dumps({
     "execution_route": route["route"],
     "controller_mode": control["mode"],
     "activity_counts": counts,
+    "local_cash_reservation_count": local_cash_count,
     "journal_prefix_matches": prefix_matches,
     "journal_tail_remaining_records": len(records)-sequence,
     "bridge_health": health,

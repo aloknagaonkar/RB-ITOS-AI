@@ -1,0 +1,9 @@
+{
+  "phase": "PREPARATION_ONLY_ACTIVE_PAUSED",
+  "children": {
+    "api": 18017,
+    "worker": 18015,
+    "source": 18019
+  },
+  "production_execution_enabled": false
+}

@@ -1,0 +1,13 @@
+{
+  "status": "STAGED_CAPTURE_ARCHIVE_TESTS_PASS",
+  "tests_run": 14,
+  "candidate_sha256": "7cc48fb3422bae9a86a2e2fa7d0d143ffbbfa7cabfab248c3b9ee8b14f084041",
+  "installed_writer_unchanged": true,
+  "production_database_accessed": false,
+  "applied": false,
+  "services_restarted": false,
+  "orders_sent": false,
+  "production_execution_enabled": false,
+  "reservation_release_permission": false,
+  "production_ready": false
+}

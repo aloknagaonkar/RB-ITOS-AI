@@ -1,0 +1,22 @@
+{
+  "model": "HILEGA_LIVE_OWNERSHIP_REFERENCE_BRIDGE_PACKAGE_V2",
+  "installed_source_sha256": {
+    "backend/market_lab/hilega_production_account_adapter_v1.py": "9484899b374701c211adf22b67ea5fc84d0cdb978defe061ce8250cb7313b140",
+    "backend/market_lab/hilega_execution_port_v1/adapter.py": "d2d8146cf8cc3334ce1d7d4715d73285d7755bc93201651be2d1798b34ee9e27",
+    "backend/market_lab/hilega_execution_port_v1/mapping.py": "a8c6ab675bbd1e604e7b4bc2994fadc1fde50ee4a48918298ef0db887d6f1e96",
+    "backend/market_lab/hilega_execution_port_v1/receipt_review.py": "ac97a3f5f0df3b7d79ddcbe4719b169e83aebd2568dfb18c175e0994d8c6a418",
+    "backend/market_lab/hilega_preparation_runtime_v1/atomic_binding.py": "594fa9ba1492515569a6e6333f11490b49d4471980714a75ca1092ef7ac9cbf0"
+  },
+  "package_sha256": {
+    "bridge.py": "dc58074a76d3d0616ff104ba975a48fbd1d5accda6c27e6c06c79a29e9e2c5dc",
+    "historical_receipt_checks.py": "a362da0d2d1255e69fcc5b816ca70187833b2c9b1d34b02f5b18b5d35e66a62b",
+    "risk_evidence_audit.py": "42e7b60efc4a67e98d6ef8f2bc2fda08c17d4fcfa8e2b468d1f239c73061121e",
+    "signature_checks.py": "62b5f998cebe9ad439728278e62e01bf39cef9ba18d268ff0b83e9fb5f6befed",
+    "test_bridge.py": "960ead71b0a992d2341c510de3735d5f959791d6a0d3f5d9eba341d812ff8ff9",
+    "test_risk_evidence_audit.py": "2cf9df2b7f3a3d89f1b10bea3c7ca5581b9c22263f1ad49bfd9b5c4df736b60f"
+  },
+  "local_tests_passed": 70,
+  "vm_validation_pending": true,
+  "runtime_integration": false,
+  "production_execution_enabled": false
+}

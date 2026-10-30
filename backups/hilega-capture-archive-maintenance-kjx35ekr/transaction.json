@@ -1,0 +1,73 @@
+{
+  "phase": "DEPLOYED_PAUSED_VERIFIED",
+  "backup": "/home/aloknagaonkar46/RB-ITOS-AI/backups/hilega-capture-archive-maintenance-kjx35ekr",
+  "previous_processes": [
+    {
+      "pid": 974,
+      "role": "api",
+      "start_ticks": 1670
+    },
+    {
+      "pid": 975,
+      "role": "production-source-worker",
+      "start_ticks": 1671
+    },
+    {
+      "pid": 976,
+      "role": "worker",
+      "start_ticks": 1671
+    }
+  ],
+  "ownership_records_sha256": "77c74722d7fdadbfc15053c660ed7df27090a847052ae9b5711a149ae390fe35",
+  "ownership_counts": {
+    "preparation_entry_ownership_state": 1,
+    "preparation_entry_ownership_reviews": 1,
+    "preparation_entry_ownership_audit": 1
+  },
+  "installer_self_tests_passed": 3,
+  "production_execution_enabled": false,
+  "database_migration_performed": false,
+  "targets": [
+    {
+      "path": "hilega-ownership-producer-tools-v1/manifest.json",
+      "before_sha256": "f89c018edbacaa128b2a574087f8ead711301459c798567670229d3df15f89b5",
+      "after_sha256": "09ac943ec667024266520a6382cffa75d02d6f7939222e95a0894cd305ef4857"
+    },
+    {
+      "path": "hilega-ownership-producer-tools-v1/reference_runtime/market_lab/hilega_preparation_runtime_v1/ownership_state.py",
+      "before_sha256": "d144c596dee2411b7f2c0d4e8e6dae31442496c8b2e32859322ef09399d84563",
+      "after_sha256": "7cc48fb3422bae9a86a2e2fa7d0d143ffbbfa7cabfab248c3b9ee8b14f084041"
+    },
+    {
+      "path": "backend/market_lab/hilega_preparation_runtime_v1/ownership_state.py",
+      "before_sha256": "d144c596dee2411b7f2c0d4e8e6dae31442496c8b2e32859322ef09399d84563",
+      "after_sha256": "7cc48fb3422bae9a86a2e2fa7d0d143ffbbfa7cabfab248c3b9ee8b14f084041"
+    }
+  ],
+  "processes": [
+    {
+      "pid": 1932,
+      "role": "api",
+      "start_ticks": 403462
+    },
+    {
+      "pid": 1934,
+      "role": "production-source-worker",
+      "start_ticks": 403467
+    },
+    {
+      "pid": 1930,
+      "role": "worker",
+      "start_ticks": 403459
+    }
+  ],
+  "ownership_records_preserved": true,
+  "producer_manifest_updated": true,
+  "producer_reference_updated": true,
+  "archive_table_created": false,
+  "controller_mode": "PAUSED",
+  "execution_route": "PREPARATION_ONLY",
+  "reservation_release_permission": false,
+  "entry_allocation_fraction": "0.50",
+  "daily_loss_limit_required": false
+}

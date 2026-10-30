@@ -1,0 +1,37 @@
+{
+  "status": "PASS",
+  "pytest_exit_code": 0,
+  "local_unit_tests_passed": 10,
+  "regression_tests": [
+    "tests/test_hilega_atomic_disabled_binding_v1.py",
+    "tests/test_hilega_application_preparation_v1.py",
+    "tests/test_hilega_preparation_wait_admission_v1.py",
+    "tests/test_hilega_preparation_pricing_wiring_v1.py",
+    "tests/test_hilega_limit_candidate_v1.py",
+    "tests/test_hilega_consolidated_adapter_v1.py",
+    "test_source_dispatch.py"
+  ],
+  "package_manifest_sha256": "833990b9eabc3f57d8a382638ba134d824937d9109499582f4dd6291689ec72d",
+  "baseline_sha256": {
+    "backend/market_lab/hilega_production_account_adapter_v1.py": "9484899b374701c211adf22b67ea5fc84d0cdb978defe061ce8250cb7313b140",
+    "backend/market_lab/hilega_execution_port_v1/adapter.py": "d2d8146cf8cc3334ce1d7d4715d73285d7755bc93201651be2d1798b34ee9e27",
+    "backend/market_lab/hilega_execution_port_v1/mapping.py": "a8c6ab675bbd1e604e7b4bc2994fadc1fde50ee4a48918298ef0db887d6f1e96",
+    "backend/market_lab/hilega_execution_port_v1/receipt_review.py": "ac97a3f5f0df3b7d79ddcbe4719b169e83aebd2568dfb18c175e0994d8c6a418",
+    "backend/market_lab/hilega_preparation_runtime_v1/atomic_binding.py": "ce62f33526ffc138b6faf51ceb4d48ab37ad2d9c9e820c49a2e9e76a2b8a35cb",
+    "backend/market_lab/hilega_preparation_runtime_v1/source.py": "049b877d43a38bc90621f06e1b28ce0ffb37bc5b7f0e9794d7d66b298ac0222e",
+    "backend/market_lab/hilega_preparation_runtime_v1/evidence.py": "9b72ab5a48b7f8e4f87c217cf641ea853cfd91a22e1402e540c84c5b3127bbec",
+    "backend/market_lab/hilega_preparation_runtime_v1/cash_reservation.py": "04a8156ef1951f36aac38c62d6ca0201e8b0df6e17661b607de4e350f2eda502",
+    "check-preparation-paused.py": "feb23c9d1d5db879fc34fad88d21d749f7cc33b3675938f98c820edbfcb6dc67",
+    "backend/market_lab/hilega_preparation_runtime_v1/exit_dispatch.py": null
+  },
+  "applied": false,
+  "services_restarted": false,
+  "database_migration_performed": false,
+  "production_execution_enabled": false,
+  "exit_dispatch_scope": "DURABLE_REFUSED_NON_EXECUTABLE_ONLY",
+  "live_exit_submission_integrated": false,
+  "reservation_release_permission": false,
+  "daily_loss_limit_required": false,
+  "entry_allocation_fraction": "0.50",
+  "production_ready": false
+}

@@ -1,0 +1,9 @@
+{
+  "model": "HILEGA_APPLICATION_OWNERSHIP_RECORD_MAINTENANCE_V1",
+  "package_sha256": {
+    "GO_LIVE_CHECKLIST.md": "e110583b8e6d161045f4e69b31b80c420087393609fc2e6ab0914132ff5f41cb",
+    "README.md": "1fc76597e861f92d29541a5bd10de562d0d743783b4ebd2cf9431a30e315ca82",
+    "maintain.py": "335b812dd1ffbe205194838eeef24db50bdf2ec95d9bd8df349c53f75ea48381",
+    "test_maintain.py": "eeaf62a7393b8dc37ba7d4c46a24ed3f2e774dc2827d698e2b228f5b6fc9d4e1"
+  }
+}

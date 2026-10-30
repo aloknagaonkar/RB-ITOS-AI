@@ -1,0 +1,39 @@
+{
+  "model": "HILEGA_EXIT_FILL_LIFECYCLE_STAGE_PACKAGE_V1",
+  "installed_source_sha256": {
+    "backend/market_lab/hilega_production_account_adapter_v1.py": "9484899b374701c211adf22b67ea5fc84d0cdb978defe061ce8250cb7313b140",
+    "backend/market_lab/hilega_execution_port_v1/adapter.py": "d2d8146cf8cc3334ce1d7d4715d73285d7755bc93201651be2d1798b34ee9e27",
+    "backend/market_lab/hilega_execution_port_v1/mapping.py": "a8c6ab675bbd1e604e7b4bc2994fadc1fde50ee4a48918298ef0db887d6f1e96",
+    "backend/market_lab/hilega_execution_port_v1/receipt_review.py": "ac97a3f5f0df3b7d79ddcbe4719b169e83aebd2568dfb18c175e0994d8c6a418",
+    "backend/market_lab/hilega_preparation_runtime_v1/atomic_binding.py": "594fa9ba1492515569a6e6333f11490b49d4471980714a75ca1092ef7ac9cbf0"
+  },
+  "package_sha256": {
+    "adapter_reference/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "adapter_reference/adapter.py": "d2d8146cf8cc3334ce1d7d4715d73285d7755bc93201651be2d1798b34ee9e27",
+    "adapter_reference/mapping.py": "a8c6ab675bbd1e604e7b4bc2994fadc1fde50ee4a48918298ef0db887d6f1e96",
+    "atomic_exit_binding.py": "d11539562b24046b2d7cc5c58f0ebdea44180523bf87806f629f0b772b4f5fcf",
+    "bridge.py": "591e659e8e580c5ddedfc5b3d2100dd857304df09a8e1c987e56fb872e5da9c4",
+    "exit_ack.py": "c5c8d3f05e573d40b84757db5eadae44f04560c41580618dc36c81c2c7fb97bf",
+    "exit_fills.py": "1b3e1b36c304fbd5c1fa9d1c6c8419456b2d0c4d72ae516fa7c61c4f947f389d",
+    "exit_intent.py": "0f173dbc152216199e928f7ce05e4ae1b2cf3b56997c62813cb0db3db2d37a58",
+    "historical_receipt_checks.py": "a362da0d2d1255e69fcc5b816ca70187833b2c9b1d34b02f5b18b5d35e66a62b",
+    "risk_evidence_audit.py": "42e7b60efc4a67e98d6ef8f2bc2fda08c17d4fcfa8e2b468d1f239c73061121e",
+    "signature_checks.py": "62b5f998cebe9ad439728278e62e01bf39cef9ba18d268ff0b83e9fb5f6befed",
+    "test_atomic_exit.py": "8077ab1f7c1ec95d58821b34217107da88459c050c486d9e150d0304514b31ce",
+    "test_bridge.py": "6f33a79872f86ec4ec81990d0eb031ae3296eff103d87583d1ec8ceefe1cb2c7",
+    "test_exit_ack.py": "f5919e7d02ecfe2d1f1aaf5dabd5c31f91b7fab198874a9f0558267fe0391d80",
+    "test_exit_fills.py": "a6f1ddfb4b7601c11bc959d701b51ca44a5186aa23f65b0248bd96a49e6287e0",
+    "test_exit_intent.py": "5ba37f75957219ffc7d804c8df4ae40361ac8124c85e9c1d0ccb0ff8fd099cdb",
+    "test_position_references.py": "4c79dc612212eee22905fcd810d28411950fa0fbfe96c425bce0839c7878ab10",
+    "test_risk_evidence_audit.py": "2cf9df2b7f3a3d89f1b10bea3c7ca5581b9c22263f1ad49bfd9b5c4df736b60f",
+    "validate_atomic_fixture.py": "e94e431afe8a50fd9117c4697c0de81868725150bc3895ab4c557389f690f806",
+    "validate_exit_ack_fixture.py": "3dc99880afec1004e4ba234bfce38cd02ecfc55044668695bbf44252602a9621",
+    "validate_exit_fill_fixture.py": "a6d3b704ba63774eeaf3449b1c59c402277bfa31bf5fafef2a154a6ba31bd032",
+    "validate_fixture.py": "eb95d252c6a734d927893308d3dfa87b2408427e33a9539563ae5d0bb428843d"
+  },
+  "local_tests_passed": 150,
+  "vm_validation_pending": true,
+  "runtime_integration": false,
+  "production_execution_enabled": false,
+  "fixture_demo_passed": true
+}

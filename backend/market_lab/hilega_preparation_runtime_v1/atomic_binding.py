@@ -7,6 +7,7 @@ import re
 
 from .evidence import FLAGS, digest, need, readonly
 from .limit_candidate import build_candidate, fresh_plan
+from .cash_reservation import reserve_local
 from market_lab.hilega_nifty_option_price_grid_v1 import PROFILE
 from market_lab.hilega_execution_port_v1.adapter import (
     validated_request, encode,
@@ -126,6 +127,9 @@ def bind_disabled_request(db, plan, hold, outbox, bundle, pin, *, now):
     db.execute(
         "CREATE TABLE IF NOT EXISTS preparation_request_bindings("
         "id TEXT PRIMARY KEY,data TEXT NOT NULL)"
+    )
+    reserve_local(
+        db, plan, hold, outbox, pin, current, fingerprint, now=now,
     )
     db.execute(
         "INSERT INTO broker.requests VALUES(?,?,?)",

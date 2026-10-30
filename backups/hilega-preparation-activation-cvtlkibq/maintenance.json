@@ -1,9 +1,9 @@
 {
   "phase": "PREPARATION_ONLY_ACTIVE_PAUSED",
   "children": {
-    "api": 4169,
-    "worker": 4154,
-    "source": 4171
+    "api": 1932,
+    "worker": 1930,
+    "source": 1934
   },
   "production_execution_enabled": false
 }

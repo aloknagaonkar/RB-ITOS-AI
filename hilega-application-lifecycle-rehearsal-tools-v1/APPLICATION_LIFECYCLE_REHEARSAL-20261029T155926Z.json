@@ -1,0 +1,21 @@
+{
+  "model": "HILEGA_APPLICATION_LIFECYCLE_REHEARSAL_V1",
+  "status": "PASS",
+  "assessed_at": "2026-10-29T15:59:26.221048+00:00",
+  "pytest_exit_code": 0,
+  "scope": "SYNTHETIC_TEMPORARY_DATABASES_ONLY",
+  "deployed_entry_code_exercised": true,
+  "separate_fixture_execution_handoff": true,
+  "entry_allocation_fraction": "0.50",
+  "daily_loss_limit_required": false,
+  "application_code_applied": false,
+  "running_services_changed": false,
+  "production_exit_dispatch_integrated": false,
+  "runtime_live_lifecycle_integrated": false,
+  "live_evidence_assessed": false,
+  "orders_sent_to_upstox": false,
+  "production_execution_enabled": false,
+  "reservation_release_permission": false,
+  "production_ready": false,
+  "report": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-application-lifecycle-rehearsal-tools-v1/APPLICATION_LIFECYCLE_REHEARSAL-20261029T155926Z.json"
+}

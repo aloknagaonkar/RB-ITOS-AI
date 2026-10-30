@@ -1,0 +1,22 @@
+{
+  "model": "HILEGA_HALF_CASH_ALLOCATION_PACKAGE_V1",
+  "package_sha256": {
+    "allocation.py": "ef9242b66c9a0f056b46f3e054304a0b4e4b275b418643a923c0247cf5b59584",
+    "cash_checks.py": "e2c1a2738f27b5cffc88736dcc85f68b1df0b47584423c48076dbd61f08cc1c3",
+    "signature_checks.py": "62b5f998cebe9ad439728278e62e01bf39cef9ba18d268ff0b83e9fb5f6befed",
+    "test_allocation.py": "a814b6d7d12182a888769d8aeebe61077f3ee4a165791d9ed1d5731b85723912",
+    "validate_fixture.py": "6af2e0d3cd9acbb57005ac01e3d8164aef94cfa17fdd8ba05ed3d5f70584c42b"
+  },
+  "operator_policy": {
+    "allocation_fraction": "0.50",
+    "daily_loss_limit_paise": null,
+    "daily_loss_limit_required": false,
+    "fixed_max_entry_cost_paise": null,
+    "initial_maximum_lots": 1
+  },
+  "local_tests_passed": 30,
+  "fixture_demo_passed": true,
+  "vm_validation_pending": true,
+  "runtime_integration": false,
+  "production_execution_enabled": false
+}

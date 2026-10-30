@@ -1,0 +1,28 @@
+{
+  "status": "CAPTURE_ARCHIVE_DEPLOYMENT_PREFLIGHT_PASS",
+  "writer_before_sha256": "d144c596dee2411b7f2c0d4e8e6dae31442496c8b2e32859322ef09399d84563",
+  "writer_after_sha256": "7cc48fb3422bae9a86a2e2fa7d0d143ffbbfa7cabfab248c3b9ee8b14f084041",
+  "producer_manifest_before_sha256": "f89c018edbacaa128b2a574087f8ead711301459c798567670229d3df15f89b5",
+  "producer_manifest_after_sha256": "09ac943ec667024266520a6382cffa75d02d6f7939222e95a0894cd305ef4857",
+  "producer_reference_before_sha256": "d144c596dee2411b7f2c0d4e8e6dae31442496c8b2e32859322ef09399d84563",
+  "producer_reference_after_sha256": "7cc48fb3422bae9a86a2e2fa7d0d143ffbbfa7cabfab248c3b9ee8b14f084041",
+  "ownership_snapshot": {
+    "records_sha256": "77c74722d7fdadbfc15053c660ed7df27090a847052ae9b5711a149ae390fe35",
+    "counts": {
+      "preparation_entry_ownership_state": 1,
+      "preparation_entry_ownership_reviews": 1,
+      "preparation_entry_ownership_audit": 1
+    },
+    "archive_exists": false
+  },
+  "ownership_records_preserved": true,
+  "updated_producer_tests_exit_code": 0,
+  "applied": false,
+  "services_restarted": false,
+  "production_database_modified": false,
+  "broker_reads_performed": false,
+  "orders_sent": false,
+  "production_execution_enabled": false,
+  "reservation_release_permission": false,
+  "production_ready": false
+}
