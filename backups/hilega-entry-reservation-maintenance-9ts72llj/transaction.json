@@ -1,0 +1,45 @@
+{
+  "phase": "DEPLOYED_PAUSED_VERIFIED",
+  "previous_processes": [
+    {
+      "pid": 4169,
+      "role": "api",
+      "start_ticks": 866874
+    },
+    {
+      "pid": 4171,
+      "role": "production-source-worker",
+      "start_ticks": 866878
+    },
+    {
+      "pid": 4154,
+      "role": "worker",
+      "start_ticks": 862421
+    }
+  ],
+  "backup": "/home/aloknagaonkar46/RB-ITOS-AI/backups/hilega-entry-reservation-maintenance-9ts72llj",
+  "production_execution_enabled": false,
+  "database_migration_performed": false,
+  "processes": [
+    {
+      "pid": 16216,
+      "role": "api",
+      "start_ticks": 4474482
+    },
+    {
+      "pid": 16218,
+      "role": "production-source-worker",
+      "start_ticks": 4474486
+    },
+    {
+      "pid": 16214,
+      "role": "worker",
+      "start_ticks": 4474479
+    }
+  ],
+  "configuration_changed": false,
+  "execution_route": "PREPARATION_ONLY",
+  "controller_mode": "PAUSED",
+  "daily_loss_limit_required": false,
+  "entry_allocation_fraction": "0.50"
+}

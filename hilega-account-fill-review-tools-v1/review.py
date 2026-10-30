@@ -86,6 +86,48 @@ def compare(links, snapshot):
         ),
     }
 
+
+def account_review_guard(checked):
+    counts = checked.get("activity_counts")
+    expected = {
+        "intents", "sim_orders", "sim_fills",
+        "sim_allocation_reservations", "preparation_plans",
+        "preparation_shadow_holds", "preparation_outbox",
+    }
+    bridge = checked.get("bridge_health", {})
+    age = bridge.get("heartbeat_age_seconds")
+    limit = bridge.get("heartbeat_limit_seconds")
+    need(
+        checked.get("status") in {
+            "PAUSED_SAFE_SOURCE_FRESH",
+            "PAUSED_SAFE_WAITING_FOR_FRESH_SOURCE",
+        }
+        and checked.get("process_identities_match") is True
+        and checked.get("controller_mode") == "PAUSED"
+        and checked.get("execution_route") == "PREPARATION_ONLY"
+        and checked.get("production_ready") is False
+        and checked.get("journal_prefix_matches") is True
+        and type(checked.get("journal_tail_remaining_records")) is int
+        and checked["journal_tail_remaining_records"] == 0
+        and isinstance(counts, dict)
+        and set(counts) == expected
+        and all(type(v) is int and v == 0 for v in counts.values())
+        and bridge.get("production_execution_enabled") is False
+        and bridge.get("phase") == "RUNNING"
+        and type(age) in (int, float)
+        and type(limit) in (int, float)
+        and 0 <= age <= limit <= 15
+        and (
+            bridge.get("status") == "HEALTHY"
+            and bridge.get("healthy") is True
+            or
+            bridge.get("status") == "SOURCE_STALE_OR_FUTURE"
+            and bridge.get("healthy") is False
+            and checked.get("within_configured_entry_clock_window") is False
+        ),
+        "PAUSED_ACCOUNT_REVIEW_SAFETY_REQUIRED",
+    )
+
 def main():
     need(sys.argv[1:] == ["--capture-account"],
          "EXPLICIT_CAPTURE_ACCOUNT_FLAG_REQUIRED")
@@ -104,13 +146,7 @@ def main():
     )
     need(result.returncode == 0, "PAUSED_CHECK_COMMAND_FAILED")
     checked = json.loads(result.stdout)
-    need(
-        checked.get("status") == "PAUSED_SAFE_SOURCE_FRESH"
-        and checked.get("controller_mode") == "PAUSED"
-        and checked.get("execution_route") == "PREPARATION_ONLY"
-        and checked.get("production_ready") is False,
-        "FRESH_PAUSED_PREPARATION_REQUIRED",
-    )
+    account_review_guard(checked)
 
     from market_lab.hilega_execution_port_v1.receipt_review import _check
     from market_lab.hilega_production_account_adapter_v1 import (

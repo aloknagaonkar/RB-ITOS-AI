@@ -247,7 +247,8 @@ class Source:
                 events=accepted(row)
             else:events=[]
             if any(e['role']=='EXIT' for e in events):
-                self._block_record(events,cursor,'EXIT_OR_REVERSAL_REQUIRES_LIVE_OWNERSHIP')
+                from .exit_dispatch import dispatch_closed
+                dispatch_closed(self,events,cursor,fingerprint=event_digest)
             elif events:self._entry(events[0],cursor)
             else:
                 with self.s.store.lock(),self.s.store.db() as db:self._cursor(db,cursor)
@@ -255,3 +256,4 @@ class Source:
 
     def poll(self):
         return dict(status='PREPARATION_ONLY_NO_BROKER_RECONCILIATION',**FLAGS)
+

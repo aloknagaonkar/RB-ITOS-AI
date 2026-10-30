@@ -1,0 +1,24 @@
+{
+  "model": "HILEGA_CLOSED_EXIT_DISPATCH_PATCH_V1",
+  "baseline_sha256": {
+    "backend/market_lab/hilega_production_account_adapter_v1.py": "9484899b374701c211adf22b67ea5fc84d0cdb978defe061ce8250cb7313b140",
+    "backend/market_lab/hilega_execution_port_v1/adapter.py": "d2d8146cf8cc3334ce1d7d4715d73285d7755bc93201651be2d1798b34ee9e27",
+    "backend/market_lab/hilega_execution_port_v1/mapping.py": "a8c6ab675bbd1e604e7b4bc2994fadc1fde50ee4a48918298ef0db887d6f1e96",
+    "backend/market_lab/hilega_execution_port_v1/receipt_review.py": "ac97a3f5f0df3b7d79ddcbe4719b169e83aebd2568dfb18c175e0994d8c6a418",
+    "backend/market_lab/hilega_preparation_runtime_v1/atomic_binding.py": "ce62f33526ffc138b6faf51ceb4d48ab37ad2d9c9e820c49a2e9e76a2b8a35cb",
+    "backend/market_lab/hilega_preparation_runtime_v1/source.py": "049b877d43a38bc90621f06e1b28ce0ffb37bc5b7f0e9794d7d66b298ac0222e",
+    "backend/market_lab/hilega_preparation_runtime_v1/evidence.py": "9b72ab5a48b7f8e4f87c217cf641ea853cfd91a22e1402e540c84c5b3127bbec",
+    "backend/market_lab/hilega_preparation_runtime_v1/cash_reservation.py": "04a8156ef1951f36aac38c62d6ca0201e8b0df6e17661b607de4e350f2eda502",
+    "check-preparation-paused.py": "feb23c9d1d5db879fc34fad88d21d749f7cc33b3675938f98c820edbfcb6dc67",
+    "backend/market_lab/hilega_preparation_runtime_v1/exit_dispatch.py": null
+  },
+  "package_sha256": {
+    "README.md": "60b0a6c6028ed640ea21b0ec19d3f805894dcf5a138d708f7323d5d6f26ff595",
+    "run_tests.py": "0f69441b4c8695de76ac73822ffcead1e5f80b0b5277b5d2c5d2c02b035dd47f",
+    "runtime/market_lab/hilega_preparation_runtime_v1/exit_dispatch.py": "e4bb191adbc200a0eefae018155d53d4f82985d936871ba52bc1710cd834a576",
+    "runtime/market_lab/hilega_preparation_runtime_v1/source.py": "c792ebb12ab5d17a20d624843c8f6a2af7b8405fd69439d68c283a2ee1bb1a5b",
+    "source-review.diff": "9f2ab24bc290f7110febf0917857f49f6426785cab54cab2c7c725099046c24a",
+    "test_dispatch_unit.py": "863ac542781d342612d32f50fcdfbe6311fd28767f53977a5f16fc53c9f01ec0",
+    "test_source_dispatch.py": "d4d63bb7141bbd9e804597d01102b6655ef75ad7f3d3a77b5b8c6715218c9f61"
+  }
+}

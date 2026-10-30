@@ -1,0 +1,20 @@
+{
+  "model": "HILEGA_FEE_REPORT_PROVIDER_PACKAGE_V1",
+  "installed_source_sha256": {
+    "backend/market_lab/hilega_production_account_adapter_v1.py": "9484899b374701c211adf22b67ea5fc84d0cdb978defe061ce8250cb7313b140",
+    "backend/market_lab/hilega_execution_port_v1/adapter.py": "d2d8146cf8cc3334ce1d7d4715d73285d7755bc93201651be2d1798b34ee9e27",
+    "backend/market_lab/hilega_execution_port_v1/mapping.py": "a8c6ab675bbd1e604e7b4bc2994fadc1fde50ee4a48918298ef0db887d6f1e96",
+    "backend/market_lab/hilega_execution_port_v1/receipt_review.py": "ac97a3f5f0df3b7d79ddcbe4719b169e83aebd2568dfb18c175e0994d8c6a418",
+    "backend/market_lab/hilega_preparation_runtime_v1/atomic_binding.py": "594fa9ba1492515569a6e6333f11490b49d4471980714a75ca1092ef7ac9cbf0"
+  },
+  "package_sha256": {
+    "fee_report.py": "fdb78c8805b8704b6e44c2c6138a61317457bb74e1ba3e2011c9fe8e51a9228c",
+    "signature_checks.py": "62b5f998cebe9ad439728278e62e01bf39cef9ba18d268ff0b83e9fb5f6befed",
+    "test_fee_report.py": "5609baac1ceb32f58c70c2265437594a251a87f2e2ef61e3ee0058f01e9b1d65"
+  },
+  "local_tests_passed": 26,
+  "vm_validation_pending": true,
+  "runtime_integration": false,
+  "fees_complete": false,
+  "production_execution_enabled": false
+}

@@ -1,0 +1,48 @@
+{
+  "phase": "DEPLOYED_PAUSED_VERIFIED",
+  "previous_processes": [
+    {
+      "pid": 16216,
+      "role": "api",
+      "start_ticks": 4474482
+    },
+    {
+      "pid": 16218,
+      "role": "production-source-worker",
+      "start_ticks": 4474486
+    },
+    {
+      "pid": 16214,
+      "role": "worker",
+      "start_ticks": 4474479
+    }
+  ],
+  "backup": "/home/aloknagaonkar46/RB-ITOS-AI/backups/hilega-exit-dispatch-maintenance-57lrw7ex",
+  "package_manifest_sha256": "833990b9eabc3f57d8a382638ba134d824937d9109499582f4dd6291689ec72d",
+  "production_execution_enabled": false,
+  "database_migration_performed": false,
+  "processes": [
+    {
+      "pid": 18017,
+      "role": "api",
+      "start_ticks": 4897844
+    },
+    {
+      "pid": 18019,
+      "role": "production-source-worker",
+      "start_ticks": 4897847
+    },
+    {
+      "pid": 18015,
+      "role": "worker",
+      "start_ticks": 4897841
+    }
+  ],
+  "configuration_changed": false,
+  "execution_route": "PREPARATION_ONLY",
+  "controller_mode": "PAUSED",
+  "daily_loss_limit_required": false,
+  "entry_allocation_fraction": "0.50",
+  "live_exit_submission_integrated": false,
+  "reservation_release_permission": false
+}

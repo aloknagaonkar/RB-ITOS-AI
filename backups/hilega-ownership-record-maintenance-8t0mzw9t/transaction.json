@@ -1,0 +1,50 @@
+{
+  "phase": "DEPLOYED_PAUSED_VERIFIED",
+  "previous_processes": [
+    {
+      "pid": 18017,
+      "role": "api",
+      "start_ticks": 4897844
+    },
+    {
+      "pid": 18019,
+      "role": "production-source-worker",
+      "start_ticks": 4897847
+    },
+    {
+      "pid": 18015,
+      "role": "worker",
+      "start_ticks": 4897841
+    }
+  ],
+  "backup": "/home/aloknagaonkar46/RB-ITOS-AI/backups/hilega-ownership-record-maintenance-8t0mzw9t",
+  "package_manifest_sha256": "030a3e5817735423d1cd11b6f54740b118f6a1be45cb739a6f3439d94857ba67",
+  "production_execution_enabled": false,
+  "database_migration_performed": false,
+  "processes": [
+    {
+      "pid": 19520,
+      "role": "api",
+      "start_ticks": 5209440
+    },
+    {
+      "pid": 19522,
+      "role": "production-source-worker",
+      "start_ticks": 5209445
+    },
+    {
+      "pid": 19518,
+      "role": "worker",
+      "start_ticks": 5209436
+    }
+  ],
+  "configuration_changed": false,
+  "execution_route": "PREPARATION_ONLY",
+  "controller_mode": "PAUSED",
+  "daily_loss_limit_required": false,
+  "entry_allocation_fraction": "0.50",
+  "live_exit_submission_integrated": false,
+  "reservation_release_permission": false,
+  "live_ownership_record_persisted": false,
+  "ownership_capture_producer_enabled": false
+}

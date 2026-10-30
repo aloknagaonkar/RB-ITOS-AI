@@ -1,0 +1,8 @@
+{
+  "model": "HILEGA_CLOSED_EXIT_DISPATCH_MAINTENANCE_V1",
+  "package_sha256": {
+    "README.md": "fc2cc6226fa558d96340717927aa5fd325249a400654a327d421f1abfa01cff3",
+    "maintain.py": "4f00ae0519703dc15367a2dd88404e6d31e3cee049f19e3ac0b09abe08ac3948",
+    "test_maintain.py": "a35a1609120456d94637a364fc43726b4701f1627faef534376e35fc4f1fb104"
+  }
+}
