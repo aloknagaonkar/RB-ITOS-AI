@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PYTHON="$ROOT/.venv/bin/python"
+RUNTIME_DIR="$ROOT/data/runtime"
+LOG_DIR="$ROOT/data/logs"
+HEALTH_URL="http://127.0.0.1:8123/api/health"
+
+cd "$ROOT"
+
+if [[ ! -x "$PYTHON" ]]; then
+    echo "ERROR: Python environment missing: $PYTHON"
+    exit 1
+fi
+
+mkdir -p "$RUNTIME_DIR" "$LOG_DIR"
+
+if [[ ! -f "$ROOT/.env" ]]; then
+    echo "ERROR: .env not found at $ROOT/.env"
+    exit 1
+fi
+
+if ! grep -qE '^UPSTOX_ACCESS_TOKEN=.+' "$ROOT/.env"; then
+    echo "ERROR: UPSTOX_ACCESS_TOKEN is missing or empty in .env"
+    exit 1
+fi
+
+CURRENT_EXTERNAL_IP="$(
+    curl -fsS --max-time 2 \
+        -H "Metadata-Flavor: Google" \
+        http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip \
+        2>/dev/null || true
+)"
+
+if [[ -n "$CURRENT_EXTERNAL_IP" ]]; then
+    export MARKET_LAB_ALLOWED_HOSTS="localhost,127.0.0.1,testserver,$CURRENT_EXTERNAL_IP"
+    echo "allowed hosts: localhost, 127.0.0.1, testserver, $CURRENT_EXTERNAL_IP"
+else
+    export MARKET_LAB_ALLOWED_HOSTS="localhost,127.0.0.1,testserver"
+    echo "WARNING: GCE external IP could not be detected."
+fi
+
+service_running() {
+    local service="$1"
+    local pidfile="$RUNTIME_DIR/$service.json"
+
+    [[ -f "$pidfile" ]] || return 1
+
+    local pid
+    pid="$("$PYTHON" - "$pidfile" "$ROOT" <<'PY'
+import json, os, sys
+from pathlib import Path
+
+pidfile = Path(sys.argv[1])
+root = str(Path(sys.argv[2]).resolve())
+try:
+    data = json.loads(pidfile.read_text(encoding="utf-8"))
+    if str(Path(data["project_root"]).resolve()) != root:
+        raise SystemExit(1)
+    print(int(data["pid"]))
+except Exception:
+    raise SystemExit(1)
+PY
+)" || return 1
+
+    kill -0 "$pid" 2>/dev/null || return 1
+    printf '%s' "$pid"
+}
+
+start_service() {
+    local service="$1"
+
+    local pid=""
+    if pid="$(service_running "$service")"; then
+        echo "$service: already running (PID $pid)"
+        return
+    fi
+
+    rm -f "$RUNTIME_DIR/$service.json"
+
+    nohup "$PYTHON" -m market_lab.runtime "$service"         >> "$LOG_DIR/$service.log"         2>> "$LOG_DIR/$service-error.log"         < /dev/null &
+
+    local deadline=$((SECONDS + 10))
+    while (( SECONDS < deadline )); do
+        sleep 0.2
+        if pid="$(service_running "$service")"; then
+            if [[ "$service" == "worker" ]]; then
+                sleep 0.75
+                if ! pid="$(service_running "$service")"; then
+                    echo "ERROR: worker exited during startup."
+                    echo "Check data/logs/worker-error.log"
+                    exit 1
+                fi
+            fi
+            echo "$service: started (PID $pid)"
+            return
+        fi
+    done
+
+    echo "ERROR: $service failed to start."
+    echo "Check data/logs/$service-error.log"
+    exit 1
+}
+
+if "$PYTHON" "$ROOT/scripts/hilega_supervised_control.py" mode; then
+    "$PYTHON" "$ROOT/scripts/hilega_supervised_control.py" start
+else
+    supervision_rc=$?
+    if [[ "$supervision_rc" -ne 10 ]]; then
+        echo "ERROR: supervision requires review; legacy launch/stop blocked."
+        exit "$supervision_rc"
+    fi
+start_service "api"
+start_service "worker"
+fi
+
+# Independent VWAP observation; failure must not block core startup.
+bash "$ROOT/scripts/start_hilega_vwap_collector.sh" || echo "VWAP collector: startup warning; inspect collector status/logs"
+bash "$ROOT/scripts/start_hilega_policy_observer.sh" || echo "Policy observer: start warning"
+
+deadline=$((SECONDS + 10))
+while (( SECONDS < deadline )); do
+    if curl -fsS --max-time 1 "$HEALTH_URL" >/dev/null 2>&1; then
+        echo "dashboard: AVAILABLE at http://127.0.0.1:8123"
+        systemctl --user start hilega-observation-analytics.service
+        bash "$ROOT/scripts/start_operational_readiness.sh"
+        exit 0
+    fi
+    sleep 0.25
+done
+
+echo "ERROR: API process started but health check failed."
+echo "Check data/logs/api-error.log"
+exit 1
+

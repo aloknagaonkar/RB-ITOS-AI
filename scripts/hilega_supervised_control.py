@@ -1,3 +1,4 @@
+from urllib.error import HTTPError, URLError
 """Control the three preparation services through the existing shell entry points."""
 import argparse
 import hashlib
@@ -39,6 +40,17 @@ def no_detached_processes(rows,units):
         need(int(units[row['role']]['MainPID'])==row['pid'],
              'DETACHED_PROCESS_PRESENT_USE_GUARDED_MIGRATION')
 
+
+def api_health_available(probe):
+    """Retry connection failures only; preserve HTTP and safety failures."""
+    try:
+        probe()
+        return True
+    except HTTPError:
+        raise
+    except URLError:
+        return False
+
 def main(action,root=None,home=None):
     root=(root or Path(__file__).resolve().parents[1]).resolve()
     home=home or Path.home()
@@ -77,7 +89,9 @@ def main(action,root=None,home=None):
             rows=inspect(root)['active_processes']
             no_detached_processes(rows,units)
             if len(rows)==3 and all(v.get('ActiveState')=='active' for v in units.values()):
-                m.api_health()
+                if not api_health_available(m.api_health):
+                    time.sleep(1)
+                    continue
                 runner.paused(root)
                 print('application: three supervised preparation services running; controller PAUSED')
                 print('source freshness requires a separate readiness check')

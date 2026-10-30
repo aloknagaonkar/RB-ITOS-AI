@@ -1,0 +1,11 @@
+{
+  "status": "SIGNAL_AUDIT_MANIFEST_PREFLIGHT_PASS",
+  "installed_source_sha256": "8163ca0db32a5fc95358368d2f474a6f0e083c853cb97008b7574f1241310f71",
+  "candidate_source_sha256": "dbfce30057763b93e8f7f8332e86e2145890bd29c72d18016b3ad944125e6150",
+  "manifest_before_sha256": "4fe45c48b1520e60dc2a0c59a3adcc7ed5f136fab4601abcd6129389f38e8598",
+  "manifest_after_sha256": "b27b573928bf485db585ce59183e0a74c6b15de50d933e990c5443d8f14426fe",
+  "installed_files_changed": false,
+  "services_restarted": false,
+  "database_modified": false,
+  "production_execution_enabled": false
+}

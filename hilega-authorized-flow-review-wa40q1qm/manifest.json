@@ -1,0 +1,101 @@
+{
+  "created_at": "2026-10-30T16:48:06.227164+00:00",
+  "scope": "SYNTHETIC_AUTHORIZED_FLOW_REVIEW_SNAPSHOT",
+  "files": [
+    {
+      "source": "/home/aloknagaonkar46/fixture_execution_authorization.py",
+      "snapshot": "00-fixture_execution_authorization.py",
+      "sha256": "ffd6d019d68e57b6783b1ec4e06b07c37c520ed6652aff67e7ac9bf1286d1e71"
+    },
+    {
+      "source": "/home/aloknagaonkar46/authorized_prepared_entry.py",
+      "snapshot": "01-authorized_prepared_entry.py",
+      "sha256": "4a4e28d7fb9caf98fa35ab35be9470648e5ecd0169e823bf6e5b3f790de6efde"
+    },
+    {
+      "source": "/home/aloknagaonkar46/authorized_exit_fixture.py",
+      "snapshot": "02-authorized_exit_fixture.py",
+      "sha256": "885036256bb545a9756a8e318afd9ceef85195cac794537d1f84eae6e09667c9"
+    },
+    {
+      "source": "/home/aloknagaonkar46/authorized_event_dispatcher.py",
+      "snapshot": "03-authorized_event_dispatcher.py",
+      "sha256": "1c5fbc84c09107a28505ee95308d4c8ec78e10a023d0d8e0d2e08ea2da678127"
+    },
+    {
+      "source": "/home/aloknagaonkar46/authorized_journal_consumer.py",
+      "snapshot": "04-authorized_journal_consumer.py",
+      "sha256": "b1e3f68d4a4197d8cb8e41ad32c80ca1036edb0524848c2159943ab079c1ead1"
+    },
+    {
+      "source": "/home/aloknagaonkar46/dispatch_precondition_review.py",
+      "snapshot": "05-dispatch_precondition_review.py",
+      "sha256": "92cd3dad83eadfaf5158c092842eb707556749cfd609ae4968dd65ac2625e990"
+    },
+    {
+      "source": "/home/aloknagaonkar46/test_fixture_execution_authorization.py",
+      "snapshot": "06-test_fixture_execution_authorization.py",
+      "sha256": "b3173c5110723502825af82d20eece7f98d552fdf6e9cf1b6db2be6194fe6474"
+    },
+    {
+      "source": "/home/aloknagaonkar46/test_authorized_attempt.py",
+      "snapshot": "07-test_authorized_attempt.py",
+      "sha256": "bf26da9db94a2a39addc9f25c33dcb9c12fcbe4f48845d662d153be91651d9c8"
+    },
+    {
+      "source": "/home/aloknagaonkar46/test_authorized_attempt_recovery.py",
+      "snapshot": "08-test_authorized_attempt_recovery.py",
+      "sha256": "a92b53d3bc7f036e69e419fe167aae7406ba7b4aba3565ece45b009a9f4b4401"
+    },
+    {
+      "source": "/home/aloknagaonkar46/test_authorized_prepared_entry.py",
+      "snapshot": "09-test_authorized_prepared_entry.py",
+      "sha256": "a3bb99d992a18467ffd15ab56a6fc3dec8c3d25aab2bdf6b4711991aeb1c240a"
+    },
+    {
+      "source": "/home/aloknagaonkar46/test_authorized_exit_contract.py",
+      "snapshot": "10-test_authorized_exit_contract.py",
+      "sha256": "ec17c41830a038abcef2abec183725695cabbc7356bcd4d94361f5eb401200d7"
+    },
+    {
+      "source": "/home/aloknagaonkar46/test_authorized_exit_integration.py",
+      "snapshot": "11-test_authorized_exit_integration.py",
+      "sha256": "0f6b5762e9e1cfd5c9cfd901cd9c3265e29e66cd60ed7bb46061465914e74a33"
+    },
+    {
+      "source": "/home/aloknagaonkar46/test_authorized_consumer_batch.py",
+      "snapshot": "12-test_authorized_consumer_batch.py",
+      "sha256": "6a09f9a4aa187d23a2e1ac6238033fcab458d70f74ddaa16beb1d005bee8a6f6"
+    },
+    {
+      "source": "/home/aloknagaonkar46/test_authorized_consumer_recovery.py",
+      "snapshot": "13-test_authorized_consumer_recovery.py",
+      "sha256": "a1a6e6530c81c13370cd3024e4686b295880cf4ee80d1d6ac7e1855ca3398eb4"
+    },
+    {
+      "source": "/home/aloknagaonkar46/test_worker_handoff.py",
+      "snapshot": "14-test_worker_handoff.py",
+      "sha256": "8bffd61d18f22b7644e1d8689fe417b5fe577dbef6ae1376ad5c62a2a6d89e71"
+    },
+    {
+      "source": "/home/aloknagaonkar46/test_automatic_entry_fixture.py",
+      "snapshot": "15-test_automatic_entry_fixture.py",
+      "sha256": "89d377530ca4b82ade6db9773e7ef76fe71655883361904683af420631671b60"
+    },
+    {
+      "source": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-authorized-attempt-stage-xzqykzdz/adapter.py",
+      "snapshot": "16-adapter.py",
+      "sha256": "82c7606a4c4aad8b540b59db35766a736982dac18e9501f26179d9e8fe24b4a4"
+    },
+    {
+      "source": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-worker-handoff-stage-51fc37nx/hilega_production_simulator_bridge.py",
+      "snapshot": "17-hilega_production_simulator_bridge.py",
+      "sha256": "24a2d5b3ded4c929016c9dcc55933e19141dd19371dd44ce654d61a8ef2fa16c"
+    }
+  ],
+  "preceding_pytest_exit_code": 0,
+  "self_contained_test_package": false,
+  "additional_repository_test_dependencies_required": true,
+  "runtime_deployed": false,
+  "production_execution_enabled": false
+}

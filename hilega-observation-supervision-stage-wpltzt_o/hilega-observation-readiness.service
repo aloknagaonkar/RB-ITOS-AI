@@ -1,0 +1,18 @@
+[Unit]
+Description=Hilega observation readiness
+After=hilega-api.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/home/aloknagaonkar46/RB-ITOS-AI
+Environment=PYTHONPATH=/home/aloknagaonkar46/RB-ITOS-AI/backend:/home/aloknagaonkar46/RB-ITOS-AI
+Environment=HILEGA_READINESS_AUTO_REPAIR=0
+ExecStart=/home/aloknagaonkar46/RB-ITOS-AI/.venv/bin/python -m market_lab.operational_readiness_v1
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+UMask=0077
+
+[Install]
+WantedBy=default.target

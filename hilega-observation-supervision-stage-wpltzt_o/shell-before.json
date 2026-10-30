@@ -1,0 +1,8 @@
+{
+  "start.sh": "19db6dd8cc168557605ff2a2363e045188ec9a42ffafc6c656908281358d4b42",
+  "stop.sh": "ec84550187dd6ff97614670e5201154aad8c8912f3433573209ad0455052b969",
+  "restart.sh": "417cedb3ee80b44f45da9ea4066be1c452f07c454f813a264abdced982a51707",
+  "status.sh": "b44c462dbfa61c28db7681977caedd19409c2aff9acd01cb942b3e868332eae4",
+  "start_operational_readiness.sh": "5f15533af565425bc33560f0167a2cd07fbbaaf61815718481a07fc0d9b69877",
+  "stop_operational_readiness.sh": "d0dd11f602f0f5acff4fcbdeedc205036cff5852a7239043b45d31e315149da6"
+}

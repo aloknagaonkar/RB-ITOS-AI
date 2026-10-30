@@ -1,0 +1,18 @@
+{
+  "status": "CLOCK_PRODUCER_MANIFEST_PREFLIGHT_PASS",
+  "installed_source_before_sha256": "c792ebb12ab5d17a20d624843c8f6a2af7b8405fd69439d68c283a2ee1bb1a5b",
+  "candidate_source_sha256": "8163ca0db32a5fc95358368d2f474a6f0e083c853cb97008b7574f1241310f71",
+  "manifest_updates": [
+    {
+      "path": "hilega-ownership-producer-tools-v1/manifest.json",
+      "before_sha256": "09ac943ec667024266520a6382cffa75d02d6f7939222e95a0894cd305ef4857",
+      "after_sha256": "4fe45c48b1520e60dc2a0c59a3adcc7ed5f136fab4601abcd6129389f38e8598"
+    }
+  ],
+  "installed_exit_matches_integration_package": true,
+  "older_review_package_preserved": true,
+  "installed_files_changed": false,
+  "services_restarted": false,
+  "database_modified": false,
+  "production_execution_enabled": false
+}

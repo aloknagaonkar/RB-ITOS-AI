@@ -1,0 +1,16 @@
+{
+  "status": "PASS",
+  "assessed_at": "2026-10-30T05:09:42.442722+00:00",
+  "pytest_exit_code": 0,
+  "scope": "SYNTHETIC_TEMPORARY_DATABASES_ONLY",
+  "installed_source_sha256": "8163ca0db32a5fc95358368d2f474a6f0e083c853cb97008b7574f1241310f71",
+  "original_rehearsal_manifest_preserved": true,
+  "separate_fixture_execution_handoff": true,
+  "production_dispatch_integrated": false,
+  "services_restarted": false,
+  "live_evidence_assessed": false,
+  "orders_sent_to_upstox": false,
+  "production_execution_enabled": false,
+  "reservation_release_permission": false,
+  "production_ready": false
+}

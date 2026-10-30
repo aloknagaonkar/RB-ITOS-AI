@@ -1,0 +1,13 @@
+{
+  "status": "PASS",
+  "assessed_at": "2026-10-30T14:56:09.482064+00:00",
+  "pytest_exit_code": 0,
+  "scope": "SYNTHETIC_TEMPORARY_DATABASES_ONLY",
+  "fixture_source_sha256": "0ebe9fc2e06c4a1187595a4022203f6b93dfd89276bb6b5751865a280268ee8c",
+  "backup": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-partial-exit-batch-38s6kbc2/automatic_exit_fixture.before.py",
+  "live_partial_quantity_policy_verified": false,
+  "runtime_deployed": false,
+  "orders_sent_to_upstox": false,
+  "production_execution_enabled": false,
+  "reservation_release_permission": false
+}

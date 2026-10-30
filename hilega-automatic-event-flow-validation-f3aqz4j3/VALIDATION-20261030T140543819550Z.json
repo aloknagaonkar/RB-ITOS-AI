@@ -1,0 +1,15 @@
+{
+  "status": "PASS",
+  "assessed_at": "2026-10-30T14:05:43.819470+00:00",
+  "pytest_exit_code": 0,
+  "scope": "SYNTHETIC_TEMPORARY_DATABASES_ONLY",
+  "fixture_event_flow_packaged": true,
+  "running_service_hook_installed": false,
+  "live_transport_integrated": false,
+  "partial_entry_exit_supported": false,
+  "live_evidence_assessed": false,
+  "orders_sent_to_upstox": false,
+  "production_execution_enabled": false,
+  "reservation_release_permission": false,
+  "production_ready": false
+}

@@ -1,0 +1,13 @@
+{
+  "status": "PASS",
+  "assessed_at": "2026-10-30T07:52:55.561399+00:00",
+  "pytest_exit_code": 0,
+  "scope": "SYNTHETIC_TEMPORARY_DATABASES_ONLY",
+  "production_runtime_integrated": false,
+  "real_account_persistence_supported": false,
+  "services_restarted": false,
+  "orders_sent_to_upstox": false,
+  "production_execution_enabled": false,
+  "reservation_release_permission": false,
+  "production_ready": false
+}

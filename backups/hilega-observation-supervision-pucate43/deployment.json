@@ -1,0 +1,18 @@
+{
+  "backup": "/home/aloknagaonkar46/RB-ITOS-AI/backups/hilega-observation-supervision-pucate43",
+  "previous_processes": [
+    {
+      "pid": 3085,
+      "role": "analytics",
+      "ticks": "907126"
+    },
+    {
+      "pid": 3297,
+      "role": "readiness",
+      "ticks": "952882"
+    }
+  ],
+  "started_at": "2026-10-30T04:08:34.637398+00:00",
+  "production_execution_enabled": false,
+  "phase": "INSTALLED_PAUSED_CHECK_PASSED"
+}

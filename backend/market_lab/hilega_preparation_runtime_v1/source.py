@@ -1,3 +1,5 @@
+from datetime import time as _EntryTime
+from zoneinfo import ZoneInfo as _EntryZone
 """Verified live strategy journal -> application-owned unsent preparation plans."""
 import json
 import fcntl
@@ -44,6 +46,15 @@ def event_digest(event):
     return digest({k:v for k,v in event.items() if k not in {'source_sequence','source_record_hash'}})
 
 
+
+def entry_clock_open(value):
+    """Preparation entry window only; never an exit restriction."""
+    need(value.tzinfo is not None and value.utcoffset() is not None,
+         "AWARE_ENTRY_CLOCK_REQUIRED")
+    local = value.astimezone(_EntryZone("Asia/Kolkata"))
+    return _EntryTime(9, 15) <= local.time() < _EntryTime(14, 55)
+
+
 class Source:
     """Consumes confirmed ENTRY only; no simulator or real order calls exist here."""
     def __init__(self,service,*,run_id,provider=None):
@@ -67,9 +78,27 @@ class Source:
     def _cursor(self,db,cursor):
         db.execute('INSERT OR REPLACE INTO preparation_source VALUES(1,?)',(encode(cursor),))
 
-    def _audit(self,db,status,reasons):
-        db.execute('INSERT INTO preparation_events(data) VALUES(?)',(encode(dict(
-            status=status,reasons=sorted(set(reasons)),at=self.s.now().isoformat(),**FLAGS)),))
+    def _audit(self,db,status,reasons,*,events=()):
+        references = [
+            dict(
+                signal_id=event["id"],
+                signal_at=event["event_at"],
+                direction=event["direction"],
+                source_sequence=event["source_sequence"],
+                source_record_hash=event["source_record_hash"],
+                event_fingerprint=event_digest(event),
+            )
+            for event in events
+        ]
+        db.execute(
+            "INSERT INTO preparation_events(data) VALUES(?)",
+            (encode(dict(
+                status=status,reasons=sorted(set(reasons)),
+                at=self.s.now().isoformat(),
+                source_event_references=references,
+                **FLAGS,
+            )),),
+        )
 
     def _block_record(self,events,cursor,reason):
         with self.s.store.lock(),self.s.store.db() as db:
@@ -80,7 +109,7 @@ class Source:
                 need(old is None or old[0]==fp,'CONFIRMED_EVENT_CONFLICT')
                 db.execute('INSERT OR IGNORE INTO preparation_consumed VALUES(?,?)',(event['id'],fp))
             self._pause_in_transaction(db)
-            self._audit(db,'BLOCKED',[reason]);self._cursor(db,cursor)
+            self._audit(db,'BLOCKED',[reason],events=events);self._cursor(db,cursor)
 
     def _entry(self,event,cursor):
         with self.s.store.lock():
@@ -97,6 +126,9 @@ class Source:
                 self._block_record_unlocked(event,cursor,'CONTROLLER_PAUSED_OR_STOP_PENDING');return
             if day(signal)!=day(now) or not 0<=(now-signal).total_seconds()<=60 or not c.get('resumed_at') or signal<=aware(c['resumed_at']):
                 self._block_record_unlocked(event,cursor,'SIGNAL_STALE_FUTURE_OR_PRE_RESUME');return
+            if not (entry_clock_open(now) and entry_clock_open(signal)):
+                self._block_record_unlocked(
+                    event,cursor,'ENTRY_CLOCK_WINDOW_CLOSED');return
             if pending(self.s.store):
                 self._block_record_unlocked(event,cursor,'UNRESOLVED_PREPARATION');return
         # Slow GET evidence collection does not hold the controller flock; Pause
@@ -114,6 +146,10 @@ class Source:
             # original Resume remains authoritative. Every evidence gate below
             # still runs against the fresh signal and signed account snapshot.
             checked_at=self.s.now()
+            if not entry_clock_open(checked_at):
+                self._record_result_unlocked(
+                    event,cursor,["ENTRY_CLOCK_WINDOW_CLOSED"])
+                return
             previous=current.get("last_reconciled_at")
             if (current["mode"]=="ARMED" and current["version"]==c["version"]
                     and current.get("reconciled") is True and previous
@@ -153,6 +189,8 @@ class Source:
                     'instrument','quantity','proposed_cost_cents')), 'EVIDENCE_CHANGED_OR_STALE_BEFORE_COMMIT')
                 plan=again
                 now=self.s.now();self.s._check_fresh(latest)
+                need(entry_clock_open(now),
+                     "ENTRY_CLOCK_WINDOW_CLOSED_BEFORE_COMMIT")
                 need(day(now)==latest['session_date'] and 0<=(now-signal).total_seconds()<=60,'SIGNAL_OR_SESSION_CHANGED_BEFORE_COMMIT')
                 # Mutable local bridge evidence shares this transaction/DB.
                 from market_lab.hilega_production_bridge_health_v1 import effective
@@ -185,9 +223,11 @@ class Source:
                 db.execute('INSERT INTO preparation_consumed VALUES(?,?)',(event['id'],fp))
                 latest.update(mode='PAUSED',version=latest['version']+1,reconciled=False,reason='APPLICATION_UNSENT_PREPARATION_REQUIRES_REVIEW')
                 db.execute('UPDATE control SET data=? WHERE id=1',(encode(latest),))
-                self._audit(db,'EVIDENCE_LINKED_UNSENT',['PRICING_POLICY_AND_REAL_RESERVATION_PENDING'])
+                self._audit(db,'EVIDENCE_LINKED_UNSENT',['PRICING_POLICY_AND_REAL_RESERVATION_PENDING'],events=[event])
                 self._cursor(db,cursor);self.checkpoint('BEFORE_COMMIT')
                 final_now=self.s.now()
+                need(entry_clock_open(final_now),
+                     "ENTRY_CLOCK_WINDOW_CLOSED_BEFORE_COMMIT")
                 final=fresh_plan(bundle,pin,event["direction"],final_now,PROFILE)
                 need(all(final[k]==plan[k] for k in (
                     "bundle_fingerprint","cash_capture_fingerprint",
@@ -215,7 +255,7 @@ class Source:
             fp=event_digest(event);need(old is None or old[0]==fp,'CONFIRMED_EVENT_CONFLICT')
             db.execute('INSERT OR IGNORE INTO preparation_consumed VALUES(?,?)',(event['id'],fp))
             self._pause_in_transaction(db)
-            self._audit(db,'BLOCKED',reasons);self._cursor(db,cursor)
+            self._audit(db,'BLOCKED',reasons,events=[event]);self._cursor(db,cursor)
 
     def run_source_once(self,path):
         fd=os.open(str(self.s.store.path)+'.preparation-source.lock',os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW,0o600)

@@ -207,7 +207,12 @@ def tick(base):
     warm=dict(warm,analytics_probe=probe)
     with ThreadPoolExecutor(max_workers=2) as pool:
         one=pool.submit(get_api,base,'/api/live-shadow/hilega-directional/status?fast=true');two=pool.submit(get_api,base,'/api/live-shadow/hilega-upstox-sandbox/dashboard');live,sandbox=one.result(),two.result()
-    report=evaluate(now,live,sandbox,warm,inspect_local(now),read_json('data/live-observation/shadow-worker-health.json'),prev);atomic(STATE,report);return report
+    local=inspect_local(now)
+    health=read_json('data/live-observation/shadow-worker-health.json')
+    assessed_at=datetime.now(IST)
+    report=evaluate(assessed_at,live,sandbox,warm,local,health,prev)
+    atomic(STATE,report)
+    return report
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('--once',action='store_true');p.add_argument('--base-url',default='http://127.0.0.1:8123');a=p.parse_args();load_dotenv('.env');ROOT.mkdir(parents=True,exist_ok=True)

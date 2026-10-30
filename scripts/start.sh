@@ -123,6 +123,8 @@ deadline=$((SECONDS + 10))
 while (( SECONDS < deadline )); do
     if curl -fsS --max-time 1 "$HEALTH_URL" >/dev/null 2>&1; then
         echo "dashboard: AVAILABLE at http://127.0.0.1:8123"
+        systemctl --user start hilega-observation-analytics.service
+        bash "$ROOT/scripts/start_operational_readiness.sh"
         exit 0
     fi
     sleep 0.25
@@ -132,5 +134,3 @@ echo "ERROR: API process started but health check failed."
 echo "Check data/logs/api-error.log"
 exit 1
 
-# UI-only operational readiness
-bash "$ROOT/scripts/start_operational_readiness.sh"

@@ -1,0 +1,19 @@
+{
+  "status": "ENTRY_CLOCK_DEPLOYED_PAUSED_VERIFIED",
+  "verified_at": "2026-10-30T04:35:33.482441+00:00",
+  "installed_hashes_verified": true,
+  "producer_package_check_passed": true,
+  "ownership_records_preserved": true,
+  "ownership_counts": {
+    "preparation_entry_ownership_state": 1,
+    "preparation_entry_ownership_reviews": 2,
+    "preparation_entry_ownership_audit": 2,
+    "preparation_account_captures": 1
+  },
+  "controller_mode": "PAUSED",
+  "execution_route": "PREPARATION_ONLY",
+  "entry_allocation_fraction": "0.50",
+  "daily_loss_limit_required": false,
+  "production_execution_enabled": false,
+  "production_ready": false
+}

@@ -1,0 +1,8 @@
+{
+  "status": "PASS",
+  "pytest_exit_code": 0,
+  "manifest_sha256": "574197a2ba8e4db050e1192377acbfc62b2e09ac49219cc171df99e9c32cb87b",
+  "runtime_deployed": false,
+  "actual_broker_network_capture_verified": false,
+  "production_execution_enabled": false
+}

@@ -85,3 +85,9 @@ fi
 bash "$ROOT/scripts/status_hilega_vwap_collector.sh" || echo "VWAP collector: status unavailable"
 
 bash "$ROOT/scripts/status_hilega_policy_observer.sh" || echo "Policy observer: status warning"
+
+# Supervised analytics and readiness process status.
+systemctl --user show \
+  hilega-observation-analytics.service \
+  hilega-observation-readiness.service \
+  -p Id -p ActiveState -p SubState -p MainPID -p Result

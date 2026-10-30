@@ -1,0 +1,17 @@
+{
+  "status": "PASS",
+  "assessed_at": "2026-10-30T17:19:23.719296+00:00",
+  "pytest_exit_code": 0,
+  "tracked_source_files_unchanged": true,
+  "manifest_sha256": "51825a32f82994d13e9114f9c6dea83db3dd00ed9225fb186cb6ffbd1b64de86",
+  "scope": "SYNTHETIC_TEMPORARY_DATABASES_AND_MOCKED_GET_RESPONSES",
+  "installed_account_capture_function_exercised": true,
+  "actual_broker_network_capture_verified": false,
+  "running_service_hook_installed": false,
+  "cancellation_submission_authorization_verified": false,
+  "fees_complete": false,
+  "reservation_release_permission": false,
+  "runtime_deployed": false,
+  "production_execution_enabled": false,
+  "production_ready": false
+}

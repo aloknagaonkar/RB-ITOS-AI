@@ -1,0 +1,17 @@
+{
+  "backup": "/home/aloknagaonkar46/RB-ITOS-AI/backups/hilega-signal-audit-1ph8rbdo",
+  "started_at": "2026-10-30T05:27:14.315188+00:00",
+  "ownership_before": {
+    "sha256": "7a7034a61b9c98d243ecff1da83dc639fff24dcc8b14208473cc02760f5e4dbb",
+    "counts": {
+      "preparation_entry_ownership_state": 1,
+      "preparation_entry_ownership_reviews": 2,
+      "preparation_entry_ownership_audit": 2,
+      "preparation_account_captures": 1
+    }
+  },
+  "production_execution_enabled": false,
+  "database_migration_performed": false,
+  "phase": "DEPLOYED_POSTCHECK_COMPLETED",
+  "ownership_records_preserved": true
+}
