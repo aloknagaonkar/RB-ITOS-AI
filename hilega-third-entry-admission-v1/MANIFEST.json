@@ -1,0 +1,27 @@
+{
+  "scope": "FIXTURE_THIRD_DISABLED_PREPARATION_ONLY",
+  "behavioral_tests_run_here": false,
+  "production_execution_enabled": false,
+  "files": {
+    "README.md": "f76f3bbb3c409fbe89b980992eba2422bb7cb21612972babb563308560a62285",
+    "apply_and_test.py": "385589efd6f9ca2edb23eb94a74860e0a224c37745e4fe262f0dc2ff635f98f7",
+    "baseline/closed_history_baseline_candidate.py": "a44402a09dc40d47a4d3fa4f7bb35139137d118155f420f6743d6d66782bb73c",
+    "baseline/repeat_entry_cash_candidate.py": "81a5b151439bb3a79f0f60e1e95807eeea0d7b3978db37d2d48095d0dd327eca",
+    "baseline/repeat_entry_preparation_candidate.py": "062b9438ae3ad2a32a61aafb2c56f64321cf31dc57c7476be6e7ff70f6be3b27",
+    "test_third_entry_preparation_candidate.py": "b3534d4d3540e9868b0b728031291fc99a89102d1fce5f4b25cd89ce55a84911",
+    "third_entry_cash_candidate.py": "7cff7caf9359c314549902f1c042458fe3437c048fbed995ff4045c7c6b4718e",
+    "third_entry_history_candidate.py": "0acb4abae57c9efaf5cb3b435d82c30145b8bf185cdbbd5be8d21204a3d353f5",
+    "third_entry_preparation_candidate.py": "22efcdcfa26fdff6b16393acf2f2745b0c78feb33d5dfd917b7df3386f292f57"
+  },
+  "baseline_sources": [
+    "repeat_entry_preparation_candidate.py",
+    "repeat_entry_cash_candidate.py",
+    "closed_history_baseline_candidate.py"
+  ],
+  "install_files": [
+    "third_entry_history_candidate.py",
+    "third_entry_cash_candidate.py",
+    "third_entry_preparation_candidate.py",
+    "test_third_entry_preparation_candidate.py"
+  ]
+}
