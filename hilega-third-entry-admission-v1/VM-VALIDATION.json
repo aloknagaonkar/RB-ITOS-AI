@@ -1,0 +1,12 @@
+{
+  "status": "PASS",
+  "pytest_exit_code": 0,
+  "scope": "SYNTHETIC_FIXTURE_DISABLED_THIRD_ENTRY_PREPARATION",
+  "third_buy_submission_implemented": false,
+  "production_execution_enabled": false,
+  "runtime_deployed": false,
+  "production_ready": false,
+  "collected_cases": 80,
+  "failed": 0,
+  "skipped": 0
+}

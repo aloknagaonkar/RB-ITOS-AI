@@ -1,0 +1,15 @@
+{
+  "status": "PASS",
+  "pytest_exit_code": 0,
+  "scope": "SYNTHETIC_DURABLE_REUSABLE_FIXTURE_JOURNAL",
+  "durable_fixture_consumer_implemented": true,
+  "key_cycle_and_recovery_cases_verified": true,
+  "multi_event_reversal_enabled": false,
+  "running_service_hook_installed": false,
+  "production_execution_enabled": false,
+  "runtime_deployed": false,
+  "production_ready": false,
+  "collected_cases": 152,
+  "failed": 0,
+  "skipped": 0
+}

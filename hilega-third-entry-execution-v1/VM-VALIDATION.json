@@ -1,0 +1,13 @@
+{
+  "status": "PASS",
+  "pytest_exit_code": 0,
+  "scope": "SYNTHETIC_FIXTURE_THIRD_BUY_SUBMISSION_AND_RECOVERY",
+  "third_fixture_buy_submission_implemented": true,
+  "third_exit_implemented": false,
+  "production_execution_enabled": false,
+  "runtime_deployed": false,
+  "production_ready": false,
+  "collected_cases": 90,
+  "failed": 0,
+  "skipped": 0
+}

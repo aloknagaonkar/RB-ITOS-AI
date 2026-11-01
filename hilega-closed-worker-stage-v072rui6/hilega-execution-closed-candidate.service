@@ -1,0 +1,16 @@
+[Unit]
+Description=Hilega closed execution candidate heartbeat
+
+[Service]
+Type=simple
+WorkingDirectory=/home/aloknagaonkar46/RB-ITOS-AI
+ExecStart="/home/aloknagaonkar46/RB-ITOS-AI/.venv/bin/python" "/home/aloknagaonkar46/RB-ITOS-AI/hilega-closed-worker-stage-v072rui6/fixture_closed_worker.py" "--watch" "--interval" "5" "--health-file" "/home/aloknagaonkar46/RB-ITOS-AI/hilega-closed-worker-stage-v072rui6/health/health.json"
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

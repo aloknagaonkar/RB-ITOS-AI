@@ -1,0 +1,16 @@
+{
+  "status": "PASS",
+  "pytest_exit_code": 0,
+  "scope": "SYNTHETIC_FIXTURE_THIRD_REFERENCE_RETIREMENT",
+  "third_fixture_buy_submission_implemented": true,
+  "third_fixture_exit_implemented": true,
+  "third_fixture_closeout_implemented": true,
+  "third_fixture_references_retired": true,
+  "fourth_entry_admission_implemented": false,
+  "production_execution_enabled": false,
+  "runtime_deployed": false,
+  "production_ready": false,
+  "collected_cases": 120,
+  "failed": 0,
+  "skipped": 0
+}

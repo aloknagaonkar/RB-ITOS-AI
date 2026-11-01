@@ -1,0 +1,34 @@
+{
+  "scope": "FIXTURE_THIRD_SELL_AND_CLOSEOUT_ONLY",
+  "behavioral_tests_run_here": false,
+  "expected_new_cases": 18,
+  "production_execution_enabled": false,
+  "files": {
+    "README.md": "7b7de88ae76be14960d0b5b31e4f1938b50deb2e14575d2fba1274fe43eaeba8",
+    "apply_and_test.py": "3fcdf5daacd5a2faf6d79e7d02dc0bb68b9bcc0899924caaff6d2d997e303bfd",
+    "baseline/fixture_repeat_exit_candidate.py": "cb276927d7e44b5cf5f5089bad647318129fc50cf6e1f06c5ce2402cbeeb7f31",
+    "baseline/fixture_third_execution_candidate.py": "689dec11a93b4b53dbb0f44864e4802eefefcc3b4dc21bdfbaed332e16c4ffe7",
+    "baseline/test_fixture_repeat_exit_candidate.py": "956eec5068188b08840185fdd645099925a4529284c34f0f98fbfc5a12d3b7d4",
+    "baseline/test_fixture_third_execution_candidate.py": "c57f2b6b54fa4d3abc1ffdbe498d05341c166fb4d9d251b28f484b4e107d71ce",
+    "baseline/test_third_entry_preparation_candidate.py": "38134538a6753cb3568cea9957a780d2b21b5ee123a8675fca2757e8095117e0",
+    "baseline/third_entry_cash_candidate.py": "7cff7caf9359c314549902f1c042458fe3437c048fbed995ff4045c7c6b4718e",
+    "baseline/third_entry_history_candidate.py": "0acb4abae57c9efaf5cb3b435d82c30145b8bf185cdbbd5be8d21204a3d353f5",
+    "baseline/third_entry_preparation_candidate.py": "22efcdcfa26fdff6b16393acf2f2745b0c78feb33d5dfd917b7df3386f292f57",
+    "fixture_third_exit_candidate.py": "0121f019885059d996148cc9c3fb4a66ec901186899ca4391fa9eafa2db4f598",
+    "test_fixture_third_exit_candidate.py": "c024f528f0776ca34634ff1c53b95e3e6b40bb0e6f46392571c8bdb49dda6bb7"
+  },
+  "baseline_sources": [
+    "fixture_repeat_exit_candidate.py",
+    "fixture_third_execution_candidate.py",
+    "test_fixture_repeat_exit_candidate.py",
+    "test_fixture_third_execution_candidate.py",
+    "test_third_entry_preparation_candidate.py",
+    "third_entry_cash_candidate.py",
+    "third_entry_history_candidate.py",
+    "third_entry_preparation_candidate.py"
+  ],
+  "install_files": [
+    "fixture_third_exit_candidate.py",
+    "test_fixture_third_exit_candidate.py"
+  ]
+}

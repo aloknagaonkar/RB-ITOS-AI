@@ -44,7 +44,8 @@ def third(completed):
                 snapshot_id='synthetic-third-entry-cash')
     if 'generated_at' in cash:
         cash['generated_at'] = now.isoformat()
-    for key in ('orders', 'trades', 'positions', 'diagnostics'):
+    # Preserve the validated cash diagnostics; copy only normalized account rows.
+    for key in ('orders', 'trades', 'positions'):
         cash[key] = deepcopy(account[key])
     resign(cash)
     market_position = dict(position, now=now)

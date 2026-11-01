@@ -1,0 +1,15 @@
+{
+  "status": "PASS",
+  "pytest_exit_code": 0,
+  "scope": "SYNTHETIC_FIXTURE_THIRD_SELL_FLAT_CLOSEOUT_AND_RECOVERY",
+  "third_fixture_buy_submission_implemented": true,
+  "third_fixture_exit_implemented": true,
+  "third_fixture_closeout_implemented": true,
+  "third_references_retired": false,
+  "production_execution_enabled": false,
+  "runtime_deployed": false,
+  "production_ready": false,
+  "collected_cases": 108,
+  "failed": 0,
+  "skipped": 0
+}

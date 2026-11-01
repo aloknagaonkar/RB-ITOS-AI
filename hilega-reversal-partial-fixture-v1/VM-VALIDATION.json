@@ -1,0 +1,18 @@
+{
+  "status": "PASS",
+  "pytest_exit_code": 0,
+  "scope": "SYNTHETIC_EXIT_FIRST_REVERSAL_AND_PARTIAL_EXIT_PROGRESS",
+  "exit_first_reversal_policy_implemented": true,
+  "working_partial_exit_tracking_implemented": true,
+  "key_policy_and_recovery_cases_verified": true,
+  "immediate_opposite_buy_enabled": false,
+  "automatic_residual_resubmission_enabled": false,
+  "broker_cancel_reprice_enabled": false,
+  "running_service_hook_installed": false,
+  "production_execution_enabled": false,
+  "runtime_deployed": false,
+  "production_ready": false,
+  "collected_cases": 163,
+  "failed": 0,
+  "skipped": 0
+}
