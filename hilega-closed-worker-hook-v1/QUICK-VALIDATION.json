@@ -1,0 +1,22 @@
+{
+  "status": "PASS_TARGETED_ONLY",
+  "scope": "CLOSED_WORKER_BOUNDARY_AND_FIXTURE_INJECTION",
+  "pytest_exit_code": 0,
+  "collected_cases": 13,
+  "failed": 0,
+  "skipped": 0,
+  "full_regression_reexecuted": false,
+  "prior_full_cases_passed": 163,
+  "prior_report_sha256": "56ba0a7f2f9631d89b396a9d61e5be4d4c55db371489af7db6d4b577707789c8",
+  "unchanged_baseline_sources": 38,
+  "service_installed": false,
+  "service_started": false,
+  "production_execution_enabled": false,
+  "runtime_deployed": false,
+  "production_ready": false,
+  "staged_unit": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-closed-worker-stage-v072rui6/hilega-execution-closed-candidate.service",
+  "stage": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-closed-worker-stage-v072rui6",
+  "systemd_unit_verified": true,
+  "bounded_closed_startup_and_restart_verified": true,
+  "managed_service_control_commands_issued": false
+}

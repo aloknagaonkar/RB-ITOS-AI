@@ -1,0 +1,12 @@
+{
+  "model": "HILEGA_CLOSED_WORKER_STAGE_V1",
+  "stage": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-closed-worker-stage-v072rui6",
+  "repo": "/home/aloknagaonkar46/RB-ITOS-AI",
+  "worker_sha256": "2ead311b8b13e2b1f1886b30641ef7c2ee482380d6f17d5d82e6892cc98fa01f",
+  "unit_sha256": "33ed2d07ce628b6b2c9472014e5dc4ebfd8aff92393efb0c7c4faced4cf50ea9",
+  "systemd_unit_verified": true,
+  "service_installed": false,
+  "service_started": false,
+  "production_execution_enabled": false,
+  "unit_verification_returncode": 0
+}

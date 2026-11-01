@@ -1,0 +1,40 @@
+{
+  "scope": "FIXTURE_THIRD_REFERENCE_RETIREMENT_ONLY",
+  "behavioral_tests_run_here": false,
+  "expected_new_cases": 12,
+  "production_execution_enabled": false,
+  "files": {
+    "README.md": "5ae86c0d338f2493e46549dada695367917ca45d72998804943d986edfd08a87",
+    "apply_and_test.py": "cc55fc0e8f99ca91ca7d273901b28eb75014e3e4bdad31a57c603903a6c8b3e5",
+    "baseline/fixture_repeat_exit_candidate.py": "cb276927d7e44b5cf5f5089bad647318129fc50cf6e1f06c5ce2402cbeeb7f31",
+    "baseline/fixture_repeat_retirement_candidate.py": "2cd1d8e42f6fefe9424f43ad3b152b9fcefbb66e1cd0115ff3e16e3d804ffc3f",
+    "baseline/fixture_third_execution_candidate.py": "689dec11a93b4b53dbb0f44864e4802eefefcc3b4dc21bdfbaed332e16c4ffe7",
+    "baseline/fixture_third_exit_candidate.py": "0121f019885059d996148cc9c3fb4a66ec901186899ca4391fa9eafa2db4f598",
+    "baseline/test_fixture_repeat_exit_candidate.py": "956eec5068188b08840185fdd645099925a4529284c34f0f98fbfc5a12d3b7d4",
+    "baseline/test_fixture_third_execution_candidate.py": "c57f2b6b54fa4d3abc1ffdbe498d05341c166fb4d9d251b28f484b4e107d71ce",
+    "baseline/test_fixture_third_exit_candidate.py": "c024f528f0776ca34634ff1c53b95e3e6b40bb0e6f46392571c8bdb49dda6bb7",
+    "baseline/test_third_entry_preparation_candidate.py": "38134538a6753cb3568cea9957a780d2b21b5ee123a8675fca2757e8095117e0",
+    "baseline/third_entry_cash_candidate.py": "7cff7caf9359c314549902f1c042458fe3437c048fbed995ff4045c7c6b4718e",
+    "baseline/third_entry_history_candidate.py": "0acb4abae57c9efaf5cb3b435d82c30145b8bf185cdbbd5be8d21204a3d353f5",
+    "baseline/third_entry_preparation_candidate.py": "22efcdcfa26fdff6b16393acf2f2745b0c78feb33d5dfd917b7df3386f292f57",
+    "fixture_third_retirement_candidate.py": "9e0a784bc172f886a1d8e4afe7f4e0acdc3768c4b3e0f2cf875a7f54f16f9860",
+    "test_fixture_third_retirement_candidate.py": "84f3d9c39c0ed376bd01d219563bc974ae1f1905fe3a2a3b0a38ce73319a2b7a"
+  },
+  "baseline_sources": [
+    "fixture_repeat_exit_candidate.py",
+    "fixture_repeat_retirement_candidate.py",
+    "fixture_third_execution_candidate.py",
+    "fixture_third_exit_candidate.py",
+    "test_fixture_repeat_exit_candidate.py",
+    "test_fixture_third_execution_candidate.py",
+    "test_fixture_third_exit_candidate.py",
+    "test_third_entry_preparation_candidate.py",
+    "third_entry_cash_candidate.py",
+    "third_entry_history_candidate.py",
+    "third_entry_preparation_candidate.py"
+  ],
+  "install_files": [
+    "fixture_third_retirement_candidate.py",
+    "test_fixture_third_retirement_candidate.py"
+  ]
+}
