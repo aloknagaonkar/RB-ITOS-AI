@@ -1,0 +1,10 @@
+{
+  "scope": "FIXTURE_TESTS_ONLY",
+  "vm_tests_run": false,
+  "production_execution_enabled": false,
+  "files": {
+    "README.md": "ab7bbe261cb49c48013e43e6bd9056b5e5a0a046075b15082add7210ca60fb6d",
+    "apply_and_test.py": "1d26d5e73f30cecb4d9d12f431230d22ab77a7e90db01858b6ccc5f08f13e17c",
+    "test_fixture_repeat_retirement_hardening.py": "59879ccce69caf70c0fbb9adc15162489ae3f3e9ca6d05007cee63a96867d816"
+  }
+}
