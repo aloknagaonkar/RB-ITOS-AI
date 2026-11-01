@@ -1,0 +1,38 @@
+
+def test_insufficient_fresh_cash_blocks(second):
+    for field in ("funds_before", "funds_after"):
+        second["cash"][field]["cash_available_to_trade"] = "1"
+    resign(second["cash"])
+    with pytest.raises(ValueError, match="REPEAT_ENTRY_CASH_BLOCKED"):
+        run(second)
+    assert all(n == 0 for n in active_counts(second).values())
+
+
+def test_paused_controller_blocks(second):
+    with second["e"]["store"].db() as db:
+        control = json.loads(db.execute(
+            "SELECT data FROM control WHERE id=1").fetchone()[0])
+        control["mode"] = "PAUSED"
+        db.execute("UPDATE control SET data=? WHERE id=1",
+                   (json.dumps(control),))
+    with pytest.raises(ValueError, match="CONTROL_RESUME_OR_STOP"):
+        run(second)
+
+
+def test_stale_market_blocks(second):
+    second["market"]["started_at"] = (
+        second["now"]-timedelta(seconds=31)).isoformat()
+    resign(second["market"])
+    with pytest.raises(ValueError):
+        run(second)
+    assert second["execution"].requests() == second["old_requests"]
+
+
+def test_expiry_before_commit_rolls_back(second):
+    times = iter([
+        second["now"], second["now"]+timedelta(minutes=5),
+    ])
+    with pytest.raises(ValueError):
+        run(second, clock=lambda: next(times))
+    assert all(n == 0 for n in active_counts(second).values())
+    assert second["execution"].requests() == second["old_requests"]

@@ -1,0 +1,57 @@
+                insert("preparation_request_bindings", binding)
+                checkpoint("AFTER_ACTIVE_REFERENCES")
+                db.execute("INSERT INTO broker.requests VALUES(?,?,?)",
+                           (key, fingerprint, json.dumps(request, sort_keys=True)))
+                db.execute("INSERT INTO broker.events(data) VALUES(?)",
+                           (json.dumps(dict(
+                               type="REQUEST_PREPARED", request_id=key,
+                               origin="FIXTURE_REPEAT_ATOMIC_BINDING")),))
+                checkpoint("AFTER_DISABLED_REQUEST_INSERT")
+                db.execute("INSERT INTO preparation_consumed VALUES(?,?)",
+                           (key, event_digest(event)))
+                row = dict(
+                    FLAGS, input_fingerprint=input_fp,
+                    request_fingerprint=fingerprint,
+                    active_fingerprints={
+                        table: sha(json.loads(db.execute(
+                            "SELECT data FROM "+table+" WHERE id=?", (key,)
+                        ).fetchone()[0])) for table in ACTIVE},
+                    account_capture=account_capture,
+                    cash_capture=cash_capture, market_bundle=market_bundle,
+                    event=event,
+                    closed_history_fingerprints=[sha(a) for a in archives])
+                row["signature"] = sign(row, pin)
+                db.execute("CREATE TABLE IF NOT EXISTS "+TABLE+
+                           "(id TEXT PRIMARY KEY,data TEXT NOT NULL)")
+                insert(TABLE, row)
+                paused = dict(
+                    control, mode="PAUSED", version=control["version"]+1,
+                    reconciled=False,
+                    reason="FIXTURE_REPEAT_PREPARATION_REQUIRES_REVIEW")
+                db.execute("UPDATE control SET data=? WHERE id=1",
+                           (json.dumps(paused, sort_keys=True),))
+                checkpoint("BEFORE_REPEAT_COMMIT")
+                final_now = clock()
+                need(checked(final_now) ==
+                     (contract, quantity, pricing, premium, cash),
+                     "REPEAT_EVIDENCE_CHANGED")
+                need(0 <= (final_now-now).total_seconds() <= 10,
+                     "DISABLED_REQUEST_STALE_BEFORE_COMMIT")
+                current = verified_records(journal)
+                need(len(current) >= sequence
+                     and current[sequence-1]["record_hash"]
+                         == records[sequence-1]["record_hash"],
+                     "JOURNAL_CHANGED_BEFORE_COMMIT")
+                db.commit()
+                return dict(
+                    status="FIXTURE_SECOND_ENTRY_PREPARED_DISABLED",
+                    request_id=key, direction=event["direction"],
+                    quantity=quantity, budget_paise=budget,
+                    half_cash_cap_paise=cash["half_cash_budget_paise"],
+                    idempotent_replay=False,
+                    previous_broker_history_preserved=True,
+                    orders_sent=False, production_execution_enabled=False,
+                    legacy_execution_authorization_compatible=False)
+            except BaseException:
+                db.rollback()
+                raise

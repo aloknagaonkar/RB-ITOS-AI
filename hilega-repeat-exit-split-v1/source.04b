@@ -1,0 +1,64 @@
+                if attempts:
+                    need(len(attempts) == 1 and found is not None,
+                         "SINGLE_REPEAT_EXIT_ATTEMPT_REQUIRED")
+                    exit_fp, raw_exit = found
+                    saved = json.loads(raw_exit)
+                    stable = {name: saved[name] for name in (
+                        "request_id", "draft", "signal_id", "signal_at",
+                        "direction", "reservation_reference",
+                    )}
+                    body = saved["draft"]["body"]
+                    need(sha(stable) == exit_fp
+                         and saved["request_id"] == exit_id
+                         and saved["signal_id"] == event["id"]
+                         and aware(saved["signal_at"]) == aware(event["event_at"])
+                         and saved["direction"] == parent["direction"]
+                         and saved["reservation_reference"]
+                             == parent["reservation_reference"]
+                         and body["transaction_type"] == "SELL"
+                         and body["quantity"] == parent["draft"]["body"]["quantity"]
+                         and body["instrument_token"]
+                             == parent["draft"]["body"]["instrument_token"]
+                         and body["product"] == parent["draft"]["body"]["product"],
+                         "REPEAT_EXIT_RECOVERY_REQUEST_CHANGED")
+                    aid, rid, operation, raw_attempt = attempts[0]
+                    attempt = json.loads(raw_attempt)
+                    need(attempt["attempt_id"] == aid
+                         and attempt["request_id"] == rid == exit_id
+                         and attempt["operation"] == operation == "PLACE"
+                         and attempt["wire"] == adapter._wire(saved, "PLACE"),
+                         "REPEAT_EXIT_RECOVERY_ATTEMPT_CHANGED")
+                    adapter.recover()
+                    recovered = next(
+                        row for row in execution_store.requests()
+                        if row["request_id"] == exit_id)
+                    return dict(
+                        status="EXISTING_REPEAT_EXIT_RECOVERED_NO_SUBMISSION",
+                        exit_id=exit_id, exit_state=recovered["state"],
+                        recovery_only=True, new_attempt_created=False,
+                        orders_sent_to_upstox=False,
+                        reservation_release_permission=False,
+                        production_execution_enabled=False)
+
+                captures = capture_provider()
+                need(isinstance(captures, dict)
+                     and set(captures) == {"account", "market"},
+                     "EXACT_REPEAT_EXIT_CAPTURE_SET_REQUIRED")
+                now = clock()
+                need(0 <= (now-aware(event["event_at"])).total_seconds() <= 60,
+                     "FRESH_REPEAT_EXIT_SIGNAL_REQUIRED")
+                report = review_repeat_position(
+                    app, source, captures["account"], pin,
+                    entry_id, event, now.isoformat())
+                contract = source["plans"][entry_id]["evidence"]["contract"]
+                pricing = review_owned_quote(
+                    captures["market"], pin, contract,
+                    quantity=report["entry_quantity"], as_of=now.isoformat())
+                selected = dict(contract)
+                for field in ("lot_size", "minimum_lot", "freeze_quantity"):
+                    value = selected[field]
+                    need(not isinstance(value, bool) and int(value) == value,
+                         "INTEGRAL_CONTRACT_QUANTITY_REQUIRED")
+                    selected[field] = int(value)
+                need(report["remaining_quantity"] == report["entry_quantity"]
+                     == selected["lot_size"], "FULL_REPEAT_POSITION_REQUIRED")

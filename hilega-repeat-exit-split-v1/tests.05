@@ -1,0 +1,45 @@
+
+def test_delayed_exit_recovery_never_captures_or_sends(position):
+    first = run_exit(position)
+    provider = Mock(side_effect=AssertionError("No recovery capture"))
+    transport_class = position["case"]["mod"].FixtureTransport
+    with patch.object(
+        transport_class, "send",
+        side_effect=AssertionError("No repeated SELL"),
+    ):
+        recovered = run_exit(
+            position, provider=provider,
+            clock=lambda: position["now"]+timedelta(hours=2))
+    assert recovered["exit_id"] == first["exit_id"]
+    assert recovered["recovery_only"] is True
+    assert recovered["new_attempt_created"] is False
+    provider.assert_not_called()
+
+
+@pytest.mark.parametrize("stage", [
+    "AFTER_REPEAT_CLOSEOUT_INSERT",
+    "BEFORE_REPEAT_CLOSEOUT_COMMIT",
+])
+def test_closeout_interruption_rolls_back(position, stage):
+    close_position(position)
+    snapshot = account_snapshot(position)
+    def interrupt(current):
+        if current == stage:
+            raise RuntimeError("synthetic closeout interruption")
+    with pytest.raises(RuntimeError, match="synthetic closeout"):
+        run_closeout(position, snapshot, checkpoint=interrupt)
+    setup = position["case"]["setup"]
+    with setup["e"]["store"].db() as db:
+        exists = db.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type='table' AND name=?", (CLOSEOUTS,)
+        ).fetchone()
+        if exists:
+            assert db.execute(
+                "SELECT COUNT(*) FROM "+CLOSEOUTS
+            ).fetchone()[0] == 0
+        assert db.execute(
+            "SELECT 1 FROM preparation_plans WHERE id=?",
+            (position["case"]["key"],)).fetchone() is not None
+    result = run_closeout(position, snapshot)
+    assert result["status"] == "REPEAT_CLOSEOUT_RECORDED"

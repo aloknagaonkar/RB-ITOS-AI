@@ -1,0 +1,63 @@
+"""Dedicated repeat-entry fixture authorization. Never live execution."""
+from contextlib import closing
+import hashlib
+import hmac
+import json
+from pathlib import Path
+import sqlite3
+
+from fixture_execution_authorization import issue, claim
+from repeat_entry_preparation_candidate import market_plan, TABLE as ADMISSIONS
+from repeat_entry_cash_candidate import review_repeat_entry
+from closed_history_baseline_candidate import TABLE as HISTORY, authenticate
+from fixture_reference_retirement_candidate import ACTIVE
+from market_lab.hilega_preparation_runtime_v1.ownership_state import (
+    SourceReader, rollback_database,
+)
+from market_lab.hilega_preparation_runtime_v1.ownership_checks.risk_evidence_audit import read_connection
+from market_lab.hilega_preparation_runtime_v1.ownership_checks.reservation_checks import verify_row
+from market_lab.hilega_preparation_runtime_v1.ownership_checks.historical_receipt_checks import _check, sha
+from market_lab.hilega_preparation_runtime_v1.ownership_checks.signature_checks import sign, aware
+from market_lab.hilega_execution_port_v1.adapter import validated_request
+
+ADAPTER_SHA = "82c7606a4c4aad8b540b59db35766a736982dac18e9501f26179d9e8fe24b4a4"
+
+
+def need(ok, reason):
+    if not ok:
+        raise ValueError(reason)
+
+
+def preparation_proof(app, source, pin, key):
+    found = app.execute(
+        "SELECT data FROM "+ADMISSIONS+" WHERE id=?", (key,)
+    ).fetchone()
+    need(found is not None, "REPEAT_PREPARATION_PROOF_REQUIRED")
+    proof = json.loads(found[0])
+    payload = dict(proof)
+    signed = payload.pop("signature", None)
+    need(isinstance(signed, str)
+         and hmac.compare_digest(sign(payload, pin), signed)
+         and proof.get("production_execution_enabled") is False,
+         "REPEAT_PREPARATION_SIGNATURE_INVALID")
+    need(proof["event"]["id"] == key
+         and proof["event"]["role"] == "ENTRY",
+         "REPEAT_SIGNAL_BINDING_MISMATCH")
+    for table, category in ACTIVE.items():
+        need(set(source[category]) == {key},
+             "SINGLE_REPEAT_REFERENCE_REQUIRED")
+        need(sha(source[category][key])
+             == proof["active_fingerprints"][table],
+             "REPEAT_ACTIVE_REFERENCE_CHANGED")
+    need(source["bindings"][key]["model"]
+         == "HILEGA_FIXTURE_REPEAT_DISABLED_BINDING_V1",
+         "DEDICATED_REPEAT_BINDING_REQUIRED")
+    archives = [
+        authenticate(json.loads(raw), pin)
+        for raw, in app.execute("SELECT data FROM "+HISTORY)
+    ]
+    need(sorted(sha(row) for row in archives)
+         == sorted(proof["closed_history_fingerprints"]),
+         "CLOSED_HISTORY_CHANGED_AFTER_PREPARATION")
+    return proof, archives
+

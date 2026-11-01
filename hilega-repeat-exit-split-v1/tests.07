@@ -1,0 +1,50 @@
+
+def test_lost_sell_response_never_resubmits(position):
+    first = run_exit(position, timeout_after=True)
+    setup = position["case"]["setup"]
+    exit_id = first["exit_id"]
+    saved = next(
+        r for r in setup["execution"].requests()
+        if r["request_id"] == exit_id)
+    assert saved["state"] == "UNKNOWN"
+    before = deepcopy(position["transport"].orders())
+    provider = Mock(side_effect=AssertionError("No recovery capture"))
+    transport_class = position["case"]["mod"].FixtureTransport
+    with patch.object(
+        transport_class, "send",
+        side_effect=AssertionError("No repeated uncertain SELL"),
+    ):
+        recovered = run_exit(
+            position, provider=provider,
+            clock=lambda: position["now"]+timedelta(hours=2))
+    provider.assert_not_called()
+    assert recovered["recovery_only"] is True
+    assert recovered["new_attempt_created"] is False
+    assert recovered["exit_state"] == "UNKNOWN"
+    assert position["transport"].orders() == before
+    with setup["e"]["store"].db() as db:
+        assert db.execute(
+            "SELECT 1 FROM preparation_plans WHERE id=?",
+            (position["case"]["key"],)).fetchone() is not None
+    assert recovered["reservation_release_permission"] is False
+
+
+def test_exit_claim_interruption_creates_no_sell_attempt(position):
+    setup = position["case"]["setup"]
+    before = deepcopy(position["transport"].orders())
+    def interrupt(stage):
+        if stage == "AFTER_REPEAT_EXIT_CLAIM":
+            raise RuntimeError("synthetic exit claim interruption")
+    with pytest.raises(RuntimeError, match="synthetic exit claim"):
+        run_exit(position, checkpoint=interrupt)
+    assert position["transport"].orders() == before
+    requests = setup["execution"].requests()
+    with setup["execution"].tx() as db:
+        for row in requests:
+            if row["draft"]["body"]["transaction_type"] == "SELL":
+                if row["request_id"] not in {
+                    r["request_id"] for r in setup["old_requests"]
+                }:
+                    assert db.execute(
+                        "SELECT 1 FROM attempts WHERE request_id=?",
+                        (row["request_id"],)).fetchone() is None

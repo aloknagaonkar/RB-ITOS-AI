@@ -1,0 +1,37 @@
+    need(historical["unbound_request_count"] == expected_unbound,
+         "UNATTRIBUTED_UNBOUND_REQUEST")
+    expected_orders = {link["order_id"] for link in links.values()}
+    need(set(orders) == expected_orders,
+         "UNATTRIBUTED_OR_MISSING_CAPTURE_ORDER")
+    sold = sell["filled"] if sell else 0
+    remaining = buy["filled"] - sold
+    need(remaining >= 0, "REPEAT_EXIT_EXCEEDS_ENTRY_FILL")
+    expected_positions = {position: 0 for position in old_position_keys}
+    position = buy["instrument"], buy["product"]
+    expected_positions[position] = remaining
+    need(set(expected_positions) <= set(positions),
+         "MISSING_POSITION_ROW_IS_NOT_FLAT")
+    need(all(positions[k] == q for k, q in expected_positions.items())
+         and not any(q != 0 for k, q in positions.items()
+                     if k not in expected_positions),
+         "REPEAT_POSITION_OR_EXTERNAL_EXPOSURE_MISMATCH")
+    pending = sell["pending"] if sell else 0
+    need(pending <= remaining, "PENDING_SELL_EXCEEDS_REMAINING")
+    return dict(
+        entry_id=key, exit_id=exit_id,
+        entry_quantity=buy["filled"], exit_filled_quantity=sold,
+        remaining_quantity=remaining, pending_exit_quantity=pending,
+        all_orders_terminal=all(
+            o["status"] in {"FILLED", "CANCELLED", "REJECTED"}
+            and o["pending"] == 0 for o in orders.values()),
+        ownership=dict(
+            filled=buy["filled"], status=buy["status"],
+            direction=entry["direction"], instrument=buy["instrument"],
+            product=buy["product"], order_id=buy["order_id"]),
+        archived_lifecycle_count=len(archives),
+        source_fingerprint=sha(source),
+        snapshot_fingerprint=sha(snapshot),
+        strategy_ownership_verified=False,
+        reservation_release_permission=False,
+        production_execution_enabled=False)
+

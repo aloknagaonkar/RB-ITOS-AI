@@ -1,0 +1,67 @@
+from copy import deepcopy
+from datetime import timedelta
+import json
+from unittest.mock import Mock, patch
+
+import pytest
+
+from fixture_repeat_execution_candidate import execute_repeat_fixture
+from test_repeat_entry_preparation_candidate import (
+    synthetic_scope, env, bound_env, module, prepared, lifecycle,
+    closed, history, reentry, second, run as prepare_second,
+)
+from hilega_application_preparation_fixtures import PIN
+
+
+def build_case(second, module, *, bearish=False):
+    result = prepare_second(second, bearish=bearish)
+    return dict(
+        setup=second, mod=module, key=result["request_id"],
+        captures=dict(
+            account=deepcopy(second["account"]),
+            cash=deepcopy(second["cash"]),
+            market=deepcopy(second["market"])))
+
+
+@pytest.fixture
+def ready(second, module):
+    return build_case(second, module)
+
+
+def run(case, *, provider=None, clock=None, **kwargs):
+    setup = case["setup"]
+    return execute_repeat_fixture(
+        setup["e"]["store"], setup["execution"], PIN,
+        adapter_module=case["mod"], request_id=case["key"],
+        capture_provider=provider or (lambda: deepcopy(case["captures"])),
+        clock=clock or (lambda: setup["now"]), **kwargs)
+
+
+def counts(case):
+    with case["setup"]["execution"].tx() as db:
+        claims = db.execute(
+            "SELECT COUNT(*) FROM fixture_authorization_claims "
+            "WHERE request_id=?", (case["key"],)).fetchone()[0]
+        attempts = db.execute(
+            "SELECT COUNT(*) FROM attempts WHERE request_id=?",
+            (case["key"],)).fetchone()[0]
+    return claims, attempts
+
+
+@pytest.mark.parametrize("bearish", [False, True])
+def test_second_buy_submits_once_with_history_preserved(
+    second, module, bearish,
+):
+    case = build_case(second, module, bearish=bearish)
+    result = run(case)
+    assert result["status"] == "REPEAT_ENTRY_ATTEMPT_RECORDED"
+    assert counts(case) == (1, 1)
+    saved = second["execution"].requests()
+    for previous in second["old_requests"]:
+        assert previous in saved
+    current = next(r for r in saved if r["request_id"] == case["key"])
+    assert current["state"] == "ACKNOWLEDGED_NOT_FILLED"
+    orders = module.FixtureTransport(second["execution"]).orders()
+    assert len(orders) == 3
+    assert result["production_execution_enabled"] is False
+

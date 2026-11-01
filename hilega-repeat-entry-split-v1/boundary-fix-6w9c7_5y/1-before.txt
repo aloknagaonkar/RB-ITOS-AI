@@ -1,0 +1,66 @@
+from copy import deepcopy
+from datetime import datetime, timedelta
+import json
+import pytest
+
+from repeat_entry_preparation_candidate import prepare_repeat_fixture
+from fixture_reference_retirement_candidate import retire_fixture_references, ACTIVE
+from test_repeat_entry_cash_candidate import (
+    synthetic_scope, env, bound_env, module, prepared,
+    lifecycle, closed, history, reentry,
+)
+from test_hilega_application_preparation_v1 import append, BULL
+from hilega_application_preparation_fixtures import PIN
+from market_lab.hilega_preparation_runtime_v1.source import pending
+from market_lab.hilega_production_simulator_bridge_v1 import verified_records
+from market_lab.hilega_preparation_runtime_v1.ownership_checks.signature_checks import sign
+
+BEAR = "ENTRY_BEARISH_ROUTE_B_STRUCTURAL"
+
+
+def resign(value):
+    value.pop("signature", None)
+    value["signature"] = sign(value, PIN)
+
+
+@pytest.fixture
+def second(closed, reentry):
+    life, data, sequence, fees = closed
+    e, mod, execution = life[0]
+    retire_fixture_references(
+        e["store"], execution.path, data[1], PIN,
+        entry_id=data[2], journal=e["path"], exit_sequences=[sequence],
+        clock=lambda: datetime.fromisoformat(data[3]))
+    account, cash, archived, at = deepcopy(reentry)
+    now = datetime.fromisoformat(at)
+    old_source = archived["source"]
+    old_id = archived["entry_id"]
+    market = json.loads(old_source["evidence"][
+        old_source["bindings"][old_id]["bundle_fingerprint"]])
+    market["started_at"] = now.isoformat()
+    market["completed_at"] = now.isoformat()
+    for quote in market["quotes"].values():
+        for field in ("timestamp", "last_trade_time"):
+            if field in quote:
+                old = quote[field]
+                quote[field] = (
+                    int(now.timestamp()*1000)
+                    if isinstance(old, (int, float)) else now.isoformat())
+    resign(market)
+    e["clock"][0] = now
+    with e["store"].db() as db:
+        control = json.loads(db.execute(
+            "SELECT data FROM control WHERE id=1").fetchone()[0])
+        control.update(
+            mode="ARMED", version=control["version"]+1, reconciled=True,
+            resumed_at=(now-timedelta(seconds=1)).isoformat(),
+            last_reconciled_at=now.isoformat())
+        db.execute("UPDATE control SET data=? WHERE id=1",
+                   (json.dumps(control),))
+        health = json.loads(db.execute(
+            "SELECT data FROM sim_bridge_health WHERE id=1").fetchone()[0])
+    return dict(
+        e=e, execution=execution, account=account, cash=cash, market=market,
+        now=now, version=control["version"], run_id=health["run_id"],
+        sequence=None, old_requests=deepcopy(execution.requests()))
+

@@ -1,0 +1,57 @@
+from copy import deepcopy
+from datetime import timedelta
+import hashlib
+import json
+from unittest.mock import Mock, patch
+
+import pytest
+
+from fixture_repeat_exit_candidate import (
+    execute_repeat_exit_fixture, record_repeat_closeout, CLOSEOUTS,
+)
+from test_fixture_repeat_execution_candidate import (
+    synthetic_scope, env, bound_env, module, prepared, lifecycle,
+    closed, history, reentry, second, ready, run as run_buy,
+)
+from hilega_application_preparation_fixtures import PIN
+from test_hilega_application_preparation_v1 import append
+from market_lab.hilega_preparation_runtime_v1.ownership_checks.signature_checks import (
+    sign,
+)
+
+
+def resign(value):
+    value.pop("signature", None)
+    value["signature"] = sign(value, PIN)
+    return value
+
+
+@pytest.fixture
+def position(ready):
+    run_buy(ready)
+    setup = ready["setup"]
+    transport = ready["mod"].FixtureTransport(setup["execution"])
+    parent = next(
+        r for r in setup["execution"].requests()
+        if r["request_id"] == ready["key"])
+    transport.fill(
+        parent["order_id"], parent["draft"]["body"]["quantity"])
+    now = setup["now"] + timedelta(minutes=5)
+    setup["e"]["clock"][0] = now
+    name = (
+        "STRUCTURAL_EXIT_RSI_CROSS_BELOW_WMA21"
+        if parent["direction"] == "BULLISH"
+        else "STRUCTURAL_EXIT_BEARISH_RSI_CROSS_ABOVE_WMA21")
+    path = setup["e"]["path"]
+    append(path, [name], at=now.isoformat())
+    rows = [json.loads(line) for line in path.read_text().splitlines()]
+    row = rows[-1]
+    row["payload"]["event_details"][0]["entry_time"] = parent["signal_at"]
+    row.pop("record_hash")
+    row["record_hash"] = hashlib.sha256(json.dumps(
+        row, sort_keys=True, separators=(",", ":"),
+        ensure_ascii=False, default=str).encode()).hexdigest()
+    path.write_text("\n".join(json.dumps(r) for r in rows)+"\n")
+    return dict(
+        case=ready, parent=parent, transport=transport,
+        now=now, sequence=len(rows))

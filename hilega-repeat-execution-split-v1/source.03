@@ -1,0 +1,71 @@
+    fp, request = requests[key]
+    now = aware(as_of)
+    need(0 <= (now-aware(request["draft"]["created_at"])).total_seconds() <= 10,
+         "REPEAT_REQUEST_STALE_OR_FUTURE")
+    plan = source["plans"][key]
+    reservation = source["cash_reservations"][key]
+    verify_row(reservation, pin)
+    need(reservation["state"] == "RESERVED_DISABLED_REQUEST"
+         and reservation["request_fingerprint"] == fp
+         and fp == source["bindings"][key]["request_fingerprint"]
+             == proof["request_fingerprint"]
+         and reservation["plan_fingerprint"] == sha(plan)
+         and reservation["shadow_hold_fingerprint"] == sha(source["holds"][key])
+         and reservation["outbox_fingerprint"] == sha(source["outbox"][key]),
+         "REPEAT_RESERVATION_BINDING_CHANGED")
+    event = proof["event"]
+    need(request["signal_id"] == key
+         and request["signal_at"] == event["event_at"] == plan["signal_at"]
+         and request["direction"] == event["direction"] == plan["direction"]
+         and request["reservation_reference"] == key,
+         "REPEAT_REQUEST_SIGNAL_CHANGED")
+    contract, quantity, pricing = market_plan(
+        captures["market"], pin, event["direction"], now)
+    need(contract == plan["evidence"]["contract"]
+         and quantity == plan["quantity"],
+         "CURRENT_REPEAT_CONTRACT_CHANGED")
+    candidate = source["outbox"][key]["disabled_request_candidate"]
+    from decimal import Decimal
+    numerator, denominator = Decimal(
+        pricing["observed_ask"]).as_integer_ratio()
+    premium, remainder = divmod(numerator*quantity*100, denominator)
+    need(remainder == 0, "EXACT_PAISE_PREMIUM_REQUIRED")
+    cash = review_repeat_entry(
+        captures["account"], captures["cash"], archives, pin,
+        signal_at=event["event_at"], premium_paise=premium,
+        fee_buffer_paise=candidate["fee_buffer_cents"], as_of=as_of)
+    need(cash["status"] == "REENTRY_REFERENCE_CHECKS_PASS",
+         "CURRENT_REPEAT_CASH_BLOCKED")
+    need(premium == candidate["premium_cents"]
+         and premium+candidate["fee_buffer_cents"]
+             == candidate["budget_cents"]
+             == reservation["held_cents"]
+             == source["holds"][key]["held_cents"]
+         and reservation["held_cents"] <= cash["half_cash_budget_paise"],
+         "REPEAT_BUDGET_CHANGED_OR_EXCEEDS_CURRENT_CASH")
+    body = request["draft"]["body"]
+    need(body["transaction_type"] == "BUY"
+         and body["order_type"] == "LIMIT"
+         and body["instrument_token"] == contract["instrument_key"]
+         and body["quantity"] == quantity
+         and Decimal(str(body["price"])) == Decimal(pricing["observed_ask"]),
+         "CURRENT_REPEAT_WIRE_MISMATCH")
+    validated, validated_fp = validated_request(
+        request["draft"], signal_id=key, signal_at=request["signal_at"],
+        direction=request["direction"], reservation_reference=key, as_of=as_of)
+    need(validated_fp == fp, "REPEAT_REQUEST_FINGERPRINT_CHANGED")
+    from market_lab.hilega_preparation_runtime_v1.source import entry_clock_open
+    from market_lab.hilega_preparation_runtime_v1.ownership_checks.signature_checks import day
+    need(entry_clock_open(now)
+         and entry_clock_open(aware(event["event_at"]))
+         and source["control"]["session_date"] == day(now),
+         "REPEAT_ENTRY_CLOCK_OR_SESSION_CLOSED")
+    wire = dict(
+        method="POST", host="api-hft.upstox.com",
+        path="/v3/order/place", body=body)
+    return dict(
+        context_fingerprint=sha(dict(source=source, captures=captures)),
+        request_fingerprint=fp, wire=wire,
+        budget_paise=reservation["held_cents"],
+        fee_buffer_paise=candidate["fee_buffer_cents"])
+

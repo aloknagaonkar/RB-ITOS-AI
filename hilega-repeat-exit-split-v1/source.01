@@ -1,0 +1,67 @@
+"""Fixture repeat-position EXIT and closeout. No live execution."""
+from contextlib import closing
+from copy import deepcopy
+import hashlib
+import hmac
+import json
+from pathlib import Path
+import sqlite3
+
+from fixture_repeat_execution_candidate import preparation_proof, ADAPTER_SHA
+from closed_history_baseline_candidate import order_identity, trade_identity
+from authorized_exit_fixture import issue_exit, claim_exit
+from owned_exit_pricing_candidate import review_owned_quote
+from market_lab.hilega_execution_port_v1.mapping import draft
+from market_lab.hilega_nifty_option_price_grid_v1 import PROFILE, normalized_tick
+from market_lab.hilega_preparation_runtime_v1.ownership_state import SourceReader, rollback_database
+from market_lab.hilega_preparation_runtime_v1.ownership_checks.risk_evidence_audit import read_connection
+from market_lab.hilega_preparation_runtime_v1.ownership_checks.bridge import validate_account_rows
+from market_lab.hilega_preparation_runtime_v1.ownership_checks.historical_receipt_checks import _check, sha
+from market_lab.hilega_preparation_runtime_v1.ownership_checks.signature_checks import verify, sign, aware
+from market_lab.hilega_production_simulator_bridge_v1 import verified_records, accepted
+
+CLOSEOUTS = "fixture_repeat_position_closeouts"
+
+
+def need(ok, reason):
+    if not ok:
+        raise ValueError(reason)
+
+
+def review_repeat_position(app, source, snapshot, pin, key, event, as_of):
+    proof, archives = preparation_proof(app, source, pin, key)
+    need(pin["scope"].startswith("FIXTURE:")
+         and source["mode"] == "OFFLINE_FIXTURE",
+         "FIXTURE_REPEAT_POSITION_ONLY")
+    verify(snapshot, pin, as_of=as_of)
+    need(snapshot.get("profile_verified_before_and_after") is True
+         and snapshot.get("account_position_rows_complete") is True
+         and snapshot.get("source_atomic") is False
+         and snapshot.get("position_fill_linkage_verified") is False,
+         "COMPLETE_READ_ONLY_CAPTURE_REQUIRED")
+    orders, positions = validate_account_rows(snapshot)
+    old_ids, old_orders, old_trades, old_position_keys = set(), {}, {}, set()
+    for archived in archives:
+        for rid, fp, raw in archived["source"]["requests"]:
+            need(rid not in old_ids, "DUPLICATE_ARCHIVED_REQUEST")
+            old_ids.add(rid)
+        previous_orders, previous_positions = validate_account_rows(
+            archived["snapshot"])
+        old_position_keys.update(previous_positions)
+        for oid, order in previous_orders.items():
+            need(oid not in old_orders, "DUPLICATE_ARCHIVED_ORDER")
+            old_orders[oid] = order_identity(order)
+        for trade in archived["snapshot"]["trades"]:
+            tid = trade["order_id"], trade["trade_id"]
+            need(tid not in old_trades, "DUPLICATE_ARCHIVED_TRADE")
+            old_trades[tid] = trade_identity(trade)
+    need(all(oid in orders and order_identity(orders[oid]) == expected
+             for oid, expected in old_orders.items()),
+         "ARCHIVED_ORDER_EVIDENCE_CHANGED")
+    current_old_trades = {
+        (t["order_id"], t["trade_id"]): trade_identity(t)
+        for t in snapshot["trades"] if t["order_id"] in old_orders
+    }
+    need(current_old_trades == old_trades,
+         "ARCHIVED_TRADE_EVIDENCE_CHANGED")
+

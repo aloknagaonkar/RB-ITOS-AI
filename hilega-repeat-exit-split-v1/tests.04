@@ -1,0 +1,48 @@
+
+def run_closeout(position, snapshot, **kwargs):
+    case = position["case"]
+    setup = case["setup"]
+    return record_repeat_closeout(
+        setup["e"]["store"], setup["execution"], PIN,
+        entry_id=case["key"], journal=setup["e"]["path"],
+        sequence=position["sequence"],
+        capture_provider=lambda: deepcopy(snapshot),
+        clock=lambda: position["now"], **kwargs)
+
+
+def test_second_sell_reaches_flat_and_records_closeout(position):
+    close_position(position)
+    snapshot = account_snapshot(position)
+    assert all(p["quantity"] == 0 for p in snapshot["positions"])
+    result = run_closeout(position, snapshot)
+    assert result["status"] == "REPEAT_CLOSEOUT_RECORDED"
+    record = result["record"]
+    assert record["review"]["remaining_quantity"] == 0
+    assert record["review"]["all_orders_terminal"] is True
+    assert record["review"]["archived_lifecycle_count"] == 1
+    assert record["active_references_retired"] is False
+    assert record["reservation_release_permission"] is False
+    assert record["production_execution_enabled"] is False
+    setup = position["case"]["setup"]
+    with setup["e"]["store"].db() as db:
+        saved = json.loads(db.execute(
+            "SELECT data FROM "+CLOSEOUTS+" WHERE id=?",
+            (position["case"]["key"],)).fetchone()[0])
+        assert saved == record
+        assert db.execute(
+            "SELECT 1 FROM preparation_plans WHERE id=?",
+            (position["case"]["key"],)).fetchone() is not None
+
+
+def test_closeout_replay_preserves_one_record(position):
+    close_position(position)
+    snapshot = account_snapshot(position)
+    first = run_closeout(position, snapshot)
+    replay = run_closeout(position, snapshot)
+    assert replay["status"] == "REPEAT_CLOSEOUT_REPLAY"
+    assert replay["record"] == first["record"]
+    setup = position["case"]["setup"]
+    with setup["e"]["store"].db() as db:
+        assert db.execute(
+            "SELECT COUNT(*) FROM "+CLOSEOUTS
+        ).fetchone()[0] == 1

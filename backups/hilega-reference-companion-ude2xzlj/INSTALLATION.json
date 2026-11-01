@@ -1,0 +1,18 @@
+{
+  "status": "READ_ONLY_COMPANION_INSTALLED",
+  "checked_at": "2026-10-30T17:42:08.375297+00:00",
+  "service": "hilega-lifecycle-reference.service",
+  "active": true,
+  "enabled": true,
+  "empty_cycle_verified": true,
+  "account_capture_requested": false,
+  "lifecycle_tables_unchanged": true,
+  "existing_application_services_restarted": false,
+  "controller_mode": "PAUSED",
+  "rollback_script": "/home/aloknagaonkar46/RB-ITOS-AI/backups/hilega-reference-companion-ude2xzlj/rollback.py",
+  "rollback_prepared": true,
+  "rollback_executed": false,
+  "backup": "/home/aloknagaonkar46/RB-ITOS-AI/backups/hilega-reference-companion-ude2xzlj",
+  "production_execution_enabled": false,
+  "production_ready": false
+}

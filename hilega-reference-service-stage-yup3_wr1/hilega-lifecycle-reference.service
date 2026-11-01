@@ -1,0 +1,15 @@
+[Unit]
+Description=Hilega read-only lifecycle reference companion
+
+[Service]
+Type=simple
+WorkingDirectory="/home/aloknagaonkar46/RB-ITOS-AI"
+ExecStart="/home/aloknagaonkar46/RB-ITOS-AI/.venv/bin/python" "/home/aloknagaonkar46/RB-ITOS-AI/hilega-reference-service-stage-yup3_wr1/lifecycle_reference_service.py" "--watch" "--repo" "/home/aloknagaonkar46/RB-ITOS-AI" "--package" "/home/aloknagaonkar46/RB-ITOS-AI/hilega-operational-lifecycle-tools-6cexrur_" "--application" "/home/aloknagaonkar46/RB-ITOS-AI/data/research/hilega-production-workspace/sim.sqlite" "--adapter" "/home/aloknagaonkar46/RB-ITOS-AI/data/research/hilega-broker-adapter-closed/adapter.sqlite" "--pin-file" "/home/aloknagaonkar46/hilega-private/upstox-account-pin.json" "--env-file" "/home/aloknagaonkar46/RB-ITOS-AI/.env" "--journal" "/home/aloknagaonkar46/RB-ITOS-AI/data/live-observation/hilega-directional-v1/step-audit.jsonl"
+Restart=no
+UMask=0077
+NoNewPrivileges=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

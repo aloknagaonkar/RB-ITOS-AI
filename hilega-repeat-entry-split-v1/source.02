@@ -1,0 +1,79 @@
+
+def prepare_repeat_fixture(
+    application_store, execution_path, pin, *,
+    journal, sequence, account_capture, cash_capture, market_bundle,
+    expected_version, bridge_run_id, fee_buffer_paise, clock,
+    checkpoint=lambda stage: None,
+):
+    need(pin["scope"].startswith("FIXTURE:"),
+         "FIXTURE_REPEAT_PREPARATION_ONLY")
+    records = verified_records(journal)
+    need(type(sequence) is int and 1 <= sequence <= len(records),
+         "JOURNAL_SEQUENCE_INVALID")
+    events = accepted(records[sequence-1])
+    need(len(events) == 1 and events[0]["role"] == "ENTRY",
+         "SINGLE_CONFIRMED_ENTRY_REQUIRED")
+    event = events[0]
+    key = event["id"]
+    app, broker = map(
+        rollback_database, (application_store.path, execution_path))
+    need(not app.samefile(broker), "DISTINCT_DATABASES_REQUIRED")
+    input_fp = sha(dict(
+        event=event, account=account_capture, cash=cash_capture,
+        market=market_bundle, fee_buffer_paise=fee_buffer_paise,
+    ))
+    with application_store.lock():
+        with closing(sqlite3.connect(
+            app.as_uri()+"?mode=rw", uri=True, timeout=10,
+        )) as db:
+            db.execute("ATTACH DATABASE ? AS broker",
+                       (broker.as_uri()+"?mode=rw",))
+            need(
+                db.execute("PRAGMA main.journal_mode").fetchone()[0] == "delete"
+                and db.execute(
+                    "PRAGMA broker.journal_mode").fetchone()[0] == "delete",
+                "DELETE_JOURNAL_REQUIRED")
+            db.execute("PRAGMA main.synchronous=FULL")
+            db.execute("PRAGMA broker.synchronous=FULL")
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                meta = json.loads(db.execute(
+                    "SELECT data FROM broker.meta WHERE id=1"
+                ).fetchone()[0])
+                need(meta == dict(
+                    scope=pin["scope"], mode="OFFLINE_FIXTURE"),
+                    "EXACT_FIXTURE_ADAPTER_REQUIRED")
+                exists = db.execute(
+                    "SELECT 1 FROM sqlite_master WHERE name=?", (TABLE,)
+                ).fetchone()
+                old = db.execute(
+                    "SELECT data FROM "+TABLE+" WHERE id=?", (key,)
+                ).fetchone() if exists else None
+                if old:
+                    row = json.loads(old[0])
+                    payload = dict(row)
+                    signed = payload.pop("signature", None)
+                    need(isinstance(signed, str)
+                         and hmac.compare_digest(sign(payload, pin), signed)
+                         and row["input_fingerprint"] == input_fp,
+                         "REPEAT_ADMISSION_REPLAY_CONFLICT")
+                    for table, fp in row["active_fingerprints"].items():
+                        found = db.execute(
+                            "SELECT data FROM "+table+" WHERE id=?", (key,)
+                        ).fetchone()
+                        need(found is not None
+                             and sha(json.loads(found[0])) == fp,
+                             "REPLAY_ACTIVE_REFERENCE_CHANGED")
+                    found = db.execute(
+                        "SELECT fingerprint FROM broker.requests WHERE id=?",
+                        (key,),
+                    ).fetchone()
+                    need(found is not None
+                         and found[0] == row["request_fingerprint"],
+                         "REPLAY_DISABLED_REQUEST_CHANGED")
+                    db.rollback()
+                    return dict(
+                        status="FIXTURE_REPEAT_PREPARATION_REPLAY",
+                        idempotent_replay=True,
+                        production_execution_enabled=False)
+

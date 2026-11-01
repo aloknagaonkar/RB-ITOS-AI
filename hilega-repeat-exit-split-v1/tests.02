@@ -1,0 +1,55 @@
+
+def account_snapshot(position):
+    case = position["case"]
+    setup = case["setup"]
+    now = position["now"]
+    snapshot = deepcopy(case["captures"]["account"])
+    old_ids = {o["order_id"] for o in snapshot["orders"]}
+    requests = {
+        r["order_id"]: r for r in setup["execution"].requests()
+        if r.get("order_id")
+    }
+    for order in position["transport"].orders():
+        oid = order["order_id"]
+        if oid in old_ids:
+            continue
+        request = requests.get(oid)
+        if request is None:
+            raise AssertionError("Unbound fixture order")
+        pending = (
+            order["quantity"]-order["filled"]
+            if order["status"] in {"OPEN", "PARTIAL"} else 0)
+        snapshot["orders"].append(dict(
+            order_id=oid, instrument=order["instrument"],
+            product=order["product"], side=order["side"],
+            quantity=order["quantity"], filled=order["filled"],
+            pending=pending, status=order["status"],
+            source_status=order["status"].lower(),
+            placed_at=request["signal_at"]))
+        if order["filled"]:
+            snapshot["trades"].append(dict(
+                order_id=oid, trade_id="synthetic-"+oid,
+                instrument=order["instrument"],
+                product=order["product"], side=order["side"],
+                quantity=order["filled"],
+                price=str(request["draft"]["body"]["price"]),
+                filled_at=now.isoformat()))
+    quantities = {
+        (p["instrument"], p["product"]): 0
+        for p in snapshot["positions"]
+    }
+    for trade in snapshot["trades"]:
+        key = (trade["instrument"], trade["product"])
+        quantities[key] = quantities.get(key, 0) + (
+            trade["quantity"] if trade["side"] == "BUY"
+            else -trade["quantity"])
+    snapshot["positions"] = [
+        dict(instrument=k[0], product=k[1], quantity=q)
+        for k, q in quantities.items()
+    ]
+    snapshot.update(
+        generated_at=now.isoformat(), completed_at=now.isoformat(),
+        session_date=now.date().isoformat(),
+        snapshot_id="synthetic-repeat-exit-"+str(
+            len(snapshot["trades"])))
+    return resign(snapshot)

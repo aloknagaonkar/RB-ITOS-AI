@@ -1,0 +1,47 @@
+                captures = capture_provider()
+                need(isinstance(captures, dict)
+                     and set(captures) == {"account", "cash", "market"},
+                     "EXACT_REPEAT_CAPTURE_SET_REQUIRED")
+                at = clock()
+                checked = repeat_context(
+                    app, source, pin, request_id, captures, at.isoformat())
+                need(checked["wire"] == wire,
+                     "REPEAT_WIRE_CHANGED_BEFORE_AUTHORIZATION")
+                grant = issue(
+                    pin, request_id=request_id, wire=wire,
+                    budget_paise=checked["budget_paise"],
+                    fee_buffer_paise=checked["fee_buffer_paise"],
+                    at=at.isoformat())
+
+                def authorize(db, attempt):
+                    current = read_connection(
+                        SourceReader(app, db), pin["scope"],
+                        expected_mode="OFFLINE_FIXTURE")
+                    final_at = clock()
+                    final = repeat_context(
+                        app, current, pin, request_id,
+                        captures, final_at.isoformat())
+                    need(final["context_fingerprint"]
+                         == checked["context_fingerprint"]
+                         and attempt["operation"] == "PLACE"
+                         and attempt["wire"] == final["wire"],
+                         "REPEAT_CONTEXT_CHANGED_BEFORE_ATTEMPT")
+                    claim(
+                        db, grant, pin, request_id=request_id,
+                        wire=attempt["wire"], at=final_at.isoformat(),
+                        attempt_id=attempt["attempt_id"])
+                    checkpoint("AFTER_REPEAT_AUTHORIZATION_CLAIM")
+
+                adapter.fixture_authorization_claim = authorize
+                transport.timeout_after = timeout_after
+                result = adapter.submit(request_id)
+                return dict(
+                    status="REPEAT_ENTRY_ATTEMPT_RECORDED",
+                    adapter_result=result,
+                    recovery_only=False,
+                    new_attempt_created=not result.get("idempotent_replay", False),
+                    orders_sent_to_upstox=False,
+                    reservation_release_permission=False,
+                    production_execution_enabled=False)
+            finally:
+                app.rollback()

@@ -1,0 +1,41 @@
+
+def test_open_sell_cannot_record_closeout(position):
+    run_exit(position)
+    snapshot = account_snapshot(position)
+    with pytest.raises(
+        ValueError, match="REPEAT_POSITION_NOT_TERMINAL_FLAT"
+    ):
+        run_closeout(position, snapshot)
+    setup = position["case"]["setup"]
+    with setup["e"]["store"].db() as db:
+        assert db.execute(
+            "SELECT 1 FROM preparation_plans WHERE id=?",
+            (position["case"]["key"],)).fetchone() is not None
+        exists = db.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type='table' AND name=?", (CLOSEOUTS,)
+        ).fetchone()
+        if exists:
+            assert db.execute(
+                "SELECT COUNT(*) FROM "+CLOSEOUTS
+            ).fetchone()[0] == 0
+
+
+def test_tampered_closeout_replay_blocks(position):
+    close_position(position)
+    snapshot = account_snapshot(position)
+    run_closeout(position, snapshot)
+    setup = position["case"]["setup"]
+    key = position["case"]["key"]
+    with setup["e"]["store"].db() as db:
+        saved = json.loads(db.execute(
+            "SELECT data FROM "+CLOSEOUTS+" WHERE id=?",
+            (key,)).fetchone()[0])
+        saved["reservation_release_permission"] = True
+        db.execute(
+            "UPDATE "+CLOSEOUTS+" SET data=? WHERE id=?",
+            (json.dumps(saved), key))
+    with pytest.raises(
+        ValueError, match="REPEAT_CLOSEOUT_SIGNATURE_INVALID"
+    ):
+        run_closeout(position, snapshot)

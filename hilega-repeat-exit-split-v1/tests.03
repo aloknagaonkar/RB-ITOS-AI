@@ -1,0 +1,57 @@
+
+def market_snapshot(position):
+    value = deepcopy(position["case"]["captures"]["market"])
+    now = position["now"]
+    value.update(
+        started_at=now.isoformat(), completed_at=now.isoformat(),
+        session_date=now.date().isoformat())
+    for quote in value["quotes"].values():
+        for field in ("timestamp", "last_trade_time"):
+            if field in quote:
+                quote[field] = (
+                    int(now.timestamp()*1000)
+                    if isinstance(quote[field], (int, float))
+                    else now.isoformat())
+    return resign(value)
+
+
+def run_exit(position, *, provider=None, clock=None, **kwargs):
+    case = position["case"]
+    setup = case["setup"]
+    return execute_repeat_exit_fixture(
+        setup["e"]["store"], setup["execution"], PIN,
+        adapter_module=case["mod"], entry_id=case["key"],
+        journal=setup["e"]["path"], sequence=position["sequence"],
+        capture_provider=provider or (lambda: dict(
+            account=account_snapshot(position),
+            market=market_snapshot(position))),
+        clock=clock or (lambda: position["now"]), **kwargs)
+
+
+def close_position(position):
+    result = run_exit(position)
+    setup = position["case"]["setup"]
+    sell = next(
+        r for r in setup["execution"].requests()
+        if r["request_id"] == result["exit_id"])
+    position["transport"].fill(
+        sell["order_id"], sell["draft"]["body"]["quantity"])
+    return result, sell
+
+
+def test_second_sell_preserves_first_cycle(position):
+    setup = position["case"]["setup"]
+    old = deepcopy(setup["old_requests"])
+    result = run_exit(position)
+    sell = next(
+        r for r in setup["execution"].requests()
+        if r["request_id"] == result["exit_id"])
+    assert sell["draft"]["body"]["transaction_type"] == "SELL"
+    assert sell["draft"]["body"]["quantity"] == (
+        position["parent"]["draft"]["body"]["quantity"])
+    current = {
+        r["request_id"]: r for r in setup["execution"].requests()
+    }
+    for row in old:
+        assert current[row["request_id"]] == row
+    assert result["production_execution_enabled"] is False

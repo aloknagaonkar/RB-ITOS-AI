@@ -1,0 +1,15 @@
+{
+  "status": "COMPANION_ROLLBACK_AND_REINSTALL_PASS",
+  "checked_at": "2026-10-30T17:43:37.781564+00:00",
+  "later_polling_cycle_verified": true,
+  "companion_stop_and_removal_verified": true,
+  "companion_reinstalled": true,
+  "new_invocation_empty_cycle_verified": true,
+  "companion_active": true,
+  "companion_enabled": true,
+  "existing_application_service_states_unchanged": true,
+  "database_backups_restored": false,
+  "controller_mode": "PAUSED",
+  "production_execution_enabled": false,
+  "production_ready": false
+}

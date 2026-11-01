@@ -1,0 +1,66 @@
+                if old is not None:
+                    saved = json.loads(old[0])
+                    payload = dict(saved)
+                    signature = payload.pop("signature", None)
+                    need(
+                        isinstance(signature, str)
+                        and hmac.compare_digest(
+                            sign(payload, pin), signature),
+                        "REPEAT_CLOSEOUT_SIGNATURE_INVALID")
+                    need(
+                        saved.get("model")
+                        == "HILEGA_FIXTURE_REPEAT_CLOSEOUT_V1"
+                        and saved.get("entry_id") == entry_id
+                        and saved.get("account_scope") == pin["scope"]
+                        and saved.get("input_fingerprint")
+                            == input_fingerprint,
+                        "REPEAT_CLOSEOUT_REPLAY_CONFLICT")
+                    db.rollback()
+                    return dict(
+                        status="REPEAT_CLOSEOUT_REPLAY",
+                        record=saved, idempotent_replay=True,
+                        reservation_release_permission=False,
+                        production_execution_enabled=False)
+                record = dict(
+                    model="HILEGA_FIXTURE_REPEAT_CLOSEOUT_V1",
+                    entry_id=entry_id, account_scope=pin["scope"],
+                    assessed_at=now.isoformat(), event=event,
+                    input_fingerprint=input_fingerprint,
+                    source_fingerprint=sha(source),
+                    snapshot_fingerprint=sha(snapshot),
+                    source=source, snapshot=snapshot, review=report,
+                    active_references_retired=False,
+                    fees_complete=False,
+                    reservation_release_permission=False,
+                    orders_sent_to_upstox=False,
+                    production_execution_enabled=False)
+                # Match the persisted JSON representation before signing.
+                record = json.loads(json.dumps(record))
+                record["signature"] = sign(record, pin)
+                db.execute(
+                    "INSERT INTO "+CLOSEOUTS+" VALUES(?,?)",
+                    (entry_id, json.dumps(record)))
+                checkpoint("AFTER_REPEAT_CLOSEOUT_INSERT")
+                checkpoint("BEFORE_REPEAT_CLOSEOUT_COMMIT")
+                final_at = clock()
+                final_source = read_connection(
+                    db, pin["scope"], expected_mode="OFFLINE_FIXTURE")
+                need(sha(final_source) == sha(source),
+                     "REPEAT_CLOSEOUT_SOURCE_CHANGED")
+                final_report = review_repeat_position(
+                    db, final_source, snapshot, pin,
+                    entry_id, event, final_at.isoformat())
+                need(final_report == report,
+                     "REPEAT_CLOSEOUT_REVIEW_CHANGED")
+                current_records = verified_records(journal)
+                need(current_records[:sequence] == records[:sequence],
+                     "REPEAT_CLOSEOUT_JOURNAL_CHANGED")
+                db.commit()
+                return dict(
+                    status="REPEAT_CLOSEOUT_RECORDED",
+                    record=record, idempotent_replay=False,
+                    reservation_release_permission=False,
+                    production_execution_enabled=False)
+            finally:
+                if db.in_transaction:
+                    db.rollback()

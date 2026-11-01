@@ -1,0 +1,69 @@
+
+def repeat_context(app, source, pin, key, captures, as_of):
+    proof, archives = preparation_proof(app, source, pin, key)
+    need(source["mode"] == "OFFLINE_FIXTURE"
+         and source["scope"] == pin["scope"]
+         and source["control"].get("mode") == "PAUSED"
+         and source["control"].get("production_execution_enabled") is False,
+         "PAUSED_FIXTURE_CONTEXT_REQUIRED")
+    stop = source["stop_state"]
+    need(isinstance(stop, list) and len(stop) == 2
+         and all(type(v) is int and v >= 0 for v in stop)
+         and stop[0] == stop[1], "STOP_RECONCILIATION_REQUIRED")
+    need(not any(source["counts"][name] for name in (
+        "intents", "sim_orders", "sim_fills", "sim_allocation_reservations",
+    )), "SIMULATOR_ACTIVITY_PRESENT")
+    requests = {
+        rid: (fp, json.loads(raw))
+        for rid, fp, raw in source["requests"]
+    }
+    need(len(requests) == len(source["requests"]),
+         "DUPLICATE_REQUEST_ID")
+    expected_requests, expected_attempts, expected_receipts = {}, {}, {}
+    for archived in archives:
+        previous = archived["source"]
+        for rid, fp, raw in previous["requests"]:
+            need(rid not in expected_requests, "DUPLICATE_ARCHIVED_REQUEST")
+            expected_requests[rid] = fp
+        for aid, rid, operation, raw in previous["attempts"]:
+            need(aid not in expected_attempts, "DUPLICATE_ARCHIVED_ATTEMPT")
+            saved = json.loads(raw)
+            expected_attempts[aid] = (rid, operation, sha(saved["wire"]))
+        for aid, raw in previous["receipts"].items():
+            need(aid not in expected_receipts, "DUPLICATE_ARCHIVED_RECEIPT")
+            expected_receipts[aid] = sha(json.loads(raw))
+    need(set(requests) == set(expected_requests) | {key}
+         and key not in expected_requests,
+         "UNATTRIBUTED_ADAPTER_REQUEST")
+    for rid, fp in expected_requests.items():
+        need(requests[rid][0] == fp
+             and requests[rid][1]["state"] not in {
+                 "UNKNOWN", "IN_FLIGHT", "CANCEL_IN_FLIGHT",
+                 "CANCEL_OUTCOME_UNKNOWN",
+             }, "HISTORICAL_REQUEST_CHANGED_OR_UNRESOLVED")
+    current_attempts = {}
+    for aid, rid, operation, raw in source["attempts"]:
+        saved = json.loads(raw)
+        need(saved["attempt_id"] == aid
+             and saved["request_id"] == rid
+             and saved["operation"] == operation
+             and saved["state"] not in {
+                 "UNKNOWN", "IN_FLIGHT", "CANCEL_OUTCOME_UNKNOWN",
+             }, "HISTORICAL_ATTEMPT_UNRESOLVED")
+        need(aid not in current_attempts, "DUPLICATE_ATTEMPT_ID")
+        current_attempts[aid] = (rid, operation, sha(saved["wire"]))
+    need(current_attempts == expected_attempts,
+         "UNATTRIBUTED_OR_CHANGED_TRANSPORT_ATTEMPT")
+    need({
+        aid: sha(json.loads(raw))
+        for aid, raw in source["receipts"].items()
+    } == expected_receipts, "HISTORICAL_RECEIPT_CHANGED")
+    historical = _check(
+        "OFFLINE_FIXTURE", source["requests"],
+        source["attempts"], source["receipts"])
+    need(historical["unbound_request_count"] == 1
+         and key in requests
+         and requests[key][1]["state"] == "PREPARED"
+         and requests[key][1].get("order_id") is None,
+         "EXACT_UNSUBMITTED_REPEAT_REQUEST_REQUIRED")
+

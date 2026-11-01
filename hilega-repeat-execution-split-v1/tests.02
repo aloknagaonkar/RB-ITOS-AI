@@ -1,0 +1,85 @@
+
+def test_delayed_recovery_needs_no_new_capture_or_send(ready):
+    run(ready)
+    provider = Mock(side_effect=AssertionError("No recovery capture"))
+    with patch.object(
+        ready["mod"].FixtureTransport, "send",
+        side_effect=AssertionError("No repeated BUY"),
+    ):
+        result = run(
+            ready, provider=provider,
+            clock=lambda: ready["setup"]["now"]+timedelta(hours=2))
+    assert result["recovery_only"] is True
+    assert counts(ready) == (1, 1)
+    provider.assert_not_called()
+
+
+def test_expired_authorization_creates_no_attempt(ready):
+    now = ready["setup"]["now"]
+    times = iter([now, now+timedelta(seconds=10)])
+    with pytest.raises(ValueError, match="EXPIRED"):
+        run(ready, clock=lambda: next(times))
+    assert counts(ready) == (0, 0)
+
+
+def test_failure_after_claim_rolls_back_both(ready):
+    def interrupt(stage):
+        raise RuntimeError("SYNTHETIC_REPEAT_CLAIM_INTERRUPTION")
+    with pytest.raises(RuntimeError, match="REPEAT_CLAIM_INTERRUPTION"):
+        run(ready, checkpoint=interrupt)
+    assert counts(ready) == (0, 0)
+    orders = ready["mod"].FixtureTransport(
+        ready["setup"]["execution"]).orders()
+    assert len(orders) == 2
+
+
+def test_new_cash_shortfall_blocks_second_buy(ready):
+    from market_lab.hilega_preparation_runtime_v1.ownership_checks.signature_checks import sign
+    captures = deepcopy(ready["captures"])
+    cash = captures["cash"]
+    for field in ("funds_before", "funds_after"):
+        cash[field]["cash_available_to_trade"] = "1"
+    cash.pop("signature")
+    cash["signature"] = sign(cash, PIN)
+    with pytest.raises(ValueError, match="CURRENT_REPEAT_CASH_BLOCKED"):
+        run(ready, provider=lambda: captures)
+    assert counts(ready) == (0, 0)
+
+
+def test_unknown_second_buy_never_resubmits(ready):
+    result = run(ready, timeout_after=True)
+    assert result["adapter_result"]["state"] == "UNKNOWN"
+    provider = Mock(side_effect=AssertionError("No new capture for recovery"))
+    with patch.object(
+        ready["mod"].FixtureTransport, "send",
+        side_effect=AssertionError("No unknown-outcome retry"),
+    ):
+        recovered = run(
+            ready, provider=provider,
+            clock=lambda: ready["setup"]["now"]+timedelta(hours=2))
+    assert recovered["recovery_only"] is True
+    assert counts(ready) == (1, 1)
+    provider.assert_not_called()
+    rows = ready["setup"]["execution"].requests()
+    current = next(r for r in rows if r["request_id"] == ready["key"])
+    assert current["state"] == "UNKNOWN"
+    with ready["setup"]["e"]["store"].db() as db:
+        held = db.execute(
+            "SELECT data FROM preparation_cash_reservations WHERE id=?",
+            (ready["key"],)).fetchone()
+        assert held is not None
+        assert json.loads(held[0])["held_cents"] > 0
+
+
+def test_tampered_preparation_proof_blocks(ready):
+    from repeat_entry_preparation_candidate import TABLE
+    with ready["setup"]["e"]["store"].db() as db:
+        row = json.loads(db.execute(
+            "SELECT data FROM "+TABLE+" WHERE id=?",
+            (ready["key"],)).fetchone()[0])
+        row["production_execution_enabled"] = True
+        db.execute("UPDATE "+TABLE+" SET data=? WHERE id=?",
+                   (json.dumps(row), ready["key"]))
+    with pytest.raises(ValueError, match="REPEAT_PREPARATION_SIGNATURE_INVALID"):
+        run(ready)
+    assert counts(ready) == (0, 0)

@@ -1,0 +1,54 @@
+
+def record_repeat_closeout(
+    application_store, execution_store, pin, *,
+    entry_id, journal, sequence, capture_provider, clock,
+    checkpoint=lambda stage: None,
+):
+    need(pin["scope"].startswith("FIXTURE:"),
+         "FIXTURE_REPEAT_CLOSEOUT_ONLY")
+    records = verified_records(journal)
+    need(type(sequence) is int and 1 <= sequence <= len(records),
+         "JOURNAL_SEQUENCE_INVALID")
+    events = accepted(records[sequence-1])
+    need(len(events) == 1 and events[0]["role"] == "EXIT",
+         "SINGLE_CONFIRMED_EXIT_REQUIRED")
+    event = events[0]
+    app_path, broker_path = map(
+        rollback_database,
+        (application_store.path, execution_store.path))
+    need(not app_path.samefile(broker_path),
+         "DISTINCT_DATABASES_REQUIRED")
+    with application_store.lock():
+        with closing(sqlite3.connect(
+            app_path.as_uri()+"?mode=rw", uri=True, timeout=10,
+        )) as db:
+            db.execute(
+                "ATTACH DATABASE ? AS broker",
+                (broker_path.as_uri()+"?mode=ro",))
+            need(
+                db.execute("PRAGMA main.journal_mode").fetchone()[0]
+                == "delete",
+                "DELETE_JOURNAL_REQUIRED")
+            db.execute("PRAGMA main.synchronous=FULL")
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                source = read_connection(
+                    db, pin["scope"], expected_mode="OFFLINE_FIXTURE")
+                snapshot = capture_provider()
+                now = clock()
+                report = review_repeat_position(
+                    db, source, snapshot, pin,
+                    entry_id, event, now.isoformat())
+                need(
+                    report["remaining_quantity"] == 0
+                    and report["pending_exit_quantity"] == 0
+                    and report["all_orders_terminal"] is True,
+                    "REPEAT_POSITION_NOT_TERMINAL_FLAT")
+                input_fingerprint = sha(dict(
+                    source=source, snapshot=snapshot, event=event))
+                db.execute(
+                    "CREATE TABLE IF NOT EXISTS "+CLOSEOUTS+"("
+                    "id TEXT PRIMARY KEY,data TEXT NOT NULL)")
+                old = db.execute(
+                    "SELECT data FROM "+CLOSEOUTS+" WHERE id=?",
+                    (entry_id,)).fetchone()

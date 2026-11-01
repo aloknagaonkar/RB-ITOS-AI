@@ -1,0 +1,23 @@
+{
+  "status": "CHECKPOINT_FROZEN",
+  "reported_vm_tests_passed": 57,
+  "scope": "SYNTHETIC_FIXTURE_TRANSPORT",
+  "second_cycle_closeout_verified": true,
+  "second_cycle_references_retired": false,
+  "third_entry_verified": false,
+  "production_execution_enabled": false,
+  "files": {
+    "closed_history_baseline_candidate.py": "c2a00c6c4dec199cf67bebbb364cf9443b7b90fdfcb0e4c8c66088db93dd1581",
+    "test_closed_history_baseline_candidate.py": "29a59b0a8079588eba055c4af8d43990c374a4af2e182af72b42649c4e1b5df9",
+    "fixture_reference_retirement_candidate.py": "6f58c51f0e55ec1af47d5180b051904b675b47de0d38f043ab488f166b048932",
+    "test_fixture_reference_retirement_candidate.py": "c27a606749fe7303d07033fd89ad326523ff5db402fc1a66e8448c6a14f9b213",
+    "repeat_entry_cash_candidate.py": "f6d393412737cdf52063e69790ab0166a637e50e1c871c2c843db28610afb343",
+    "test_repeat_entry_cash_candidate.py": "8e32148030203de641299f0f213130d3980deb00b3c22b411947bd40b8b091cf",
+    "repeat_entry_preparation_candidate.py": "f95bea78e324cc52767bee408e1516801c615c44c5c5dc4f12e948dd59d1fb02",
+    "test_repeat_entry_preparation_candidate.py": "ec44844d3f2977d789d164f3b2242416be0fe69d5a3f7875473c596b4a56e528",
+    "fixture_repeat_execution_candidate.py": "447dba465d83765fb06fd8666bbf42a74dd319eb3d4a125f7b2f271b2bde6fb2",
+    "test_fixture_repeat_execution_candidate.py": "ee3f466ceb0574a728ed9c56eebad7be3200632d0936dc0f08fb095cdf3af272",
+    "fixture_repeat_exit_candidate.py": "18d43b2e538dc6421b7e5f4b3f3d4ea82286f6c9d3f62ad2dc657ce1ffa01e55",
+    "test_fixture_repeat_exit_candidate.py": "0a4dcb368addcef734031a9b107a4ad34f4a330d83e7b86a67730f5020e2436b"
+  }
+}

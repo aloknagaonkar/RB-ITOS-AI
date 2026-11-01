@@ -1,0 +1,65 @@
+
+def execute_repeat_exit_fixture(
+    application_store, execution_store, pin, *,
+    adapter_module, entry_id, journal, sequence,
+    capture_provider, clock, timeout_after=False,
+    checkpoint=lambda stage: None,
+):
+    need(pin["scope"].startswith("FIXTURE:"), "FIXTURE_REPEAT_EXIT_ONLY")
+    path = Path(adapter_module.__file__)
+    need(path.is_file() and not path.is_symlink()
+         and hashlib.sha256(path.read_bytes()).hexdigest() == ADAPTER_SHA,
+         "PINNED_FIXTURE_ADAPTER_REQUIRED")
+    need(type(execution_store) is adapter_module.Store
+         and execution_store.mode == "OFFLINE_FIXTURE"
+         and execution_store.scope == pin["scope"],
+         "EXACT_FIXTURE_EXECUTION_STORE_REQUIRED")
+    records = verified_records(journal)
+    need(type(sequence) is int and 1 <= sequence <= len(records),
+         "JOURNAL_SEQUENCE_INVALID")
+    events = accepted(records[sequence-1])
+    need(len(events) == 1 and events[0]["role"] == "EXIT",
+         "SINGLE_CONFIRMED_EXIT_REQUIRED")
+    event = events[0]
+    exit_id = sha(["SYNTHETIC_STRATEGY_EXIT", entry_id, event["id"]])
+    app_path = rollback_database(application_store.path)
+    broker_path = rollback_database(execution_store.path)
+    need(not app_path.samefile(broker_path), "DISTINCT_DATABASES_REQUIRED")
+    transport = adapter_module.FixtureTransport(execution_store)
+    adapter = adapter_module.Adapter(execution_store, transport)
+    with application_store.lock():
+        with closing(sqlite3.connect(
+            app_path.as_uri()+"?mode=ro", uri=True, timeout=10,
+        )) as app:
+            app.execute("PRAGMA query_only=ON")
+            app.execute("BEGIN")
+            try:
+                with execution_store.tx() as db:
+                    source = read_connection(
+                        SourceReader(app, db), pin["scope"],
+                        expected_mode="OFFLINE_FIXTURE")
+                    found = db.execute(
+                        "SELECT fingerprint,data FROM requests WHERE id=?",
+                        (exit_id,),
+                    ).fetchone()
+                    attempts = db.execute(
+                        "SELECT id,request_id,operation,data FROM attempts "
+                        "WHERE request_id=?", (exit_id,),
+                    ).fetchall()
+                preparation_proof(app, source, pin, entry_id)
+                parent_fp, parent_raw = next(
+                    (fp, raw) for rid, fp, raw in source["requests"]
+                    if rid == entry_id)
+                parent = json.loads(parent_raw)
+                parent_stable = {name: parent[name] for name in (
+                    "request_id", "draft", "signal_id", "signal_at",
+                    "direction", "reservation_reference",
+                )}
+                need(sha(parent_stable) == parent_fp
+                     == source["bindings"][entry_id]["request_fingerprint"],
+                     "REPEAT_PARENT_FINGERPRINT_CHANGED")
+                need(event["direction"] == parent["direction"]
+                     and event.get("entry_reference_at") is not None
+                     and aware(event["entry_reference_at"])
+                         == aware(parent["signal_at"]),
+                     "REPEAT_EXIT_PARENT_MISMATCH")

@@ -1,0 +1,17 @@
+{
+  "status": "PASS",
+  "assessed_at": "2026-10-30T18:41:20.577663+00:00",
+  "pytest_exit_code": 0,
+  "tracked_sources_unchanged": true,
+  "manifest_sha256": "da8ca19c28a20298fa684e89ae31b92b469f8e3ca7d2c61a505bd9182489de47",
+  "candidate_checkpoint_frozen": true,
+  "scope": "SYNTHETIC_EVIDENCE_AND_INTERCEPTED_ORDER_TRANSPORT",
+  "actual_owned_quote_network_validation": false,
+  "pricing_policy_approved": false,
+  "partial_quantity_policy_approved": false,
+  "trusted_production_authority_provisioned": false,
+  "reservation_release_implemented": false,
+  "execution_runtime_deployed": false,
+  "production_execution_enabled": false,
+  "production_ready": false
+}

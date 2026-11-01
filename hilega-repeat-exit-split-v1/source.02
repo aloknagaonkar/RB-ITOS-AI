@@ -1,0 +1,71 @@
+    requests = {
+        rid: (fp, json.loads(raw))
+        for rid, fp, raw in source["requests"]
+    }
+    need(len(requests) == len(source["requests"]), "DUPLICATE_REQUEST_ID")
+    need(key not in old_ids and key in requests,
+         "CURRENT_REPEAT_ENTRY_REQUIRED")
+    entry_fp, entry = requests[key]
+    stable = {name: entry[name] for name in (
+        "request_id", "draft", "signal_id", "signal_at",
+        "direction", "reservation_reference",
+    )}
+    need(sha(stable) == entry_fp
+         == source["bindings"][key]["request_fingerprint"]
+         == proof["request_fingerprint"],
+         "CURRENT_ENTRY_FINGERPRINT_CHANGED")
+    need(event["role"] == "EXIT"
+         and event["direction"] == entry["direction"]
+         and event.get("entry_reference_at") is not None
+         and aware(event["entry_reference_at"]) == aware(entry["signal_at"])
+         and aware(entry["signal_at"]) <= aware(event["event_at"])
+             <= aware(snapshot["completed_at"]),
+         "REPEAT_EXIT_PARENT_MISMATCH")
+    exit_id = sha(["SYNTHETIC_STRATEGY_EXIT", key, event["id"]])
+    need(set(requests)-old_ids in ({key}, {key, exit_id}),
+         "UNATTRIBUTED_CURRENT_REQUEST")
+    need(old_ids <= set(requests), "ARCHIVED_REQUEST_MISSING")
+    expected_fps = {
+        rid: fp for archived in archives
+        for rid, fp, raw in archived["source"]["requests"]
+    }
+    need(all(requests[rid][0] == fp for rid, fp in expected_fps.items()),
+         "ARCHIVED_REQUEST_FINGERPRINT_CHANGED")
+    expected_old_attempts = {
+        aid: (rid, op, sha(json.loads(raw)["wire"]))
+        for archived in archives
+        for aid, rid, op, raw in archived["source"]["attempts"]
+    }
+    actual_old_attempts = {
+        aid: (rid, op, sha(json.loads(raw)["wire"]))
+        for aid, rid, op, raw in source["attempts"] if rid in old_ids
+    }
+    need(actual_old_attempts == expected_old_attempts,
+         "ARCHIVED_TRANSPORT_HISTORY_CHANGED")
+    for archived in archives:
+        for aid, raw in archived["source"]["receipts"].items():
+            need(aid in source["receipts"]
+                 and sha(json.loads(source["receipts"][aid]))
+                     == sha(json.loads(raw)),
+                 "ARCHIVED_RECEIPT_CHANGED")
+    need(all(row["state"] not in {
+        "UNKNOWN", "IN_FLIGHT", "CANCEL_IN_FLIGHT", "CANCEL_OUTCOME_UNKNOWN",
+    } for fp, row in requests.values()), "UNRESOLVED_REQUEST_OUTCOME")
+    need(all(op == "PLACE" for aid, rid, op, raw in source["attempts"]
+             if rid not in old_ids), "CURRENT_CANCEL_REQUIRES_SEPARATE_REVIEW")
+    historical = _check(
+        "OFFLINE_FIXTURE", source["requests"],
+        source["attempts"], source["receipts"])
+    links = {row["request_id"]: row for row in historical["bindings"]}
+    need(key in links, "CURRENT_ENTRY_ACKNOWLEDGEMENT_REQUIRED")
+    parent_link = links[key]
+    buy = orders.get(parent_link["order_id"])
+    need(buy is not None and parent_link["side"] == "BUY",
+         "CURRENT_ENTRY_ORDER_REQUIRED")
+    need(all(buy[name] == parent_link[name] for name in (
+        "instrument", "product", "side", "quantity",
+    )), "CURRENT_ENTRY_ORDER_IDENTITY_MISMATCH")
+    need(buy["status"] == "FILLED"
+         and buy["filled"] == buy["quantity"]
+         and buy["pending"] == 0,
+         "FULL_CURRENT_ENTRY_FILL_REQUIRED")

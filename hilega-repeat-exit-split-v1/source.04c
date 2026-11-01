@@ -1,0 +1,59 @@
+                request_at = (
+                    aware(json.loads(found[1])["draft"]["created_at"])
+                    if found is not None else now)
+                need(0 <= (now-request_at).total_seconds() <= 10,
+                     "REPEAT_EXIT_REQUEST_STALE")
+                request_draft = draft(
+                    selected, request_id=exit_id, side="SELL", lots=1,
+                    as_of=request_at.isoformat(), order_type="LIMIT",
+                    limit_price=pricing["limit_price"],
+                    normalized_tick_rupees=normalized_tick(
+                        selected, profile=PROFILE))
+                saved = adapter.prepare(
+                    request_draft, signal_id=event["id"],
+                    signal_at=event["event_at"], direction=event["direction"],
+                    reservation_reference=parent["reservation_reference"],
+                    as_of=now.isoformat())
+                wire = adapter._wire(saved, "PLACE")
+                from decimal import Decimal
+                need(Decimal(str(wire["body"]["price"]))
+                     == Decimal(pricing["limit_price"]),
+                     "REPEAT_EXIT_WIRE_PRICE_CHANGED")
+                with execution_store.tx() as db:
+                    prepared_source = read_connection(
+                        SourceReader(app, db), pin["scope"],
+                        expected_mode="OFFLINE_FIXTURE")
+                prepared_report = review_repeat_position(
+                    app, prepared_source, captures["account"], pin,
+                    entry_id, event, now.isoformat())
+                need(prepared_report["ownership"] == report["ownership"]
+                     and prepared_report["remaining_quantity"]
+                         == report["remaining_quantity"],
+                     "REPEAT_POSITION_CHANGED_DURING_PREPARATION")
+                frame_fingerprint = sha(dict(
+                    source=prepared_source, captures=captures))
+                grant = issue_exit(
+                    pin, request_id=exit_id, parent_id=entry_id,
+                    event=event, wire=wire,
+                    ownership=prepared_report["ownership"],
+                    at=now.isoformat())
+
+                def authorize(db, attempt):
+                    current = read_connection(
+                        SourceReader(app, db), pin["scope"],
+                        expected_mode="OFFLINE_FIXTURE")
+                    final_at = clock()
+                    final_report = review_repeat_position(
+                        app, current, captures["account"], pin,
+                        entry_id, event, final_at.isoformat())
+                    final_price = review_owned_quote(
+                        captures["market"], pin, contract,
+                        quantity=final_report["entry_quantity"],
+                        as_of=final_at.isoformat())
+                    need(sha(dict(source=current, captures=captures))
+                         == frame_fingerprint
+                         and attempt["operation"] == "PLACE"
+                         and attempt["wire"] == wire
+                         and Decimal(str(wire["body"]["price"]))
+                             == Decimal(final_price["limit_price"]),
+                         "REPEAT_EXIT_CONTEXT_CHANGED_BEFORE_ATTEMPT")

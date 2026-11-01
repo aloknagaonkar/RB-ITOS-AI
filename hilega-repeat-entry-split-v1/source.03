@@ -1,0 +1,93 @@
+                control = json.loads(db.execute(
+                    "SELECT data FROM control WHERE id=1").fetchone()[0])
+                stop = db.execute(
+                    "SELECT generation,handled FROM sim_stop_state WHERE id=1"
+                ).fetchone()
+                now = clock()
+                need(control["mode"] == "ARMED"
+                     and control["version"] == expected_version
+                     and control.get("reconciled") is True
+                     and control["session_date"] == day(now)
+                     and control.get("resumed_at")
+                     and aware(event["event_at"]) > aware(control["resumed_at"])
+                     and control.get("last_reconciled_at")
+                     and 0 <= (now-aware(control["last_reconciled_at"])).total_seconds() <= 30
+                     and stop is not None and stop[0] == stop[1],
+                     "CONTROL_RESUME_OR_STOP_CHECK_FAILED")
+                need(entry_clock_open(now)
+                     and entry_clock_open(aware(event["event_at"])),
+                     "ENTRY_CLOCK_WINDOW_CLOSED")
+                route = json.loads(db.execute(
+                    "SELECT data FROM preparation_route WHERE id=1"
+                ).fetchone()[0])
+                need(route == dict(
+                    route="PREPARATION_ONLY",
+                    model="APPLICATION_PREPARATION_ROUTE_V1"),
+                    "PREPARATION_ROUTE_REQUIRED")
+                need(not any(db.execute(
+                    "SELECT 1 FROM "+table+" LIMIT 1").fetchone()
+                    for table in ACTIVE), "ACTIVE_REFERENCE_REQUIRES_REVIEW")
+                need(not any(db.execute(
+                    "SELECT 1 FROM "+table+" LIMIT 1").fetchone()
+                    for table in ("intents", "sim_orders", "sim_fills",
+                                  "sim_allocation_reservations")),
+                     "SIMULATOR_ACTIVITY_PRESENT")
+                archives = [authenticate(json.loads(raw), pin)
+                            for raw, in db.execute("SELECT data FROM "+HISTORY)]
+                need(bool(archives), "CLOSED_HISTORY_REQUIRED")
+                requests = db.execute(
+                    "SELECT id,fingerprint,data FROM broker.requests ORDER BY rowid"
+                ).fetchall()
+                attempts = db.execute(
+                    "SELECT id,request_id,operation,data FROM broker.attempts"
+                ).fetchall()
+                receipts = dict(db.execute(
+                    "SELECT id,data FROM broker.receipts"))
+                historical = _check(
+                    "OFFLINE_FIXTURE", requests, attempts, receipts)
+                expected_links, expected_ids = [], set()
+                for archived in archives:
+                    previous = archived["source"]
+                    expected_links.extend(_check(
+                        "OFFLINE_FIXTURE", previous["requests"],
+                        previous["attempts"], previous["receipts"])["bindings"])
+                    for rid, fp, raw in previous["requests"]:
+                        need(rid not in expected_ids,
+                             "DUPLICATE_ARCHIVED_REQUEST")
+                        expected_ids.add(rid)
+                ordered = lambda links: sorted(
+                    links, key=lambda row: row["request_id"])
+                need(historical["unbound_request_count"] == 0
+                     and {r[0] for r in requests} == expected_ids
+                     and ordered(historical["bindings"]) == ordered(expected_links),
+                     "BROKER_HISTORY_NOT_FULLY_ARCHIVED")
+                need(all(json.loads(raw)["state"] not in {
+                    "UNKNOWN", "IN_FLIGHT", "CANCEL_IN_FLIGHT",
+                    "CANCEL_OUTCOME_UNKNOWN",
+                } for rid, fp, raw in requests), "UNRESOLVED_BROKER_OUTCOME")
+                need(not db.execute(
+                    "SELECT 1 FROM preparation_consumed WHERE id=?", (key,)
+                ).fetchone(), "SIGNAL_ALREADY_CONSUMED")
+
+                def checked(at):
+                    contract, quantity, pricing = market_plan(
+                        market_bundle, pin, event["direction"], at)
+                    n, d = Decimal(pricing["observed_ask"]).as_integer_ratio()
+                    premium, remainder = divmod(n*quantity*100, d)
+                    need(remainder == 0, "EXACT_PAISE_PREMIUM_REQUIRED")
+                    cash = review_repeat_entry(
+                        account_capture, cash_capture, archives, pin,
+                        signal_at=event["event_at"], premium_paise=premium,
+                        fee_buffer_paise=fee_buffer_paise, as_of=at.isoformat())
+                    need(cash["status"] == "REENTRY_REFERENCE_CHECKS_PASS",
+                         "REPEAT_ENTRY_CASH_BLOCKED")
+                    health = json.loads(db.execute(
+                        "SELECT data FROM sim_bridge_health WHERE id=1"
+                    ).fetchone()[0])
+                    need(health.get("run_id") == bridge_run_id
+                         and effective(health, at)["healthy"],
+                         "BRIDGE_HEALTH_NOT_READY")
+                    need(entry_clock_open(at), "ENTRY_CLOCK_WINDOW_CLOSED")
+                    return contract, quantity, pricing, premium, cash
+
+                contract, quantity, pricing, premium, cash = checked(now)

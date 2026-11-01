@@ -1,0 +1,52 @@
+"""Atomic fixture repeat-entry preparation. No live support."""
+from contextlib import closing
+from decimal import Decimal
+import hmac
+import json
+import sqlite3
+
+from repeat_entry_cash_candidate import review_repeat_entry
+from closed_history_baseline_candidate import TABLE as HISTORY, authenticate
+from fixture_reference_retirement_candidate import ACTIVE
+from owned_exit_pricing_candidate import review_owned_quote
+from market_lab.hilega_preparation_runtime_v1.evidence import FLAGS, dependencies
+from market_lab.hilega_preparation_runtime_v1.cash_reservation import reserve_local
+from market_lab.hilega_preparation_runtime_v1.ownership_state import rollback_database
+from market_lab.hilega_preparation_runtime_v1.source import entry_clock_open, event_digest
+from market_lab.hilega_execution_port_v1.adapter import validated_request
+from market_lab.hilega_execution_port_v1.mapping import draft
+from market_lab.hilega_nifty_option_price_grid_v1 import PROFILE, normalized_tick
+from market_lab.hilega_production_simulator_bridge_v1 import verified_records, accepted
+from market_lab.hilega_production_bridge_health_v1 import effective
+from market_lab.hilega_preparation_runtime_v1.ownership_checks.historical_receipt_checks import _check, sha
+from market_lab.hilega_preparation_runtime_v1.ownership_checks.signature_checks import sign, aware, day
+
+TABLE = "fixture_repeat_entry_admissions"
+
+
+def need(ok, reason):
+    if not ok:
+        raise ValueError(reason)
+
+
+def market_plan(bundle, pin, direction, now):
+    rules, _ = dependencies()
+    underlying = rules.quote_map(
+        bundle["quotes"], [rules.UNDERLYING])[rules.UNDERLYING]
+    age = (now-rules.timestamp(underlying["timestamp"])).total_seconds()
+    need(0 <= age <= 10, "UNDERLYING_QUOTE_STALE_OR_FUTURE")
+    mapping = rules.select(
+        bundle["contracts"], underlying["last_price"], [0], 1,
+        now.astimezone(rules.IST).date())
+    side = "CE" if direction == "BULLISH" else "PE"
+    rows = [r for r in mapping["contracts"] if r["side"] == side]
+    need(len(rows) == 1, "EXACT_CURRENT_ATM_CONTRACT_REQUIRED")
+    selected = rows[0]
+    contract = next(
+        c for c in bundle["contracts"]
+        if c["instrument_key"] == selected["instrument_key"])
+    pricing = review_owned_quote(
+        bundle, pin, contract, quantity=selected["quantity"],
+        as_of=now.isoformat())
+    return contract, selected["quantity"], pricing
+

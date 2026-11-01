@@ -1,0 +1,48 @@
+    need(aware(buy["placed_at"]) >= aware(entry["signal_at"]),
+         "ENTRY_ORDER_PRECEDES_SIGNAL")
+    sell = None
+    expected_unbound = 0
+    if exit_id in requests:
+        exit_fp, exit_request = requests[exit_id]
+        exit_stable = {name: exit_request[name] for name in (
+            "request_id", "draft", "signal_id", "signal_at",
+            "direction", "reservation_reference",
+        )}
+        disabled = exit_request["draft"]
+        body = disabled["body"]
+        need(sha(exit_stable) == exit_fp
+             and sha(body) == disabled["fingerprint"]
+             and disabled["request_id"] == exit_id
+             and all(disabled.get(flag) is False for flag in (
+                 "submission_enabled", "entry_permission", "orders_sent",
+             )), "REPEAT_EXIT_DRAFT_CHANGED")
+        need(
+            (disabled["documented_method"], disabled["documented_host"],
+             disabled["documented_path"])
+            == ("POST", "api-hft.upstox.com", "/v3/order/place"),
+            "REPEAT_EXIT_ENDPOINT_CHANGED")
+        need(exit_request["signal_id"] == event["id"]
+             and aware(exit_request["signal_at"]) == aware(event["event_at"])
+             and exit_request["direction"] == entry["direction"]
+             and exit_request["reservation_reference"]
+                 == entry["reservation_reference"]
+             and body["transaction_type"] == "SELL"
+             and body["order_type"] == "LIMIT"
+             and body["instrument_token"] == buy["instrument"]
+             and body["product"] == buy["product"]
+             and type(body["quantity"]) is int
+             and body["quantity"] == buy["filled"],
+             "REPEAT_EXIT_PARENT_OR_QUANTITY_CHANGED")
+        if exit_id in links:
+            sell = orders.get(links[exit_id]["order_id"])
+            need(sell is not None and all(
+                sell[name] == links[exit_id][name]
+                for name in ("instrument", "product", "side", "quantity")),
+                "REPEAT_EXIT_ORDER_IDENTITY_MISMATCH")
+        else:
+            need(exit_request["state"] == "PREPARED"
+                 and exit_request.get("order_id") is None
+                 and not any(rid == exit_id
+                             for aid, rid, op, raw in source["attempts"]),
+                 "UNACKNOWLEDGED_EXIT_REQUIRES_RECOVERY")
+            expected_unbound = 1
