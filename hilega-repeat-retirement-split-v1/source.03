@@ -1,0 +1,60 @@
+                source = read_connection(
+                    db, pin["scope"], expected_mode="OFFLINE_FIXTURE")
+                need(all(
+                    set(source[category]) == {entry_id}
+                    for category in ACTIVE.values()),
+                    "SINGLE_ACTIVE_REPEAT_LIFECYCLE_REQUIRED")
+                need(sha(source) == closeout["source_fingerprint"],
+                     "REPEAT_SOURCE_CHANGED_AFTER_CLOSEOUT")
+                now = clock()
+                report = review_repeat_position(
+                    db, source, snapshot, pin, entry_id,
+                    closeout["event"], now.isoformat())
+                need(
+                    report["remaining_quantity"] == 0
+                    and report["pending_exit_quantity"] == 0
+                    and report["all_orders_terminal"] is True,
+                    "REPEAT_RETIREMENT_REQUIRES_TERMINAL_FLAT")
+                row = dict(
+                    model="HILEGA_FIXTURE_REPEAT_RETIREMENT_V1",
+                    entry_id=entry_id, account_scope=pin["scope"],
+                    assessed_at=now.isoformat(),
+                    closeout_fingerprint=sha(closeout),
+                    history_fingerprints=history_fingerprints,
+                    snapshot=snapshot, snapshot_fingerprint=sha(snapshot),
+                    review=report,
+                    retired_reference_fingerprints={
+                        table: sha(source[category][entry_id])
+                        for table, category in ACTIVE.items()
+                    },
+                    local_reference_retired=True,
+                    broker_cash_release_assessed=False,
+                    third_entry_admission_assessed=False,
+                    reservation_release_permission=False,
+                    production_execution_enabled=False)
+                row = json.loads(json.dumps(row))
+                row["signature"] = sign(row, pin)
+                db.execute(
+                    "CREATE TABLE IF NOT EXISTS "+TABLE+"("
+                    "id TEXT PRIMARY KEY,data TEXT NOT NULL)")
+                db.execute(
+                    "INSERT INTO "+TABLE+" VALUES(?,?)",
+                    (entry_id, json.dumps(row, sort_keys=True)))
+                checkpoint("AFTER_REPEAT_RETIREMENT_SEAL")
+                for table in ACTIVE:
+                    changed = db.execute(
+                        "DELETE FROM main."+table+" WHERE id=?",
+                        (entry_id,))
+                    need(changed.rowcount == 1,
+                         "REPEAT_ACTIVE_REFERENCE_CHANGED")
+                checkpoint("AFTER_REPEAT_REFERENCES_RETIRED")
+                checkpoint("BEFORE_REPEAT_RETIREMENT_COMMIT")
+                expected = deepcopy(source)
+                for table, category in ACTIVE.items():
+                    expected[category] = {}
+                    if table in expected["counts"]:
+                        expected["counts"][table] = 0
+                current = read_connection(
+                    db, pin["scope"], expected_mode="OFFLINE_FIXTURE")
+                need(sha(current) == sha(expected),
+                     "REPEAT_RETIREMENT_SOURCE_CHANGED")

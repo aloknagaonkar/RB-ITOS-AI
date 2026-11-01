@@ -1,0 +1,39 @@
+                final_report = review_repeat_position(
+                    db, source, snapshot, pin, entry_id,
+                    closeout["event"], clock().isoformat())
+                need(final_report == report,
+                     "REPEAT_RETIREMENT_REVIEW_CHANGED")
+                persisted_closeout = db.execute(
+                    "SELECT data FROM "+CLOSEOUTS+" WHERE id=?",
+                    (entry_id,)).fetchone()
+                need(
+                    persisted_closeout is not None
+                    and sha(authenticated_closeout(
+                        json.loads(persisted_closeout[0]), pin, entry_id))
+                        == sha(closeout),
+                    "REPEAT_CLOSEOUT_CHANGED_DURING_RETIREMENT")
+                final_history = [
+                    authenticate(json.loads(raw), pin)
+                    for raw, in db.execute("SELECT data FROM "+HISTORY)
+                ]
+                need(
+                    sorted(sha(r) for r in final_history)
+                    == history_fingerprints,
+                    "REPEAT_HISTORY_CHANGED_DURING_RETIREMENT")
+                saved = json.loads(db.execute(
+                    "SELECT data FROM "+TABLE+" WHERE id=?",
+                    (entry_id,)).fetchone()[0])
+                need(saved == row, "REPEAT_RETIREMENT_RECORD_CHANGED")
+                db.commit()
+                return dict(
+                    status="FIXTURE_REPEAT_REFERENCES_RETIRED",
+                    idempotent_replay=False,
+                    database_modified=True,
+                    broker_records_deleted=False,
+                    signed_evidence_deleted=False,
+                    third_entry_admission_assessed=False,
+                    reservation_release_permission=False,
+                    production_execution_enabled=False)
+            finally:
+                if db.in_transaction:
+                    db.rollback()

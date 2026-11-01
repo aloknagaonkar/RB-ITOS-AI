@@ -1,0 +1,62 @@
+"""Fixture-only second-cycle retirement; no broker cash release."""
+from contextlib import closing
+from copy import deepcopy
+import hmac
+import json
+import sqlite3
+
+from fixture_repeat_exit_candidate import (
+    CLOSEOUTS, review_repeat_position,
+)
+from fixture_reference_retirement_candidate import ACTIVE
+from closed_history_baseline_candidate import (
+    TABLE as HISTORY, authenticate,
+)
+from market_lab.hilega_preparation_runtime_v1.ownership_state import (
+    rollback_database,
+)
+from market_lab.hilega_preparation_runtime_v1.ownership_checks.risk_evidence_audit import (
+    read_connection,
+)
+from market_lab.hilega_preparation_runtime_v1.ownership_checks.historical_receipt_checks import sha
+from market_lab.hilega_preparation_runtime_v1.ownership_checks.signature_checks import (
+    sign, verify,
+)
+
+TABLE = "fixture_repeat_reference_retirements"
+
+
+def need(ok, reason):
+    if not ok:
+        raise ValueError(reason)
+
+
+def authenticated_closeout(record, pin, entry_id):
+    payload = dict(record)
+    signature = payload.pop("signature", None)
+    need(
+        isinstance(signature, str)
+        and hmac.compare_digest(sign(payload, pin), signature),
+        "REPEAT_CLOSEOUT_SIGNATURE_INVALID")
+    need(
+        record["model"] == "HILEGA_FIXTURE_REPEAT_CLOSEOUT_V1"
+        and record["account_scope"] == pin["scope"]
+        and record["entry_id"] == entry_id
+        and record["active_references_retired"] is False
+        and record["reservation_release_permission"] is False
+        and record["production_execution_enabled"] is False,
+        "REPEAT_CLOSEOUT_BINDING_INVALID")
+    need(
+        sha(record["source"]) == record["source_fingerprint"]
+        and sha(record["snapshot"]) == record["snapshot_fingerprint"]
+        and sha(dict(
+            source=record["source"], snapshot=record["snapshot"],
+            event=record["event"])) == record["input_fingerprint"],
+        "REPEAT_CLOSEOUT_EVIDENCE_CHANGED")
+    verify(record["snapshot"], pin, as_of=record["assessed_at"])
+    need(
+        record["review"]["remaining_quantity"] == 0
+        and record["review"]["pending_exit_quantity"] == 0
+        and record["review"]["all_orders_terminal"] is True,
+        "REPEAT_CLOSEOUT_NOT_FLAT")
+    return record

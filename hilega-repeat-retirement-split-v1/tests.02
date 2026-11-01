@@ -1,0 +1,50 @@
+
+def test_retirement_replay_is_idempotent(completed):
+    retire(completed)
+    replay = retire(completed)
+    assert replay["status"] == "REPEAT_RETIREMENT_HISTORICAL_REPLAY"
+    assert replay["database_modified"] is False
+    position, _, _ = completed
+    setup = position["case"]["setup"]
+    with setup["e"]["store"].db() as db:
+        assert db.execute(
+            "SELECT COUNT(*) FROM "+TABLE
+        ).fetchone()[0] == 1
+
+
+@pytest.mark.parametrize("stage", [
+    "AFTER_REPEAT_RETIREMENT_SEAL",
+    "AFTER_REPEAT_REFERENCES_RETIRED",
+    "BEFORE_REPEAT_RETIREMENT_COMMIT",
+])
+def test_retirement_interruption_restores_references(completed, stage):
+    position, _, _ = completed
+    setup = position["case"]["setup"]
+    key = position["case"]["key"]
+    with setup["e"]["store"].db() as db:
+        before = {
+            table: db.execute(
+                "SELECT data FROM "+table+" WHERE id=?", (key,)
+            ).fetchone()[0]
+            for table in ACTIVE
+        }
+    def interrupt(current):
+        if current == stage:
+            raise RuntimeError("synthetic retirement interruption")
+    with pytest.raises(RuntimeError, match="synthetic retirement"):
+        retire(completed, checkpoint=interrupt)
+    with setup["e"]["store"].db() as db:
+        for table, raw in before.items():
+            assert db.execute(
+                "SELECT data FROM "+table+" WHERE id=?", (key,)
+            ).fetchone()[0] == raw
+        exists = db.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type='table' AND name=?", (TABLE,)
+        ).fetchone()
+        if exists:
+            assert db.execute(
+                "SELECT COUNT(*) FROM "+TABLE
+            ).fetchone()[0] == 0
+    assert retire(completed)["status"] == (
+        "FIXTURE_REPEAT_REFERENCES_RETIRED")

@@ -1,0 +1,70 @@
+
+def retire_repeat_fixture(
+    application_store, execution_path, snapshot, pin, *,
+    entry_id, clock, checkpoint=lambda stage: None,
+):
+    need(pin["scope"].startswith("FIXTURE:"),
+         "FIXTURE_REPEAT_RETIREMENT_ONLY")
+    app, broker = map(
+        rollback_database, (application_store.path, execution_path))
+    need(not app.samefile(broker), "DISTINCT_DATABASES_REQUIRED")
+    with application_store.lock():
+        with closing(sqlite3.connect(
+            app.as_uri()+"?mode=rw", uri=True, timeout=10,
+        )) as db:
+            db.execute(
+                "ATTACH DATABASE ? AS broker",
+                (broker.as_uri()+"?mode=ro",))
+            need(all(
+                db.execute("PRAGMA "+name+".journal_mode").fetchone()[0]
+                == "delete" for name in ("main", "broker")),
+                "DELETE_JOURNAL_REQUIRED")
+            db.execute("PRAGMA main.synchronous=FULL")
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                found = db.execute(
+                    "SELECT data FROM "+CLOSEOUTS+" WHERE id=?",
+                    (entry_id,)).fetchone()
+                need(found is not None, "REPEAT_CLOSEOUT_REQUIRED")
+                closeout = authenticated_closeout(
+                    json.loads(found[0]), pin, entry_id)
+                archives = [
+                    authenticate(json.loads(raw), pin)
+                    for raw, in db.execute("SELECT data FROM "+HISTORY)
+                ]
+                history_fingerprints = sorted(sha(r) for r in archives)
+                exists = db.execute(
+                    "SELECT 1 FROM sqlite_master "
+                    "WHERE type='table' AND name=?", (TABLE,)
+                ).fetchone()
+                old = db.execute(
+                    "SELECT data FROM "+TABLE+" WHERE id=?",
+                    (entry_id,)).fetchone() if exists else None
+                if old is not None:
+                    row = json.loads(old[0])
+                    payload = dict(row)
+                    signature = payload.pop("signature", None)
+                    need(
+                        isinstance(signature, str)
+                        and hmac.compare_digest(sign(payload, pin), signature),
+                        "REPEAT_RETIREMENT_SIGNATURE_INVALID")
+                    need(
+                        row["model"] == "HILEGA_FIXTURE_REPEAT_RETIREMENT_V1"
+                        and row["entry_id"] == entry_id
+                        and row["account_scope"] == pin["scope"]
+                        and row["closeout_fingerprint"] == sha(closeout)
+                        and row["history_fingerprints"] == history_fingerprints
+                        and row["reservation_release_permission"] is False
+                        and row["production_execution_enabled"] is False,
+                        "REPEAT_RETIREMENT_BINDING_CHANGED")
+                    need(not any(db.execute(
+                        "SELECT 1 FROM "+table+" WHERE id=?",
+                        (entry_id,)).fetchone() for table in ACTIVE),
+                        "RETIRED_REPEAT_REFERENCE_REAPPEARED")
+                    db.rollback()
+                    return dict(
+                        status="REPEAT_RETIREMENT_HISTORICAL_REPLAY",
+                        idempotent_replay=True, database_modified=False,
+                        third_entry_admission_assessed=False,
+                        reservation_release_permission=False,
+                        production_execution_enabled=False)
