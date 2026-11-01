@@ -1,0 +1,31 @@
+{
+  "model": "HILEGA_PROPOSED_CLOSED_RELEASE_CONTRACT_V1",
+  "status": "REVIEW_ONLY_NOT_APPROVED",
+  "files": [
+    {
+      "target": "scripts/hilega_production_simulator_bridge.py",
+      "current_sha256": "9fd8bc6b22af63229f59743722cfb156b12feb0ca279bc2117a103d02670de98",
+      "proposed_sha256": "154cbe309b86dfc8e3ff7f758cd0f6aec4e539d511483ef07f60ed8487ddbdb9"
+    },
+    {
+      "target": "backend/market_lab/hilega_preparation_runtime_v1/source.py",
+      "current_sha256": "dbfce30057763b93e8f7f8332e86e2145890bd29c72d18016b3ad944125e6150",
+      "proposed_sha256": "d451edda4f7f28bfa38d2e095a543d4e36b83b9484027fb1ddff1375464b22e2"
+    },
+    {
+      "target": "backend/market_lab/hilega_exclusive_closed_route_v1.py",
+      "current_sha256": null,
+      "proposed_sha256": "f8fd3bf253b4faf94517c7b520de75e72217e519aa8aa7fa47b95210f0f05844"
+    }
+  ],
+  "environment_pin_matches": true,
+  "startup_path_review_passed": true,
+  "existing_baseline_blockers": [],
+  "actual_process_environment_verified": false,
+  "old_workers_quiesced": false,
+  "code_and_database_backups_created": false,
+  "new_release_approved": false,
+  "dependency_manifest_fully_reconciled": false,
+  "live_apply_available": false,
+  "production_execution_enabled": false
+}

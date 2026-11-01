@@ -1,0 +1,8 @@
+{
+  "model": "HILEGA_BOUNDED_APPROVED_STARTUP_RETRY_V1",
+  "plan_sha256": "55ba58b26771b81ade1511e0b9f3324767fbc6768c2e2fa4d6ee3e6acbad4965",
+  "previous_phase": "STARTUP_FAILED_SERVICES_STOPPED",
+  "production_execution_enabled": false,
+  "requires_advancing_heartbeat": true,
+  "timeout_seconds": 60
+}

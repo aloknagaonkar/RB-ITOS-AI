@@ -1,0 +1,75 @@
+{
+  "status": "NOT_READY_TO_DEPLOY",
+  "checks": [
+    {
+      "check": "PINNED_STAGED_MODULES",
+      "satisfied": true
+    },
+    {
+      "check": "DIRECT_IMPORT_RESOLUTION",
+      "satisfied": true
+    },
+    {
+      "check": "SOURCE_SERVICE_MAPPING",
+      "satisfied": true
+    },
+    {
+      "check": "CLOSED_UNIT_SYNTAX",
+      "satisfied": true
+    },
+    {
+      "check": "CANDIDATE_INTEGRATION_EVIDENCE",
+      "satisfied": true
+    },
+    {
+      "check": "TRANSITIVE_RELEASE_DEPENDENCY_MANIFEST",
+      "satisfied": false
+    },
+    {
+      "check": "SUPERVISOR_AND_RELEASE_APPROVAL_RECONCILIATION",
+      "satisfied": false
+    },
+    {
+      "check": "LIVE_DATABASE_AND_OWNER_STATE_BASELINE",
+      "satisfied": false
+    },
+    {
+      "check": "OLD_WORKER_QUIESCENCE_AND_CODE_DATABASE_BACKUPS",
+      "satisfied": false
+    },
+    {
+      "check": "ACTUAL_MANAGED_CLOSED_STARTUP_AND_ROLLBACK",
+      "satisfied": false
+    },
+    {
+      "check": "EXECUTION_SESSION_FACTORY_AND_TRUSTED_AUTHORITY",
+      "satisfied": false
+    },
+    {
+      "check": "BROKER_VALIDATION_AND_APPROVED_POLICIES",
+      "satisfied": false
+    },
+    {
+      "check": "FEES_AND_BROKER_CASH_HANDLING",
+      "satisfied": false
+    },
+    {
+      "check": "FULL_RELEASE_REGRESSION",
+      "satisfied": false
+    }
+  ],
+  "pending": [
+    "TRANSITIVE_RELEASE_DEPENDENCY_MANIFEST",
+    "SUPERVISOR_AND_RELEASE_APPROVAL_RECONCILIATION",
+    "LIVE_DATABASE_AND_OWNER_STATE_BASELINE",
+    "OLD_WORKER_QUIESCENCE_AND_CODE_DATABASE_BACKUPS",
+    "ACTUAL_MANAGED_CLOSED_STARTUP_AND_ROLLBACK",
+    "EXECUTION_SESSION_FACTORY_AND_TRUSTED_AUTHORITY",
+    "BROKER_VALIDATION_AND_APPROVED_POLICIES",
+    "FEES_AND_BROKER_CASH_HANDLING",
+    "FULL_RELEASE_REGRESSION"
+  ],
+  "live_apply_available": false,
+  "production_execution_enabled": false,
+  "production_ready": false
+}

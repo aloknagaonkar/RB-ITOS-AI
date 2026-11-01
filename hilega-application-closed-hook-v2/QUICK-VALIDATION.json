@@ -1,0 +1,104 @@
+{
+  "status": "PASS_TARGETED_ONLY",
+  "scope": "APPLICATION_CLOSED_HOOK_STAGING",
+  "pytest_exit_code": 0,
+  "collected_cases": 12,
+  "failed": 0,
+  "skipped": 0,
+  "full_regression_reexecuted": false,
+  "prior_full_cases_passed": 163,
+  "prior_report_sha256": "56ba0a7f2f9631d89b396a9d61e5be4d4c55db371489af7db6d4b577707789c8",
+  "unchanged_baseline_sources": 41,
+  "service_installed": false,
+  "service_started": false,
+  "production_execution_enabled": false,
+  "runtime_deployed": false,
+  "production_ready": false,
+  "assessed_at": "2026-11-01T09:08:21.172109+00:00",
+  "stage": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-application-closed-hook-stage-g0rmw6bg",
+  "original_path": "/home/aloknagaonkar46/RB-ITOS-AI/scripts/hilega_production_simulator_bridge.py",
+  "original_sha256": "9fd8bc6b22af63229f59743722cfb156b12feb0ca279bc2117a103d02670de98",
+  "candidate_path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-application-closed-hook-stage-g0rmw6bg/scripts/hilega_production_simulator_bridge.py",
+  "candidate_sha256": "57703daaef3f8e26d376885366dd6e263de6888f887b73ef642e1f13818577d9",
+  "boundary_path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-application-closed-hook-stage-g0rmw6bg/backend/market_lab/hilega_closed_execution_boundary_v1.py",
+  "boundary_sha256": "2ead311b8b13e2b1f1886b30641ef7c2ee482380d6f17d5d82e6892cc98fa01f",
+  "related_services": [
+    {
+      "scope": "user",
+      "unit": "hilega-production-source-worker.service",
+      "active": "active",
+      "sub_state": "running",
+      "enabled": "enabled",
+      "fragment_path": "/home/aloknagaonkar46/.config/systemd/user/hilega-production-source-worker.service",
+      "working_directory": "/home/aloknagaonkar46/RB-ITOS-AI",
+      "script_paths": [
+        "/home/aloknagaonkar46/hilega-persistent-supervision-stage-v1/runner.py"
+      ]
+    },
+    {
+      "scope": "user",
+      "unit": "hilega-worker.service",
+      "active": "active",
+      "sub_state": "running",
+      "enabled": "enabled",
+      "fragment_path": "/home/aloknagaonkar46/.config/systemd/user/hilega-worker.service",
+      "working_directory": "/home/aloknagaonkar46/RB-ITOS-AI",
+      "script_paths": [
+        "/home/aloknagaonkar46/hilega-persistent-supervision-stage-v1/runner.py"
+      ]
+    },
+    {
+      "scope": "user",
+      "unit": "hilega-lifecycle-reference.service",
+      "active": "active",
+      "sub_state": "running",
+      "enabled": "enabled",
+      "fragment_path": "/home/aloknagaonkar46/.config/systemd/user/hilega-lifecycle-reference.service",
+      "working_directory": "/home/aloknagaonkar46/RB-ITOS-AI",
+      "script_paths": [
+        "/home/aloknagaonkar46/RB-ITOS-AI/hilega-reference-service-stage-yup3_wr1/lifecycle_reference_service.py"
+      ]
+    },
+    {
+      "scope": "user",
+      "unit": "hilega-api.service",
+      "active": "active",
+      "sub_state": "running",
+      "enabled": "enabled",
+      "fragment_path": "/home/aloknagaonkar46/.config/systemd/user/hilega-api.service",
+      "working_directory": "/home/aloknagaonkar46/RB-ITOS-AI",
+      "script_paths": [
+        "/home/aloknagaonkar46/hilega-persistent-supervision-stage-v1/runner.py"
+      ]
+    },
+    {
+      "scope": "user",
+      "unit": "hilega-observation-analytics.service",
+      "active": "active",
+      "sub_state": "running",
+      "enabled": "enabled",
+      "fragment_path": "/home/aloknagaonkar46/.config/systemd/user/hilega-observation-analytics.service",
+      "working_directory": "/home/aloknagaonkar46/RB-ITOS-AI",
+      "script_paths": []
+    },
+    {
+      "scope": "user",
+      "unit": "hilega-observation-readiness.service",
+      "active": "active",
+      "sub_state": "running",
+      "enabled": "enabled",
+      "fragment_path": "/home/aloknagaonkar46/.config/systemd/user/hilega-observation-readiness.service",
+      "working_directory": "/home/aloknagaonkar46/RB-ITOS-AI",
+      "script_paths": []
+    }
+  ],
+  "source_worker_units": [],
+  "service_mapping_confirmed": false,
+  "inventory_limitations": [],
+  "installed_sources_modified": false,
+  "candidate_main_executed": false,
+  "application_databases_opened": false,
+  "raw_arguments_exported": false,
+  "environment_files_opened": false,
+  "service_control_commands_issued": false
+}

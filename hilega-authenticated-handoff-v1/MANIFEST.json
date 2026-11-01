@@ -1,0 +1,7 @@
+{
+  "README.md": "2bb3ee870cb0558c9d72a053133cf1c252a4e57a9a51cdffbff3d54a4365dadb",
+  "SOURCE_PINS.json": "94ce1d0763d2dfaee44b9e80f13ef9273bb9250822b076598011f3759e5ff087",
+  "authenticated_handoff_v1.py": "5ab2a4f62632d387741b068d1c2bb4c4ca9b38053ecb915a3c3ed70da98a59a2",
+  "test_authenticated_handoff_v1.py": "e228faf04c6f5edc519a55730b6b6bef0fe4a6d901bf7d23c72c82020a1c1607",
+  "apply_and_test.py": "188ced750b9b39739e174b673a8a54cb46e1f658f4249be827263b17541524fc"
+}

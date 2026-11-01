@@ -1,0 +1,70 @@
+{
+  "services": [
+    {
+      "unit": "hilega-production-source-worker.service",
+      "query_succeeded": true,
+      "active": "active",
+      "sub_state": "running",
+      "enabled": "enabled",
+      "working_directory_matches": true,
+      "references_reviewed_supervisor": true,
+      "references_source_role": true
+    },
+    {
+      "unit": "hilega-worker.service",
+      "query_succeeded": true,
+      "active": "active",
+      "sub_state": "running",
+      "enabled": "enabled",
+      "working_directory_matches": true,
+      "references_reviewed_supervisor": true,
+      "references_source_role": false
+    },
+    {
+      "unit": "hilega-api.service",
+      "query_succeeded": true,
+      "active": "active",
+      "sub_state": "running",
+      "enabled": "enabled",
+      "working_directory_matches": true,
+      "references_reviewed_supervisor": true,
+      "references_source_role": false
+    },
+    {
+      "unit": "hilega-lifecycle-reference.service",
+      "query_succeeded": true,
+      "active": "active",
+      "sub_state": "running",
+      "enabled": "enabled",
+      "working_directory_matches": true,
+      "references_reviewed_supervisor": false,
+      "references_source_role": false
+    },
+    {
+      "unit": "hilega-observation-analytics.service",
+      "query_succeeded": true,
+      "active": "active",
+      "sub_state": "running",
+      "enabled": "enabled",
+      "working_directory_matches": true,
+      "references_reviewed_supervisor": false,
+      "references_source_role": false
+    },
+    {
+      "unit": "hilega-observation-readiness.service",
+      "query_succeeded": true,
+      "active": "active",
+      "sub_state": "running",
+      "enabled": "enabled",
+      "working_directory_matches": true,
+      "references_reviewed_supervisor": false,
+      "references_source_role": false
+    }
+  ],
+  "supervisor_matches_reviewed_version": true,
+  "source_service_mapping_confirmed": true,
+  "limitations": [],
+  "private_configuration_opened": false,
+  "environment_values_exported": false,
+  "service_control_commands_issued": false
+}

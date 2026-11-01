@@ -1,0 +1,11 @@
+[Unit]
+Description=Hilega bounded closed release probe (no application session)
+[Service]
+Type=oneshot
+ExecStart="/home/aloknagaonkar46/RB-ITOS-AI/.venv/bin/python" -I "/home/aloknagaonkar46/RB-ITOS-AI/hilega-closed-release-v2-stage-3spzy7tb/candidate/closed_application_coordinator_v1.py" --watch --interval 1 --max-ticks 2
+Restart=no
+TimeoutStartSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only

@@ -1,3 +1,4 @@
+from market_lab.hilega_exclusive_closed_route_v1 import closed_poll
 """Confirmed strategy signals into simulated orders only. No Upstox transport."""
 import argparse,json,os,time,uuid
 from datetime import datetime,timedelta
@@ -88,7 +89,7 @@ def main():
                 if a.synthetic_cash is not None:
                     from market_lab.hilega_sim_allocation_v1 import synthetic_funds
                     synthetic_funds(s,a.synthetic_cash)
-                result=bridge.run_source_once(a.source)
+                result=closed_poll(bridge,a.source)
                 proof=bridge.poll()
                 allowed='PREPARATION_ONLY_NO_BROKER_RECONCILIATION' if preparation_only else 'RECONCILED_OFFLINE_FIXTURE'
                 problem=None if proof['status']==allowed else 'OWNERSHIP_RECONCILIATION_REQUIRED'
