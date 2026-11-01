@@ -1,0 +1,68 @@
+{
+  "adapter_db": "/home/aloknagaonkar46/RB-ITOS-AI/data/research/hilega-broker-adapter-closed/adapter.sqlite",
+  "application_db": "/home/aloknagaonkar46/RB-ITOS-AI/data/research/hilega-production-workspace/sim.sqlite",
+  "environment_pins": {
+    "configuration_sha256": "ea2db4384550af6d9c6c31441230b73058902c3d42b24fef857b9044672c372b",
+    "environment_sha256": "a9ee4c6bcf427885594b1359908105347641fa71f36137e7342e52d4feaaaee1"
+  },
+  "files": [
+    {
+      "mode": 436,
+      "name": "scripts/hilega_production_simulator_bridge.py",
+      "new_sha256": "154cbe309b86dfc8e3ff7f758cd0f6aec4e539d511483ef07f60ed8487ddbdb9",
+      "old_sha256": "9fd8bc6b22af63229f59743722cfb156b12feb0ca279bc2117a103d02670de98"
+    },
+    {
+      "mode": 420,
+      "name": "backend/market_lab/hilega_preparation_runtime_v1/source.py",
+      "new_sha256": "d451edda4f7f28bfa38d2e095a543d4e36b83b9484027fb1ddff1375464b22e2",
+      "old_sha256": "dbfce30057763b93e8f7f8332e86e2145890bd29c72d18016b3ad944125e6150"
+    },
+    {
+      "mode": 420,
+      "name": "backend/market_lab/hilega_exclusive_closed_route_v1.py",
+      "new_sha256": "f8fd3bf253b4faf94517c7b520de75e72217e519aa8aa7fa47b95210f0f05844",
+      "old_sha256": null
+    }
+  ],
+  "model": "HILEGA_APPROVABLE_CLOSED_ROLLOUT_V1",
+  "previous_bridge_run_hash": "201083551a66a93364cd00775ccd95ff454d2b29307c1a46e3f8ce4efb5d9cee",
+  "production_execution_enabled": false,
+  "production_ready": false,
+  "repo": "/home/aloknagaonkar46/RB-ITOS-AI",
+  "scope": "CLOSED_PREPARATION_HOOK_ONLY_NO_EXECUTION_FACTORY",
+  "services_observed": {
+    "hilega-api.service": {
+      "active": "active",
+      "pid": 967,
+      "sub": "running"
+    },
+    "hilega-lifecycle-reference.service": {
+      "active": "active",
+      "pid": 968,
+      "sub": "running"
+    },
+    "hilega-observation-analytics.service": {
+      "active": "active",
+      "pid": 975,
+      "sub": "running"
+    },
+    "hilega-observation-readiness.service": {
+      "active": "active",
+      "pid": 976,
+      "sub": "running"
+    },
+    "hilega-production-source-worker.service": {
+      "active": "active",
+      "pid": 969,
+      "sub": "running"
+    },
+    "hilega-worker.service": {
+      "active": "active",
+      "pid": 973,
+      "sub": "running"
+    }
+  },
+  "stage": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-closed-release-v2-stage-t11rajpw/candidate",
+  "tool_manifest_sha256": "b99bdd1e8c4185ad9299986106bfb41acb26652393882267e07c5bcbf7c1bd97"
+}

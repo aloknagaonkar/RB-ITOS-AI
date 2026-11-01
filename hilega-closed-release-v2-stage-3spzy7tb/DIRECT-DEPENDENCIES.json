@@ -1,0 +1,332 @@
+{
+  "scope": "DECLARED_DIRECT_IMPORTS_ONLY",
+  "modules": [
+    {
+      "module": "application_cycle_close_v1",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "9f7b78af33a761bbedfea54124ddf6b511267a5c1152369392e77986d126934c"
+    },
+    {
+      "module": "application_lifecycle_candidate_v1",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "e59b9f2d27bef848034bea255a016d363d986b836b5f9f756dacc347df9a4f05"
+    },
+    {
+      "module": "argparse",
+      "resolution": "STANDARD_LIBRARY"
+    },
+    {
+      "module": "authenticated_handoff_v1",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "5ab2a4f62632d387741b068d1c2bb4c4ca9b38053ecb915a3c3ed70da98a59a2"
+    },
+    {
+      "module": "closed_application_coordinator_v1",
+      "resolution": "PINNED_STAGED_MODULE",
+      "relative_path": "closed_application_coordinator_v1.py",
+      "origin_sha256": "286e7524c042db573913ffb7746da07bf04dd266b524083cd52ab6112ff007dc",
+      "regular_origin": true
+    },
+    {
+      "module": "contextlib",
+      "resolution": "STANDARD_LIBRARY"
+    },
+    {
+      "module": "contextvars",
+      "resolution": "STANDARD_LIBRARY"
+    },
+    {
+      "module": "copy",
+      "resolution": "STANDARD_LIBRARY"
+    },
+    {
+      "module": "cycle_scope_v1",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "1ccb0f9dc3a6275dc76b59c85e946362adaf123cf65f73464b35ad86b671de1a"
+    },
+    {
+      "module": "datetime",
+      "resolution": "STANDARD_LIBRARY"
+    },
+    {
+      "module": "decimal",
+      "resolution": "STANDARD_LIBRARY"
+    },
+    {
+      "module": "dotenv",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "6e163e88aeb0c0765a996208e9e482b820165d435d9f64d016610eb97494ed23"
+    },
+    {
+      "module": "durable_closed_handoff_v1",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "e03091c7e825d3ba5e3ff61effbd1e3c95beb2cf038f5a96f66f3f7bebb10d75"
+    },
+    {
+      "module": "existing_request_attempt_v1",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "eede3cfd2dc1bb63bcf36292f1eb114ba6f2c03410856605de06bd294e4a17b8"
+    },
+    {
+      "module": "fcntl",
+      "resolution": "STANDARD_LIBRARY"
+    },
+    {
+      "module": "functools",
+      "resolution": "STANDARD_LIBRARY"
+    },
+    {
+      "module": "hashlib",
+      "resolution": "STANDARD_LIBRARY"
+    },
+    {
+      "module": "history_aware_attempt_v1",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "d429ba7c8b619b0ebecc93c485cee90f80e53cfde3ecd165d6a060ee0f7c879f"
+    },
+    {
+      "module": "history_aware_cycle_close_v1",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "5c2e7a46dd8e8bd86f1574bc78f7bcba00a561862de3885d3cccf6d490fe143c"
+    },
+    {
+      "module": "history_aware_lifecycle_v1",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "e49eb66837d57c3473b4d5fdb1451e41f62b07aa72d40257921b1d8ddb434d7e"
+    },
+    {
+      "module": "history_aware_preparation_v1",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "d4d4cf6c2df4188ada08041afae115bc43b2fc9d16c2ae5794bcbba560e7d2bd"
+    },
+    {
+      "module": "history_prepared_proof_v1",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "cadb658fe714ecc20c9ea42d2adb48211e750e4c4e4ee8a5e09ff19b283aee96"
+    },
+    {
+      "module": "hmac",
+      "resolution": "STANDARD_LIBRARY"
+    },
+    {
+      "module": "json",
+      "resolution": "STANDARD_LIBRARY"
+    },
+    {
+      "module": "market_lab.hilega_combined_policy_v1",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "4edab4a8b68f195942a2f1fb8c9e4a2c30ccee0c63e04b0cadbe3aca1db7c663"
+    },
+    {
+      "module": "market_lab.hilega_exclusive_closed_route_v1",
+      "resolution": "PINNED_STAGED_MODULE",
+      "relative_path": "backend/market_lab/hilega_exclusive_closed_route_v1.py",
+      "origin_sha256": "f8fd3bf253b4faf94517c7b520de75e72217e519aa8aa7fa47b95210f0f05844",
+      "regular_origin": true
+    },
+    {
+      "module": "market_lab.hilega_execution_port_v1",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "16d0bfcd34379a5e2091e1af1a6ad82c8c32cb4f1b7bf6495091bd9806b4911b"
+    },
+    {
+      "module": "market_lab.hilega_execution_port_v1.adapter",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "d2d8146cf8cc3334ce1d7d4715d73285d7755bc93201651be2d1798b34ee9e27"
+    },
+    {
+      "module": "market_lab.hilega_execution_port_v1.mapping",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "a8c6ab675bbd1e604e7b4bc2994fadc1fde50ee4a48918298ef0db887d6f1e96"
+    },
+    {
+      "module": "market_lab.hilega_nifty_option_price_grid_v1",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "4c687b701b2ec00fedd22d0c3eaace0e6ce937559102d1b1b04e65a09d837575"
+    },
+    {
+      "module": "market_lab.hilega_preparation_runtime_v1",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "048e5833b9f3f7bd033bc397ec833c0cd392a57cce93f0c1d504dfa82c4f3f8f"
+    },
+    {
+      "module": "market_lab.hilega_preparation_runtime_v1.atomic_binding",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "ce62f33526ffc138b6faf51ceb4d48ab37ad2d9c9e820c49a2e9e76a2b8a35cb"
+    },
+    {
+      "module": "market_lab.hilega_preparation_runtime_v1.cash_reservation",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "04a8156ef1951f36aac38c62d6ca0201e8b0df6e17661b607de4e350f2eda502"
+    },
+    {
+      "module": "market_lab.hilega_preparation_runtime_v1.collect",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "2b27984062db6079457c7039c68abe10194faa2fcf0865001f5ef80d739ca386"
+    },
+    {
+      "module": "market_lab.hilega_preparation_runtime_v1.evidence",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "9b72ab5a48b7f8e4f87c217cf641ea853cfd91a22e1402e540c84c5b3127bbec"
+    },
+    {
+      "module": "market_lab.hilega_preparation_runtime_v1.exit_dispatch",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "110196e7cbe67e93628b9a0a5547257be2b1ddb479bcda8a89735bd0b0a5dc70"
+    },
+    {
+      "module": "market_lab.hilega_preparation_runtime_v1.limit_candidate",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "7fb67ce2e86c69d3abb1cc8853995bcc6d80c58f196617ee93da40b90b5e2e94"
+    },
+    {
+      "module": "market_lab.hilega_preparation_runtime_v1.ownership_checks.bridge",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "3d254a1bf7c404f57df760c64244f5e21d965db2a87b39f349363dbf68e148e1"
+    },
+    {
+      "module": "market_lab.hilega_preparation_runtime_v1.ownership_checks.historical_receipt_checks",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "a362da0d2d1255e69fcc5b816ca70187833b2c9b1d34b02f5b18b5d35e66a62b"
+    },
+    {
+      "module": "market_lab.hilega_preparation_runtime_v1.ownership_checks.signature_checks",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "62b5f998cebe9ad439728278e62e01bf39cef9ba18d268ff0b83e9fb5f6befed"
+    },
+    {
+      "module": "market_lab.hilega_preparation_runtime_v1.ownership_state",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "7cc48fb3422bae9a86a2e2fa7d0d143ffbbfa7cabfab248c3b9ee8b14f084041"
+    },
+    {
+      "module": "market_lab.hilega_preparation_runtime_v1.pricing_preview",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "47a75db7553805017fc9b98650f784708e94a7d1196da068264d7d5a88603e8b"
+    },
+    {
+      "module": "market_lab.hilega_preparation_runtime_v1.source",
+      "resolution": "PINNED_STAGED_MODULE",
+      "relative_path": "backend/market_lab/hilega_preparation_runtime_v1/source.py",
+      "origin_sha256": "d451edda4f7f28bfa38d2e095a543d4e36b83b9484027fb1ddff1375464b22e2",
+      "regular_origin": true
+    },
+    {
+      "module": "market_lab.hilega_production_account_adapter_v1",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "9484899b374701c211adf22b67ea5fc84d0cdb978defe061ce8250cb7313b140"
+    },
+    {
+      "module": "market_lab.hilega_production_bridge_health_v1",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "d7e02c6c7c8bc4697109c981fb515306db7036683028cd28248d2bd070850a93"
+    },
+    {
+      "module": "market_lab.hilega_production_foundation.core",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "40fd7f1f0d7bd0ce0b1d57d188079a338884196c97a8325ccb9bb29f99214d62"
+    },
+    {
+      "module": "market_lab.hilega_production_simulator_bridge_v1",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "18f8e5578336ba4aa516bf96cad90c60a58349104b7d710503e0e03476d6ce27"
+    },
+    {
+      "module": "market_lab.hilega_sim_allocation_v1",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "f05a64857c49c6d2c06e995849c3b313dd19f8049ad0b8b98f5d0bc2f87ef3e7"
+    },
+    {
+      "module": "os",
+      "resolution": "STANDARD_LIBRARY"
+    },
+    {
+      "module": "owned_exit_pricing_candidate",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "d6f8b25dbeee38a23d08523418db418e52bd69db98d70d4e3b1ad9f8b75808f4"
+    },
+    {
+      "module": "pathlib",
+      "resolution": "STANDARD_LIBRARY"
+    },
+    {
+      "module": "re",
+      "resolution": "STANDARD_LIBRARY"
+    },
+    {
+      "module": "sqlite3",
+      "resolution": "STANDARD_LIBRARY"
+    },
+    {
+      "module": "stat",
+      "resolution": "STANDARD_LIBRARY"
+    },
+    {
+      "module": "sys",
+      "resolution": "STANDARD_LIBRARY"
+    },
+    {
+      "module": "time",
+      "resolution": "STANDARD_LIBRARY"
+    },
+    {
+      "module": "uuid",
+      "resolution": "STANDARD_LIBRARY"
+    },
+    {
+      "module": "worker_history_preparation_v1",
+      "resolution": "RESOLVED_WITHOUT_IMPORT",
+      "regular_origin": true,
+      "origin_sha256": "59299b9bfd2143133d63c24378afc9716b272c22890b6bf3cc0b0edc06b3a85e"
+    },
+    {
+      "module": "zoneinfo",
+      "resolution": "STANDARD_LIBRARY"
+    }
+  ],
+  "unresolved_count": 0,
+  "package_code_executed": false,
+  "staged_modules_verified": [
+    "closed_application_coordinator_v1",
+    "hilega_production_simulator_bridge",
+    "market_lab.hilega_exclusive_closed_route_v1",
+    "market_lab.hilega_preparation_runtime_v1.source"
+  ],
+  "transitive_runtime_closure_verified": false,
+  "production_dependency_manifest_fully_reconciled": false
+}

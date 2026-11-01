@@ -1,0 +1,18 @@
+{
+  "market_lab.hilega_preparation_runtime_v1.source": {
+    "relative_path": "backend/market_lab/hilega_preparation_runtime_v1/source.py",
+    "sha256": "d451edda4f7f28bfa38d2e095a543d4e36b83b9484027fb1ddff1375464b22e2"
+  },
+  "market_lab.hilega_exclusive_closed_route_v1": {
+    "relative_path": "backend/market_lab/hilega_exclusive_closed_route_v1.py",
+    "sha256": "f8fd3bf253b4faf94517c7b520de75e72217e519aa8aa7fa47b95210f0f05844"
+  },
+  "closed_application_coordinator_v1": {
+    "relative_path": "closed_application_coordinator_v1.py",
+    "sha256": "286e7524c042db573913ffb7746da07bf04dd266b524083cd52ab6112ff007dc"
+  },
+  "hilega_production_simulator_bridge": {
+    "relative_path": "scripts/hilega_production_simulator_bridge.py",
+    "sha256": "154cbe309b86dfc8e3ff7f758cd0f6aec4e539d511483ef07f60ed8487ddbdb9"
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "status": "READ_ONLY_BASELINE_CAPTURED",
+  "snapshots": [
+    {
+      "kind": "application",
+      "status": "READ_ONLY_LOCAL_SNAPSHOT_OBSERVED",
+      "database_opened": true,
+      "sql_mutations_issued": false,
+      "signed_ownership_verified": false,
+      "broker_reconciliation_verified": false,
+      "journal_mode": "delete",
+      "schema_fingerprint": "00df5bb6e30a0471c31f83176b98598a3de80505ed256a3f4ed37517aeddb6cf",
+      "counts": {
+        "preparation_plans": 0,
+        "preparation_shadow_holds": 0,
+        "preparation_outbox": 0
+      },
+      "control_mode": "PAUSED",
+      "control_version": 92,
+      "session_is_current_ist": true,
+      "stop_pending": false,
+      "source_cursor_present": true,
+      "source_sequence": 13790,
+      "owner_migration_review_required": false,
+      "independent_database_snapshots_not_cross_database_atomic": true,
+      "path_selection": "SUPERVISOR_CAPTURED_ENVIRONMENT"
+    },
+    {
+      "kind": "adapter",
+      "status": "READ_ONLY_LOCAL_SNAPSHOT_OBSERVED",
+      "database_opened": true,
+      "sql_mutations_issued": false,
+      "signed_ownership_verified": false,
+      "broker_reconciliation_verified": false,
+      "journal_mode": "delete",
+      "schema_fingerprint": "b12010cf121a578034999cf6ef1f956d16130d9d9e9ba4802750c68ccc58570c",
+      "counts": {
+        "requests": 0,
+        "attempts": 0,
+        "receipts": 0
+      },
+      "adapter_is_live_closed": true,
+      "account_scope_fingerprint": "c3f72937e47060abb932f43f4d755aecb68fea2904cb06da7a4443c4ad45428b",
+      "independent_database_snapshots_not_cross_database_atomic": true,
+      "path_selection": "DEFAULT_NOT_EFFECTIVE_ENV_VERIFIED"
+    }
+  ],
+  "blockers": [
+    "ADAPTER_EFFECTIVE_PATH_NOT_CONFIRMED"
+  ],
+  "live_database_inspected": true,
+  "migration_approved": false,
+  "production_ready": false
+}

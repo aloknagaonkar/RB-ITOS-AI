@@ -1,3 +1,4 @@
+from market_lab.hilega_exclusive_closed_route_v1 import exclusive_source_guard
 from datetime import time as _EntryTime
 from zoneinfo import ZoneInfo as _EntryZone
 """Verified live strategy journal -> application-owned unsent preparation plans."""
@@ -257,6 +258,7 @@ class Source:
             self._pause_in_transaction(db)
             self._audit(db,'BLOCKED',reasons,events=[event]);self._cursor(db,cursor)
 
+    @exclusive_source_guard
     def run_source_once(self,path):
         fd=os.open(str(self.s.store.path)+'.preparation-source.lock',os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW,0o600)
         with os.fdopen(fd,'a') as lock:

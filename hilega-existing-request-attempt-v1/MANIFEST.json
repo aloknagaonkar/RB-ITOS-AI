@@ -1,0 +1,12 @@
+{
+  "README.md": "8854467c99ea0e9e36efb89faf8187830361f308178f74833d6f065f988e90f4",
+  "existing_request_attempt_v1.py": "eede3cfd2dc1bb63bcf36292f1eb114ba6f2c03410856605de06bd294e4a17b8",
+  "test_durable_closed_handoff_v1.py": "dcf02ada44238b29e45fce696864c20585914fb3649f401baa7376f1bb95c268",
+  "SOURCE_PINS.json": "1b37abd4c488ce3bca7dc7307a5b09f5746ea64f5b9473270f2a22f97625286b",
+  "MILESTONES.md": "51e70ebcbe034f3c88b1a336d171c0d6749b7453527af35f2fd6ab25a66c65a5",
+  "durable_closed_handoff_v1.py": "e03091c7e825d3ba5e3ff61effbd1e3c95beb2cf038f5a96f66f3f7bebb10d75",
+  "authenticated_handoff_v1.py": "5ab2a4f62632d387741b068d1c2bb4c4ca9b38053ecb915a3c3ed70da98a59a2",
+  "test_existing_request_attempt_v1.py": "bac7c751710ef488853193fbc524bc87e5710e564e7f3fe5df9334a8003c9515",
+  "test_authenticated_handoff_v1.py": "e228faf04c6f5edc519a55730b6b6bef0fe4a6d901bf7d23c72c82020a1c1607",
+  "apply_and_test.py": "577f9f55757d2d5c8726174deab17aabc46fef5aee4a9d93795fc168e809b93d"
+}

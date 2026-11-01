@@ -1,0 +1,17 @@
+{
+  "status": "PINNED_STARTUP_ENVIRONMENT_REVIEWED",
+  "environment_hash_revalidated": true,
+  "effective_database_paths_confirmed": true,
+  "private_values_exported": false,
+  "approvals_modified": false,
+  "services_changed": false,
+  "actual_running_process_environment_verified": false,
+  "path_selection_basis": "APPROVED_STARTUP_CONFIGURATION_AND_PINNED_ENV_FILE",
+  "database_path_provenance": {
+    "HILEGA_PRODUCTION_SIM_DB": "SUPERVISOR_CAPTURED_ENVIRONMENT",
+    "HILEGA_PREPARATION_ADAPTER_DB": "REVIEWED_SOURCE_DEFAULT"
+  },
+  "default_uses_override_false": true,
+  "new_release_approved": false,
+  "production_ready": false
+}

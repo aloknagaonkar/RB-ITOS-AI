@@ -1,0 +1,17 @@
+{
+  "apply_and_test.py": "910e3d6bf168d3c4de9caa6f48b507b468616db999fa143a2aa7ec1028014e94",
+  "existing_request_attempt_v1.py": "eede3cfd2dc1bb63bcf36292f1eb114ba6f2c03410856605de06bd294e4a17b8",
+  "test_durable_closed_handoff_v1.py": "dcf02ada44238b29e45fce696864c20585914fb3649f401baa7376f1bb95c268",
+  "authenticated_handoff_v1.py": "5ab2a4f62632d387741b068d1c2bb4c4ca9b38053ecb915a3c3ed70da98a59a2",
+  "durable_closed_handoff_v1.py": "e03091c7e825d3ba5e3ff61effbd1e3c95beb2cf038f5a96f66f3f7bebb10d75",
+  "application_lifecycle_candidate_v1.py": "e59b9f2d27bef848034bea255a016d363d986b836b5f9f756dacc347df9a4f05",
+  "application_cycle_close_v1.py": "9f7b78af33a761bbedfea54124ddf6b511267a5c1152369392e77986d126934c",
+  "test_authenticated_handoff_v1.py": "e228faf04c6f5edc519a55730b6b6bef0fe4a6d901bf7d23c72c82020a1c1607",
+  "test_existing_request_attempt_v1.py": "bac7c751710ef488853193fbc524bc87e5710e564e7f3fe5df9334a8003c9515",
+  "test_application_lifecycle_candidate_v1.py": "34fb070e4d5f6f7d6c0f8ffc52e93f127ee7e4adff345180fc110fc9fcb084dc",
+  "SOURCE_PINS.json": "21d3598ac3960a8a7752f054f02db075ab8390dfe7b825820d449664b07dcac7",
+  "owned_exit_pricing_candidate.py": "d6f8b25dbeee38a23d08523418db418e52bd69db98d70d4e3b1ad9f8b75808f4",
+  "README.md": "12f90d833f219fcf0176e2ec6b3378963cefe6cf7fb137afef17806b6a44cd00",
+  "MILESTONES.md": "6c09e47c18f0797d420a22ca8d240271660c1a285b4d0f15cf977921db220571",
+  "test_application_cycle_close_v1.py": "43a17948fcdb3eace3f1e18c19e325dfe59e6309e5bc72054c71259e57c151a9"
+}

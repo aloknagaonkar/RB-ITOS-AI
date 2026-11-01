@@ -1,0 +1,20 @@
+{
+  "status": "PASS_TARGETED_ONLY",
+  "scope": "READ_ONLY_ACTUAL_SOURCE_HANDOFF_CONTRACT",
+  "collected_cases": 10,
+  "failed": 0,
+  "skipped": 0,
+  "pytest_exit_code": 0,
+  "reviewed_github_commit": "c96fbb4a55951432ddd48dcca3825350dfe1721b",
+  "pinned_application_sources_unchanged": true,
+  "full_regression_reexecuted": false,
+  "tests_use_temporary_synthetic_databases": true,
+  "live_database_inspected": false,
+  "execution_adoption_implemented": false,
+  "dependency_manifest_fully_reconciled": false,
+  "installed_sources_modified": false,
+  "services_changed": false,
+  "production_execution_enabled": false,
+  "runtime_deployed": false,
+  "production_ready": false
+}

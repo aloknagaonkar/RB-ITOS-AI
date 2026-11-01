@@ -1,0 +1,7 @@
+{
+  "BASELINE_PINS.json": "f3aa6d6ee2984fb104ae548cecf46b334077088917524c3e83a9cdf287ad0f36",
+  "README.md": "434fe7badac585b81f92c755a92c2a9f9698a727cf93b970696f4fcbf7fdf53e",
+  "apply_and_test.py": "279b82f58df4c75b4ffdcb0e0430c56a78298c03039fbe24208e9803966e3e34",
+  "release_tools.py": "fe445e339710cf012a06ebcd3bb657d39c00b4cdda81c700298752be97889de7",
+  "test_closed_release.py": "c3fb948c8e06709f6784a1678903553cbc13e6fb26ae15c60fff9992f5f4890d"
+}
