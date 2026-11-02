@@ -1,0 +1,11 @@
+{
+  "status": "MANAGED_CLOSED_PROBE_PASS",
+  "command_exit_code": 0,
+  "disposable_managed_unit_start_requested": true,
+  "application_service_control_commands_issued": false,
+  "source_worker_executed": false,
+  "actual_worker_managed_startup_validated": false,
+  "live_database_opened_by_probe": false,
+  "production_execution_enabled": false,
+  "production_ready": false
+}

@@ -1,0 +1,9 @@
+{
+  "application_db": "/home/aloknagaonkar46/RB-ITOS-AI/data/research/hilega-production-workspace/sim.sqlite",
+  "bundle": "/home/aloknagaonkar46/RB-ITOS-AI/data/runtime/hilega-closed-releases/5e88e69ce287dd364219011bcfb07e10151c778a9bf47204a8b86a2fb0ffe370",
+  "model": "HILEGA_CLOSED_PAUSE_RECOVERY_CONFIG_V1",
+  "production_execution_enabled": false,
+  "release_manifest_sha256": "5e88e69ce287dd364219011bcfb07e10151c778a9bf47204a8b86a2fb0ffe370",
+  "worker": "/home/aloknagaonkar46/RB-ITOS-AI/scripts/hilega_production_simulator_bridge.py",
+  "worker_sha256": "97e7e181b850385efb6c07b3fc3922471c6610f3e96a41f781b76f6f9f456140"
+}

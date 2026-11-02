@@ -1,0 +1,43 @@
+{
+  "status": "PREPARATION_WINDOW_REVIEW_ONLY",
+  "new_test_cases": 10,
+  "assessed_at": "2026-11-02T13:29:57.103255+05:30",
+  "active_plan_sha256": "ef2b637dd6bdebf57bf03b56b4020cd39ab6735e8a9434e002dc452792dedcc6",
+  "control_mode": "PAUSED",
+  "control_version": 108,
+  "source_sequence": 14238,
+  "counts": {
+    "application.preparation_plans": 0,
+    "application.preparation_shadow_holds": 0,
+    "application.preparation_outbox": 0,
+    "application.preparation_request_bindings": null,
+    "application.preparation_cash_reservations": null,
+    "application.preparation_candidate_exclusive_source_owner_v1": null,
+    "application.intents": 0,
+    "application.sim_allocation_reservations": 0,
+    "adapter.requests": 0,
+    "adapter.attempts": 0,
+    "adapter.receipts": 0
+  },
+  "resume_contract_sources_verified": true,
+  "verified_running_route": "PREPARATION_ONLY",
+  "independently_snapshotted_databases_not_cross_database_atomic": true,
+  "review": {
+    "blockers": [],
+    "live_apply_available": false,
+    "controller_resumed": false,
+    "note": "Do not inject synthetic funds to satisfy a real-evidence preparation review.",
+    "remaining_engineering": [
+      "PREPARATION_ARM_ASSEMBLY_AND_PROCESS_ROUTE_BINDING",
+      "INDEPENDENT_DURABLE_DEADLINE_AND_PAUSE_RECOVERY",
+      "DISPOSABLE_WORKER_WINDOW_AND_CRASH_REHEARSAL",
+      "EXACT_STATE_BOUND_MAINTENANCE_PLAN"
+    ],
+    "production_execution_enabled": false
+  },
+  "application_sql_mutations_issued": false,
+  "service_control_commands_issued": false,
+  "secret_material_created": false,
+  "live_database_enrolled": false,
+  "production_ready": false
+}

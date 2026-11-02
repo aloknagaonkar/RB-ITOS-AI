@@ -1,0 +1,20 @@
+{
+  "status": "CLOSED_RECOVERY_INSTALL_PLAN_PASS",
+  "plan": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-recovery-install-plan-_sstat4z/PLAN.json",
+  "plan_sha256": "0ac9c4b4921ca21d8eaa790686e3e167cc887fe134885f8b9f85045ea82ed553",
+  "new_targeted_cases": 6,
+  "current_baseline_cases": 10,
+  "native_recovery_synthetic_scenarios": 2,
+  "recovery_unit_syntax_verified": true,
+  "exact_file_count": 9,
+  "application_services_to_quiesce": 6,
+  "plan_apply_available": true,
+  "controller_resume_available": false,
+  "real_backups_created": false,
+  "recovery_installed": false,
+  "actual_vm_reboot_tested": false,
+  "services_changed": false,
+  "live_database_mutations_issued": false,
+  "production_execution_enabled": false,
+  "production_ready": false
+}

@@ -1,0 +1,9 @@
+{
+  "application_db": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group2-closed-plan-8xpitljo/synthetic/paused-empty/application.sqlite",
+  "bundle": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group2-combined-review-28nw4wk0/candidate",
+  "model": "HILEGA_CLOSED_PAUSE_RECOVERY_CONFIG_V1",
+  "production_execution_enabled": false,
+  "release_manifest_sha256": "5e88e69ce287dd364219011bcfb07e10151c778a9bf47204a8b86a2fb0ffe370",
+  "worker": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group2-closed-plan-8xpitljo/payload/rehearsal-worker.py",
+  "worker_sha256": "18b72f67be6d0839c1467aa32f916377a6f9fe6d0171897f931301212adc1203"
+}

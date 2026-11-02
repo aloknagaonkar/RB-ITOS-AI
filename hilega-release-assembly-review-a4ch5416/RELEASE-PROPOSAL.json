@@ -1,0 +1,20 @@
+{
+  "scope": "ASSEMBLED_CANDIDATE_RELEASE_REVIEW_ONLY",
+  "release_manifest_sha256": "e5b7172ab14099264e90aa7865e9e56588d1e4503aa3063707d3a446ec73131e",
+  "old_supervisor_approval_bindings_match": true,
+  "new_release_approval_reconciled": false,
+  "current_supervisor_runner_sha256": "cd7286892f5099ab962d3a179aff15642cce20ccd59727e21c83ab3b6e707e8a",
+  "private_config_exported": false,
+  "live_apply_available": false,
+  "managed_service_rehearsal_completed": false,
+  "proposed_next_review": [
+    "EXPLICIT_WORKER_BOOTSTRAP_REGISTRATION_AND_EXISTING_STORE_ASSEMBLY",
+    "NEW_RELEASE_AND_SUPERVISOR_APPROVAL_BINDINGS",
+    "COMPANION_PIN_CHAIN_IMPACT",
+    "FULL_APPLICATION_SERVICE_DEPENDENCIES_AND_RELEASE_REGRESSION",
+    "BROKER_AUTHORITY_FEES_CASH_AND_PARTIAL_FILL_POLICIES",
+    "FRESH_SEED_ENROLLMENT_AND_CONTROLLED_LIVE_APPROVAL"
+  ],
+  "installed_sources_modified": false,
+  "production_execution_enabled": false
+}

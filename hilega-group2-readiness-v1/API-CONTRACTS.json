@@ -1,0 +1,24 @@
+{
+  "source_sha256": {
+    "hilega_production_account_adapter_v1.py": "9484899b374701c211adf22b67ea5fc84d0cdb978defe061ce8250cb7313b140",
+    "hilega_production_broker_observation_v1.py": "d0b0167604db78c5d0a70fa7012dcfbe18db4e86516b62a2190fcf294168aa4e"
+  },
+  "paths": {
+    "profile": "/v2/user/profile",
+    "orders": "/v2/order/retrieve-all",
+    "trades": "/v2/order/trades/get-trades-for-day",
+    "positions": "/v2/portfolio/short-term-positions",
+    "funds": "/v3/user/get-funds-and-margin"
+  },
+  "official_sources_reviewed_at": "2026-11-02",
+  "official_sources": [
+    "https://upstox.com/developer/api-documentation/get-profile/",
+    "https://upstox.com/developer/api-documentation/get-order-book/",
+    "https://upstox.com/developer/api-documentation/get-trade-history/",
+    "https://upstox.com/developer/api-documentation/get-positions/",
+    "https://upstox.com/developer/api-documentation/get-funds-and-margin-v3/",
+    "https://upstox.com/developer/api-documentation/get-trade-charges/"
+  ],
+  "charge_endpoint_implemented_or_called": false,
+  "broker_mutation_endpoints_available": false
+}

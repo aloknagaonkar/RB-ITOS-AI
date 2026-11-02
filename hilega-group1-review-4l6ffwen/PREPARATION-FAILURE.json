@@ -1,0 +1,7 @@
+{
+  "status": "GROUP1_REQUIRES_REVIEW",
+  "reason": "ACTUAL_DISPOSABLE_WORKER_FAILED: Traceback (most recent call last):\n  File \"/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-4l6ffwen/release/closed_worker_launcher.py\", line 10, in <module>\n    runpy.run_path(str(root/'scripts/hilega_production_simulator_bridge.py'),run_name='__main__')\n    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<frozen runpy>\", line 294, in run_path\n  File \"<frozen runpy>\", line 98, in _run_module_code\n  File \"<frozen runpy>\", line 88, in _run_code\n  File \"/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-4l6ffwen/release/scripts/hilega_production_simulator_bridge.py\", line 1, in <module>\n    from market_lab.hilega_worker_registration_v1 import registered_worker_poll,load_closed_registration\nModuleNotFoundError: No module named 'market_lab.hilega_worker_registration_v1'; 'market_lab' is not a package\n",
+  "installed_sources_modified": false,
+  "application_services_changed": false,
+  "production_execution_enabled": false
+}

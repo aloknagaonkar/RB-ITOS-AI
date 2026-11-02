@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-4l6ffwen/release/closed_worker_launcher.py", line 10, in <module>
+    runpy.run_path(str(root/'scripts/hilega_production_simulator_bridge.py'),run_name='__main__')
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen runpy>", line 294, in run_path
+  File "<frozen runpy>", line 98, in _run_module_code
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-4l6ffwen/release/scripts/hilega_production_simulator_bridge.py", line 1, in <module>
+    from market_lab.hilega_worker_registration_v1 import registered_worker_poll,load_closed_registration
+ModuleNotFoundError: No module named 'market_lab.hilega_worker_registration_v1'; 'market_lab' is not a package

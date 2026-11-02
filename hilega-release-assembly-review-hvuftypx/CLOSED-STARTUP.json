@@ -1,0 +1,14 @@
+[
+  {
+    "attempt": 1,
+    "status": "EXECUTION_COORDINATOR_CLOSED_IN_CODE",
+    "application_database_opened": false,
+    "token_loaded": false
+  },
+  {
+    "attempt": 2,
+    "status": "EXECUTION_COORDINATOR_CLOSED_IN_CODE",
+    "application_database_opened": false,
+    "token_loaded": false
+  }
+]

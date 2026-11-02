@@ -1,0 +1,8 @@
+{
+  "BASELINE-PINS.json": "f495d647a011330cc43673a08267080debd8b79535a09f0d05d7a256f3a29b8f",
+  "README.md": "18d4a7c058557b7fed91df4c8398f50f34d0d27fc806ebb9d7f60abbd7aef1a9",
+  "capture.py": "a5ae9ce8ab89946a820c6e50bf79f14b63e6af2b1832343b6a50c4740fbf8781",
+  "finance.py": "9140bad577d3e175dec2e7cf894fa936daba4093cd79eb6cfbc3a85d86dcb983",
+  "manage.py": "459499887dce3693eb4f0cce3f584b2dd7d6ce6d651e5e6b4d99e0f9b35c1ad2",
+  "test_finance.py": "747c302e2919ecd235ab03df0163067f08dfbe1ae472fdf849003434ba8ca4e3"
+}

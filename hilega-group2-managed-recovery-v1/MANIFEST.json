@@ -1,0 +1,15 @@
+{
+  "README.md": "2a77bed84adaca97bdec9ccfbbe59d524afdd679a752552a70885d3b05b34385",
+  "managed_guard.py": "bf5fdcc1a2ecc94ecc2944e398cfb6f3bca3e999e9be30ee66775009862cb885",
+  "BASELINE-PINS.json": "ea06c4052dec18bb311f98823ccaf9c38ec9ef115b155cbe5295fe033b47fae8",
+  "test_hilega_application_preparation_v1.py": "a92fb42fb618db1e0c88e5477bd671cb232bfefa18653e8ebb2274d237be74ff",
+  "managed_arm.py": "705498bebcbdf6b628b8e12504cbea56db3cf62b459e9672ec3df08bdd2ac88f",
+  "test_managed_contract.py": "23300d4592fea731df732a6957e8eab8df6a6691857fb8e8814e32c86c6cbb64",
+  "test_preparation_window.py": "9a014c1612eafdbbeb8df98da7cd22447d428f08d31bd1458b511cf0d6f233f1",
+  "native.py": "9e0c2a4d9b0140d51e9b733d5c09f760ae73967fc6065fd8ce1f98a306dec77e",
+  "window.py": "0a1da6611412dcbdef6f6747c9e9393db66bb3a74fec5d958b89959f77a4b7a7",
+  "test_hilega_atomic_disabled_binding_v1.py": "618c8fef0a96e9a1cef3351f60d671abff019a05ad648bf26c1115c9dc94f6f8",
+  "hilega_application_preparation_fixtures.py": "b7f07e2af2db352ea13fb3dc7fccc878186d55072764515587b9fe343d8edae6",
+  "rehearse.py": "6e67e3e2adc351cdb0e07b2a763b24663501431d2195b8172bfb1f360eba3389",
+  "manage.py": "e200ab0e21c8365f8e715150c9d618d7d8440d71f8f490da9c1e9fcc904954a2"
+}

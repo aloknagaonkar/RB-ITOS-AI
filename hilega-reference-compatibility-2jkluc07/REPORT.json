@@ -1,0 +1,13 @@
+{
+  "approved_runtime_delta_verified": true,
+  "collected_cases": 6,
+  "dependent_pin_chain_modified": true,
+  "installed_hook_sources_modified": false,
+  "new_guard_pin_added": true,
+  "production_execution_enabled": false,
+  "production_ready": false,
+  "review_folder": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-reference-compatibility-2jkluc07",
+  "services_started": false,
+  "staged_companion_check_passed": true,
+  "status": "COMPATIBILITY_APPLIED_SERVICES_STOPPED"
+}

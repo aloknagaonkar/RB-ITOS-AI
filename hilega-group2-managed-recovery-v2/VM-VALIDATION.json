@@ -1,0 +1,50 @@
+{
+  "status": "PASS_MANAGED_DISPOSABLE_AND_SYNTHETIC_PREPARATION_ONLY",
+  "new_targeted_cases": 12,
+  "current_window_review_cases": 10,
+  "prior_regression_reexecuted": false,
+  "managed_rehearsals": [
+    {
+      "scenario": "managed-timeout",
+      "actual_candidate_worker_executed": true,
+      "native_resume_and_pause_used": true,
+      "managed_guard_sigkill_tested": false,
+      "managed_recovery_pause_verified": true,
+      "stop_post_recovery_verified": true,
+      "disposable_databases_only": true,
+      "non_signal_observation_fixture_only": true,
+      "fresh_signal_preparation_verified": false
+    },
+    {
+      "scenario": "managed-guard-loss",
+      "actual_candidate_worker_executed": true,
+      "native_resume_and_pause_used": true,
+      "managed_guard_sigkill_tested": true,
+      "managed_recovery_pause_verified": true,
+      "stop_post_recovery_verified": true,
+      "disposable_databases_only": true,
+      "non_signal_observation_fixture_only": true,
+      "fresh_signal_preparation_verified": false
+    }
+  ],
+  "synthetic_fresh_signal_atomic_preparation_tested": true,
+  "signed_local_cash_reservation_tested": true,
+  "hard_order_gate_remained_closed": true,
+  "in_process_source_fixture_only": true,
+  "managed_window_fresh_signal_end_to_end_verified": false,
+  "persisted_state_recovery_repeated": true,
+  "actual_vm_reboot_tested": false,
+  "automatic_boot_recovery_installed": false,
+  "application_service_control_commands_issued": false,
+  "disposable_unit_control_commands_issued": true,
+  "live_database_mutations_issued": false,
+  "installed_sources_modified": false,
+  "live_controller_resumed": false,
+  "live_apply_available": false,
+  "live_database_enrolled": false,
+  "production_authority_provisioned": false,
+  "group2_complete": false,
+  "production_execution_enabled": false,
+  "production_ready": false,
+  "audit_folder": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group2-managed-recovery-a2gqf8ye"
+}

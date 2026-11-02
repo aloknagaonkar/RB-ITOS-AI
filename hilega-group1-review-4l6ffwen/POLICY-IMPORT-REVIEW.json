@@ -1,0 +1,7 @@
+{
+  "original_policy_sha256": "4edab4a8b68f195942a2f1fb8c9e4a2c30ccee0c63e04b0cadbe3aca1db7c663",
+  "candidate_policy_sha256": "b5e97157f14129aea880e9d7344d611608e398a99843aab9ca787fbd2ef7b492",
+  "exception_function_ast_identical": true,
+  "research_module_required_by_candidate": false,
+  "installed_policy_modified": false
+}

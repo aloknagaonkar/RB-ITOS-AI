@@ -1,0 +1,19 @@
+{
+  "distribution": "python-dotenv",
+  "expected_version": "1.2.3",
+  "installed_version": "1.2.3",
+  "version_matches": true,
+  "installed_source_hashes": {
+    "dotenv/__init__.py": "6e163e88aeb0c0765a996208e9e482b820165d435d9f64d016610eb97494ed23",
+    "dotenv/__main__.py": "3744612c6ee71c8aad9491f0c1ea48a3ecdb24f371f6c7b0082446639dbc87fe",
+    "dotenv/cli.py": "8c547ed95b551f492d85cc9c81c55e476aaebed00392c14a4ffdda3b8007cbbb",
+    "dotenv/ipython.py": "74740177d3dc7425298466faed7c32dc6914a8c49d7fd5d4522358c53677b585",
+    "dotenv/main.py": "697eb33eee75d78b73db61eaf96bf9a6547548c1811c93501b67e056e5470dea",
+    "dotenv/parser.py": "6052533a6cd4e0ad5052fe88e5936853059c28ed3fec0f098cd29a7cb376dca4",
+    "dotenv/variables.py": "083d2a5cebefa41deae51a4140c0fda97eaf1d7ed2c96f92ba2c063054a5b74f",
+    "dotenv/version.py": "0be0ff596ad59010e64260292dc9b4b16361d82808af059f73cfec079bef53e4"
+  },
+  "artifact_kind": "OBSERVED_INSTALLED_SOURCE_SNAPSHOT",
+  "wheel_artifact_hash_locked": false,
+  "package_installed_or_modified": false
+}

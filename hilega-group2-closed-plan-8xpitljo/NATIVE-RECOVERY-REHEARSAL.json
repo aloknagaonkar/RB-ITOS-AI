@@ -1,0 +1,5 @@
+{
+  "exit_code": 0,
+  "stderr": "",
+  "stdout": "{\"status\": \"LIVE_ADAPTER_SYNTHETIC_REHEARSAL_PASS\", \"scenarios\": [{\"scenario\": \"paused-empty\", \"native_pause_verified\": true, \"disposable_database_only\": true}, {\"scenario\": \"armed-empty\", \"native_pause_verified\": true, \"disposable_database_only\": true}], \"live_database_mutated\": false}\n"
+}

@@ -1,0 +1,13 @@
+{
+  "hilega-group2-closed-upgrade-v1/MANIFEST.json": "0afcff67ff2c7329a9a90f11ce83b72cde11168fd8a6c79306e1f75b884f3328",
+  "hilega-group2-closed-upgrade-v1/BASELINE-PINS.json": "75b5b2f6393baf94ff641ca33939866819697670862c1268c536803f4ed21962",
+  "hilega-group2-closed-upgrade-v1/MILESTONES.md": "4d1ed24565c6f8a392a90a7e4f692af51f1cd4241ecc7b0e5a30bcc7e7e4c332",
+  "hilega-group2-closed-upgrade-v1/README.md": "15f42bd132097d17087afa2dfc3db9510d97c0b1ca276641cb5a6e8c8666d60d",
+  "hilega-group2-closed-upgrade-v1/candidate_review.py": "53034a669eaa70d2994073af8a770c8081a7a30f627d6bc4bfcaefaae9462eb9",
+  "hilega-group2-closed-upgrade-v1/live_recovery.py": "9cb88dc4b3116f5e1189813f9006c2c1980add9e23e7f13c505357adc6c7da24",
+  "hilega-group2-closed-upgrade-v1/manage.py": "7602f4a706e13ea4895bf0c5f04d2c20dd00917fc51c7d10a092dc1042151da0",
+  "hilega-group2-closed-upgrade-v1/plan_tools.py": "d4237eca87b65089bc821fd4d74223892abcb5188919307fb5ae5e3e0daeaf78",
+  "hilega-group2-closed-upgrade-v1/test_transaction.py": "f5c5aead1bf202dcb5c08cd514b542c42e288f33b753f5a0acddc5682efe5f7e",
+  "hilega-group2-closed-upgrade-v1/transaction.py": "18f4a664fffa9d4ef06cb9efaa5c7d7a2d3b2d604103e0ad7618f814970033f9",
+  "hilega-group2-closed-upgrade-v1/wrapper.py": "485743ef48aaabdf702f3a7951ffa7f3a5b867705a65bb704667f9358696495f"
+}

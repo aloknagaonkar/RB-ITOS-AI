@@ -1,0 +1,80 @@
+{
+  "status": "PASS_TARGETED_ONLY",
+  "scope": "GROUP2_COMBINED_RESERVATION_FEE_AND_ENROLLMENT_CANDIDATES",
+  "assessed_at": "2026-11-02T04:32:42.218158+00:00",
+  "new_candidate_test_cases": 12,
+  "broker_capture_test_cases": 12,
+  "prior_closed_release_cases_passed": 314,
+  "prior_regression_reexecuted": false,
+  "fresh_broker_capture_passed": true,
+  "broker_receipt_sha256": "df05a1280d21c81f2bbfa26ef54c3ae7556319f83e7bd4e2321b85d27faaefee",
+  "broker_audit_folder": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group2-review-zxn0u7ch",
+  "broker_summary": {
+    "status": "BROKER_GET_ACCOUNT_CASH_CAPTURE_PASS",
+    "assessed_at": "2026-11-02T04:32:35.823288+00:00",
+    "account_identity_verified": true,
+    "signed_account_capture_verified": true,
+    "cash_schema_verified": true,
+    "funds_changed_during_capture": false,
+    "capabilities": {
+      "checks": {
+        "active": true,
+        "nfo_enabled": true,
+        "intraday_enabled": true,
+        "limit_orders_enabled": true
+      },
+      "capabilities_present": true,
+      "execution_permission": false
+    },
+    "order_count": 0,
+    "trade_count": 0,
+    "position_row_count": 0,
+    "nonzero_position_count": 0,
+    "diagnostic_issue_count": 0,
+    "account_position_rows_complete": true,
+    "broker_token_read_only_scopes_verified": false,
+    "broker_network_get_validated": true,
+    "strategy_ownership_verified": false,
+    "fees_complete": false,
+    "broker_cash_release_implemented": false,
+    "production_execution_enabled": false,
+    "production_ready": false
+  },
+  "enrollment_preflight": {
+    "blockers": [
+      "ONE_FRESH_DISABLED_PREPARATION_REQUIRED",
+      "EXISTING_OWNER_REQUIRES_REVIEW"
+    ],
+    "structural_preconditions_present": false,
+    "freshness_verified": false,
+    "signed_ownership_verified": false,
+    "trusted_authority_provisioned": false,
+    "live_enrollment_permitted": false,
+    "production_execution_enabled": false,
+    "preparation_count_is_total_not_active_classification": true,
+    "owner_table_name_scan_is_not_signed_ownership_verification": true
+  },
+  "policies": {
+    "status": "CANDIDATES_ONLY_REQUIRES_REVIEW",
+    "reservation_release": "TERMINAL_ORDER_AND_VERIFIED_FLAT_AND_CURRENT_BROKER_RECONCILIATION_AND_FINAL_FEES",
+    "broker_cash_addback": "NEVER",
+    "unknown_order": "HOLD_RESERVATION_NO_RESUBMISSION",
+    "fees": "EXACT_TRADE_COMPONENT_ATTRIBUTION_WITH_EXPLICIT_COVERAGE",
+    "pnl": "NET_CASHFLOW_IS_NOT_CERTIFIED_NET_PNL_WITHOUT_CLOSED_POSITIONS_AND_COST_BASIS",
+    "production_permission": false
+  },
+  "actual_fees_reconciled": false,
+  "broker_cash_release_implemented": false,
+  "candidate_local_release_rules_implemented": true,
+  "candidate_fee_attribution_implemented": true,
+  "production_authority_provisioned": false,
+  "execution_factory_configured": false,
+  "live_database_enrolled": false,
+  "application_sql_mutations_issued": false,
+  "application_services_changed": false,
+  "installed_sources_modified": false,
+  "orders_sent": false,
+  "group2_complete": false,
+  "production_execution_enabled": false,
+  "production_ready": false
+}

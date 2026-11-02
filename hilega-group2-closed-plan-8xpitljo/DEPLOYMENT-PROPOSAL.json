@@ -1,0 +1,50 @@
+{
+  "actual_managed_candidate_startup_tested": false,
+  "automatic_database_restore": false,
+  "broker_timestamp_contract_resolved": false,
+  "candidate": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group2-combined-review-28nw4wk0/candidate",
+  "candidate_release_sha256": "5e88e69ce287dd364219011bcfb07e10151c778a9bf47204a8b86a2fb0ffe370",
+  "context_adoption_plan_sha256": "ef0eb61d1423c373a488474d7de81302d10a06b2171fd5ff6467a5e6fac28301",
+  "created_at": "2026-11-02T16:16:51.145015+00:00",
+  "destination": "/home/aloknagaonkar46/RB-ITOS-AI/data/runtime/hilega-closed-releases/5e88e69ce287dd364219011bcfb07e10151c778a9bf47204a8b86a2fb0ffe370",
+  "exact_unit_payload_and_transactional_installer_still_required": true,
+  "factory_enabled": false,
+  "group2_complete": false,
+  "install_sequence": [
+    "VERIFY_EXACT_CURRENT_STATE_AND_ACQUIRE_SHARED_LOCK",
+    "STOP_ALL_SIX_APPLICATION_SERVICES_AND_VERIFY_NO_WRITERS",
+    "BACK_UP_EXACT_WRAPPER_RECOVERY_UNIT_CONFIG_DROPINS_AND_CONSISTENT_DATABASES",
+    "INSTALL_SEALED_CANDIDATE_WRAPPER_AND_NEW_RECOVERY_BINDING_AS_ONE_TRANSACTION",
+    "RELOAD_AND_RUN_NEW_PAUSE_RECOVERY_BEFORE_STARTING_APPLICATION_SERVICES",
+    "VERIFY_PAUSED_CLOSED_BASELINE_AND_STABLE_SERVICES"
+  ],
+  "installed_recovery_plan": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-recovery-install-plan-_sstat4z/PLAN.json",
+  "installed_recovery_plan_sha256": "0ac9c4b4921ca21d8eaa790686e3e167cc887fe134885f8b9f85045ea82ed553",
+  "live_apply_available": false,
+  "model": "HILEGA_GROUP2_CLOSED_DEPLOYMENT_PROPOSAL_V1",
+  "native_candidate_recovery_scenarios_passed": 2,
+  "new_wrapper_sha256": "97e7e181b850385efb6c07b3fc3922471c6610f3e96a41f781b76f6f9f456140",
+  "old_wrapper_sha256": "aeea24d0eb9e2a8b43e52c2b80e32d0b5bf95a96a2681fa4abbeae1b6a60a495",
+  "previous_release": "/home/aloknagaonkar46/RB-ITOS-AI/data/runtime/hilega-closed-releases/eeecd69d6dcbbffa9288406e6b2c48c37f69e0cc809c5e6d69fab62613e26e71",
+  "previous_release_sha256": "eeecd69d6dcbbffa9288406e6b2c48c37f69e0cc809c5e6d69fab62613e26e71",
+  "production_authority_provisioned": false,
+  "production_execution_enabled": false,
+  "proposed_recovery_config_sha256": "dfca35f5dc6241cddd0fe90de38d9df4174b3515ece25c235db99d4d26f87971",
+  "real_backups_created": false,
+  "repo": "/home/aloknagaonkar46/RB-ITOS-AI",
+  "rollback_sequence": [
+    "STOP_APPLICATION_SERVICES",
+    "VERIFY_AND_RESTORE_EXACT_OLD_CODE_AND_RECOVERY_BINDINGS",
+    "RELOAD_RUN_OLD_PAUSE_RECOVERY_THEN_START_SERVICES",
+    "VERIFY_OLD_CLOSED_RUNTIME"
+  ],
+  "services_to_quiesce": [
+    "hilega-production-source-worker.service",
+    "hilega-worker.service",
+    "hilega-api.service",
+    "hilega-lifecycle-reference.service",
+    "hilega-observation-analytics.service",
+    "hilega-observation-readiness.service"
+  ],
+  "wrapper_path": "/home/aloknagaonkar46/RB-ITOS-AI/scripts/hilega_production_simulator_bridge.py"
+}

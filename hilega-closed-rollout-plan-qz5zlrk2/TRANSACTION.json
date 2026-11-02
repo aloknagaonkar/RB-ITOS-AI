@@ -51,7 +51,7 @@
       "old_sha256": null
     }
   ],
-  "phase": "STARTUP_FAILED_SERVICES_STOPPED",
+  "phase": "CLOSED_HOOK_RUNNING",
   "production_execution_enabled": false,
   "repo": "/home/aloknagaonkar46/RB-ITOS-AI"
 }

@@ -1,0 +1,19 @@
+{
+  "scope": "ROLLBACK_OLD_CLOSED_WORKER_THEN_RESTORE_IDENTICAL_APPROVED_CANDIDATE",
+  "repo": "/home/aloknagaonkar46/RB-ITOS-AI",
+  "original_plan": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-rollout-plan-nvnouzgc/PLAN.json",
+  "original_plan_sha256": "ef2b637dd6bdebf57bf03b56b4020cd39ab6735e8a9434e002dc452792dedcc6",
+  "reinstall_plan": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-rollout-plan-8bqcbhss/PLAN.json",
+  "original_validation_sha256": "f12f0f1f60b44b47a0df6d5d6df567c5687b086c65ad38dbc24b4b7c74ac4819",
+  "original_transaction_sha256": "14beed7886e76ca508725f7117d624d6156bc9d2ed776c0db8119d2a3804334d",
+  "backup_hashes": {
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-rollout-plan-nvnouzgc/backups/worker.old": "154cbe309b86dfc8e3ff7f758cd0f6aec4e539d511483ef07f60ed8487ddbdb9",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-rollout-plan-nvnouzgc/backups/application.sqlite": "cfb769de3a19672a7ae8abfbf53d041a448e008ff6aee4946ee018e6da271b4c",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-rollout-plan-nvnouzgc/backups/adapter.sqlite": "c94d5bfcd491333ca496bf57b8633814c88022a85b82dade4c4cfab1285cb74b"
+  },
+  "tool_manifest_sha256": "1085748df2cec1013cd9d55920ccc7de90e7ab5b27ba7cb5cacb0942ff5fea43",
+  "service_stop_start_windows": 2,
+  "automatic_database_restore": false,
+  "controller_resume_permitted": false,
+  "production_execution_enabled": false
+}

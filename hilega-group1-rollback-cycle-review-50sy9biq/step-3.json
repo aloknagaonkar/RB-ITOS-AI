@@ -1,0 +1,7 @@
+{
+  "action": "start",
+  "plan": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-rollout-plan-nvnouzgc/PLAN.json",
+  "exit_code": 0,
+  "stdout": "{\n  \"phase\": \"ROLLED_BACK_RUNNING\",\n  \"production_execution_enabled\": false,\n  \"production_ready\": false\n}\n",
+  "stderr": ""
+}

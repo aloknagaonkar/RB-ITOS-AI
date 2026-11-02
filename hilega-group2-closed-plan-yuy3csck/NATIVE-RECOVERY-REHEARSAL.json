@@ -1,0 +1,5 @@
+{
+  "exit_code": 1,
+  "stderr": "Traceback (most recent call last):\n  File \"/home/aloknagaonkar46/RB-ITOS-AI/hilega-group2-closed-plan-v1/rehearse.py\", line 4, in <module>\n    from live_recovery import need,sha\nModuleNotFoundError: No module named 'live_recovery'\n",
+  "stdout": ""
+}

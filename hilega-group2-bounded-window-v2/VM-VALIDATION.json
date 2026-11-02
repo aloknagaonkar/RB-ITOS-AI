@@ -1,0 +1,46 @@
+{
+  "status": "PASS_DISPOSABLE_ONLY",
+  "scope": "BOUNDED_NATIVE_PREPARATION_WINDOW_AND_INITIATOR_CRASH_REHEARSAL",
+  "new_candidate_test_cases": 14,
+  "window_review_test_cases": 10,
+  "rehearsals": [
+    {
+      "scenario": "normal-timeout",
+      "actual_candidate_worker_executed": true,
+      "native_resume_and_pause_used": true,
+      "initiator_sigkill_tested": false,
+      "independent_deadline_pause_verified": true,
+      "disposable_databases_only": true,
+      "non_signal_observation_fixture_only": true,
+      "fresh_signal_preparation_verified": false
+    },
+    {
+      "scenario": "initiator-sigkill",
+      "actual_candidate_worker_executed": true,
+      "native_resume_and_pause_used": true,
+      "initiator_sigkill_tested": true,
+      "independent_deadline_pause_verified": true,
+      "disposable_databases_only": true,
+      "non_signal_observation_fixture_only": true,
+      "fresh_signal_preparation_verified": false
+    }
+  ],
+  "durable_deadline_state_implemented": true,
+  "independent_watchdog_candidate_implemented": true,
+  "explicit_disposable_recovery_entrypoint_implemented": true,
+  "automatic_reboot_recovery_configured": false,
+  "guard_loss_fail_closed_verified": false,
+  "fresh_signal_preparation_verified": false,
+  "live_apply_available": false,
+  "controller_resumed_on_live_database": false,
+  "live_application_sql_mutations_issued": false,
+  "application_services_changed": false,
+  "installed_sources_modified": false,
+  "broker_credentials_provided_to_rehearsal": false,
+  "orders_sent": false,
+  "live_database_enrolled": false,
+  "group2_complete": false,
+  "production_execution_enabled": false,
+  "production_ready": false,
+  "audit_folder": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group2-bounded-window-9b049cbj"
+}

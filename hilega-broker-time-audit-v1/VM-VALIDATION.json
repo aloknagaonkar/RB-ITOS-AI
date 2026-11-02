@@ -1,0 +1,174 @@
+{
+  "status": "TIMESTAMP_CROSS_ENDPOINT_AUDIT_COMPLETE_REVIEW_REQUIRED",
+  "new_test_cases": 8,
+  "prior_combined_group2_cases_passed": 74,
+  "prior_seed_preflight_passed": 1,
+  "prior_candidate_tests_reexecuted": false,
+  "capture": {
+    "status": "CROSS_ENDPOINT_TIMESTAMP_AUDIT_CAPTURED",
+    "order_rows": 2,
+    "trade_rows": 2,
+    "position_rows": 1,
+    "position_quantity_schema_complete": true,
+    "nonzero_position_rows": 0,
+    "audited_orders": 2,
+    "order_limit": 5,
+    "all_matched_orders_included": true,
+    "unmatched_day_trade_rows": 0,
+    "fill_comparisons": [
+      {
+        "order_ordinal": 1,
+        "match_count": 1,
+        "unique_fill_match": true,
+        "timezone_contract_confirmed": false,
+        "timestamps_modified": false,
+        "execution_permission": false,
+        "identity_fields_match": true,
+        "quantity_matches": true,
+        "price_matches": true,
+        "day_trade_order_timestamp": "2026-11-02T13:09:33",
+        "day_trade_exchange_timestamp": "2026-11-02T18:39:33",
+        "per_order_trade_order_timestamp": "2026-11-02T13:09:33",
+        "per_order_trade_exchange_timestamp": "2026-11-02T18:39:33",
+        "day_minus_per_order_exchange_time": {
+          "seconds": 0.0,
+          "basis": "NAIVE_WALL_CLOCK_ONLY"
+        },
+        "history_identity_matches_request": true,
+        "order_history_rows": 6,
+        "order_history_events": [
+          {
+            "status": "put order req received",
+            "order_timestamp": "2026-11-02T13:09:33",
+            "exchange_timestamp": null
+          },
+          {
+            "status": "validation pending",
+            "order_timestamp": "2026-11-02T13:09:33",
+            "exchange_timestamp": null
+          },
+          {
+            "status": "open pending",
+            "order_timestamp": "2026-11-02T13:09:33",
+            "exchange_timestamp": null
+          },
+          {
+            "status": "open",
+            "order_timestamp": "2026-11-02T13:09:33",
+            "exchange_timestamp": "2026-11-02T13:09:33"
+          },
+          {
+            "status": "open",
+            "order_timestamp": "2026-11-02T13:09:33",
+            "exchange_timestamp": "2026-11-02T13:09:33"
+          },
+          {
+            "status": "complete",
+            "order_timestamp": "2026-11-02T13:09:33",
+            "exchange_timestamp": "2026-11-02T13:09:33"
+          }
+        ]
+      },
+      {
+        "order_ordinal": 2,
+        "match_count": 1,
+        "unique_fill_match": true,
+        "timezone_contract_confirmed": false,
+        "timestamps_modified": false,
+        "execution_permission": false,
+        "identity_fields_match": true,
+        "quantity_matches": true,
+        "price_matches": true,
+        "day_trade_order_timestamp": "2026-11-02T13:58:06",
+        "day_trade_exchange_timestamp": "2026-11-02T19:28:06",
+        "per_order_trade_order_timestamp": "2026-11-02T13:58:06",
+        "per_order_trade_exchange_timestamp": "2026-11-02T19:28:06",
+        "day_minus_per_order_exchange_time": {
+          "seconds": 0.0,
+          "basis": "NAIVE_WALL_CLOCK_ONLY"
+        },
+        "history_identity_matches_request": true,
+        "order_history_rows": 6,
+        "order_history_events": [
+          {
+            "status": "put order req received",
+            "order_timestamp": "2026-11-02T13:58:06",
+            "exchange_timestamp": null
+          },
+          {
+            "status": "validation pending",
+            "order_timestamp": "2026-11-02T13:58:06",
+            "exchange_timestamp": null
+          },
+          {
+            "status": "open pending",
+            "order_timestamp": "2026-11-02T13:58:06",
+            "exchange_timestamp": null
+          },
+          {
+            "status": "open",
+            "order_timestamp": "2026-11-02T13:58:06",
+            "exchange_timestamp": "2026-11-02T13:58:06"
+          },
+          {
+            "status": "open",
+            "order_timestamp": "2026-11-02T13:58:06",
+            "exchange_timestamp": "2026-11-02T13:58:06"
+          },
+          {
+            "status": "complete",
+            "order_timestamp": "2026-11-02T13:58:06",
+            "exchange_timestamp": "2026-11-02T13:58:06"
+          }
+        ]
+      }
+    ],
+    "http_date_observations": [
+      {
+        "order_ordinal": 1,
+        "endpoint": "history",
+        "http_date_utc": "2026-11-02T14:37:37+00:00",
+        "local_minus_http_date_seconds": 1.043
+      },
+      {
+        "order_ordinal": 1,
+        "endpoint": "order_trades",
+        "http_date_utc": "2026-11-02T14:37:38+00:00",
+        "local_minus_http_date_seconds": 0.043
+      },
+      {
+        "order_ordinal": 2,
+        "endpoint": "history",
+        "http_date_utc": "2026-11-02T14:37:38+00:00",
+        "local_minus_http_date_seconds": 0.319
+      },
+      {
+        "order_ordinal": 2,
+        "endpoint": "order_trades",
+        "http_date_utc": "2026-11-02T14:37:38+00:00",
+        "local_minus_http_date_seconds": 0.319
+      }
+    ],
+    "private_signed_capture_saved": true,
+    "profile_verified_before_and_after": true,
+    "timezone_contract_confirmed": false,
+    "timestamps_modified": false,
+    "execution_permission": false,
+    "strategy_ownership_verified": false,
+    "production_execution_enabled": false
+  },
+  "source_process_stable_during_audit": true,
+  "broker_timezone_contract_confirmed": false,
+  "timestamps_corrected": false,
+  "installed_normalizer_modified": false,
+  "controller_resumed": false,
+  "live_database_mutations_issued": false,
+  "application_services_changed": false,
+  "orders_sent": false,
+  "support_summary_created": true,
+  "support_message_sent": false,
+  "group2_complete": false,
+  "production_execution_enabled": false,
+  "production_ready": false,
+  "audit_folder": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-broker-time-audit-m4vk_azy"
+}
