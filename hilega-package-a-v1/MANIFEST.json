@@ -1,0 +1,17 @@
+{
+  "README.md": "c16fd8f921c26e36e55bbd5387ffd5d398deb602981c10ab7263ba51652b6602",
+  "managed_guard.py": "bf5fdcc1a2ecc94ecc2944e398cfb6f3bca3e999e9be30ee66775009862cb885",
+  "BASELINE-PINS.json": "3f63771f4b65977047bd4335b920fdf3392fe7b778f0edb8edb13a4ce0edecb8",
+  "end_to_end.py": "f0b77bee471a6e83df7a66794b420c997a9c79110094738ae52a0d394e199dc1",
+  "fixture_clock.py": "df5dc84d6a6f2c6d5cd7cf6a8de5c82f645c2dae2d8d9a3d986fe4fa63b461c8",
+  "managed_arm.py": "3f5df0fff18b99119cbf0941ffb59f0a794551aba6f0f9fedde0536f05c12b13",
+  "prepare_fixture.py": "25ca0b973343d5692ac7537cd86a41d82671d7843cb02a4e086e9b5fded81f29",
+  "recovery.py": "0bb7adb5bc58075c4a7e86d0d3906bc5b48425df5c9581b884eb8d2ac88a92c7",
+  "verify_fixture.py": "00f61779538c68bbe75d612b658cff179d651e6dac037b2ed810edd1e87460a7",
+  "test_package_a.py": "03a507c4be87be024685020e7f93f234b209beacee01c35ea4806a32092ac814",
+  "fixture_worker.py": "1956e053d771d54120e41bcb2ddb51777f3a616ea87a11a00253ef1e88a05629",
+  "native.py": "5e034f752345dc8921ef29e067992290651435268b62bd4a5857faf8cfbb5ef5",
+  "window.py": "0a1da6611412dcbdef6f6747c9e9393db66bb3a74fec5d958b89959f77a4b7a7",
+  "hilega_application_preparation_fixtures.py": "b7f07e2af2db352ea13fb3dc7fccc878186d55072764515587b9fe343d8edae6",
+  "manage.py": "6a1d55b5d1a954465c82ac01d87429cb0b543f447a0b917d59398f7b77bd1efe"
+}
