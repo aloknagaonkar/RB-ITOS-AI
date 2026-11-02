@@ -1,0 +1,16 @@
+{
+  "group1.py": "e8d564c8746327ec4cf902478cb82ef6cad7b0e58e84b9bbd5e7c18dacc86560",
+  "runtime_rsi_exception_v1.py": "24cc2bda4c30e4405f996149e6fe9fd3d82f1fca2e2edb5112a63e10a8627ca3",
+  "test_group1.py": "78098a3d0f6413e4fe6e83d5b045803773c00ac237eb3a1689663b595b54b413",
+  "checkpoint.py": "416426050bb026bb01495596c4da54880de0183c22b16f6a7a26fbc2f76757d1",
+  "supervisor_review.py": "1ed6ff82eed2bf76d89d6cdbf6fb3f70c46138a7ed585859a378c8b8d097ac5d",
+  "ast_compat.py": "d40ba6599688cb4172637b7380f5f35ca217b4c7924b0ec6ba48fe5c644e072e",
+  "runtime_inventory.py": "20d88c3ee33f4d510f2ba252062d3dd656fb746a86dccdaac27202341aef33c4",
+  "manage.py": "db4ac5b532b851aabf1ccf4387630481d319015c44c79a416afbfab296ddd1ae",
+  "POLICY-PINS.json": "1640bebce0d8db485d9eeb16ff458e13b2b000c015fa79e77f1ec53a638aa9e2",
+  "assembly.py": "d3597e91524afb010af7ca8eabffda30a74e10b1fa59f4d536efd11e9ab828ec",
+  "README.md": "aa36936142d3e8ff5fff11d62a833555953069dca8f4f438b438dbb04d65948c",
+  "BASELINE_PINS.json": "7e99f9556f5d687933be5ada4c0cf48b8acb05d8205ea3a47710fd4a064f67fe",
+  "rehearse.py": "57ed696a6ec12eb7573920f52ca47dd92f27164998239a8b1ac27a47c660a084",
+  "wheel_closure.py": "1c91931a381f5bd0a6cb9f5c908e9b7b21a48757a53e127211d9dd3dc0cdf8a4"
+}
