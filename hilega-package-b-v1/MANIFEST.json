@@ -1,0 +1,18 @@
+{
+  "source_preflight.py": "3082dc465787c878daeab84244c236b730afbd753745d71d0d59cc53f83d0d63",
+  "README.md": "ffea9512ad4ea97780e2f11c5013d0134e8db31f3e530b6d70b01fa68b2b0dae",
+  "BASELINE-PINS.json": "febed1051f7e3ae70a834cfc8d982adc32198759a9e6c481800cf8c094cc1ed5",
+  "conftest.py": "298d9ef70c45bed6593018b9c02fb707288dca58330455f528ba2f8c226ec7ca",
+  "adoption_contract.py": "b3d30e8aa6751cd74d21471e96a894251cfa2da0f5e5aaccb1f1a9a55e934fe7",
+  "manage.py": "5750d5d29e96bf575e2a89c4916e0626f9a23271c9bfecac1e9b949d4e6f153a",
+  "tests/test_session_factory.py": "11c79a5c805c314d49d8cd73a6dcdefa4c095015e9479da36cd908f175244bca",
+  "tests/test_provisioning.py": "5ac99f8920fabd978ae50665d16508ac84cacc3100bf4ad91a989ed576531d88",
+  "tests/test_adoption_contract.py": "35c7df165dfa7bf428252468362f16bf3c69c68ce4e665ec4db5430af43bac3e",
+  "tests/test_private_context.py": "2e02a3868607ea10c628dca97998385327eb790b273d128d223dff338e77c7c7",
+  "fixtures/test_hilega_application_preparation_v1.py": "a92fb42fb618db1e0c88e5477bd671cb232bfefa18653e8ebb2274d237be74ff",
+  "fixtures/test_durable_closed_handoff_v1.py": "dcf02ada44238b29e45fce696864c20585914fb3649f401baa7376f1bb95c268",
+  "fixtures/test_closed_application_coordinator_v1.py": "2e7a97a418a401df2e2969e4bba811008ae0f9e04b494b21eb000101f626ad52",
+  "fixtures/test_hilega_atomic_disabled_binding_v1.py": "618c8fef0a96e9a1cef3351f60d671abff019a05ad648bf26c1115c9dc94f6f8",
+  "fixtures/test_existing_request_attempt_v1.py": "bac7c751710ef488853193fbc524bc87e5710e564e7f3fe5df9334a8003c9515",
+  "fixtures/hilega_application_preparation_fixtures.py": "b7f07e2af2db352ea13fb3dc7fccc878186d55072764515587b9fe343d8edae6"
+}

@@ -1,0 +1,10 @@
+{
+  "test_dependency_lock.py": "89c104e1d74d8a7c15d57d0243d3d290444e55456595a1006ad40412eb93c68a",
+  "release_review.py": "b7d97d8b3bb0e9eefa14d9b27935cdac3d8174eea97c9264f3b04ef1a40e60f5",
+  "dependency_lock.py": "a7edb2ef692f8976341c65d7e403c1442c553da213cdc1ab1fe4332a906ac847",
+  "apply_and_test.py": "fa1184405c9a0d7ee47886fa337a1727b2a408123ff8f4e269d0567ca136f9bc",
+  "runtime_inventory.py": "aa1b80784d59b89c4142144073b0236012f34da9228c455552ae77060c786cb6",
+  "README.md": "5cdf514c1657fbcb336e67f36cf9431a36c42c00acc0d8d2d362b23ad6978d40",
+  "BASELINE_PINS.json": "3fc3dcb29b0996aeaa3e007c1eb8ca5e30c03081333e5e3c767b4c7588e8bef2",
+  "DYNAMIC_PINS.json": "db26af3a47d12efcd31962542fb33ab5a1fc807d1a8019db275fd597f27c6684"
+}

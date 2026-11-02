@@ -1,0 +1,8 @@
+{
+  "controller_remains_paused": true,
+  "heartbeat_advanced": true,
+  "new_lease_verified": true,
+  "phase": "CLOSED_HOOK_RUNNING",
+  "production_execution_enabled": false,
+  "production_ready": false
+}

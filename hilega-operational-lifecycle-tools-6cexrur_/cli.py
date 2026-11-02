@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import sys
 
-EXPECTED_MANIFEST = "574197a2ba8e4db050e1192377acbfc62b2e09ac49219cc171df99e9c32cb87b"
+EXPECTED_MANIFEST = '67713245f538ab8217ac6016eb81d12c09edff18584db5adf30145d8eaa62acf'
 
 
 def digest(raw):

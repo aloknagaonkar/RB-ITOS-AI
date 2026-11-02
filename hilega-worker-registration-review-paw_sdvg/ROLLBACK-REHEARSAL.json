@@ -1,0 +1,7 @@
+{
+  "status": "DISPOSABLE_REGISTERED_WORKER_ROLLBACK_PASS",
+  "previous_sha256": "e9501b98a699b55fa4b4f5e3cf1d16f8dd282960813abea0a24ee15dd459105a",
+  "candidate_sha256": "cdafeeaab3c918e55737dcd016b4c8abfbc1625f2734a3ba249a77a9c74185fd",
+  "installed_worker_restored": false,
+  "live_database_restored": false
+}

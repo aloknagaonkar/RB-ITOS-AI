@@ -1,0 +1,11 @@
+# Explicit one-position policy candidate
+
+User configuration: maximum simultaneous open positions 1; premium-per-entry cap null; daily-loss cutoff null. No additional monetary ceiling is introduced. Existing cash availability, half-cash candidate allocation, fee buffers and reservation checks are preserved. Those existing checks are not changed by this package.
+
+A new sealed candidate is copied from the installed closed release. A policy guard is inserted immediately before attempt construction in both first-entry and history-aware entry submission, inside their attached database transaction. It unwraps cycle-scoped projections to inspect all broker request rows. Every unretired BUY request counts once regardless of PREPARED, UNKNOWN, PARTIAL, terminal or other state. SELL requests do not add positions. The current entry is counted once, so idempotent recovery remains unchanged. Completed cycles are excluded only after their signed archive/retirement bindings verify and no active preparation references remain. No cash reservation release is performed by this guard.
+
+New module/config and both changed attempt modules are included in the candidate preparation dependency manifest and outer release manifest. Existing hard port gate bytes remain unchanged. No installed file or live database is changed. Candidate-only source paths are patched; their dependency pins are reconciled and verified before sealing. New policy tests run 14 cases, followed by one synthetic seed preflight and 74 existing tests against the changed candidate. All tests run on VM only; local checks are syntax/ZIP only.
+
+Capacity may be represented up to 5 in a future reviewed config, but this package fixes it to 1. Increasing a candidate numeric cap is not proof of multi-position coordinator support; the existing coordinator is serial. No environment toggle or automatic capacity increase is provided. Monetary caps other than null are rejected rather than silently ignored.
+
+After a successful VM check, deployment/recovery rebinding and managed candidate validation are still required. The package provides no apply action. The newest supplied readiness checklist is copied and updated in the output folder. Broker timestamps, fees, authority provisioning and real fresh enrollment remain separate unfinished milestones.

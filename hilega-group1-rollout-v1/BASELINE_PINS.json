@@ -1,0 +1,17 @@
+{
+  "hilega-group1-closed-runtime-v4/group1.py": "36fa6e906b87b0eabe472d1bce74a2f893e812b03aa7c04355a538e0d7ce4892",
+  "hilega-group1-closed-runtime-v4/runtime_rsi_exception_v1.py": "24cc2bda4c30e4405f996149e6fe9fd3d82f1fca2e2edb5112a63e10a8627ca3",
+  "hilega-group1-closed-runtime-v4/test_group1.py": "c397e337dd6873d092adf9752f1488af4053c030ffeb3f77ca1dd196e848ae89",
+  "hilega-group1-closed-runtime-v4/checkpoint.py": "416426050bb026bb01495596c4da54880de0183c22b16f6a7a26fbc2f76757d1",
+  "hilega-group1-closed-runtime-v4/supervisor_review.py": "1ed6ff82eed2bf76d89d6cdbf6fb3f70c46138a7ed585859a378c8b8d097ac5d",
+  "hilega-group1-closed-runtime-v4/ast_compat.py": "d40ba6599688cb4172637b7380f5f35ca217b4c7924b0ec6ba48fe5c644e072e",
+  "hilega-group1-closed-runtime-v4/runtime_inventory.py": "ce4b411e6aa8a12288e0071edbba7ffeda5b7ec64581137a7eb89349a553fb94",
+  "hilega-group1-closed-runtime-v4/manage.py": "006e8dafbcf5289642dc1567139cc83f16a1960382a4c9b95d459c61b6f321b3",
+  "hilega-group1-closed-runtime-v4/POLICY-PINS.json": "1640bebce0d8db485d9eeb16ff458e13b2b000c015fa79e77f1ec53a638aa9e2",
+  "hilega-group1-closed-runtime-v4/assembly.py": "d3597e91524afb010af7ca8eabffda30a74e10b1fa59f4d536efd11e9ab828ec",
+  "hilega-group1-closed-runtime-v4/README.md": "00850f2a0dfba55ea44620e7b5a1face7f6cd76628d585a2f47f6ea22f0a4da1",
+  "hilega-group1-closed-runtime-v4/BASELINE_PINS.json": "7e99f9556f5d687933be5ada4c0cf48b8acb05d8205ea3a47710fd4a064f67fe",
+  "hilega-group1-closed-runtime-v4/rehearse.py": "57ed696a6ec12eb7573920f52ca47dd92f27164998239a8b1ac27a47c660a084",
+  "hilega-group1-closed-runtime-v4/wheel_closure.py": "338e83994858aeeb33b64e26bf9fbc842830b7d82194639187e750738eb09a22",
+  "hilega-group1-closed-runtime-v4/MANIFEST.json": "9cf930d92f44849b38dfeeee327bb5fd1216ad445654abe2eb30301807b4d927"
+}

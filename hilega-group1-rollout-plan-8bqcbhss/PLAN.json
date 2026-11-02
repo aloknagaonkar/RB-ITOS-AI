@@ -1,0 +1,65 @@
+{
+  "adapter_db": "/home/aloknagaonkar46/RB-ITOS-AI/data/research/hilega-broker-adapter-closed/adapter.sqlite",
+  "all_six_services_stopped_during_apply": true,
+  "application_db": "/home/aloknagaonkar46/RB-ITOS-AI/data/research/hilega-production-workspace/sim.sqlite",
+  "automatic_database_restore": false,
+  "bindings": {
+    "/home/aloknagaonkar46/RB-ITOS-AI/.env": "a9ee4c6bcf427885594b1359908105347641fa71f36137e7342e52d4feaaaee1",
+    "/home/aloknagaonkar46/RB-ITOS-AI/backend/market_lab/hilega_exclusive_closed_route_v1.py": "f8fd3bf253b4faf94517c7b520de75e72217e519aa8aa7fa47b95210f0f05844",
+    "/home/aloknagaonkar46/RB-ITOS-AI/backend/market_lab/hilega_execution_port_v1/adapter.py": "d2d8146cf8cc3334ce1d7d4715d73285d7755bc93201651be2d1798b34ee9e27",
+    "/home/aloknagaonkar46/RB-ITOS-AI/backend/market_lab/hilega_preparation_runtime_v1/source.py": "d451edda4f7f28bfa38d2e095a543d4e36b83b9484027fb1ddff1375464b22e2",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-operational-lifecycle-tools-6cexrur_/cli.py": "a6335cb61dbb94e8d19f392dc884135c58728d4b5868c48bf1f58708a97035de",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-operational-lifecycle-tools-6cexrur_/manifest.json": "67713245f538ab8217ac6016eb81d12c09edff18584db5adf30145d8eaa62acf",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-reference-service-stage-yup3_wr1/lifecycle_reference_service.py": "b5275d29a9e5d7041314d228094455d734d25f869caf7f5b2928d8ec3f1d242f",
+    "/home/aloknagaonkar46/hilega-persistent-supervision-stage-v1/MIGRATION_APPROVED.json": "625e3038b5fa985683a4d2940016c70aa7c58024a76e1b7a463b3a767e900e23",
+    "/home/aloknagaonkar46/hilega-persistent-supervision-stage-v1/config-private.json": "ea2db4384550af6d9c6c31441230b73058902c3d42b24fef857b9044672c372b",
+    "/home/aloknagaonkar46/hilega-persistent-supervision-stage-v1/runner.py": "cd7286892f5099ab962d3a179aff15642cce20ccd59727e21c83ab3b6e707e8a"
+  },
+  "companion_sources_modified": false,
+  "destination": "/home/aloknagaonkar46/RB-ITOS-AI/data/runtime/hilega-closed-releases/eeecd69d6dcbbffa9288406e6b2c48c37f69e0cc809c5e6d69fab62613e26e71",
+  "model": "HILEGA_GROUP1_EXACT_CLOSED_ROLLOUT_V1",
+  "new_release_approved": false,
+  "new_worker_sha256": "aeea24d0eb9e2a8b43e52c2b80e32d0b5bf95a96a2681fa4abbeae1b6a60a495",
+  "old_worker_sha256": "154cbe309b86dfc8e3ff7f758cd0f6aec4e539d511483ef07f60ed8487ddbdb9",
+  "production_execution_enabled": false,
+  "production_ready": false,
+  "release_manifest_sha256": "eeecd69d6dcbbffa9288406e6b2c48c37f69e0cc809c5e6d69fab62613e26e71",
+  "repo": "/home/aloknagaonkar46/RB-ITOS-AI",
+  "scope": "ONE_WORKER_WRAPPER_AND_IMMUTABLE_CLOSED_BUNDLE_NO_FACTORY_OR_OWNER",
+  "services_observed": {
+    "hilega-api.service": {
+      "active": "active",
+      "pid": 727,
+      "sub": "running"
+    },
+    "hilega-lifecycle-reference.service": {
+      "active": "active",
+      "pid": 728,
+      "sub": "running"
+    },
+    "hilega-observation-analytics.service": {
+      "active": "active",
+      "pid": 731,
+      "sub": "running"
+    },
+    "hilega-observation-readiness.service": {
+      "active": "active",
+      "pid": 734,
+      "sub": "running"
+    },
+    "hilega-production-source-worker.service": {
+      "active": "active",
+      "pid": 1364,
+      "sub": "running"
+    },
+    "hilega-worker.service": {
+      "active": "active",
+      "pid": 730,
+      "sub": "running"
+    }
+  },
+  "source_bundle": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release",
+  "supervisor_configuration_modified": false,
+  "tool_manifest_sha256": "efb894906ba847de06e40e42bf5fa1d0980089a6db40334def8f6b3de96e7d83",
+  "worker_mode": 436
+}

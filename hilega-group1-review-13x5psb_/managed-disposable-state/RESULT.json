@@ -1,0 +1,25 @@
+{
+  "status": "ACTUAL_DISPOSABLE_CLOSED_WORKER_RESTART_PASS",
+  "runs": [
+    {
+      "attempt": 1,
+      "exit_code": 0,
+      "controller_paused": true,
+      "orders_and_preparations_empty": true
+    },
+    {
+      "attempt": 2,
+      "exit_code": 0,
+      "controller_paused": true,
+      "orders_and_preparations_empty": true
+    }
+  ],
+  "actual_candidate_worker_executed": true,
+  "disposable_databases_only": true,
+  "empty_journal_only": true,
+  "fresh_signal_preparation_verified": false,
+  "live_database_opened": false,
+  "credentials_provided": false,
+  "application_services_changed": false,
+  "production_execution_enabled": false
+}

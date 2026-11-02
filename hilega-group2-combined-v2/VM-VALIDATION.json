@@ -1,0 +1,98 @@
+{
+  "status": "GROUP2_COMBINED_CANDIDATE_PASS_BROKER_REVIEW_REQUIRED",
+  "targeted_cases": 74,
+  "seed_preflight_cases": 1,
+  "failed": 0,
+  "skipped": 0,
+  "prior_full_regression_reexecuted": false,
+  "candidate_factory_private_context_and_provisioning_modules_tested": true,
+  "synthetic_authority_and_owner_commit_recovery_tested": true,
+  "positive_paths_use_in_memory_test_gate_override": true,
+  "real_network_denied_in_tests": true,
+  "installed_production_gate_bytes_unchanged": true,
+  "actual_production_gate_opened": false,
+  "source_preflight_requested": true,
+  "source_preflight": {
+    "status": "SOURCE_PROVIDER_PREFLIGHT_BLOCKED",
+    "reason": "BROKER_TIMESTAMP_SEMANTICS_UNVERIFIED",
+    "error_type": "Blocked",
+    "timestamp_review": {
+      "status": "BROKER_TIMESTAMP_SEMANTICS_UNVERIFIED",
+      "review_required": true,
+      "suspected_offset_rows": 2,
+      "order_rows": 2,
+      "trade_rows": 2,
+      "parse_issues": 0,
+      "examples": [
+        {
+          "future_trade": false,
+          "trade_before_order": false,
+          "wrong_ist_session": false,
+          "exact_naive_utc_ist_offset_pattern": true,
+          "order_timestamp_utc": "2026-11-02T08:28:06+00:00",
+          "trade_timestamp_utc": "2026-11-02T13:58:06+00:00",
+          "trade_minus_order_seconds": 19800.0
+        },
+        {
+          "future_trade": false,
+          "trade_before_order": false,
+          "wrong_ist_session": false,
+          "exact_naive_utc_ist_offset_pattern": true,
+          "order_timestamp_utc": "2026-11-02T07:39:33+00:00",
+          "trade_timestamp_utc": "2026-11-02T13:09:33+00:00",
+          "trade_minus_order_seconds": 19800.0
+        }
+      ],
+      "timestamps_modified": false,
+      "broker_timezone_contract_independently_confirmed": false,
+      "not_a_certificate_of_chronological_validity": true
+    },
+    "candidate_normalizer_used": true,
+    "running_worker_code_replaced": false,
+    "production_execution_enabled": false
+  },
+  "read_only_timestamp_guard_staged": true,
+  "timestamps_automatically_shifted": false,
+  "candidate_changes": {
+    "original_release_sha256": "eeecd69d6dcbbffa9288406e6b2c48c37f69e0cc809c5e6d69fab62613e26e71",
+    "candidate_release_sha256": "5e88e69ce287dd364219011bcfb07e10151c778a9bf47204a8b86a2fb0ffe370",
+    "changed_modules": [
+      "backend/market_lab/hilega_production_account_adapter_v1.py",
+      "backend/market_lab/hilega_broker_time_consistency_v1.py"
+    ],
+    "changed_dependency_manifest": "backend/market_lab/hilega_preparation_runtime_v1/dependencies.json",
+    "staged_dependency_chain_verified": true,
+    "integrity_checks_retained": true,
+    "installed_sources_modified": false
+  },
+  "candidate_folder": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group2-combined-review-28nw4wk0/candidate",
+  "factory_context_and_owner_recovery_cases": 40,
+  "reservation_and_fee_candidate_cases": 12,
+  "broker_readiness_candidate_cases": 12,
+  "timestamp_regression_cases": 10,
+  "broker_timezone_contract_independently_confirmed": false,
+  "context_adoption_plan_created": true,
+  "context_adoption_plan_sha256": "ef0eb61d1423c373a488474d7de81302d10a06b2171fd5ff6467a5e6fac28301",
+  "public_authority_review_request_created": true,
+  "live_secret_material_created": false,
+  "production_authority_provisioned": false,
+  "live_database_enrolled": false,
+  "execution_factory_configured": false,
+  "controller_resumed": false,
+  "live_preparation_created": false,
+  "application_services_changed": false,
+  "installed_sources_modified": false,
+  "live_database_mutations_issued": false,
+  "candidate_test_batch_complete": true,
+  "remaining_live_group2": [
+    "BROKER_TIMESTAMP_CONTRACT_AND_EXISTING_ACCOUNT_ACTIVITY_REVIEW",
+    "INDEPENDENT_PRODUCTION_AUTHORITY_AND_ORDER_POLICY_APPROVAL",
+    "STAGED_CONTEXT_AND_RECOVERY_BINDINGS_DEPLOYMENT_REVIEW",
+    "BOUNDED_FRESH_SEED_TO_SIGNED_OWNER_ENROLLMENT",
+    "ACTUAL_FEE_RECONCILIATION_AND_DEPLOYED_CASH_RELEASE"
+  ],
+  "group2_complete": false,
+  "production_execution_enabled": false,
+  "production_ready": false,
+  "audit_folder": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group2-combined-review-28nw4wk0"
+}

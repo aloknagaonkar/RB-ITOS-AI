@@ -1,0 +1,364 @@
+{
+  "modules": {
+    "analysis": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/hilega-production-cash-observation/analysis.py",
+      "sha256": "9d4f98258585a9dea8f4af6266adb28ba32de50a20bbe7f65c8c58424534e799"
+    },
+    "rules": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/hilega-production-contract-preview/rules.py",
+      "sha256": "660c92d979626692898c4b154b3918be24ed6fe27424885f165ccd7ee45195e5"
+    },
+    "preflight_cash_collector": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/hilega-production-cash-observation/run.py",
+      "sha256": "3d8a56ece2277968255556a4c4b56ec0f56ec0657545e7d7a3126f1e15fb9163"
+    },
+    "market_lab.hilega_production_broker_observation_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_production_broker_observation_v1.py",
+      "sha256": "d0b0167604db78c5d0a70fa7012dcfbe18db4e86516b62a2190fcf294168aa4e"
+    },
+    "market_lab": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/__init__.py",
+      "sha256": "8f4f8350979084aed89a7be8e490a75a5711df7280f261e4202b700974e7c932"
+    },
+    "market_lab.hilega_production_account_adapter_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_production_account_adapter_v1.py",
+      "sha256": "9484899b374701c211adf22b67ea5fc84d0cdb978defe061ce8250cb7313b140"
+    },
+    "preflight_cash_analysis": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/hilega-production-cash-observation/analysis.py",
+      "sha256": "9d4f98258585a9dea8f4af6266adb28ba32de50a20bbe7f65c8c58424534e799"
+    },
+    "preflight_market_collector": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/hilega-production-contract-preview/run.py",
+      "sha256": "bd7f8f5590a6ac1a67373804e173d3e5c7c0245db0a6a42285966a73bb99b1c0"
+    },
+    "preflight_cash_gate": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/hilega-production-real-cash-shadow-gate/gate.py",
+      "sha256": "5b7b0278bb877caa0f9ccd181dd8dfc24ba3ed177738d42b596540bd417f5e6a"
+    },
+    "preflight_contract_rules": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/hilega-production-contract-preview/rules.py",
+      "sha256": "660c92d979626692898c4b154b3918be24ed6fe27424885f165ccd7ee45195e5"
+    },
+    "_group1_worker": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/scripts/hilega_production_simulator_bridge.py",
+      "sha256": "cdafeeaab3c918e55737dcd016b4c8abfbc1625f2734a3ba249a77a9c74185fd"
+    },
+    "market_lab.hilega_sim_allocation_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_sim_allocation_v1.py",
+      "sha256": "f05a64857c49c6d2c06e995849c3b313dd19f8049ad0b8b98f5d0bc2f87ef3e7"
+    },
+    "market_lab.hilega_production_foundation.core": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_production_foundation/core.py",
+      "sha256": "40fd7f1f0d7bd0ce0b1d57d188079a338884196c97a8325ccb9bb29f99214d62"
+    },
+    "market_lab.hilega_preparation_runtime_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_preparation_runtime_v1/__init__.py",
+      "sha256": "048e5833b9f3f7bd033bc397ec833c0cd392a57cce93f0c1d504dfa82c4f3f8f"
+    },
+    "market_lab.hilega_preparation_runtime_v1.evidence": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_preparation_runtime_v1/evidence.py",
+      "sha256": "9b72ab5a48b7f8e4f87c217cf641ea853cfd91a22e1402e540c84c5b3127bbec"
+    },
+    "market_lab.hilega_production_bridge_health_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_production_bridge_health_v1.py",
+      "sha256": "d7e02c6c7c8bc4697109c981fb515306db7036683028cd28248d2bd070850a93"
+    },
+    "market_lab.hilega_production_foundation": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/backend/market_lab/hilega_production_foundation/__init__.py",
+      "sha256": "43a1da2f20d4d4aee092e16deb92ac1fd8ba5f1b4d53886710b9d16b8d9e3baf"
+    },
+    "market_lab.hilega_preparation_runtime_v1.source": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_preparation_runtime_v1/source.py",
+      "sha256": "d451edda4f7f28bfa38d2e095a543d4e36b83b9484027fb1ddff1375464b22e2"
+    },
+    "market_lab.hilega_preparation_runtime_v1.exit_dispatch": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_preparation_runtime_v1/exit_dispatch.py",
+      "sha256": "110196e7cbe67e93628b9a0a5547257be2b1ddb479bcda8a89735bd0b0a5dc70"
+    },
+    "market_lab.hilega_preparation_runtime_v1.ownership_state": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_preparation_runtime_v1/ownership_state.py",
+      "sha256": "7cc48fb3422bae9a86a2e2fa7d0d143ffbbfa7cabfab248c3b9ee8b14f084041"
+    },
+    "market_lab.hilega_preparation_runtime_v1.ownership_checks.bridge": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_preparation_runtime_v1/ownership_checks/bridge.py",
+      "sha256": "3d254a1bf7c404f57df760c64244f5e21d965db2a87b39f349363dbf68e148e1"
+    },
+    "market_lab.hilega_preparation_runtime_v1.ownership_checks.signature_checks": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_preparation_runtime_v1/ownership_checks/signature_checks.py",
+      "sha256": "62b5f998cebe9ad439728278e62e01bf39cef9ba18d268ff0b83e9fb5f6befed"
+    },
+    "market_lab.hilega_preparation_runtime_v1.ownership_checks": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/backend/market_lab/hilega_preparation_runtime_v1/ownership_checks/__init__.py",
+      "sha256": "523f0489458f1e5594984f1e9edc8a3f5921cc61d7236ec48dac213ae477a6fc"
+    },
+    "market_lab.hilega_preparation_runtime_v1.ownership_checks.historical_receipt_checks": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_preparation_runtime_v1/ownership_checks/historical_receipt_checks.py",
+      "sha256": "a362da0d2d1255e69fcc5b816ca70187833b2c9b1d34b02f5b18b5d35e66a62b"
+    },
+    "market_lab.hilega_preparation_runtime_v1.ownership_checks.risk_evidence_audit": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_preparation_runtime_v1/ownership_checks/risk_evidence_audit.py",
+      "sha256": "b5576a8216529f293a943df001512f67cad2bea56804acfcb180a538fe09cbfc"
+    },
+    "market_lab.hilega_preparation_runtime_v1.ownership_checks.ownership_review": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_preparation_runtime_v1/ownership_checks/ownership_review.py",
+      "sha256": "1cbbdef88dca9a76553802d5364675028024f2902f5fd405ec4b2469203f7ba2"
+    },
+    "market_lab.hilega_preparation_runtime_v1.ownership_checks.reservation_checks": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_preparation_runtime_v1/ownership_checks/reservation_checks.py",
+      "sha256": "2e83c56c0885e5bec09ba3328e030dec6605434ee8c26ceedd0a2cde296a9063"
+    },
+    "market_lab.hilega_preparation_runtime_v1.collect": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_preparation_runtime_v1/collect.py",
+      "sha256": "2b27984062db6079457c7039c68abe10194faa2fcf0865001f5ef80d739ca386"
+    },
+    "market_lab.hilega_production_simulator_bridge_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_production_simulator_bridge_v1.py",
+      "sha256": "18f8e5578336ba4aa516bf96cad90c60a58349104b7d710503e0e03476d6ce27"
+    },
+    "market_lab.hilega_production_ownership_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_production_ownership_v1.py",
+      "sha256": "1f66565941d752c6e4fb5132a49c7ddec393acdb71a53820a645467629bfce0a"
+    },
+    "market_lab.hilega_nifty_option_price_grid_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_nifty_option_price_grid_v1.py",
+      "sha256": "4c687b701b2ec00fedd22d0c3eaace0e6ce937559102d1b1b04e65a09d837575"
+    },
+    "market_lab.hilega_preparation_runtime_v1.atomic_binding": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_preparation_runtime_v1/atomic_binding.py",
+      "sha256": "ce62f33526ffc138b6faf51ceb4d48ab37ad2d9c9e820c49a2e9e76a2b8a35cb"
+    },
+    "market_lab.hilega_execution_port_v1.adapter": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_execution_port_v1/adapter.py",
+      "sha256": "d2d8146cf8cc3334ce1d7d4715d73285d7755bc93201651be2d1798b34ee9e27"
+    },
+    "market_lab.hilega_execution_port_v1.terminal": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_execution_port_v1/terminal.py",
+      "sha256": "38143dd3bd733874d0f9189c366c7483ddc2f29d2c3becb8ae2efe5d90b1d4ab"
+    },
+    "market_lab.hilega_execution_port_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_execution_port_v1/__init__.py",
+      "sha256": "16d0bfcd34379a5e2091e1af1a6ad82c8c32cb4f1b7bf6495091bd9806b4911b"
+    },
+    "market_lab.hilega_execution_port_v1.mapping": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_execution_port_v1/mapping.py",
+      "sha256": "a8c6ab675bbd1e604e7b4bc2994fadc1fde50ee4a48918298ef0db887d6f1e96"
+    },
+    "market_lab.hilega_preparation_runtime_v1.cash_reservation": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_preparation_runtime_v1/cash_reservation.py",
+      "sha256": "04a8156ef1951f36aac38c62d6ca0201e8b0df6e17661b607de4e350f2eda502"
+    },
+    "market_lab.hilega_preparation_runtime_v1.limit_candidate": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_preparation_runtime_v1/limit_candidate.py",
+      "sha256": "7fb67ce2e86c69d3abb1cc8853995bcc6d80c58f196617ee93da40b90b5e2e94"
+    },
+    "market_lab.hilega_preparation_runtime_v1.reference_review": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_preparation_runtime_v1/reference_review.py",
+      "sha256": "bb8c1bd7f19f6d97c194fdb713eb6fa9241bf850f8f584ddb04d4e1f9c3ed595"
+    },
+    "market_lab.hilega_preparation_runtime_v1.pricing_preview": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_preparation_runtime_v1/pricing_preview.py",
+      "sha256": "47a75db7553805017fc9b98650f784708e94a7d1196da068264d7d5a88603e8b"
+    },
+    "market_lab.hilega_exclusive_closed_route_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_exclusive_closed_route_v1.py",
+      "sha256": "f8fd3bf253b4faf94517c7b520de75e72217e519aa8aa7fa47b95210f0f05844"
+    },
+    "closed_application_coordinator_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/runtime/closed_application_coordinator_v1.py",
+      "sha256": "286e7524c042db573913ffb7746da07bf04dd266b524083cd52ab6112ff007dc"
+    },
+    "history_aware_cycle_close_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/runtime/history_aware_cycle_close_v1.py",
+      "sha256": "5c2e7a46dd8e8bd86f1574bc78f7bcba00a561862de3885d3cccf6d490fe143c"
+    },
+    "cycle_scope_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/runtime/cycle_scope_v1.py",
+      "sha256": "1ccb0f9dc3a6275dc76b59c85e946362adaf123cf65f73464b35ad86b671de1a"
+    },
+    "application_cycle_close_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/runtime/application_cycle_close_v1.py",
+      "sha256": "9f7b78af33a761bbedfea54124ddf6b511267a5c1152369392e77986d126934c"
+    },
+    "authenticated_handoff_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/runtime/authenticated_handoff_v1.py",
+      "sha256": "5ab2a4f62632d387741b068d1c2bb4c4ca9b38053ecb915a3c3ed70da98a59a2"
+    },
+    "application_lifecycle_candidate_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/runtime/application_lifecycle_candidate_v1.py",
+      "sha256": "e59b9f2d27bef848034bea255a016d363d986b836b5f9f756dacc347df9a4f05"
+    },
+    "owned_exit_pricing_candidate": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/runtime/owned_exit_pricing_candidate.py",
+      "sha256": "d6f8b25dbeee38a23d08523418db418e52bd69db98d70d4e3b1ad9f8b75808f4"
+    },
+    "durable_closed_handoff_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/runtime/durable_closed_handoff_v1.py",
+      "sha256": "e03091c7e825d3ba5e3ff61effbd1e3c95beb2cf038f5a96f66f3f7bebb10d75"
+    },
+    "existing_request_attempt_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/runtime/existing_request_attempt_v1.py",
+      "sha256": "eede3cfd2dc1bb63bcf36292f1eb114ba6f2c03410856605de06bd294e4a17b8"
+    },
+    "history_aware_lifecycle_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/runtime/history_aware_lifecycle_v1.py",
+      "sha256": "e49eb66837d57c3473b4d5fdb1451e41f62b07aa72d40257921b1d8ddb434d7e"
+    },
+    "history_aware_attempt_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/runtime/history_aware_attempt_v1.py",
+      "sha256": "d429ba7c8b619b0ebecc93c485cee90f80e53cfde3ecd165d6a060ee0f7c879f"
+    },
+    "history_prepared_proof_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/runtime/history_prepared_proof_v1.py",
+      "sha256": "cadb658fe714ecc20c9ea42d2adb48211e750e4c4e4ee8a5e09ff19b283aee96"
+    },
+    "history_aware_preparation_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/runtime/history_aware_preparation_v1.py",
+      "sha256": "d4d4cf6c2df4188ada08041afae115bc43b2fc9d16c2ae5794bcbba560e7d2bd"
+    },
+    "worker_history_preparation_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/runtime/worker_history_preparation_v1.py",
+      "sha256": "59299b9bfd2143133d63c24378afc9716b272c22890b6bf3cc0b0edc06b3a85e"
+    },
+    "market_lab.hilega_combined_policy_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_combined_policy_v1.py",
+      "sha256": "b5e97157f14129aea880e9d7344d611608e398a99843aab9ca787fbd2ef7b492"
+    },
+    "market_lab.hilega_runtime_rsi_exception_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_runtime_rsi_exception_v1.py",
+      "sha256": "24cc2bda4c30e4405f996149e6fe9fd3d82f1fca2e2edb5112a63e10a8627ca3"
+    },
+    "market_lab.hilega_v2_alignment_replay_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/backend/market_lab/hilega_v2_alignment_replay_v1.py",
+      "sha256": "a7e1a80ccb3654f1541cd8b46412144eb8ed21f6d79fcc08d48f41ba15c0ee97"
+    },
+    "market_lab.hilega_milega_historical_replay_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/backend/market_lab/hilega_milega_historical_replay_v1.py",
+      "sha256": "c5d640d66285f5e6b908b036b20bf57a909437b247d38757918dc8728c687319"
+    },
+    "market_lab.hilega_milega_audit_report_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/backend/market_lab/hilega_milega_audit_report_v1.py",
+      "sha256": "1d191eebf0f7c8b542dfa79284fb45b130316ebc845db52ef321143aee3da3f2"
+    },
+    "market_lab.live_shadow_step_audit_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/backend/market_lab/live_shadow_step_audit_v1.py",
+      "sha256": "aafc0c867d89873596b822a79e2b3aefca33f5cf9e9d1f61b0d2b899f13e51f9"
+    },
+    "market_lab.platform_file_lock": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/backend/market_lab/platform_file_lock.py",
+      "sha256": "12568e91f86b0e4d73bbb42880a036ee0b8dc38eb83d0515db885278be10ea62"
+    },
+    "market_lab.hilega_milega_strategy_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/backend/market_lab/hilega_milega_strategy_v1.py",
+      "sha256": "50e49e4c47c3cc5c6f401da964fdcc6e6a98f8c9f52ee154fddf00199f05da9d"
+    },
+    "market_lab.domain": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/backend/market_lab/domain.py",
+      "sha256": "27bead30119270b544eefaad0ff42f2ee5aaed52bb4cce08978aab30fc2d29df"
+    },
+    "market_lab.hilega_milega_bearish_strategy_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/backend/market_lab/hilega_milega_bearish_strategy_v1.py",
+      "sha256": "46d3f3c2c85c6270c85ff3a173a9e28aac45eecdf37187ca8b3cdac06fa3632d"
+    },
+    "market_lab.hilega_directional_coordinator_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/backend/market_lab/hilega_directional_coordinator_v1.py",
+      "sha256": "bf63bc0e49450861cce4a3f3643a72a8326410a6b83f93ca5a45f6d0621665c2"
+    },
+    "market_lab.hilega_opening_reference_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/backend/market_lab/hilega_opening_reference_v1.py",
+      "sha256": "59aaba78dd2e89aa392f773637cd34b2455a6c7306cb5d8d669a089a85dbeb8a"
+    },
+    "market_lab.hilega_worker_registration_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_worker_registration_v1.py",
+      "sha256": "a0b5ee60f6cc907a41b18d187dc38e0d354c5b08171c8506eac07f59a3415152"
+    },
+    "market_lab.hilega_execution_session_factory_v1": {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_execution_session_factory_v1.py",
+      "sha256": "48d0c62d56bc8a6cf1af4fb528e26721a39fb36410302579de5491bacf770056"
+    }
+  },
+  "unresolved_local": [],
+  "external_imports": [
+    "dotenv",
+    "pydantic"
+  ],
+  "dynamic_loading_sites": [
+    {
+      "module": "market_lab.hilega_preparation_runtime_v1.evidence",
+      "line": 40,
+      "call": "importlib.util.spec_from_file_location"
+    }
+  ],
+  "external_distributions_locked": false,
+  "dynamic_loading_review_complete": false,
+  "dependency_manifest_fully_reconciled": false,
+  "input_hashes": {
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/hilega-production-cash-observation/analysis.py": "9d4f98258585a9dea8f4af6266adb28ba32de50a20bbe7f65c8c58424534e799",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/hilega-production-contract-preview/rules.py": "660c92d979626692898c4b154b3918be24ed6fe27424885f165ccd7ee45195e5",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/hilega-production-cash-observation/run.py": "3d8a56ece2277968255556a4c4b56ec0f56ec0657545e7d7a3126f1e15fb9163",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_production_broker_observation_v1.py": "d0b0167604db78c5d0a70fa7012dcfbe18db4e86516b62a2190fcf294168aa4e",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/__init__.py": "8f4f8350979084aed89a7be8e490a75a5711df7280f261e4202b700974e7c932",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_production_account_adapter_v1.py": "9484899b374701c211adf22b67ea5fc84d0cdb978defe061ce8250cb7313b140",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/hilega-production-contract-preview/run.py": "bd7f8f5590a6ac1a67373804e173d3e5c7c0245db0a6a42285966a73bb99b1c0",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/hilega-production-real-cash-shadow-gate/gate.py": "5b7b0278bb877caa0f9ccd181dd8dfc24ba3ed177738d42b596540bd417f5e6a",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/scripts/hilega_production_simulator_bridge.py": "cdafeeaab3c918e55737dcd016b4c8abfbc1625f2734a3ba249a77a9c74185fd",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_sim_allocation_v1.py": "f05a64857c49c6d2c06e995849c3b313dd19f8049ad0b8b98f5d0bc2f87ef3e7",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_production_foundation/core.py": "40fd7f1f0d7bd0ce0b1d57d188079a338884196c97a8325ccb9bb29f99214d62",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_preparation_runtime_v1/__init__.py": "048e5833b9f3f7bd033bc397ec833c0cd392a57cce93f0c1d504dfa82c4f3f8f",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_preparation_runtime_v1/evidence.py": "9b72ab5a48b7f8e4f87c217cf641ea853cfd91a22e1402e540c84c5b3127bbec",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_production_bridge_health_v1.py": "d7e02c6c7c8bc4697109c981fb515306db7036683028cd28248d2bd070850a93",
+    "/home/aloknagaonkar46/RB-ITOS-AI/backend/market_lab/hilega_production_foundation/__init__.py": "43a1da2f20d4d4aee092e16deb92ac1fd8ba5f1b4d53886710b9d16b8d9e3baf",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_preparation_runtime_v1/source.py": "d451edda4f7f28bfa38d2e095a543d4e36b83b9484027fb1ddff1375464b22e2",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_preparation_runtime_v1/exit_dispatch.py": "110196e7cbe67e93628b9a0a5547257be2b1ddb479bcda8a89735bd0b0a5dc70",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_preparation_runtime_v1/ownership_state.py": "7cc48fb3422bae9a86a2e2fa7d0d143ffbbfa7cabfab248c3b9ee8b14f084041",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_preparation_runtime_v1/ownership_checks/bridge.py": "3d254a1bf7c404f57df760c64244f5e21d965db2a87b39f349363dbf68e148e1",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_preparation_runtime_v1/ownership_checks/signature_checks.py": "62b5f998cebe9ad439728278e62e01bf39cef9ba18d268ff0b83e9fb5f6befed",
+    "/home/aloknagaonkar46/RB-ITOS-AI/backend/market_lab/hilega_preparation_runtime_v1/ownership_checks/__init__.py": "523f0489458f1e5594984f1e9edc8a3f5921cc61d7236ec48dac213ae477a6fc",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_preparation_runtime_v1/ownership_checks/historical_receipt_checks.py": "a362da0d2d1255e69fcc5b816ca70187833b2c9b1d34b02f5b18b5d35e66a62b",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_preparation_runtime_v1/ownership_checks/risk_evidence_audit.py": "b5576a8216529f293a943df001512f67cad2bea56804acfcb180a538fe09cbfc",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_preparation_runtime_v1/ownership_checks/ownership_review.py": "1cbbdef88dca9a76553802d5364675028024f2902f5fd405ec4b2469203f7ba2",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_preparation_runtime_v1/ownership_checks/reservation_checks.py": "2e83c56c0885e5bec09ba3328e030dec6605434ee8c26ceedd0a2cde296a9063",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_preparation_runtime_v1/collect.py": "2b27984062db6079457c7039c68abe10194faa2fcf0865001f5ef80d739ca386",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_production_simulator_bridge_v1.py": "18f8e5578336ba4aa516bf96cad90c60a58349104b7d710503e0e03476d6ce27",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_production_ownership_v1.py": "1f66565941d752c6e4fb5132a49c7ddec393acdb71a53820a645467629bfce0a",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_nifty_option_price_grid_v1.py": "4c687b701b2ec00fedd22d0c3eaace0e6ce937559102d1b1b04e65a09d837575",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_preparation_runtime_v1/atomic_binding.py": "ce62f33526ffc138b6faf51ceb4d48ab37ad2d9c9e820c49a2e9e76a2b8a35cb",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_execution_port_v1/adapter.py": "d2d8146cf8cc3334ce1d7d4715d73285d7755bc93201651be2d1798b34ee9e27",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_execution_port_v1/terminal.py": "38143dd3bd733874d0f9189c366c7483ddc2f29d2c3becb8ae2efe5d90b1d4ab",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_execution_port_v1/__init__.py": "16d0bfcd34379a5e2091e1af1a6ad82c8c32cb4f1b7bf6495091bd9806b4911b",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_execution_port_v1/mapping.py": "a8c6ab675bbd1e604e7b4bc2994fadc1fde50ee4a48918298ef0db887d6f1e96",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_preparation_runtime_v1/cash_reservation.py": "04a8156ef1951f36aac38c62d6ca0201e8b0df6e17661b607de4e350f2eda502",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_preparation_runtime_v1/limit_candidate.py": "7fb67ce2e86c69d3abb1cc8853995bcc6d80c58f196617ee93da40b90b5e2e94",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_preparation_runtime_v1/reference_review.py": "bb8c1bd7f19f6d97c194fdb713eb6fa9241bf850f8f584ddb04d4e1f9c3ed595",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_preparation_runtime_v1/pricing_preview.py": "47a75db7553805017fc9b98650f784708e94a7d1196da068264d7d5a88603e8b",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_exclusive_closed_route_v1.py": "f8fd3bf253b4faf94517c7b520de75e72217e519aa8aa7fa47b95210f0f05844",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/runtime/closed_application_coordinator_v1.py": "286e7524c042db573913ffb7746da07bf04dd266b524083cd52ab6112ff007dc",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/runtime/history_aware_cycle_close_v1.py": "5c2e7a46dd8e8bd86f1574bc78f7bcba00a561862de3885d3cccf6d490fe143c",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/runtime/cycle_scope_v1.py": "1ccb0f9dc3a6275dc76b59c85e946362adaf123cf65f73464b35ad86b671de1a",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/runtime/application_cycle_close_v1.py": "9f7b78af33a761bbedfea54124ddf6b511267a5c1152369392e77986d126934c",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/runtime/authenticated_handoff_v1.py": "5ab2a4f62632d387741b068d1c2bb4c4ca9b38053ecb915a3c3ed70da98a59a2",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/runtime/application_lifecycle_candidate_v1.py": "e59b9f2d27bef848034bea255a016d363d986b836b5f9f756dacc347df9a4f05",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/runtime/owned_exit_pricing_candidate.py": "d6f8b25dbeee38a23d08523418db418e52bd69db98d70d4e3b1ad9f8b75808f4",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/runtime/durable_closed_handoff_v1.py": "e03091c7e825d3ba5e3ff61effbd1e3c95beb2cf038f5a96f66f3f7bebb10d75",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/runtime/existing_request_attempt_v1.py": "eede3cfd2dc1bb63bcf36292f1eb114ba6f2c03410856605de06bd294e4a17b8",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/runtime/history_aware_lifecycle_v1.py": "e49eb66837d57c3473b4d5fdb1451e41f62b07aa72d40257921b1d8ddb434d7e",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/runtime/history_aware_attempt_v1.py": "d429ba7c8b619b0ebecc93c485cee90f80e53cfde3ecd165d6a060ee0f7c879f",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/runtime/history_prepared_proof_v1.py": "cadb658fe714ecc20c9ea42d2adb48211e750e4c4e4ee8a5e09ff19b283aee96",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/runtime/history_aware_preparation_v1.py": "d4d4cf6c2df4188ada08041afae115bc43b2fc9d16c2ae5794bcbba560e7d2bd",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/runtime/worker_history_preparation_v1.py": "59299b9bfd2143133d63c24378afc9716b272c22890b6bf3cc0b0edc06b3a85e",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_combined_policy_v1.py": "b5e97157f14129aea880e9d7344d611608e398a99843aab9ca787fbd2ef7b492",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_runtime_rsi_exception_v1.py": "24cc2bda4c30e4405f996149e6fe9fd3d82f1fca2e2edb5112a63e10a8627ca3",
+    "/home/aloknagaonkar46/RB-ITOS-AI/backend/market_lab/hilega_v2_alignment_replay_v1.py": "a7e1a80ccb3654f1541cd8b46412144eb8ed21f6d79fcc08d48f41ba15c0ee97",
+    "/home/aloknagaonkar46/RB-ITOS-AI/backend/market_lab/hilega_milega_historical_replay_v1.py": "c5d640d66285f5e6b908b036b20bf57a909437b247d38757918dc8728c687319",
+    "/home/aloknagaonkar46/RB-ITOS-AI/backend/market_lab/hilega_milega_audit_report_v1.py": "1d191eebf0f7c8b542dfa79284fb45b130316ebc845db52ef321143aee3da3f2",
+    "/home/aloknagaonkar46/RB-ITOS-AI/backend/market_lab/live_shadow_step_audit_v1.py": "aafc0c867d89873596b822a79e2b3aefca33f5cf9e9d1f61b0d2b899f13e51f9",
+    "/home/aloknagaonkar46/RB-ITOS-AI/backend/market_lab/platform_file_lock.py": "12568e91f86b0e4d73bbb42880a036ee0b8dc38eb83d0515db885278be10ea62",
+    "/home/aloknagaonkar46/RB-ITOS-AI/backend/market_lab/hilega_milega_strategy_v1.py": "50e49e4c47c3cc5c6f401da964fdcc6e6a98f8c9f52ee154fddf00199f05da9d",
+    "/home/aloknagaonkar46/RB-ITOS-AI/backend/market_lab/domain.py": "27bead30119270b544eefaad0ff42f2ee5aaed52bb4cce08978aab30fc2d29df",
+    "/home/aloknagaonkar46/RB-ITOS-AI/backend/market_lab/hilega_milega_bearish_strategy_v1.py": "46d3f3c2c85c6270c85ff3a173a9e28aac45eecdf37187ca8b3cdac06fa3632d",
+    "/home/aloknagaonkar46/RB-ITOS-AI/backend/market_lab/hilega_directional_coordinator_v1.py": "bf63bc0e49450861cce4a3f3643a72a8326410a6b83f93ca5a45f6d0621665c2",
+    "/home/aloknagaonkar46/RB-ITOS-AI/backend/market_lab/hilega_opening_reference_v1.py": "59aaba78dd2e89aa392f773637cd34b2455a6c7306cb5d8d669a089a85dbeb8a",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_worker_registration_v1.py": "a0b5ee60f6cc907a41b18d187dc38e0d354c5b08171c8506eac07f59a3415152",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release/backend/market_lab/hilega_execution_session_factory_v1.py": "48d0c62d56bc8a6cf1af4fb528e26721a39fb36410302579de5491bacf770056"
+  }
+}

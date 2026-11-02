@@ -1,0 +1,33 @@
+{
+  "phase": "EXECUTING",
+  "completed_steps": [
+    {
+      "index": 0,
+      "action": "hold",
+      "plan": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-rollout-plan-nvnouzgc/PLAN.json",
+      "phase": "INSTALLED_SERVICES_STOPPED"
+    },
+    {
+      "index": 1,
+      "action": "rollback",
+      "plan": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-rollout-plan-nvnouzgc/PLAN.json",
+      "phase": "ROLLED_BACK_SERVICES_STOPPED"
+    },
+    {
+      "index": 2,
+      "action": "start",
+      "plan": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-rollout-plan-nvnouzgc/PLAN.json",
+      "phase": "ROLLED_BACK_RUNNING"
+    },
+    {
+      "index": 3,
+      "action": "status",
+      "plan": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-rollout-plan-nvnouzgc/PLAN.json",
+      "phase": "ROLLED_BACK_RUNNING"
+    }
+  ],
+  "production_execution_enabled": false,
+  "next_step": 4,
+  "action_in_progress": "apply",
+  "plan_in_progress": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-rollout-plan-8bqcbhss/PLAN.json"
+}

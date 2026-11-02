@@ -1,0 +1,7 @@
+{
+  "action": "hold",
+  "plan": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-rollout-plan-nvnouzgc/PLAN.json",
+  "exit_code": 0,
+  "stdout": "{\n  \"phase\": \"INSTALLED_SERVICES_STOPPED\",\n  \"production_execution_enabled\": false,\n  \"production_ready\": false\n}\n",
+  "stderr": ""
+}

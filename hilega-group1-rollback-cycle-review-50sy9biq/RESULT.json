@@ -1,0 +1,9 @@
+{
+  "status": "CYCLE_STOPPED_REVIEW_REQUIRED",
+  "reason": "CLOSED_MAINTENANCE_ACTION_FAILED: apply; inspect /home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-rollback-cycle-review-50sy9biq/step-5.json",
+  "original_plan": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-rollout-plan-nvnouzgc/PLAN.json",
+  "reinstall_plan": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-rollout-plan-8bqcbhss/PLAN.json",
+  "automatic_recovery_attempted": false,
+  "automatic_database_restore": false,
+  "production_execution_enabled": false
+}

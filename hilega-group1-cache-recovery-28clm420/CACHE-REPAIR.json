@@ -1,0 +1,328 @@
+{
+  "quarantined": [
+    {
+      "path": "backend/market_lab/__pycache__/__init__.cpython-313.pyc",
+      "source": "backend/market_lab/__init__.py",
+      "sha256": "43fb0bed74e6fec40f8e8f7f2de20e4f94a74a6781b36fa651215987e54d7bd6"
+    },
+    {
+      "path": "backend/market_lab/__pycache__/domain.cpython-313.pyc",
+      "source": "backend/market_lab/domain.py",
+      "sha256": "840ea95adffc84467fa22ef62eaaef242d6ebd53eb4ac80e4f6b359133e65a4d"
+    },
+    {
+      "path": "backend/market_lab/__pycache__/hilega_combined_policy_v1.cpython-313.pyc",
+      "source": "backend/market_lab/hilega_combined_policy_v1.py",
+      "sha256": "6fc7de9ceca20b1db726aae0381a20e94fe700009120a3af47c9a984cb8c38d9"
+    },
+    {
+      "path": "backend/market_lab/__pycache__/hilega_directional_coordinator_v1.cpython-313.pyc",
+      "source": "backend/market_lab/hilega_directional_coordinator_v1.py",
+      "sha256": "b38bac2fb13dcf176d7788f09cbb1f7a68c14e19abdf8b0ffc0e9307bc1abfb7"
+    },
+    {
+      "path": "backend/market_lab/__pycache__/hilega_exclusive_closed_route_v1.cpython-313.pyc",
+      "source": "backend/market_lab/hilega_exclusive_closed_route_v1.py",
+      "sha256": "435b734ec7b7f15f0054f38cf7e3222743d0d6806e49950b26b3a0df64f725cd"
+    },
+    {
+      "path": "backend/market_lab/__pycache__/hilega_execution_session_factory_v1.cpython-313.pyc",
+      "source": "backend/market_lab/hilega_execution_session_factory_v1.py",
+      "sha256": "1e5c5c1e1554804a80589ea4a863cc0dfee2e956599f25496ffee269db8447f5"
+    },
+    {
+      "path": "backend/market_lab/__pycache__/hilega_milega_audit_report_v1.cpython-313.pyc",
+      "source": "backend/market_lab/hilega_milega_audit_report_v1.py",
+      "sha256": "614c9be975a63d08a80ec67a9fcb8cb63c0cdc12a5c43b199884b8211909d88c"
+    },
+    {
+      "path": "backend/market_lab/__pycache__/hilega_milega_bearish_strategy_v1.cpython-313.pyc",
+      "source": "backend/market_lab/hilega_milega_bearish_strategy_v1.py",
+      "sha256": "1d9151a8ee11a1a425873d5647abbbcd8c4381f21c887b3002fdfd56232a820a"
+    },
+    {
+      "path": "backend/market_lab/__pycache__/hilega_milega_historical_replay_v1.cpython-313.pyc",
+      "source": "backend/market_lab/hilega_milega_historical_replay_v1.py",
+      "sha256": "a1ab59dcf8badb51513e24c1be40578bfc7945e74d5b3595d4181b755ad0253c"
+    },
+    {
+      "path": "backend/market_lab/__pycache__/hilega_milega_strategy_v1.cpython-313.pyc",
+      "source": "backend/market_lab/hilega_milega_strategy_v1.py",
+      "sha256": "1dfa9dc4f0f2fc8e8ec480c91dbdb79a4a9bb514512269f49ea545c82f749f5d"
+    },
+    {
+      "path": "backend/market_lab/__pycache__/hilega_nifty_option_price_grid_v1.cpython-313.pyc",
+      "source": "backend/market_lab/hilega_nifty_option_price_grid_v1.py",
+      "sha256": "9a318f8a3dc6e344b978823faa68742015f1789766fe9eaac4962f5f716de081"
+    },
+    {
+      "path": "backend/market_lab/__pycache__/hilega_opening_reference_v1.cpython-313.pyc",
+      "source": "backend/market_lab/hilega_opening_reference_v1.py",
+      "sha256": "17bd7404ddd5101ee58d32890c0817276185c8b8df736de09ca15984bf6cb5d3"
+    },
+    {
+      "path": "backend/market_lab/__pycache__/hilega_production_account_adapter_v1.cpython-313.pyc",
+      "source": "backend/market_lab/hilega_production_account_adapter_v1.py",
+      "sha256": "88701767f4d8ab612772a4d68a3e0acc19077d9162bb3c2b191cf6bab0dd0fea"
+    },
+    {
+      "path": "backend/market_lab/__pycache__/hilega_production_bridge_health_v1.cpython-313.pyc",
+      "source": "backend/market_lab/hilega_production_bridge_health_v1.py",
+      "sha256": "67a6a3575774e4ac7f87b91b7faa6af43f33676ac523b9cfd0d592562c58b984"
+    },
+    {
+      "path": "backend/market_lab/__pycache__/hilega_production_broker_observation_v1.cpython-313.pyc",
+      "source": "backend/market_lab/hilega_production_broker_observation_v1.py",
+      "sha256": "b0e4b7604f8021cb8a1540aece1992759ebd70353809676012a03b85eacf6226"
+    },
+    {
+      "path": "backend/market_lab/__pycache__/hilega_production_ownership_v1.cpython-313.pyc",
+      "source": "backend/market_lab/hilega_production_ownership_v1.py",
+      "sha256": "dbf67fe168a989d0c914821471447eb2540a19dde167aa290bf4708cc487adfe"
+    },
+    {
+      "path": "backend/market_lab/__pycache__/hilega_production_simulator_bridge_v1.cpython-313.pyc",
+      "source": "backend/market_lab/hilega_production_simulator_bridge_v1.py",
+      "sha256": "aefb1dd4e0705d6b40d5facf385d788d124f460876cc546a8eceda6ffe73588d"
+    },
+    {
+      "path": "backend/market_lab/__pycache__/hilega_sim_allocation_v1.cpython-313.pyc",
+      "source": "backend/market_lab/hilega_sim_allocation_v1.py",
+      "sha256": "b9263eb120ce67dc549e5730f66b01bb5c3e483507bad9b3255f3152173750d0"
+    },
+    {
+      "path": "backend/market_lab/__pycache__/hilega_v2_alignment_replay_v1.cpython-313.pyc",
+      "source": "backend/market_lab/hilega_v2_alignment_replay_v1.py",
+      "sha256": "fb2392cdea0afcd9184a9ebd677f079d9834aab1cc34b2d8209b3efcf1f0c50d"
+    },
+    {
+      "path": "backend/market_lab/__pycache__/hilega_worker_registration_v1.cpython-313.pyc",
+      "source": "backend/market_lab/hilega_worker_registration_v1.py",
+      "sha256": "f69bd3d2b001e4f143d68ff267e9b6c33d47137ca7947849077c9c7104ecf5fb"
+    },
+    {
+      "path": "backend/market_lab/__pycache__/live_shadow_step_audit_v1.cpython-313.pyc",
+      "source": "backend/market_lab/live_shadow_step_audit_v1.py",
+      "sha256": "884fd5c5ee07286ea8c15a99cdc423757dcb26349c5e19c998095875654c70bf"
+    },
+    {
+      "path": "backend/market_lab/__pycache__/platform_file_lock.cpython-313.pyc",
+      "source": "backend/market_lab/platform_file_lock.py",
+      "sha256": "089634f0236876cd8c44aae733e6432c87b92fcf67d567016d41434df4439b02"
+    },
+    {
+      "path": "backend/market_lab/hilega_execution_port_v1/__pycache__/__init__.cpython-313.pyc",
+      "source": "backend/market_lab/hilega_execution_port_v1/__init__.py",
+      "sha256": "c8168600782401e7bb2c524b6148c7cd9fab39987daaffec7b1b84e98d24f6b5"
+    },
+    {
+      "path": "backend/market_lab/hilega_execution_port_v1/__pycache__/adapter.cpython-313.pyc",
+      "source": "backend/market_lab/hilega_execution_port_v1/adapter.py",
+      "sha256": "7a2df49bed8ad6aba6a499df1ed604fc18b270e6656d322c3b87d45c4c1b91c1"
+    },
+    {
+      "path": "backend/market_lab/hilega_execution_port_v1/__pycache__/mapping.cpython-313.pyc",
+      "source": "backend/market_lab/hilega_execution_port_v1/mapping.py",
+      "sha256": "ed140af2c44b8a630e11c4874d89910528bf7622db2fb362cf8139760b20b304"
+    },
+    {
+      "path": "backend/market_lab/hilega_preparation_runtime_v1/__pycache__/__init__.cpython-313.pyc",
+      "source": "backend/market_lab/hilega_preparation_runtime_v1/__init__.py",
+      "sha256": "08a9307104b604962975286e400def94a5c3e47a1886538bbd8739cd89722572"
+    },
+    {
+      "path": "backend/market_lab/hilega_preparation_runtime_v1/__pycache__/atomic_binding.cpython-313.pyc",
+      "source": "backend/market_lab/hilega_preparation_runtime_v1/atomic_binding.py",
+      "sha256": "6b71bc224a327b5f084e93bc949695e99f5bfb3bd34fc14f8a978e86df3238da"
+    },
+    {
+      "path": "backend/market_lab/hilega_preparation_runtime_v1/__pycache__/cash_reservation.cpython-313.pyc",
+      "source": "backend/market_lab/hilega_preparation_runtime_v1/cash_reservation.py",
+      "sha256": "d84a74265abfe10048b9189d3d65f900394840998ec2dac6aa756dfaea46f8a1"
+    },
+    {
+      "path": "backend/market_lab/hilega_preparation_runtime_v1/__pycache__/evidence.cpython-313.pyc",
+      "source": "backend/market_lab/hilega_preparation_runtime_v1/evidence.py",
+      "sha256": "c8edbee2d17327d3134853bf6123c76cf28a1e4de6e9387c1f3937a7f8e3ee61"
+    },
+    {
+      "path": "backend/market_lab/hilega_preparation_runtime_v1/__pycache__/limit_candidate.cpython-313.pyc",
+      "source": "backend/market_lab/hilega_preparation_runtime_v1/limit_candidate.py",
+      "sha256": "577766d57c337cea933c18543694857e15d356a7f392cafea4b260ef887afbbe"
+    },
+    {
+      "path": "backend/market_lab/hilega_preparation_runtime_v1/__pycache__/pricing_preview.cpython-313.pyc",
+      "source": "backend/market_lab/hilega_preparation_runtime_v1/pricing_preview.py",
+      "sha256": "9dddee0a160f2def18c9a4bd8a9ac5601be98dc4d4284947418114899e052faf"
+    },
+    {
+      "path": "backend/market_lab/hilega_preparation_runtime_v1/__pycache__/reference_review.cpython-313.pyc",
+      "source": "backend/market_lab/hilega_preparation_runtime_v1/reference_review.py",
+      "sha256": "106e6e965329a7bdf38939975e426e67bede597e372e0c77ff0fee686ef862d7"
+    },
+    {
+      "path": "backend/market_lab/hilega_preparation_runtime_v1/__pycache__/source.cpython-313.pyc",
+      "source": "backend/market_lab/hilega_preparation_runtime_v1/source.py",
+      "sha256": "d1899d0eb86bbd5d36bcb804ad43440ad08131da0396ee3f3f9dfaffe4fbd857"
+    },
+    {
+      "path": "backend/market_lab/hilega_production_foundation/__pycache__/__init__.cpython-313.pyc",
+      "source": "backend/market_lab/hilega_production_foundation/__init__.py",
+      "sha256": "593277cb144d3bd998d3052780660906cd2d1aa777d342c8f6f496ab2259b033"
+    },
+    {
+      "path": "backend/market_lab/hilega_production_foundation/__pycache__/core.cpython-313.pyc",
+      "source": "backend/market_lab/hilega_production_foundation/core.py",
+      "sha256": "db83c256db2cae6fe10db82be6220f8f2b3d08fbd6979ffc7b330eb9135075a3"
+    }
+  ],
+  "original_modes": {
+    ".": 448,
+    "scripts": 448,
+    "RUNTIME-WHEELS.json": 384,
+    "hilega-production-cash-observation": 448,
+    "hilega-production-real-cash-shadow-gate": 448,
+    "wheels": 448,
+    "probe.py": 384,
+    "backend": 509,
+    "CLOSED-REGISTRATION.json": 384,
+    "hilega-production-contract-preview": 448,
+    "RELEASE-MANIFEST.json": 384,
+    "closed_worker_launcher.py": 384,
+    "requirements-candidate.lock": 384,
+    "runtime": 448,
+    "runtime-wheels": 448,
+    "rehearse.py": 384,
+    "scripts/hilega_production_simulator_bridge.py": 384,
+    "hilega-production-cash-observation/run.py": 384,
+    "hilega-production-cash-observation/analysis.py": 384,
+    "hilega-production-real-cash-shadow-gate/gate.py": 384,
+    "wheels/python_dotenv-1.2.3-py3-none-any.whl": 384,
+    "backend/market_lab": 448,
+    "hilega-production-contract-preview/run.py": 384,
+    "hilega-production-contract-preview/rules.py": 384,
+    "runtime/history_prepared_proof_v1.py": 384,
+    "runtime/history_aware_attempt_v1.py": 384,
+    "runtime/worker_history_preparation_v1.py": 384,
+    "runtime/history_aware_cycle_close_v1.py": 384,
+    "runtime/cycle_scope_v1.py": 384,
+    "runtime/history_aware_lifecycle_v1.py": 384,
+    "runtime/history_aware_preparation_v1.py": 384,
+    "runtime/closed_application_coordinator_v1.py": 384,
+    "runtime/authenticated_handoff_v1.py": 384,
+    "runtime/durable_closed_handoff_v1.py": 384,
+    "runtime/existing_request_attempt_v1.py": 384,
+    "runtime/owned_exit_pricing_candidate.py": 384,
+    "runtime/application_lifecycle_candidate_v1.py": 384,
+    "runtime/application_cycle_close_v1.py": 384,
+    "runtime-wheels/requirements-runtime.lock": 384,
+    "runtime-wheels/python-dotenv": 448,
+    "runtime-wheels/pydantic-core": 448,
+    "runtime-wheels/annotated-types": 448,
+    "runtime-wheels/typing-inspection": 448,
+    "runtime-wheels/pydantic": 448,
+    "runtime-wheels/typing-extensions": 448,
+    "runtime-wheels/python-dotenv/python_dotenv-1.2.3-py3-none-any.whl": 384,
+    "runtime-wheels/pydantic-core/pydantic_core-2.46.5-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl": 384,
+    "runtime-wheels/annotated-types/annotated_types-0.8.0-py3-none-any.whl": 384,
+    "runtime-wheels/typing-inspection/typing_inspection-0.4.4-py3-none-any.whl": 384,
+    "runtime-wheels/pydantic/pydantic-2.13.5-py3-none-any.whl": 384,
+    "runtime-wheels/typing-extensions/typing_extensions-4.16.0-py3-none-any.whl": 384,
+    "backend/market_lab/hilega_preparation_runtime_v1": 448,
+    "backend/market_lab/hilega_runtime_bootstrap_v1.py": 384,
+    "backend/market_lab/hilega_milega_bearish_strategy_v1.py": 384,
+    "backend/market_lab/hilega_milega_strategy_v1.py": 384,
+    "backend/market_lab/__init__.py": 384,
+    "backend/market_lab/hilega_milega_audit_report_v1.py": 384,
+    "backend/market_lab/hilega_combined_policy_v1.py": 384,
+    "backend/market_lab/__pycache__": 448,
+    "backend/market_lab/hilega_v2_alignment_replay_v1.py": 384,
+    "backend/market_lab/live_shadow_step_audit_v1.py": 384,
+    "backend/market_lab/hilega_provisioning_workflow_v1.py": 384,
+    "backend/market_lab/hilega_nifty_option_price_grid_v1.py": 384,
+    "backend/market_lab/hilega_sim_allocation_v1.py": 384,
+    "backend/market_lab/hilega_directional_coordinator_v1.py": 384,
+    "backend/market_lab/hilega_private_context_v1.py": 384,
+    "backend/market_lab/hilega_production_ownership_v1.py": 384,
+    "backend/market_lab/hilega_execution_port_v1": 448,
+    "backend/market_lab/hilega_production_foundation": 448,
+    "backend/market_lab/hilega_production_bridge_health_v1.py": 384,
+    "backend/market_lab/hilega_production_simulator_bridge_v1.py": 384,
+    "backend/market_lab/hilega_production_broker_observation_v1.py": 384,
+    "backend/market_lab/hilega_production_account_adapter_v1.py": 384,
+    "backend/market_lab/hilega_worker_registration_v1.py": 384,
+    "backend/market_lab/hilega_opening_reference_v1.py": 384,
+    "backend/market_lab/hilega_execution_session_factory_v1.py": 384,
+    "backend/market_lab/hilega_runtime_rsi_exception_v1.py": 384,
+    "backend/market_lab/domain.py": 384,
+    "backend/market_lab/hilega_exclusive_closed_route_v1.py": 384,
+    "backend/market_lab/hilega_milega_historical_replay_v1.py": 384,
+    "backend/market_lab/platform_file_lock.py": 384,
+    "backend/market_lab/hilega_preparation_runtime_v1/exit_dispatch.py": 384,
+    "backend/market_lab/hilega_preparation_runtime_v1/pricing_preview.py": 384,
+    "backend/market_lab/hilega_preparation_runtime_v1/__init__.py": 384,
+    "backend/market_lab/hilega_preparation_runtime_v1/source.py": 384,
+    "backend/market_lab/hilega_preparation_runtime_v1/evidence.py": 384,
+    "backend/market_lab/hilega_preparation_runtime_v1/__pycache__": 448,
+    "backend/market_lab/hilega_preparation_runtime_v1/atomic_binding.py": 384,
+    "backend/market_lab/hilega_preparation_runtime_v1/reference_review.py": 384,
+    "backend/market_lab/hilega_preparation_runtime_v1/ownership_checks": 448,
+    "backend/market_lab/hilega_preparation_runtime_v1/ownership_state.py": 384,
+    "backend/market_lab/hilega_preparation_runtime_v1/cash_reservation.py": 384,
+    "backend/market_lab/hilega_preparation_runtime_v1/limit_candidate.py": 384,
+    "backend/market_lab/hilega_preparation_runtime_v1/dependencies.json": 384,
+    "backend/market_lab/hilega_preparation_runtime_v1/collect.py": 384,
+    "backend/market_lab/__pycache__/hilega_production_bridge_health_v1.cpython-313.pyc": 384,
+    "backend/market_lab/__pycache__/hilega_milega_strategy_v1.cpython-313.pyc": 384,
+    "backend/market_lab/__pycache__/hilega_nifty_option_price_grid_v1.cpython-313.pyc": 384,
+    "backend/market_lab/__pycache__/hilega_directional_coordinator_v1.cpython-313.pyc": 384,
+    "backend/market_lab/__pycache__/hilega_exclusive_closed_route_v1.cpython-313.pyc": 384,
+    "backend/market_lab/__pycache__/domain.cpython-313.pyc": 384,
+    "backend/market_lab/__pycache__/hilega_production_account_adapter_v1.cpython-313.pyc": 384,
+    "backend/market_lab/__pycache__/hilega_milega_audit_report_v1.cpython-313.pyc": 384,
+    "backend/market_lab/__pycache__/hilega_v2_alignment_replay_v1.cpython-313.pyc": 384,
+    "backend/market_lab/__pycache__/hilega_combined_policy_v1.cpython-313.pyc": 384,
+    "backend/market_lab/__pycache__/hilega_opening_reference_v1.cpython-313.pyc": 384,
+    "backend/market_lab/__pycache__/hilega_production_simulator_bridge_v1.cpython-313.pyc": 384,
+    "backend/market_lab/__pycache__/hilega_sim_allocation_v1.cpython-313.pyc": 384,
+    "backend/market_lab/__pycache__/hilega_execution_session_factory_v1.cpython-313.pyc": 384,
+    "backend/market_lab/__pycache__/__init__.cpython-313.pyc": 384,
+    "backend/market_lab/__pycache__/platform_file_lock.cpython-313.pyc": 384,
+    "backend/market_lab/__pycache__/hilega_milega_historical_replay_v1.cpython-313.pyc": 384,
+    "backend/market_lab/__pycache__/hilega_milega_bearish_strategy_v1.cpython-313.pyc": 384,
+    "backend/market_lab/__pycache__/hilega_production_broker_observation_v1.cpython-313.pyc": 384,
+    "backend/market_lab/__pycache__/live_shadow_step_audit_v1.cpython-313.pyc": 384,
+    "backend/market_lab/__pycache__/hilega_production_ownership_v1.cpython-313.pyc": 384,
+    "backend/market_lab/__pycache__/hilega_worker_registration_v1.cpython-313.pyc": 384,
+    "backend/market_lab/hilega_execution_port_v1/__init__.py": 384,
+    "backend/market_lab/hilega_execution_port_v1/terminal.py": 384,
+    "backend/market_lab/hilega_execution_port_v1/__pycache__": 448,
+    "backend/market_lab/hilega_execution_port_v1/mapping.py": 384,
+    "backend/market_lab/hilega_execution_port_v1/adapter.py": 384,
+    "backend/market_lab/hilega_production_foundation/__init__.py": 384,
+    "backend/market_lab/hilega_production_foundation/__pycache__": 448,
+    "backend/market_lab/hilega_production_foundation/core.py": 384,
+    "backend/market_lab/hilega_production_foundation/__pycache__/core.cpython-313.pyc": 384,
+    "backend/market_lab/hilega_production_foundation/__pycache__/__init__.cpython-313.pyc": 384,
+    "backend/market_lab/hilega_execution_port_v1/__pycache__/mapping.cpython-313.pyc": 384,
+    "backend/market_lab/hilega_execution_port_v1/__pycache__/adapter.cpython-313.pyc": 384,
+    "backend/market_lab/hilega_execution_port_v1/__pycache__/__init__.cpython-313.pyc": 384,
+    "backend/market_lab/hilega_preparation_runtime_v1/__pycache__/reference_review.cpython-313.pyc": 384,
+    "backend/market_lab/hilega_preparation_runtime_v1/__pycache__/cash_reservation.cpython-313.pyc": 384,
+    "backend/market_lab/hilega_preparation_runtime_v1/__pycache__/pricing_preview.cpython-313.pyc": 384,
+    "backend/market_lab/hilega_preparation_runtime_v1/__pycache__/atomic_binding.cpython-313.pyc": 384,
+    "backend/market_lab/hilega_preparation_runtime_v1/__pycache__/limit_candidate.cpython-313.pyc": 384,
+    "backend/market_lab/hilega_preparation_runtime_v1/__pycache__/__init__.cpython-313.pyc": 384,
+    "backend/market_lab/hilega_preparation_runtime_v1/__pycache__/evidence.cpython-313.pyc": 384,
+    "backend/market_lab/hilega_preparation_runtime_v1/__pycache__/source.cpython-313.pyc": 384,
+    "backend/market_lab/hilega_preparation_runtime_v1/ownership_checks/bridge.py": 384,
+    "backend/market_lab/hilega_preparation_runtime_v1/ownership_checks/ownership_review.py": 384,
+    "backend/market_lab/hilega_preparation_runtime_v1/ownership_checks/__init__.py": 384,
+    "backend/market_lab/hilega_preparation_runtime_v1/ownership_checks/risk_evidence_audit.py": 384,
+    "backend/market_lab/hilega_preparation_runtime_v1/ownership_checks/signature_checks.py": 384,
+    "backend/market_lab/hilega_preparation_runtime_v1/ownership_checks/historical_receipt_checks.py": 384,
+    "backend/market_lab/hilega_preparation_runtime_v1/ownership_checks/reservation_checks.py": 384
+  },
+  "approved_file_bytes_changed": false,
+  "installed_bundle_read_only": true
+}

@@ -1,0 +1,83 @@
+{
+  "status": "CLOSED_POSTDEPLOY_CHECK_REQUIRES_REVIEW",
+  "assessed_at": "2026-11-01T16:26:15.925249+00:00",
+  "checks": {
+    "installed_hook_hashes_match": true,
+    "companion_integrity_check_passed": true,
+    "all_services_active": true,
+    "service_pids_stable": true,
+    "controller_remains_paused": true,
+    "no_pending_stop": true,
+    "heartbeat_advances_on_same_lease": false,
+    "heartbeat_current_and_healthy": true,
+    "closed_adapter": true,
+    "no_preparation_or_adapter_activity": true,
+    "execution_candidate_not_enrolled": true
+  },
+  "services": [
+    {
+      "unit": "hilega-production-source-worker.service",
+      "active": true,
+      "sub_state": "running",
+      "pid": 18649,
+      "restart_count": 0
+    },
+    {
+      "unit": "hilega-worker.service",
+      "active": true,
+      "sub_state": "running",
+      "pid": 18647,
+      "restart_count": 0
+    },
+    {
+      "unit": "hilega-api.service",
+      "active": true,
+      "sub_state": "running",
+      "pid": 18645,
+      "restart_count": 0
+    },
+    {
+      "unit": "hilega-lifecycle-reference.service",
+      "active": true,
+      "sub_state": "running",
+      "pid": 18643,
+      "restart_count": 0
+    },
+    {
+      "unit": "hilega-observation-analytics.service",
+      "active": true,
+      "sub_state": "running",
+      "pid": 18641,
+      "restart_count": 0
+    },
+    {
+      "unit": "hilega-observation-readiness.service",
+      "active": true,
+      "sub_state": "running",
+      "pid": 18639,
+      "restart_count": 0
+    }
+  ],
+  "heartbeat_at": "2026-11-01T21:56:09.496644+05:30",
+  "heartbeat_age_seconds": 6.351,
+  "application_counts": {
+    "preparation_plans": 0,
+    "preparation_shadow_holds": 0,
+    "preparation_outbox": 0
+  },
+  "adapter_counts": {
+    "requests": 0,
+    "attempts": 0,
+    "receipts": 0
+  },
+  "scope": "RUNNING_CLOSED_PREPARATION_HOOK_ONLY",
+  "live_database_inspected": true,
+  "sql_mutations_issued": false,
+  "account_capture_requested": false,
+  "service_control_commands_issued": false,
+  "execution_session_factory_configured": false,
+  "broker_network_validated": false,
+  "full_release_regression_reexecuted": false,
+  "production_execution_enabled": false,
+  "production_ready": false
+}

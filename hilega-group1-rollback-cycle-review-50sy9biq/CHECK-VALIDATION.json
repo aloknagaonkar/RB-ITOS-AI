@@ -1,0 +1,21 @@
+{
+  "status": "PASS_TARGETED_ONLY",
+  "scope": "GROUP1_CONTROLLED_ROLLBACK_AND_IDENTICAL_RESTORE_PREPARATION",
+  "collected_cases": 8,
+  "failed": 0,
+  "skipped": 0,
+  "pytest_exit_code": 0,
+  "prior_closed_release_cases_passed": 314,
+  "prior_regression_reexecuted": false,
+  "cycle_plan": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-rollback-cycle-review-50sy9biq/CYCLE-PLAN.json",
+  "cycle_plan_sha256": "c9cbbb88467a416fbb8968425de25bf63aba09d132a1492be195c176dc5b0ed5",
+  "unchanged_approved_plan_reused": true,
+  "validation_receipt_copied_byte_for_byte": true,
+  "existing_backups_verified": true,
+  "actual_cycle_executed": false,
+  "application_services_changed": false,
+  "installed_sources_modified": false,
+  "automatic_database_restore": false,
+  "production_execution_enabled": false,
+  "production_ready": false
+}

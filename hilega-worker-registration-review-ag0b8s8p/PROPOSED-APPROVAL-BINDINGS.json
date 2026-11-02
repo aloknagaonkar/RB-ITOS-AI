@@ -1,0 +1,13 @@
+{
+  "scope": "PROPOSED_NEW_RELEASE_BINDINGS",
+  "base_release_manifest_sha256": "e5b7172ab14099264e90aa7865e9e56588d1e4503aa3063707d3a446ec73131e",
+  "new_release_manifest_sha256": "266050ec42637c0bb8d2f71845d2f32f2eff22f49b486707ea86d1ad4dcf2e9b",
+  "public_registration_sha256": "fdcbe39fc90fd1d23a9527ba0f3b8f3016753ff437390f208de8f7f584a46e32",
+  "old_supervisor_approval_retained": true,
+  "new_supervisor_approval_written": false,
+  "release_approved": false,
+  "source_service_execstart_changed": false,
+  "companion_pin_chain_reconciled_for_new_deployment": false,
+  "execution_factory_configured": false,
+  "production_execution_enabled": false
+}

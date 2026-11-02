@@ -1,0 +1,10 @@
+{
+  "model": "UNCHANGED_PLAN_VALIDATION_REUSE_V1",
+  "original_plan": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-rollout-plan-nvnouzgc/PLAN.json",
+  "plan_sha256": "ef2b637dd6bdebf57bf03b56b4020cd39ab6735e8a9434e002dc452792dedcc6",
+  "original_validation_sha256": "f12f0f1f60b44b47a0df6d5d6df567c5687b086c65ad38dbc24b4b7c74ac4819",
+  "new_plan_bytes_identical": true,
+  "new_validation_bytes_identical": true,
+  "tests_reexecuted": false,
+  "production_execution_enabled": false
+}

@@ -1,0 +1,7 @@
+{
+  "action": "apply",
+  "plan": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-rollout-plan-8bqcbhss/PLAN.json",
+  "exit_code": 1,
+  "stdout": "",
+  "stderr": "Traceback (most recent call last):\n  File \"/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-rollout-v1/manage.py\", line 121, in <module>\n    if __name__=='__main__':raise SystemExit(main())\n                                             ~~~~^^\n  File \"/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-rollout-v1/manage.py\", line 53, in main\n    result=apply(plan,review,manager)\n  File \"/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-rollout-v1/rollout.py\", line 60, in apply\n    verify(destination,json.loads(existing))\n    ~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-rollout-v1/assembly.py\", line 62, in verify\n    need(actual==set(manifest['files'])|{'RELEASE-MANIFEST.json'},'UNMANIFESTED_RELEASE_FILE')\n    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-rollout-v1/assembly.py\", line 12, in need\n    if not ok:raise ValueError(reason)\n              ^^^^^^^^^^^^^^^^^^^^^^^^\nValueError: UNMANIFESTED_RELEASE_FILE\n"
+}

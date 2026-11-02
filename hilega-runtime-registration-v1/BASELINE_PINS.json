@@ -1,0 +1,10 @@
+{
+  "hilega-runtime-bootstrap-v1/checkpoint.py": "416426050bb026bb01495596c4da54880de0183c22b16f6a7a26fbc2f76757d1",
+  "hilega-runtime-bootstrap-v1/runtime_bootstrap_v1.py": "81c15565a9ed0c322b54f47a71b15e115e38411ab4490e9b3a074fe8fab2947f",
+  "hilega-runtime-bootstrap-v1/apply_and_test.py": "d3516318bf0dcc176558288051b4e8dd888decac070ec58d698e84e1f35c8293",
+  "hilega-runtime-bootstrap-v1/runtime_inventory.py": "e406aa670767252020308bb7b9f4b45cd343188e3eb63142b71ae14fbb6225a3",
+  "hilega-runtime-bootstrap-v1/README.md": "5324c474442358754b26380e3cb372fab5807c9b862baefe77dac2f9dabdbaad",
+  "hilega-runtime-bootstrap-v1/test_runtime_bootstrap.py": "a76a5c6848d9a032189df3bbd822df2b45bb55c4f5ee8747ba8439464165e796",
+  "hilega-runtime-bootstrap-v1/BASELINE_PINS.json": "a539f26efaa402e8051ca548fba57fab3d8ee8070e3574c8d85cc0242b41bfff",
+  "hilega-runtime-bootstrap-v1/MANIFEST.json": "2d5c5631cb8c809ad5b9a261d5b845e10ddd81595eab977c1ec885282fbbb733"
+}

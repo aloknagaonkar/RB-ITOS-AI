@@ -1,0 +1,17 @@
+{
+  "scope": "DISPOSABLE_MANAGED_CLOSED_REGISTRATION_PROBE",
+  "repo": "/home/aloknagaonkar46/RB-ITOS-AI",
+  "release_folder": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-worker-registration-review-ag0b8s8p/release",
+  "release_manifest_sha256": "266050ec42637c0bb8d2f71845d2f32f2eff22f49b486707ea86d1ad4dcf2e9b",
+  "registration": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-worker-registration-review-ag0b8s8p/release/CLOSED-REGISTRATION.json",
+  "registration_sha256": "fdcbe39fc90fd1d23a9527ba0f3b8f3016753ff437390f208de8f7f584a46e32",
+  "tool_manifest_sha256": "beea9f9fef76a00b1e249af70aa683866af8c8755e07bba521df375276c7e862",
+  "python": "/home/aloknagaonkar46/RB-ITOS-AI/.venv/bin/python",
+  "probe_script": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-worker-registration-review-ag0b8s8p/release/probe.py",
+  "probe_unit": "hilega-closed-registration-probe-e9de82e06e7a.service",
+  "application_services_modified": false,
+  "application_databases_opened": false,
+  "credentials_opened": false,
+  "source_worker_executed": false,
+  "production_execution_enabled": false
+}

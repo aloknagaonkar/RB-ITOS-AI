@@ -1,0 +1,7 @@
+{
+  "action": "status",
+  "plan": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-rollout-plan-8bqcbhss/PLAN.json",
+  "exit_code": 0,
+  "stdout": "{\n  \"phase\": \"CLOSED_BUNDLE_RUNNING\",\n  \"production_execution_enabled\": false,\n  \"production_ready\": false\n}\n",
+  "stderr": ""
+}

@@ -1,0 +1,12 @@
+{
+  "status": "GROUP1_MANAGED_DISPOSABLE_WORKER_PASS",
+  "command_exit_code": 0,
+  "actual_candidate_worker_executed": true,
+  "isolated_managed_startup_and_restart_verified": true,
+  "application_service_control_commands_issued": false,
+  "disposable_databases_only": true,
+  "production_worker_deployed": false,
+  "group1_complete": false,
+  "production_execution_enabled": false,
+  "production_ready": false
+}

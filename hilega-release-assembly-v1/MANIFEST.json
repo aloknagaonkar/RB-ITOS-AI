@@ -1,0 +1,9 @@
+{
+  "checkpoint.py": "416426050bb026bb01495596c4da54880de0183c22b16f6a7a26fbc2f76757d1",
+  "supervisor_review.py": "1ed6ff82eed2bf76d89d6cdbf6fb3f70c46138a7ed585859a378c8b8d097ac5d",
+  "test_assembly.py": "33de03675349dcb37e9df89de26245e9c651728648ba43aa78ac4ad859153056",
+  "apply_and_test.py": "6915fdaa110d05ef6f7ad6e2bb7ee91aeee26ec2f9fd40ab2e2846381009cdfb",
+  "assembly.py": "d3597e91524afb010af7ca8eabffda30a74e10b1fa59f4d536efd11e9ab828ec",
+  "README.md": "18997c34d11795709b4c6dc90cff64919489614fcbf8aed95c12cf60e086459c",
+  "BASELINE_PINS.json": "b88b5ea0a167c50474c3fd8a38ae2f6dcf1b894dd5d614e001726136728872b2"
+}

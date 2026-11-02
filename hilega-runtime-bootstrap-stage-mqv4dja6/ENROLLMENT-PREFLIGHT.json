@@ -1,0 +1,9 @@
+{
+  "status": "WAITING_FOR_FRESH_DISABLED_PREPARATION",
+  "active_preparation_count": 0,
+  "existing_owner_table": false,
+  "live_provisioning_permitted": false,
+  "real_order_gate_remains_closed": true,
+  "source_resumed": false,
+  "secret_material_created": false
+}

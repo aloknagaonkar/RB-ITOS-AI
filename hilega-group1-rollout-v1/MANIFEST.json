@@ -1,0 +1,13 @@
+{
+  "test_rollout.py": "46aa24681ebb5d92138577b02062e7528429e2d191806fea6d9e8ebc99f1ae4c",
+  "checkpoint.py": "416426050bb026bb01495596c4da54880de0183c22b16f6a7a26fbc2f76757d1",
+  "supervisor_review.py": "1ed6ff82eed2bf76d89d6cdbf6fb3f70c46138a7ed585859a378c8b8d097ac5d",
+  "managed_processes.py": "83c6d960bf47571f6e5e1ed5647a7fa97da4d011fce71791a7e4a5045c905119",
+  "manage.py": "ff42eb482408eada0dee88feafd07ca808e6255818e32a211142c913a71cd88d",
+  "assembly.py": "d3597e91524afb010af7ca8eabffda30a74e10b1fa59f4d536efd11e9ab828ec",
+  "rollout.py": "a8cf27f5006cd6f57526cd24cd45e616445078d63e8a3de8516e2413498686de",
+  "README.md": "6d8a7a3cc444834ce7bbd83cc73051742ff53905b444d34f2d69b38c4e84db4b",
+  "BASELINE_PINS.json": "2a42b6a1e08a46afa803f137365f4b142a4030cd46e722b1b0fa04bab82e7f23",
+  "rehearse.py": "57ed696a6ec12eb7573920f52ca47dd92f27164998239a8b1ac27a47c660a084",
+  "maintenance_primitives.py": "2a630e50feaf57c4c4de18fd31dcec139d5f66607c5d092c46f14be97b6e1178"
+}

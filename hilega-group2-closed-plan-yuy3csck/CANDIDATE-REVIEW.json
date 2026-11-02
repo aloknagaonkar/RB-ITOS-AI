@@ -1,0 +1,5 @@
+{
+  "exit_code": 0,
+  "stderr": "",
+  "stdout": "{\n  \"status\": \"STATIC_CANDIDATE_DEPLOYMENT_REVIEW_ONLY\",\n  \"candidate_files_verified\": 86,\n  \"context_and_authority_review_hashes_verified\": true,\n  \"prior_74_case_receipt_verified\": true,\n  \"prior_tests_reexecuted\": false,\n  \"installed_recovery_compatibility\": \"REQUIRES_NEW_EXACT_RELEASE_BINDING_REVIEW\",\n  \"remaining_work\": [\n    \"VERIFY_CURRENT_INSTALLED_STATE_AND_RECOVERY_CONFIG_BEFORE_PLANNING\",\n    \"REHEARSE_NEW_RELEASE_RECOVERY_BINDING_WITH_FACTORY_DISABLED\",\n    \"CREATE_EXACT_INSTALL_BACKUP_AND_ROLLBACK_PLAN\",\n    \"RESOLVE_BROKER_TIMESTAMP_CONTRACT_BEFORE_REAL_EVIDENCE_ADOPTION\",\n    \"INDEPENDENT_AUTHORITY_ORDER_POLICY_AND_FEE_RELEASE_REVIEW\"\n  ],\n  \"live_apply_available\": false,\n  \"production_authority_provisioned\": false,\n  \"group2_complete\": false,\n  \"production_execution_enabled\": false,\n  \"application_database_opened\": false,\n  \"service_commands_issued\": false,\n  \"installed_sources_modified\": false\n}\n"
+}

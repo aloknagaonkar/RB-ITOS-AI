@@ -1,0 +1,10 @@
+{
+  "hilega-runtime-registration-v1/test_release_review.py": "d972e796a8a28e9619ee38c2583614fdd3e9411df418358b13148c698b754df2",
+  "hilega-runtime-registration-v1/release_review.py": "b7d97d8b3bb0e9eefa14d9b27935cdac3d8174eea97c9264f3b04ef1a40e60f5",
+  "hilega-runtime-registration-v1/checkpoint.py": "416426050bb026bb01495596c4da54880de0183c22b16f6a7a26fbc2f76757d1",
+  "hilega-runtime-registration-v1/apply_and_test.py": "87c517dfade1a5702f8b2077211caf619ea2ba64afd8d95eeec028daaf1ce29c",
+  "hilega-runtime-registration-v1/README.md": "e799ac8e20169bd09255e8096c9d8bb546c01c043baebce926b58e36c385c0cd",
+  "hilega-runtime-registration-v1/BASELINE_PINS.json": "109db25b9684dbc1a61b1a355e364c6e36f373677b167650b8861418f347fe68",
+  "hilega-runtime-registration-v1/MANIFEST.json": "1d7362a30d260eb9219e0008b2ed325cf3cc3ff6b9e90b54014fe0f1f57dac50",
+  "hilega-runtime-registration-v1/DYNAMIC_PINS.json": "db26af3a47d12efcd31962542fb33ab5a1fc807d1a8019db275fd597f27c6684"
+}

@@ -1,0 +1,12 @@
+{
+  "status": "REVIEWED_APPROVAL_BINDINGS_MATCH",
+  "approval_hashes_match": true,
+  "private_values_exported": false,
+  "environment_file_opened": false,
+  "approvals_modified": false,
+  "services_changed": false,
+  "source_command_matches": true,
+  "captured_environment_closed_route": true,
+  "environment_hash_revalidated": false,
+  "complete_release_approval_reconciled": false
+}

@@ -1,0 +1,13 @@
+# Closed one-position policy upgrade
+
+Default check combines the passed 89-case policy candidate receipt, two native pause-recovery rehearsals on new disposable databases, a disposable user-systemd worker startup/restart rehearsal, exact unit syntax validation, current installed status before/after, and an exact 30-minute deployment/rollback plan. The rollback target is the currently deployed Group 2 release from --current-plan. Earlier policy/regression cases are not rerun. The check starts only a named disposable systemd unit, not the application services.
+
+User policy remains maximum positions 1, premium cap null, daily-loss cutoff null. Hard execution port bytes must match the currently installed release. Factory-disabled registration remains mandatory. Existing cash and reservation checks remain intact.
+
+Check arguments: --repo, --current-plan, --current-plan-sha256, --policy-review. Apply/status/rollback arguments: --repo --action ACTION --plan EXACT_PLAN --approve-plan-sha256 EXACT_DIGEST. Use the new generated plan digest, not the predecessor digest. Apply stops six application services, makes verified quiescent private code/config/database backups, installs the sealed candidate and matching wrapper/recovery bindings, runs pause recovery first, starts services and verifies the empty paused baseline and healthy heartbeat. The file transaction, apply, backup, rollback and health functions are unchanged from the previously VM-validated closed upgrade implementation; static AST comparison verified that reuse. This is not an end-to-end fault-injection certification.
+
+On failure the installer holds application services stopped and preserves receipts. Explicit rollback restores exact old wrapper/recovery code after checking backups and external edits. It never restores databases or rewinds the source cursor. New immutable artifacts are retained. Reapplying a failed/rolled-back transaction requires reviewed recovery; no automatic retry.
+
+After successful upgrade, use THIS package's status command and new PLAN.json. The predecessor upgrade status is bound to the previous wrapper and will reject the new one. No old validation receipt is rewritten. New plan folder ACTIVE-RUNTIME.json identifies this transaction. MILESTONES.md updates from the passed policy review baseline.
+
+No authority is provisioned, no owner enrolled, no live controller resumed and no orders sent. Native/managed rehearsals use only disposable state. Source and candidate bytes are hash-verified, not modified. Local validation is syntax/ZIP and AST comparison only. All behavioral checks run on the user VM.

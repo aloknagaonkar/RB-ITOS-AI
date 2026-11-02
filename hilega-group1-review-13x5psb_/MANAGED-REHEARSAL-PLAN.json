@@ -1,0 +1,14 @@
+{
+  "scope": "ACTUAL_CLOSED_WORKER_DISPOSABLE_MANAGED_REHEARSAL",
+  "repo": "/home/aloknagaonkar46/RB-ITOS-AI",
+  "release_folder": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/release",
+  "release_manifest_sha256": "eeecd69d6dcbbffa9288406e6b2c48c37f69e0cc809c5e6d69fab62613e26e71",
+  "python": "/home/aloknagaonkar46/RB-ITOS-AI/.venv/bin/python",
+  "unit": "hilega-group1-worker-rehearsal-ab221a963a25.service",
+  "output": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-13x5psb_/managed-disposable-state",
+  "tool_manifest_sha256": "9cf930d92f44849b38dfeeee327bb5fd1216ad445654abe2eb30301807b4d927",
+  "application_services_modified": false,
+  "live_database_opened": false,
+  "credentials_provided": false,
+  "production_execution_enabled": false
+}

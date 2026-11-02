@@ -1,0 +1,35 @@
+{
+  "scope": "PROPOSED_CLOSED_SOURCE_WORKER_BUNDLE_DEPLOYMENT",
+  "repo": "/home/aloknagaonkar46/RB-ITOS-AI",
+  "bundle": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group1-review-1u2obmvm/release",
+  "release_manifest_sha256": "eeecd69d6dcbbffa9288406e6b2c48c37f69e0cc809c5e6d69fab62613e26e71",
+  "installed_worker": {
+    "path": "scripts/hilega_production_simulator_bridge.py",
+    "old_sha256": "154cbe309b86dfc8e3ff7f758cd0f6aec4e539d511483ef07f60ed8487ddbdb9"
+  },
+  "existing_supervisor_bindings_match": true,
+  "new_release_approved": false,
+  "live_apply_available": false,
+  "source_route": "CLOSED_PREPARATION_ONLY",
+  "execution_factory_configured": false,
+  "required_before_apply": [
+    "FULL_SERVICE_IMPORT_AND_DISTRIBUTION_RECONCILIATION",
+    "EXACT_INSTALL_DESTINATION_AND_WORKER_WRAPPER_REVIEW",
+    "NEW_RELEASE_SUPERVISOR_AND_COMPANION_BINDINGS",
+    "FULL_RELEASE_REGRESSION",
+    "APPROVED_SERVICE_QUIESCENCE_AND_REAL_CODE_DATABASE_BACKUPS",
+    "LIVE_EMPTY_PAUSED_BASELINE_RECHECK",
+    "EXACT_PLAN_APPROVAL"
+  ],
+  "rollback_policy": {
+    "restore_verified_code_only": true,
+    "stop_affected_services_before_restore": true,
+    "restore_previously_active_service_set": true,
+    "recheck_new_lease_and_advancing_heartbeat": true,
+    "automatic_live_database_rewind": false,
+    "retain_database_backups": true
+  },
+  "controller_resume_permitted": false,
+  "production_execution_enabled": false,
+  "production_ready": false
+}

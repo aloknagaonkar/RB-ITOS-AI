@@ -1,0 +1,20 @@
+{
+  "hilega-group1-rollout-v1/test_rollout.py": "46aa24681ebb5d92138577b02062e7528429e2d191806fea6d9e8ebc99f1ae4c",
+  "hilega-group1-rollout-v1/checkpoint.py": "416426050bb026bb01495596c4da54880de0183c22b16f6a7a26fbc2f76757d1",
+  "hilega-group1-rollout-v1/supervisor_review.py": "1ed6ff82eed2bf76d89d6cdbf6fb3f70c46138a7ed585859a378c8b8d097ac5d",
+  "hilega-group1-rollout-v1/managed_processes.py": "83c6d960bf47571f6e5e1ed5647a7fa97da4d011fce71791a7e4a5045c905119",
+  "hilega-group1-rollout-v1/manage.py": "ff42eb482408eada0dee88feafd07ca808e6255818e32a211142c913a71cd88d",
+  "hilega-group1-rollout-v1/assembly.py": "d3597e91524afb010af7ca8eabffda30a74e10b1fa59f4d536efd11e9ab828ec",
+  "hilega-group1-rollout-v1/rollout.py": "a8cf27f5006cd6f57526cd24cd45e616445078d63e8a3de8516e2413498686de",
+  "hilega-group1-rollout-v1/README.md": "6d8a7a3cc444834ce7bbd83cc73051742ff53905b444d34f2d69b38c4e84db4b",
+  "hilega-group1-rollout-v1/BASELINE_PINS.json": "2a42b6a1e08a46afa803f137365f4b142a4030cd46e722b1b0fa04bab82e7f23",
+  "hilega-group1-rollout-v1/rehearse.py": "57ed696a6ec12eb7573920f52ca47dd92f27164998239a8b1ac27a47c660a084",
+  "hilega-group1-rollout-v1/MANIFEST.json": "efb894906ba847de06e40e42bf5fa1d0980089a6db40334def8f6b3de96e7d83",
+  "hilega-group1-rollout-v1/maintenance_primitives.py": "2a630e50feaf57c4c4de18fd31dcec139d5f66607c5d092c46f14be97b6e1178",
+  "hilega-group1-rollback-cycle-v1/cycle.py": "3c5533b54c39fd14520c7147570d453589e7a891244511b16ae3ca225bd566e1",
+  "hilega-group1-rollback-cycle-v1/test_cycle.py": "8b600de645d2ba69d73e1f0a9f102147d9fb60ea43e5103fc792bb7c1a052e6d",
+  "hilega-group1-rollback-cycle-v1/manage.py": "653d9eb98f782ddd9f65b3ef1fd2d9d7e07fdd2aa744b1f3deadb9c6887fcd08",
+  "hilega-group1-rollback-cycle-v1/README.md": "532b01a338d1297251bf46f525dfb43507f4bc4f7bd13921c6854ffccdc8e096",
+  "hilega-group1-rollback-cycle-v1/BASELINE_PINS.json": "37926782d090070918e63d2a495a8d79efc8320b534019b6ebdde28545587270",
+  "hilega-group1-rollback-cycle-v1/MANIFEST.json": "1085748df2cec1013cd9d55920ccc7de90e7ab5b27ba7cb5cacb0942ff5fea43"
+}

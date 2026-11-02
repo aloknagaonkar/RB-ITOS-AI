@@ -1,0 +1,36 @@
+{
+  "before": {
+    "hilega-api.service": {
+      "active": "active",
+      "pid": 4964,
+      "sub": "running"
+    },
+    "hilega-lifecycle-reference.service": {
+      "active": "active",
+      "pid": 4962,
+      "sub": "running"
+    },
+    "hilega-observation-analytics.service": {
+      "active": "active",
+      "pid": 4960,
+      "sub": "running"
+    },
+    "hilega-observation-readiness.service": {
+      "active": "active",
+      "pid": 4958,
+      "sub": "running"
+    },
+    "hilega-production-source-worker.service": {
+      "active": "active",
+      "pid": 4972,
+      "sub": "running"
+    },
+    "hilega-worker.service": {
+      "active": "active",
+      "pid": 4966,
+      "sub": "running"
+    }
+  },
+  "phase": "CLOSED_BUNDLE_RUNNING",
+  "production_execution_enabled": false
+}
