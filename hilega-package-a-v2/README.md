@@ -1,0 +1,14 @@
+# Package A — combined candidate preparation and recovery validation
+
+One command: `.venv/bin/python hilega-package-a-v2/manage.py --repo "$PWD"`. Requires the managed-recovery V2 PASS receipt. Reuses prior timeout and guard-loss results, runs six recovery/admission tests, executes the pinned current baseline review before and after, and runs two new process rehearsals.
+
+1. Fresh synthetic signal: actual deployed launcher and Source logic run in a marked disposable workspace under a deterministic market clock. Fixture-only core datetime injection is confined to the worker process; native Service uses the matching explicit clock. No order gate or transport clearance is patched. Signed synthetic evidence is passed through the configured private file provider, not through a live broker. A post-arm ENTRY is appended to the disposable journal, creating one disabled request, plan, binding and signed local cash reservation. Managed pause and worker-restart replay invariants are verified.
+2. Pending restart: SIGKILL the armed disposable worker, restart the exact worker launcher under the same fixture clock, verify native startup pauses and retains the source cursor, then execute the pending registry recovery candidate as a transient user systemd oneshot. Admission remains blocked until recovery completes. This simulates process/startup recovery, NOT VM reboot or loss of the user systemd manager.
+
+Only hilega-disposable-* units and disposable databases are modified. No live controller changes, live signals, credentials, authority provisioning or enrollment. Synthetic pin material is public test data, not trusted production authority.
+
+Outputs include one RESULT.json and one SHA-bound MAINTENANCE-PLAN.json with observed state, recovery unit template, dependency requirements and quiescent backup requirements. It is a review proposal, not a live apply command. The native adapter deliberately requires a disposable marker. Boot unit installation, live adapter integration, real quiescent backups and final exact-state approval are still required before opening a live preparation window. Existing native worker startup pause is exercised, but actual reboot and total manager loss are not tested.
+
+Full repository regression and prior passed behavior suites are not rerun. The current 10-case baseline review runs twice to verify the live controller stays paused. New behavioral tests and process rehearsals run only on your VM; local validation is syntax/archive only.
+
+V2 corrects the synthetic journal fixture: explicit reconstructed=false and exact completed five-minute timestamps. The clock is frozen at 09:29:55 during startup/arming, then released at 09:29:58 so the fresh signal is 09:30:00 after resume without invalidating the heartbeat. No application validator is weakened. Three checks exercise the bundled accepted() parser before process rehearsal. Failed runs print synthetic logs and preparation rejection reasons automatically.
