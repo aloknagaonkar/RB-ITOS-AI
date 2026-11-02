@@ -1,0 +1,18 @@
+{
+  "hilega-group2-window-review-v2/README.md": "40650809acfa641c57b199ed9094b066dca5bb260f2c9152d9aebfb0134316d7",
+  "hilega-group2-window-review-v2/SOURCE-PINS.json": "7645e0cf63a1fb88939f9feb9a2ba84aa80fc7ab64875c06adab0dfa96925b3f",
+  "hilega-group2-window-review-v2/test_review.py": "c0b6348fe69c11433834a4970d929ef686c5e6a90954cd77f233840aba6b231a",
+  "hilega-group2-window-review-v2/window_review.py": "c69260a03131904a981fb4a4b858ae89781aa5ca3f541236c1815bd38da777ef",
+  "hilega-group2-window-review-v2/manage.py": "6d136704928d53d3bb4562561b5780d5f5d4305c5395342324293a95810d18cf",
+  "hilega-group2-window-review-v2/MANIFEST.json": "9fe23b37d99d75a482168bf1c1617bae4358b8e611f266ca09d1a954a0030843",
+  "hilega-group2-bounded-window-v2/README.md": "3c10d2cfb8739609f6b8603c0883a8e7541e65f102d296a907cd09caaf615a54",
+  "hilega-group2-bounded-window-v2/BASELINE-PINS.json": "01c74d28190e0fa5916574b48bbf12186a856678a552332332a1ec75276e1d1d",
+  "hilega-group2-bounded-window-v2/test_window.py": "8a47de785c45d6f3afeecb66aea6f48378c1e63be3524d027bf9892a05ce94fa",
+  "hilega-group2-bounded-window-v2/native.py": "9e0c2a4d9b0140d51e9b733d5c09f760ae73967fc6065fd8ce1f98a306dec77e",
+  "hilega-group2-bounded-window-v2/window.py": "0a1da6611412dcbdef6f6747c9e9393db66bb3a74fec5d958b89959f77a4b7a7",
+  "hilega-group2-bounded-window-v2/guard.py": "268f33b9ab209eefe4c2c0937abf6544f6f71d19b1e0fcda42b5f617758b7d29",
+  "hilega-group2-bounded-window-v2/rehearse.py": "5aa801e2f1b518570d9f656eec9614a734000a04b2690e3fd0aaec9659c4e3f4",
+  "hilega-group2-bounded-window-v2/manage.py": "bd30a24ea2ae79f95ab69751a0db94840129266739c5fcd23988a58cb85ae1aa",
+  "hilega-group2-bounded-window-v2/arm.py": "1623b42ff47d4d1b1db3933543f42466f2078536511598615abeba5884cb7f53",
+  "hilega-group2-bounded-window-v2/MANIFEST.json": "0a6e560cc26073809ee729ab3cae0b9e35d2c0284bc3a9ea2a7443b520fdc583"
+}
