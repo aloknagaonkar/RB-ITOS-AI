@@ -1,0 +1,32 @@
+{
+  "status": "success",
+  "data": {
+    "NSE_INDEX:Nifty 50": {
+      "ohlc": {
+        "open": 23582.25,
+        "high": 23675.3,
+        "low": 23482.8,
+        "close": 23671.7
+      },
+      "depth": {
+        "buy": [],
+        "sell": []
+      },
+      "timestamp": "2026-11-03T11:45:52.599+05:30",
+      "instrument_token": "NSE_INDEX|Nifty 50",
+      "symbol": "NA",
+      "last_price": 23671.7,
+      "volume": null,
+      "average_price": null,
+      "oi": null,
+      "net_change": 230.9,
+      "total_buy_quantity": null,
+      "total_sell_quantity": null,
+      "lower_circuit_limit": null,
+      "upper_circuit_limit": null,
+      "last_trade_time": "1793686552000",
+      "oi_day_high": null,
+      "oi_day_low": null
+    }
+  }
+}

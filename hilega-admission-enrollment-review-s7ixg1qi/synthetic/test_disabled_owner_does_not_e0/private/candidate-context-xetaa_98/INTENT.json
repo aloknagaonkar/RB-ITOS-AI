@@ -1,0 +1,7 @@
+{
+  "config_sha256": "1f8bcbef59235237f7169f1a7fead8438e226c4aac993926a58140dad7e194af",
+  "lifecycle_fingerprint": "e20f68b2bc3d177687acbdacff7c44486e6d7c8778240d588f952330ecd728de",
+  "model": "HILEGA_CANDIDATE_CONTEXT_ENROLLMENT_INTENT_V1",
+  "production_authority_provisioned": false,
+  "production_execution_enabled": false
+}

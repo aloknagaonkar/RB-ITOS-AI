@@ -1,0 +1,5 @@
+{
+  "exit_code": 0,
+  "stdout": "{\"checked_at\": \"2026-11-03T21:18:17.892506+05:30\", \"session_date\": \"2026-11-03\", \"complete_sessions\": 28, \"indicator_warmup_ready\": true, \"issues\": [], \"missing_calendar_dates\": [\"2026-10-10\", \"2026-10-11\", \"2026-10-17\", \"2026-10-18\", \"2026-10-20\", \"2026-10-24\", \"2026-10-25\", \"2026-10-31\", \"2026-11-01\", \"2026-11-02\"], \"missing_dates_verified\": false, \"repair_attempted\": false, \"ready\": true}\n",
+  "stderr": ""
+}

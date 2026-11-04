@@ -1,0 +1,62 @@
+{
+  "model": "HILEGA_WINDOW_CLOSED_DEPLOYMENT_PROPOSAL_V1",
+  "active_plan": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-warmup-install-plan-6d56keoy/PLAN.json",
+  "active_plan_sha256": "25a6a37a1600b1a0cebb5026abd356712e9d764b048a4ae757a5c5c475d1f3f9",
+  "window_receipt": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-window-worker-review-s4otit3u/RESULT.json",
+  "window_receipt_sha256": "1e376b7aacce258293fce75d07d6b86d9b35673e21422805a3e6925e7ad4a6a7",
+  "installed_release_sha256": "e9e092399fcf29672d5273c18ef138de645a8feec573407954d1db62392d0b59",
+  "candidate": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-window-worker-review-s4otit3u/candidate",
+  "candidate_release_sha256": "a23ddba83ca884366a1007da3c3bee0edb3e356bd635b9dfcaffb192db264ce9",
+  "changes": [
+    {
+      "path": "backend/market_lab/hilega_preparation_runtime_v1/dependencies.json",
+      "installed_sha256": "72addf91843fc550ed02ae29f5f3afd04e7923b0da9cf7f754c630840fb81aa5",
+      "candidate_sha256": "af16d9d2bac6c0bed2969dc597887c469e492309556cc325afec5b277039028c"
+    },
+    {
+      "path": "runtime/admission_enrollment_flow.py",
+      "installed_sha256": null,
+      "candidate_sha256": "53d88b1e5ee5b0f4c23c16ed050ab8c7724f3f337212a2a36c7093c1e7e248fa"
+    },
+    {
+      "path": "runtime/window_worker_bridge.py",
+      "installed_sha256": null,
+      "candidate_sha256": "a94e6a01d87342efd3ff636856b1fd30c8ff96065195c85ba34b0c1f2bb41d0a"
+    },
+    {
+      "path": "runtime/worker_binding.py",
+      "installed_sha256": "3ae8732c5f76a650026fed418b725ade603667504be9f96b662a24f4c40d9c89",
+      "candidate_sha256": "9f46352cfd4490a3ff92bd2bf8a8cc19f091bfb796457c4239f396f9c82060df"
+    }
+  ],
+  "protected_files": [
+    "backend/market_lab/hilega_execution_port_v1/adapter.py",
+    "runtime/FACTORY-REGISTRATION.json",
+    "runtime/POSITION-POLICY.json",
+    "closed_worker_launcher.py",
+    "scripts/hilega_production_simulator_bridge.py"
+  ],
+  "apply_available": false,
+  "live_window_arm_available": false,
+  "production_execution_enabled": false,
+  "required_installation_checks": [
+    "Rehearse exact guard-death-before-resume interleavings on disposable state",
+    "Qualify successor wrapper and startup recovery against candidate release",
+    "Prepare quiescent file and database backups with no automatic database restore",
+    "Install closed release with window configuration absent and factory disabled",
+    "Verify heartbeat, paused controller and warmup using successor status driver"
+  ],
+  "recovery_contract": {
+    "default_window_configuration": "ABSENT",
+    "startup_controller": "PAUSED",
+    "factory_registration_enabled": false,
+    "lease_migration": "EXPLICIT_SIGNED_REBIND_ONLY",
+    "database_restore": "NEVER_AUTOMATIC",
+    "rollback_target": "e9e092399fcf29672d5273c18ef138de645a8feec573407954d1db62392d0b59"
+  },
+  "pending_reminders": [
+    "Open-session v4 WebSocket and native contract coverage validation",
+    "Upstox timestamp reply and final November 2 contract note/fee reconciliation",
+    "Real fresh disabled seed and ownership enrollment, then separate final activation"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "README.md": "a5b7ff87dcfc64f26f14874d2474d15aa5c100974f910cca4955e2516cb2e8f4",
+  "manage.py": "00588b1f818429c7bee12dcd67f2ed996cdd74b025ce340549131e5f3423a7a9",
+  "BASELINE-PINS.json": "ff1e0d52fe238326e7e02cdd6c1270d09c929175ba8c617f3bbb1b26259cefbb",
+  "test_stream.py": "b87141a25e6523aaeaaca70e009820c8211372da0d6eb2a0ee0e905edebea20a",
+  "quote_core.py": "89668d496c28bd4b9f3c26aeab29be6309ed236b951c3016fe2ee7a71aa73555",
+  "stream_worker.py": "328caefce7043bd0abbe3c3cfb86ffd11080f42ded2b88d196484d2532174fcd"
+}

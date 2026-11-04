@@ -1,0 +1,17 @@
+{
+  "adapter_db": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-admission-enrollment-review-s7ixg1qi/synthetic/test_native_precommit_expiry_r0/adapter.sqlite",
+  "application_db": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-admission-enrollment-review-s7ixg1qi/synthetic/test_native_precommit_expiry_r0/application.sqlite",
+  "authority_file": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-admission-enrollment-review-s7ixg1qi/synthetic/test_native_precommit_expiry_r0/private/candidate-context-0nlhl0hc/authority.json",
+  "authority_sha256": "50db62abb0ecf1d1c697a1ae26f7b9e07b49e82a6adc4c78dc766ba1d792b8e7",
+  "bridge_run_id": "synthetic-lease",
+  "broker_token_file": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-admission-enrollment-review-s7ixg1qi/synthetic/test_native_precommit_expiry_r0/private/candidate-context-0nlhl0hc/broker-token",
+  "broker_token_sha256": "f06e194de9d2ad49576b401e6890ab835f65e522c25aaabb8a48e95a0186cfea",
+  "expires_at": "2026-10-26T10:25:03+05:30",
+  "issued_at": "2026-10-26T09:25:03+05:30",
+  "journal": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-admission-enrollment-review-s7ixg1qi/synthetic/test_native_precommit_expiry_r0/strategy.jsonl",
+  "model": "HILEGA_PINNED_PRIVATE_CANDIDATE_CONTEXT_V1",
+  "pin_file": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-admission-enrollment-review-s7ixg1qi/synthetic/test_native_precommit_expiry_r0/private/candidate-context-0nlhl0hc/pin.json",
+  "pin_sha256": "6d1eb6a0eb83d56f1c43c8d41e7f7a3446bce2cc4cddb8ea925db0119953b1c6",
+  "production_execution_enabled": false,
+  "seed_request_id": "4fe54086eaa2e4d5283dcd6f1a4638b3efb42d2ec51c5ae364b88da2a0937bd6"
+}

@@ -1,0 +1,12 @@
+{
+  "BASELINE-PINS.json": "0920ef1b1bb74acf83a45d4bd39b481c801d4f65ae12ac23e98b736edc9feee9",
+  "MILESTONES.md": "574588308aa73ef168ed626f651e27aeb25c295289a4fb56783e6978d0c13dff",
+  "README.md": "b5ff750b0d04639bc95cd6cbd4cf380a58f2daf76d26dea309ae9926d4299e07",
+  "live_recovery.py": "9cb88dc4b3116f5e1189813f9006c2c1980add9e23e7f13c505357adc6c7da24",
+  "manage.py": "af6914ce8b8e4441e110899b0ac3132b024b17cf11b258f1baf7994fbbd37d22",
+  "plan_prepare.py": "b4f96e06a244c197fa8a412af72d2c45efc73581ed0fda9c10a13011593d1160",
+  "plan_tools.py": "d4237eca87b65089bc821fd4d74223892abcb5188919307fb5ae5e3e0daeaf78",
+  "rehearse.py": "e1e529520e5e215fa8d408a22aa16521f1958edd39bc2f0de93dcbd51e0aa480",
+  "transaction.py": "18f4a664fffa9d4ef06cb9efaa5c7d7a2d3b2d604103e0ad7618f814970033f9",
+  "wrapper.py": "ce047ee0cdbb3d7612c5d882add6df2f499bcc5e2acfb3affaa80967888c23bd"
+}

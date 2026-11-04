@@ -1,0 +1,7 @@
+{
+  "config_sha256": "8a104c4144f29a8b011c34e87e61d5a96d704e2599f81475a7f7c29598db8f2e",
+  "orders_sent": false,
+  "production_authority_provisioned": false,
+  "production_execution_enabled": false,
+  "status": "CANDIDATE_PRIVATE_CONTEXT_AND_OWNER_READY"
+}

@@ -1,0 +1,22 @@
+{
+  "status": "QUOTE_STREAM_VALIDATION_DEFERRED_OUTSIDE_USABLE_SESSION",
+  "session": {
+    "status": "AFTER_SESSION_CLOSE",
+    "clock_window_open": false,
+    "assessed_at_ist": "2026-11-03T20:30:30.668725+05:30",
+    "session_open_ist": "2026-11-03T09:15:00+05:30",
+    "session_close_ist": "2026-11-03T15:30:00+05:30",
+    "minimum_remaining_seconds": 180,
+    "exchange_holiday_calendar_verified": false
+  },
+  "websocket_validation_attempted": false,
+  "websocket_validated": false,
+  "broker_requests_issued": false,
+  "credentials_loaded": false,
+  "observer_started": false,
+  "services_changed": false,
+  "controller_resumed": false,
+  "production_execution_enabled": false,
+  "production_ready": false,
+  "audit_folder": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-quote-stream-review-16_exg5y"
+}

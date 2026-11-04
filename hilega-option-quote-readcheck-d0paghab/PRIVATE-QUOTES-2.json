@@ -1,0 +1,795 @@
+{
+  "status": "success",
+  "data": {
+    "NSE_FO:NIFTY26N0323600PE": {
+      "ohlc": {
+        "open": 177.8,
+        "high": 177.8,
+        "low": 28.0,
+        "close": 30.0
+      },
+      "depth": {
+        "buy": [
+          {
+            "quantity": 1885,
+            "price": 30.05,
+            "orders": 6
+          },
+          {
+            "quantity": 12870,
+            "price": 30.0,
+            "orders": 28
+          },
+          {
+            "quantity": 11050,
+            "price": 29.95,
+            "orders": 20
+          },
+          {
+            "quantity": 8580,
+            "price": 29.9,
+            "orders": 13
+          },
+          {
+            "quantity": 9815,
+            "price": 29.85,
+            "orders": 12
+          }
+        ],
+        "sell": [
+          {
+            "quantity": 130,
+            "price": 30.1,
+            "orders": 1
+          },
+          {
+            "quantity": 8385,
+            "price": 30.15,
+            "orders": 17
+          },
+          {
+            "quantity": 18070,
+            "price": 30.2,
+            "orders": 28
+          },
+          {
+            "quantity": 7150,
+            "price": 30.25,
+            "orders": 13
+          },
+          {
+            "quantity": 9035,
+            "price": 30.3,
+            "orders": 11
+          }
+        ]
+      },
+      "timestamp": "2026-11-03T11:45:54.817+05:30",
+      "instrument_token": "NSE_FO|54065",
+      "symbol": "NIFTY26N0323600PE",
+      "last_price": 30.0,
+      "volume": 618765810,
+      "average_price": 50.51,
+      "oi": 46087600.0,
+      "net_change": -247.6,
+      "total_buy_quantity": 27431105.0,
+      "total_sell_quantity": 6671275.0,
+      "lower_circuit_limit": 0.05,
+      "upper_circuit_limit": 741.6,
+      "last_trade_time": "1793686554491",
+      "oi_day_high": 46087600.0,
+      "oi_day_low": 263185.0
+    },
+    "NSE_FO:NIFTY26N0323700CE": {
+      "ohlc": {
+        "open": 8.0,
+        "high": 43.55,
+        "low": 5.7,
+        "close": 33.7
+      },
+      "depth": {
+        "buy": [
+          {
+            "quantity": 2210,
+            "price": 33.4,
+            "orders": 4
+          },
+          {
+            "quantity": 7800,
+            "price": 33.35,
+            "orders": 17
+          },
+          {
+            "quantity": 6890,
+            "price": 33.3,
+            "orders": 11
+          },
+          {
+            "quantity": 6760,
+            "price": 33.25,
+            "orders": 15
+          },
+          {
+            "quantity": 6695,
+            "price": 33.2,
+            "orders": 10
+          }
+        ],
+        "sell": [
+          {
+            "quantity": 910,
+            "price": 33.5,
+            "orders": 7
+          },
+          {
+            "quantity": 9490,
+            "price": 33.55,
+            "orders": 27
+          },
+          {
+            "quantity": 5590,
+            "price": 33.6,
+            "orders": 15
+          },
+          {
+            "quantity": 5330,
+            "price": 33.65,
+            "orders": 10
+          },
+          {
+            "quantity": 6630,
+            "price": 33.7,
+            "orders": 10
+          }
+        ]
+      },
+      "timestamp": "2026-11-03T11:45:54.817+05:30",
+      "instrument_token": "NSE_FO|54098",
+      "symbol": "NIFTY26N0323700CE",
+      "last_price": 33.7,
+      "volume": 665327520,
+      "average_price": 29.21,
+      "oi": 31651880.0,
+      "net_change": 29.7,
+      "total_buy_quantity": 58590740.0,
+      "total_sell_quantity": 3690180.0,
+      "lower_circuit_limit": 0.05,
+      "upper_circuit_limit": 271.05,
+      "last_trade_time": "1793686554730",
+      "oi_day_high": 31651880.0,
+      "oi_day_low": 7528365.0
+    },
+    "NSE_FO:NIFTY26N0323600CE": {
+      "ohlc": {
+        "open": 31.1,
+        "high": 101.65,
+        "low": 20.1,
+        "close": 89.3
+      },
+      "depth": {
+        "buy": [
+          {
+            "quantity": 1040,
+            "price": 88.7,
+            "orders": 4
+          },
+          {
+            "quantity": 1365,
+            "price": 88.65,
+            "orders": 11
+          },
+          {
+            "quantity": 1885,
+            "price": 88.6,
+            "orders": 10
+          },
+          {
+            "quantity": 3250,
+            "price": 88.55,
+            "orders": 9
+          },
+          {
+            "quantity": 1235,
+            "price": 88.5,
+            "orders": 6
+          }
+        ],
+        "sell": [
+          {
+            "quantity": 2145,
+            "price": 88.95,
+            "orders": 15
+          },
+          {
+            "quantity": 2860,
+            "price": 89.0,
+            "orders": 13
+          },
+          {
+            "quantity": 1495,
+            "price": 89.05,
+            "orders": 4
+          },
+          {
+            "quantity": 2405,
+            "price": 89.1,
+            "orders": 7
+          },
+          {
+            "quantity": 1755,
+            "price": 89.15,
+            "orders": 5
+          }
+        ]
+      },
+      "timestamp": "2026-11-03T11:45:54.817+05:30",
+      "instrument_token": "NSE_FO|54062",
+      "symbol": "NIFTY26N0323600CE",
+      "last_price": 89.3,
+      "volume": 638728480,
+      "average_price": 70.02,
+      "oi": 15688465.0,
+      "net_change": 80.35,
+      "total_buy_quantity": 43555980.0,
+      "total_sell_quantity": 1676545.0,
+      "lower_circuit_limit": 0.05,
+      "upper_circuit_limit": 451.6,
+      "last_trade_time": "1793686554474",
+      "oi_day_high": 23535655.0,
+      "oi_day_low": 10408450.0
+    },
+    "NSE_FO:NIFTY26N0323700PE": {
+      "ohlc": {
+        "open": 244.65,
+        "high": 254.15,
+        "low": 71.35,
+        "close": 74.7
+      },
+      "depth": {
+        "buy": [
+          {
+            "quantity": 650,
+            "price": 74.9,
+            "orders": 5
+          },
+          {
+            "quantity": 2925,
+            "price": 74.85,
+            "orders": 14
+          },
+          {
+            "quantity": 1950,
+            "price": 74.8,
+            "orders": 9
+          },
+          {
+            "quantity": 455,
+            "price": 74.75,
+            "orders": 4
+          },
+          {
+            "quantity": 585,
+            "price": 74.7,
+            "orders": 4
+          }
+        ],
+        "sell": [
+          {
+            "quantity": 1170,
+            "price": 75.1,
+            "orders": 4
+          },
+          {
+            "quantity": 1755,
+            "price": 75.15,
+            "orders": 11
+          },
+          {
+            "quantity": 1430,
+            "price": 75.2,
+            "orders": 7
+          },
+          {
+            "quantity": 1495,
+            "price": 75.25,
+            "orders": 8
+          },
+          {
+            "quantity": 1430,
+            "price": 75.3,
+            "orders": 5
+          }
+        ]
+      },
+      "timestamp": "2026-11-03T11:45:54.817+05:30",
+      "instrument_token": "NSE_FO|54099",
+      "symbol": "NIFTY26N0323700PE",
+      "last_price": 74.7,
+      "volume": 226637775,
+      "average_price": 99.57,
+      "oi": 14017640.0,
+      "net_change": -299.95,
+      "total_buy_quantity": 16526055.0,
+      "total_sell_quantity": 2122510.0,
+      "lower_circuit_limit": 0.05,
+      "upper_circuit_limit": 908.7,
+      "last_trade_time": "1793686554675",
+      "oi_day_high": 14066390.0,
+      "oi_day_low": 79885.0
+    },
+    "NSE_FO:NIFTY26N0323650PE": {
+      "ohlc": {
+        "open": 194.7,
+        "high": 208.45,
+        "low": 45.0,
+        "close": 47.65
+      },
+      "depth": {
+        "buy": [
+          {
+            "quantity": 2795,
+            "price": 47.5,
+            "orders": 12
+          },
+          {
+            "quantity": 2925,
+            "price": 47.45,
+            "orders": 19
+          },
+          {
+            "quantity": 2470,
+            "price": 47.4,
+            "orders": 10
+          },
+          {
+            "quantity": 2145,
+            "price": 47.35,
+            "orders": 8
+          },
+          {
+            "quantity": 1690,
+            "price": 47.3,
+            "orders": 7
+          }
+        ],
+        "sell": [
+          {
+            "quantity": 520,
+            "price": 47.65,
+            "orders": 4
+          },
+          {
+            "quantity": 2730,
+            "price": 47.7,
+            "orders": 17
+          },
+          {
+            "quantity": 2340,
+            "price": 47.75,
+            "orders": 13
+          },
+          {
+            "quantity": 3250,
+            "price": 47.8,
+            "orders": 7
+          },
+          {
+            "quantity": 2730,
+            "price": 47.85,
+            "orders": 11
+          }
+        ]
+      },
+      "timestamp": "2026-11-03T11:45:54.817+05:30",
+      "instrument_token": "NSE_FO|54097",
+      "symbol": "NIFTY26N0323650PE",
+      "last_price": 47.65,
+      "volume": 357339775,
+      "average_price": 68.64,
+      "oi": 26926900.0,
+      "net_change": -279.65,
+      "total_buy_quantity": 19176040.0,
+      "total_sell_quantity": 2946905.0,
+      "lower_circuit_limit": 0.05,
+      "upper_circuit_limit": 830.8,
+      "last_trade_time": "1793686554541",
+      "oi_day_high": 26926900.0,
+      "oi_day_low": 69550.0
+    },
+    "NSE_FO:NIFTY26N0323550PE": {
+      "ohlc": {
+        "open": 117.0,
+        "high": 129.45,
+        "low": 16.9,
+        "close": 18.25
+      },
+      "depth": {
+        "buy": [
+          {
+            "quantity": 65,
+            "price": 18.25,
+            "orders": 1
+          },
+          {
+            "quantity": 15470,
+            "price": 18.2,
+            "orders": 31
+          },
+          {
+            "quantity": 18850,
+            "price": 18.15,
+            "orders": 27
+          },
+          {
+            "quantity": 14950,
+            "price": 18.1,
+            "orders": 19
+          },
+          {
+            "quantity": 11440,
+            "price": 18.05,
+            "orders": 17
+          }
+        ],
+        "sell": [
+          {
+            "quantity": 11895,
+            "price": 18.3,
+            "orders": 14
+          },
+          {
+            "quantity": 17550,
+            "price": 18.35,
+            "orders": 29
+          },
+          {
+            "quantity": 18590,
+            "price": 18.4,
+            "orders": 23
+          },
+          {
+            "quantity": 16445,
+            "price": 18.45,
+            "orders": 20
+          },
+          {
+            "quantity": 12220,
+            "price": 18.5,
+            "orders": 15
+          }
+        ]
+      },
+      "timestamp": "2026-11-03T11:45:54.817+05:30",
+      "instrument_token": "NSE_FO|54061",
+      "symbol": "NIFTY26N0323550PE",
+      "last_price": 18.25,
+      "volume": 343971355,
+      "average_price": 35.38,
+      "oi": 25296115.0,
+      "net_change": -212.9,
+      "total_buy_quantity": 23053355.0,
+      "total_sell_quantity": 3635515.0,
+      "lower_circuit_limit": 0.05,
+      "upper_circuit_limit": 647.05,
+      "last_trade_time": "1793686554460",
+      "oi_day_high": 25458030.0,
+      "oi_day_low": 147030.0
+    },
+    "NSE_FO:NIFTY26N0323550CE": {
+      "ohlc": {
+        "open": 47.95,
+        "high": 140.0,
+        "low": 33.65,
+        "close": 127.6
+      },
+      "depth": {
+        "buy": [
+          {
+            "quantity": 195,
+            "price": 127.0,
+            "orders": 2
+          },
+          {
+            "quantity": 390,
+            "price": 126.95,
+            "orders": 5
+          },
+          {
+            "quantity": 260,
+            "price": 126.9,
+            "orders": 3
+          },
+          {
+            "quantity": 455,
+            "price": 126.85,
+            "orders": 5
+          },
+          {
+            "quantity": 455,
+            "price": 126.8,
+            "orders": 5
+          }
+        ],
+        "sell": [
+          {
+            "quantity": 325,
+            "price": 127.3,
+            "orders": 4
+          },
+          {
+            "quantity": 650,
+            "price": 127.35,
+            "orders": 9
+          },
+          {
+            "quantity": 1885,
+            "price": 127.4,
+            "orders": 14
+          },
+          {
+            "quantity": 325,
+            "price": 127.45,
+            "orders": 5
+          },
+          {
+            "quantity": 130,
+            "price": 127.5,
+            "orders": 2
+          }
+        ]
+      },
+      "timestamp": "2026-11-03T11:45:54.817+05:30",
+      "instrument_token": "NSE_FO|54056",
+      "symbol": "NIFTY26N0323550CE",
+      "last_price": 127.6,
+      "volume": 262189590,
+      "average_price": 94.6,
+      "oi": 6247475.0,
+      "net_change": 113.9,
+      "total_buy_quantity": 28808065.0,
+      "total_sell_quantity": 546585.0,
+      "lower_circuit_limit": 0.05,
+      "upper_circuit_limit": 549.35,
+      "last_trade_time": "1793686554459",
+      "oi_day_high": 11592295.0,
+      "oi_day_low": 5051930.0
+    },
+    "NSE_FO:NIFTY26N0323750PE": {
+      "ohlc": {
+        "open": 283.8,
+        "high": 299.65,
+        "low": 104.95,
+        "close": 109.55
+      },
+      "depth": {
+        "buy": [
+          {
+            "quantity": 260,
+            "price": 109.2,
+            "orders": 2
+          },
+          {
+            "quantity": 520,
+            "price": 109.15,
+            "orders": 4
+          },
+          {
+            "quantity": 455,
+            "price": 109.1,
+            "orders": 5
+          },
+          {
+            "quantity": 585,
+            "price": 109.05,
+            "orders": 6
+          },
+          {
+            "quantity": 780,
+            "price": 109.0,
+            "orders": 7
+          }
+        ],
+        "sell": [
+          {
+            "quantity": 325,
+            "price": 109.45,
+            "orders": 5
+          },
+          {
+            "quantity": 1560,
+            "price": 109.5,
+            "orders": 16
+          },
+          {
+            "quantity": 1495,
+            "price": 109.55,
+            "orders": 7
+          },
+          {
+            "quantity": 1040,
+            "price": 109.6,
+            "orders": 6
+          },
+          {
+            "quantity": 390,
+            "price": 109.65,
+            "orders": 3
+          }
+        ]
+      },
+      "timestamp": "2026-11-03T11:45:54.817+05:30",
+      "instrument_token": "NSE_FO|54101",
+      "symbol": "NIFTY26N0323750PE",
+      "last_price": 109.55,
+      "volume": 52817960,
+      "average_price": 134.73,
+      "oi": 3431935.0,
+      "net_change": -315.8,
+      "total_buy_quantity": 8212685.0,
+      "total_sell_quantity": 501865.0,
+      "lower_circuit_limit": 0.05,
+      "upper_circuit_limit": 981.55,
+      "last_trade_time": "1793686554176",
+      "oi_day_high": 3431935.0,
+      "oi_day_low": 19045.0
+    },
+    "NSE_FO:NIFTY26N0323750CE": {
+      "ohlc": {
+        "open": 3.0,
+        "high": 24.55,
+        "low": 3.0,
+        "close": 17.4
+      },
+      "depth": {
+        "buy": [
+          {
+            "quantity": 15990,
+            "price": 17.2,
+            "orders": 29
+          },
+          {
+            "quantity": 17160,
+            "price": 17.15,
+            "orders": 29
+          },
+          {
+            "quantity": 22945,
+            "price": 17.1,
+            "orders": 28
+          },
+          {
+            "quantity": 20150,
+            "price": 17.05,
+            "orders": 24
+          },
+          {
+            "quantity": 18005,
+            "price": 17.0,
+            "orders": 23
+          }
+        ],
+        "sell": [
+          {
+            "quantity": 11115,
+            "price": 17.3,
+            "orders": 20
+          },
+          {
+            "quantity": 19955,
+            "price": 17.35,
+            "orders": 34
+          },
+          {
+            "quantity": 14885,
+            "price": 17.4,
+            "orders": 25
+          },
+          {
+            "quantity": 3185,
+            "price": 17.45,
+            "orders": 14
+          },
+          {
+            "quantity": 15210,
+            "price": 17.5,
+            "orders": 18
+          }
+        ]
+      },
+      "timestamp": "2026-11-03T11:45:54.817+05:30",
+      "instrument_token": "NSE_FO|54100",
+      "symbol": "NIFTY26N0323750CE",
+      "last_price": 17.4,
+      "volume": 360858875,
+      "average_price": 16.01,
+      "oi": 19101875.0,
+      "net_change": 14.65,
+      "total_buy_quantity": 36185760.0,
+      "total_sell_quantity": 1901380.0,
+      "lower_circuit_limit": 0.05,
+      "upper_circuit_limit": 196.7,
+      "last_trade_time": "1793686554425",
+      "oi_day_high": 19144905.0,
+      "oi_day_low": 3235245.0
+    },
+    "NSE_FO:NIFTY26N0323650CE": {
+      "ohlc": {
+        "open": 13.5,
+        "high": 68.95,
+        "low": 10.1,
+        "close": 57.0
+      },
+      "depth": {
+        "buy": [
+          {
+            "quantity": 390,
+            "price": 57.0,
+            "orders": 1
+          },
+          {
+            "quantity": 3055,
+            "price": 56.95,
+            "orders": 9
+          },
+          {
+            "quantity": 2665,
+            "price": 56.9,
+            "orders": 9
+          },
+          {
+            "quantity": 3640,
+            "price": 56.85,
+            "orders": 8
+          },
+          {
+            "quantity": 3640,
+            "price": 56.8,
+            "orders": 6
+          }
+        ],
+        "sell": [
+          {
+            "quantity": 3250,
+            "price": 57.15,
+            "orders": 20
+          },
+          {
+            "quantity": 4680,
+            "price": 57.2,
+            "orders": 21
+          },
+          {
+            "quantity": 3120,
+            "price": 57.25,
+            "orders": 6
+          },
+          {
+            "quantity": 2990,
+            "price": 57.3,
+            "orders": 11
+          },
+          {
+            "quantity": 4095,
+            "price": 57.35,
+            "orders": 7
+          }
+        ]
+      },
+      "timestamp": "2026-11-03T11:45:54.817+05:30",
+      "instrument_token": "NSE_FO|54066",
+      "symbol": "NIFTY26N0323650CE",
+      "last_price": 57.0,
+      "volume": 638286805,
+      "average_price": 48.26,
+      "oi": 21927360.0,
+      "net_change": 51.1,
+      "total_buy_quantity": 39085865.0,
+      "total_sell_quantity": 2674100.0,
+      "lower_circuit_limit": 0.05,
+      "upper_circuit_limit": 357.2,
+      "last_trade_time": "1793686554556",
+      "oi_day_high": 24124035.0,
+      "oi_day_low": 4350060.0
+    }
+  }
+}

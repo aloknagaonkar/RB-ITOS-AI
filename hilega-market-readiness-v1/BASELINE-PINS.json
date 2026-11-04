@@ -1,0 +1,19 @@
+{
+  "hilega-registration-rollout-v1/MILESTONES.md": "d34f7d3687fb0b72b0e2eea8ffeee003a8985bab41da80f6cf3ae157f7239906",
+  "hilega-registration-rollout-v1/BASELINE-PINS.json": "0f8a074bd528d1c0dd81c67da2338b1a664ad9881aa95a75b5c636f3a46390c5",
+  "hilega-registration-rollout-v1/manage.py": "2510562c3539fc15cca7e405ca488c28ba38d451fb2408df809ed98b97171c04",
+  "hilega-registration-rollout-v1/plan_tools.py": "d4237eca87b65089bc821fd4d74223892abcb5188919307fb5ae5e3e0daeaf78",
+  "hilega-registration-rollout-v1/plan_prepare.py": "abbb154cdf909d267b8258fca068bee40656929091e475a8b379dd97b180971d",
+  "hilega-registration-rollout-v1/rehearse.py": "e1e529520e5e215fa8d408a22aa16521f1958edd39bc2f0de93dcbd51e0aa480",
+  "hilega-registration-rollout-v1/live_recovery.py": "9cb88dc4b3116f5e1189813f9006c2c1980add9e23e7f13c505357adc6c7da24",
+  "hilega-registration-rollout-v1/transaction.py": "18f4a664fffa9d4ef06cb9efaa5c7d7a2d3b2d604103e0ad7618f814970033f9",
+  "hilega-registration-rollout-v1/MANIFEST.json": "4e2583d7afa24a06b9b90958fc3e8183951a6c11631f745b062afca6472f33db",
+  "hilega-registration-rollout-v1/wrapper.py": "3ed2bc69296b4e9f6f9b2075dacfed2289a1236b8af5e0d2ac39ccc80e493dcc",
+  "hilega-registration-rollout-v1/README.md": "98553391ceceb4c4b20c02dfe7614078246eb6792bf78061fde02a6a1427f320",
+  "hilega-issuer-provision-v1/BASELINE-PINS.json": "14c0f74d3dd8341d2f42bfa6f221d8d118c15e0d0fe0ebb8fd3b17711c7e78ab",
+  "hilega-issuer-provision-v1/manage.py": "d69dbfecc3c3c8eda087257228dafa89cc33629072c02bebdcd991b293e37b7b",
+  "hilega-issuer-provision-v1/test_storage.py": "7e5a81351f0e67488ab2e301c1e6a3ba52c4c0c14301b31efb47202223082498",
+  "hilega-issuer-provision-v1/storage.py": "6538d101a0c330041afe29d09a7cb6041b4382474379f97080a89fcf100b029a",
+  "hilega-issuer-provision-v1/MANIFEST.json": "7b53ca80356a67e3840ee7365b5d3b62f3b53828ab358de1194761f2541a90f4",
+  "hilega-issuer-provision-v1/README.md": "f9ac58dd301447b51b3ab25e03cf8934c5c457ee0a53702b42210ce5916e12b7"
+}

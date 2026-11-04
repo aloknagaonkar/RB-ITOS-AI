@@ -1,0 +1,15 @@
+# Native disabled admission/enrollment integration candidate
+
+This is implementation code, not just a checklist: runtime/admission_enrollment_flow.py wraps the existing native fresh prepared-seed scan and exact LocalApproval binding, calls native provision_disabled_owner with the hard order gate closed, and calls native recover_disabled_context after uncertain commit outcomes. It checks paused/no-pending-stop state and zero attempts/receipts before and after. No method arms or resumes the controller, signs a grant, loads a real trust root, invokes transport or releases the gate. Caller must supply an actual verified LocalApproval object. An unsigned dict is rejected. Final activation review remains explicitly blocked.
+
+The manager verifies the exact current installed release and successor status, copies it into a disposable candidate, adds the integration module to the dependency and release manifests, preserves protected port/policy/worker dispatch/launcher bytes, and runs eight meaningful tests against the candidate native modules. Temporary fixtures use synthetic account evidence, signed local test approvals, temporary private directories/databases and intercepted transport callbacks; sends are asserted zero and the real hard order gate is never overridden. All real network connections are denied by the test conftest. No live database, key, service or production source is changed.
+
+Tests cover read-only admission request, actual signed disabled enrollment, rejection of unsigned/changed-lease/expired inputs, native precommit expiry rollback, same-key postcommit recovery and disabled owner never enabling final activation. They do not qualify a live seed, live issuer provisioning or production contract entry. Prior fixture code is reused under exact source pins.
+
+Scope still outstanding: independent live preparation-window/guard assembly; exact live maintenance/enrollment apply plan; fresh-session market/quote and natural seed evidence; external broker timestamp/final-fee evidence; reviewed registry/attachment/recovery binding; separate hard-gate release. There is no live apply CLI in this package and no claim that the default worker dispatch is wired to this new API. Do not manually copy the staged module into the sealed release.
+
+Run manage.py --repo "$PWD" --active-plan <warmup successor PLAN.json> --active-plan-sha256 <SHA>. It produces candidate, TESTS.xml, PROCESS.json, RESULT.json and MILESTONES.md. A failing test is not a deployment failure: live state is unchanged. No tests run locally; syntax and ZIP integrity only.
+
+## v2 fixture registration fix
+
+All eight v1 cases failed before test bodies executed because setup's transitive flow fixture was absent from the new pytest scope. v2 registers the complete env -> bound_env -> ready -> case -> flow -> setup chain in conftest.py and renames the ordinary constructor helper to make_flow to avoid hiding the real flow fixture. The implementation module, native provisioner, hard gate, candidate staging logic and case assertions are unchanged. There is no fallback that skips setup or weakens the tests. No v1 test-body success is claimed.

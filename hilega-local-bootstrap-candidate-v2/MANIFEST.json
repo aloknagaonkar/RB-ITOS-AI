@@ -1,0 +1,10 @@
+{
+  "BASELINE-PINS.json": "27d2f53648ab464f770d2ef0f236e643a7578ebbedc8c571782bd4eb7f3b7d41",
+  "README.md": "4737f06c37da45c7c328017129dcb18387f5d404b3f5dfd6f0466e3a94d1b6e5",
+  "conftest.py": "298d9ef70c45bed6593018b9c02fb707288dca58330455f528ba2f8c226ec7ca",
+  "local_admission.py": "66ad635c5d9006b0d34fc8e76d603e5111dcdb1a31099ebff8a4a7ab533b78d9",
+  "local_context.py": "27dec44e54951e31e27c4c560532262852f63f41faae8bc33e369bd99a26510c",
+  "manage.py": "b98a79441fffb4e25c261b80d501b4f097a0d26195244a9cef15fde05339b5c9",
+  "stage.py": "6e17c93bd2356c6cfc09f0fc1ff228a4bf0ee7134e3be23deaad0de7f2f7377d",
+  "tests/test_bootstrap.py": "28b141de3f0f9c5549715557cbe759a9d3a321f295da1f71f1441ec723f668e5"
+}

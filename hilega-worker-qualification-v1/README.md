@@ -1,0 +1,13 @@
+# Closed worker heartbeat and lease qualification
+
+Factory outputs lack the source_at field used by the actual outer worker heartbeat. This candidate adds verified source time at worker dispatch by reading the hash-verified journal and the existing policy/version/reconstructed filtering. It does not consume a source record, rewind a cursor, synthesize freshness from wall time, or normalize broker times. Empty/stale journals remain empty/stale. Factory exceptions propagate without retry. The outer loop's normal heartbeat/finish/pause behavior is retained.
+
+Default check copies the current installed trust-worker release, changes only runtime/worker_binding.py and its dependency pin/outer release manifest, runs eight new heartbeat/lease cases plus a seed preflight, then performs exact native pause recovery and managed default-worker startup/restart checks and emits a 30-minute closed upgrade plan. Earlier authority/file tests are not rerun. All behavioral validation runs on the user VM.
+
+New tests cover actual outer heartbeat on a consistent lease, retained journal time across clock advancement, no cursor consumption, gate-closed enabled-registration observation without private-file access, malformed/empty journal handling, no retry after errors, and rejection of a changed lease on a cached synthetic configured worker. Positive configured paths use synthetic private files, in-memory gate overrides and intercepted transport; network is denied in the test conftest.
+
+This is partial enabled-worker qualification. The managed process remains factory-disabled. A real enabled-factory bootstrap under a newly claimed source lease, production authority material, real owner enrollment and configured-factory restart/recovery still require engineering and qualification. A stale grant or seed cannot simply be reused after restart. This package does not solve that bootstrap workflow or open the hard gate.
+
+Apply/status/rollback use this package and the exact generated plan/digest. The closed transactional engine is unchanged from the already VM-validated predecessor; apply quiesces six services, verifies backups and installs matching immutable wrapper/recovery bindings, preserving the one-position policy and disabled registration. Explicit rollback restores code/config only, not databases/cursors. Failures hold services stopped for reviewed rollback. After apply use THIS package's status; predecessor checks are bound to their old wrapper.
+
+MILESTONES.md preserves the deployed baseline and marks this scoped qualification separately. Group 2 and production readiness remain false. Local validation is Python syntax, ZIP CRC and transaction-function AST comparison only.
