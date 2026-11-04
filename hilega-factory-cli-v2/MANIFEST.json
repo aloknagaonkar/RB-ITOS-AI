@@ -1,0 +1,8 @@
+{
+  "BASELINE-PINS.json": "e568a0c048dfc6bd90a6d62e724f2cfb04390d977b0926847c7e8d02bd30ee76",
+  "MILESTONES.md": "4a386d070cc4a0d54911711d3cfc5aa571b3833691e9018e67ad89899b7d31eb",
+  "README.md": "1bac2ec990afbe649fb202cf1d8137fa026046fd378086ec273408371daf63bc",
+  "conftest.py": "298d9ef70c45bed6593018b9c02fb707288dca58330455f528ba2f8c226ec7ca",
+  "manage.py": "807cc7d1d957c40151bc0ddbd5add182d09a0b64f31ef4dcc970e0be293cd0fa",
+  "tests/test_outer_cli.py": "5ffb382873247dfd0a8e9fee1fd608a746223b9ac8ef789b8ee11112c0a86d5e"
+}

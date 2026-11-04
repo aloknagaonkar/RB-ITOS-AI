@@ -1,0 +1,19 @@
+{
+  "account_scope": "UPSTOX:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "adapter_db": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-window-worker-review-4hhmgc_d/fresh-signal/adapter.sqlite",
+  "admission_request_created": false,
+  "application_db": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-window-worker-review-4hhmgc_d/fresh-signal/application.sqlite",
+  "controller_paused": true,
+  "journal": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-window-worker-review-4hhmgc_d/fresh-signal/strategy.jsonl",
+  "model": "HILEGA_DISABLED_WINDOW_SEED_BOUNDARY_V1",
+  "orders_sent": false,
+  "owner_enrolled": false,
+  "production_execution_enabled": false,
+  "release_sha256": "12a22dafc9a5c700ec0e96d7271fa110b712c8bb0cf7145fe20832500a3be705",
+  "seed_request_id": "89a17e24209edf4a7d410133261399e6de256b659312ce49aa152b905b1c9220",
+  "signature": "71d47512079ec061e03a3420fecafeb3668e380192f212007d4c5dbecc282a8a",
+  "source_lease": "c5770308bd724982963ec7f2b05382c9",
+  "source_record_hash": "144cb4d38130e4a1094073229a888765c9f326c8235ccabd17c8439691218959",
+  "source_sequence": 2,
+  "window_created_at": 1793730575.3894315
+}

@@ -1,0 +1,9 @@
+{
+  "BASELINE-PINS.json": "d971659f13ffac8ee5823d8f990d3b648b41cb141624229c9f471798255e986b",
+  "MILESTONES.md": "e87933edd85fdf1f1e8654ebd6be6f51e812c3e58afa6bc82ba58d1c907417ef",
+  "README.md": "41847b24621f8042e8f87397ae0b7ff6b04f23b4e381ace012d15297b4874692",
+  "conftest.py": "298d9ef70c45bed6593018b9c02fb707288dca58330455f528ba2f8c226ec7ca",
+  "handoff.py": "d9fc6cf338a5e1ab2c1c9d46d48e6f2d0e373545cd9a208577706e761dc75558",
+  "manage.py": "f1bbed9dd64ad13e4c60498c93bd5ce5e24b75715f3ac2c8198ded2432c9ef3b",
+  "tests/test_handoff.py": "6d2d166876f3b281c6caa6b3706df7b66a9488e852de409464caba56ce3f436e"
+}

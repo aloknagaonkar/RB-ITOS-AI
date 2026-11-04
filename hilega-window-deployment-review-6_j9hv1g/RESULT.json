@@ -1,0 +1,14 @@
+{
+  "status": "CLOSED_WINDOW_DEPLOYMENT_IMPACT_REVIEW_PASS",
+  "changed_file_count": 4,
+  "four_prior_scenarios_receipt_verified": true,
+  "prior_scenarios_reexecuted": false,
+  "guard_race_qualified": false,
+  "proposal": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-window-deployment-review-6_j9hv1g/DEPLOYMENT-PROPOSAL.json",
+  "proposal_sha256": "534c27087bdf712b9d4ebb86282b5f70b59af793db299de82c5492a63940094e",
+  "live_apply_available": false,
+  "installed_sources_modified": false,
+  "controller_resumed": false,
+  "production_execution_enabled": false,
+  "production_ready": false
+}

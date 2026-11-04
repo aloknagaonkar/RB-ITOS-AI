@@ -1,0 +1,161 @@
+{
+  "status": "SIGNED_CAPTURE_REVIEW_COMPLETE_EXTERNAL_EVIDENCE_REQUIRED",
+  "session": "2026-11-02",
+  "signed_local_capture_signatures_verified": true,
+  "captures_linked_to_same_account_and_session": true,
+  "broker_independent_signature_or_report_finality_verified": false,
+  "recorded_cross_endpoint_fill_comparisons": [
+    {
+      "order_ordinal": 1,
+      "match_count": 1,
+      "unique_fill_match": true,
+      "timezone_contract_confirmed": false,
+      "timestamps_modified": false,
+      "execution_permission": false,
+      "identity_fields_match": true,
+      "quantity_matches": true,
+      "price_matches": true,
+      "day_trade_order_timestamp": "2026-11-02T13:09:33",
+      "day_trade_exchange_timestamp": "2026-11-02T18:39:33",
+      "per_order_trade_order_timestamp": "2026-11-02T13:09:33",
+      "per_order_trade_exchange_timestamp": "2026-11-02T18:39:33",
+      "day_minus_per_order_exchange_time": {
+        "seconds": 0.0,
+        "basis": "NAIVE_WALL_CLOCK_ONLY"
+      },
+      "history_identity_matches_request": true,
+      "order_history_rows": 6,
+      "order_history_events": [
+        {
+          "status": "put order req received",
+          "order_timestamp": "2026-11-02T13:09:33",
+          "exchange_timestamp": null
+        },
+        {
+          "status": "validation pending",
+          "order_timestamp": "2026-11-02T13:09:33",
+          "exchange_timestamp": null
+        },
+        {
+          "status": "open pending",
+          "order_timestamp": "2026-11-02T13:09:33",
+          "exchange_timestamp": null
+        },
+        {
+          "status": "open",
+          "order_timestamp": "2026-11-02T13:09:33",
+          "exchange_timestamp": "2026-11-02T13:09:33"
+        },
+        {
+          "status": "open",
+          "order_timestamp": "2026-11-02T13:09:33",
+          "exchange_timestamp": "2026-11-02T13:09:33"
+        },
+        {
+          "status": "complete",
+          "order_timestamp": "2026-11-02T13:09:33",
+          "exchange_timestamp": "2026-11-02T13:09:33"
+        }
+      ]
+    },
+    {
+      "order_ordinal": 2,
+      "match_count": 1,
+      "unique_fill_match": true,
+      "timezone_contract_confirmed": false,
+      "timestamps_modified": false,
+      "execution_permission": false,
+      "identity_fields_match": true,
+      "quantity_matches": true,
+      "price_matches": true,
+      "day_trade_order_timestamp": "2026-11-02T13:58:06",
+      "day_trade_exchange_timestamp": "2026-11-02T19:28:06",
+      "per_order_trade_order_timestamp": "2026-11-02T13:58:06",
+      "per_order_trade_exchange_timestamp": "2026-11-02T19:28:06",
+      "day_minus_per_order_exchange_time": {
+        "seconds": 0.0,
+        "basis": "NAIVE_WALL_CLOCK_ONLY"
+      },
+      "history_identity_matches_request": true,
+      "order_history_rows": 6,
+      "order_history_events": [
+        {
+          "status": "put order req received",
+          "order_timestamp": "2026-11-02T13:58:06",
+          "exchange_timestamp": null
+        },
+        {
+          "status": "validation pending",
+          "order_timestamp": "2026-11-02T13:58:06",
+          "exchange_timestamp": null
+        },
+        {
+          "status": "open pending",
+          "order_timestamp": "2026-11-02T13:58:06",
+          "exchange_timestamp": null
+        },
+        {
+          "status": "open",
+          "order_timestamp": "2026-11-02T13:58:06",
+          "exchange_timestamp": "2026-11-02T13:58:06"
+        },
+        {
+          "status": "open",
+          "order_timestamp": "2026-11-02T13:58:06",
+          "exchange_timestamp": "2026-11-02T13:58:06"
+        },
+        {
+          "status": "complete",
+          "order_timestamp": "2026-11-02T13:58:06",
+          "exchange_timestamp": "2026-11-02T13:58:06"
+        }
+      ]
+    }
+  ],
+  "aggregate_review": {
+    "status": "AGGREGATE_POSTTRADE_REVIEW_ONLY",
+    "report_rows": 1,
+    "metadata_trade_count": 1,
+    "pagination_count_matches": true,
+    "missing_or_null_components": [
+      "charges.ipft"
+    ],
+    "aggregate_component_arithmetic_matches": false,
+    "no_trade_report_rows": false,
+    "aggregate_charges_captured": true,
+    "broker_report_finality_verified": false,
+    "per_trade_fee_attribution_verified": false,
+    "strategy_ownership_verified": false,
+    "net_pnl_certified": false,
+    "actual_fees_reconciled": false,
+    "reservation_release_permitted": false,
+    "production_execution_enabled": false,
+    "component_arithmetic_state": "NOT_ASSESSABLE_NULL_COMPONENTS"
+  },
+  "historical_trade_capture_complete": true,
+  "recorded_historical_matches": 2,
+  "operator_activity_attribution": "USER_REPORTED_MANUAL_FOR_2026_11_02_ONLY",
+  "strategy_ownership_verified": false,
+  "broker_timezone_contract_confirmed": false,
+  "actual_fees_reconciled": false,
+  "per_trade_fee_attribution_verified": false,
+  "full_contract_identity_verified": false,
+  "final_contract_note_supplied_to_this_review": false,
+  "broker_reply_supplied_to_this_review": false,
+  "capture_verification_key_loaded": true,
+  "broker_access_token_loaded": false,
+  "broker_requests_issued": false,
+  "timestamps_shifted": false,
+  "null_fee_components_converted_to_zero": false,
+  "source_fingerprints": {
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-group2-evidence-review-fn9zw7je/PRIVATE-ACCOUNT-BOUND-EVIDENCE.json": "78858127c1e6c34eea12c54cedb46ad5a14652d1881794fe4e38a808764ed135",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-live-prerequisites-review-djuyjmst/PRIVATE-POSTTRADE-EVIDENCE.json": "b136f8103cd17af095c837d0d97d00c102ca1bebab1f50138b8c59ffe6b22a8e"
+  },
+  "application_sources_modified": false,
+  "services_changed": false,
+  "controller_resumed": false,
+  "orders_sent": false,
+  "production_execution_enabled": false,
+  "production_ready": false,
+  "audit_folder": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-broker-evidence-review-a8m9vcc9"
+}

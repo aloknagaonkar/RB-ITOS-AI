@@ -1,0 +1,12 @@
+{
+  "BASELINE-PINS.json": "5dd999a701d23c835694bc4548d99eb449532874c7502d4c1451fa24c3b17131",
+  "DOCUMENTATION-REVIEW.md": "ff9531c4d28d06b2bb487a8407ff6db3556f9095d9855f1ddb7d7c4a537cd1a5",
+  "README.md": "f0a3b6895edb7b57eed0433f90f338d52fca3f8d72cdf9b016d087a60340c28c",
+  "SUPPORT-DRAFT.md": "f6fca2c9f3779bd0bf1614feeeed6ce8046962fef53b51d63dbf8e2ef0bae8cd",
+  "capture.py": "bd6a8897c3ca7f8d1e5eaae031fed16f6ca1ec6f0e44b8871117accbad85b8da",
+  "finance.py": "9140bad577d3e175dec2e7cf894fa936daba4093cd79eb6cfbc3a85d86dcb983",
+  "historical.py": "682fa40a6eb68317582a0deb144081dd89583b0a51c332b95abbdb1927c692e5",
+  "manage.py": "bcee338ec741c3d0a7008892c016c3456d62049d1693d239d10c3f1c91ee9f20",
+  "test_finance.py": "747c302e2919ecd235ab03df0163067f08dfbe1ae472fdf849003434ba8ca4e3",
+  "test_historical.py": "5667882c166859a7b9bea70656e97734593852e9726e034aefc08a76ef094460"
+}

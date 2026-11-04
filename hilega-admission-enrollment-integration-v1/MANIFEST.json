@@ -1,0 +1,8 @@
+{
+  "conftest.py": "298d9ef70c45bed6593018b9c02fb707288dca58330455f528ba2f8c226ec7ca",
+  "admission_enrollment_flow.py": "53d88b1e5ee5b0f4c23c16ed050ab8c7724f3f337212a2a36c7093c1e7e248fa",
+  "manage.py": "e30a58dd409ed6f19575d99e72b245e9cac32b1ea2296df33360d3ff6d4e57cc",
+  "BASELINE-PINS.json": "b0a4faa2560fa3d1ac35904d879d950d64fdc11b4d2dc13620b7bffa4cafeb9f",
+  "README.md": "945b76bd3abf02022c58536495574b70d8d137891581966e35f21cc8b745fd14",
+  "tests/test_flow.py": "8c511cd21b028168956f6feb6e89dcdb3212d71b28368faec16844f400be0a3f"
+}

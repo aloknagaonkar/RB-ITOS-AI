@@ -1,0 +1,53 @@
+{
+  "status": "COORDINATED_WARMUP_PREVENTION_PROPOSAL_PASS",
+  "binding_tests": 6,
+  "candidate_writer_and_three_dependency_bindings_prepared": true,
+  "candidate_package_runtime_check_passed": true,
+  "prior_18_repair_writer_tests_reexecuted": false,
+  "current_runtime_checked_before_and_after": true,
+  "current_plan_binding_impact": [
+    {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/backend/market_lab/hilega_milega_historical_replay_v1.py",
+      "original_sha256": "c5d640d66285f5e6b908b036b20bf57a909437b247d38757918dc8728c687319",
+      "candidate_sha256": "2bd6ae98e40a7b76b6e492f641feef5fc933ab27cefe48e369d2c9b38afc7b8f",
+      "current_plan_direct_binding": false,
+      "candidate": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-warmup-prevention-plan-p2cs63w2/candidate-repo/backend/market_lab/hilega_milega_historical_replay_v1.py",
+      "original_backup": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-warmup-prevention-plan-p2cs63w2/originals/backend/market_lab/hilega_milega_historical_replay_v1.py"
+    },
+    {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-operational-lifecycle-tools-6cexrur_/manifest.json",
+      "original_sha256": "67713245f538ab8217ac6016eb81d12c09edff18584db5adf30145d8eaa62acf",
+      "candidate_sha256": "486aa427e918ca2d8da750d209435084b8a702ab6c524836dcc895d8c9ceb07f",
+      "current_plan_direct_binding": true,
+      "candidate": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-warmup-prevention-plan-p2cs63w2/candidate-repo/hilega-operational-lifecycle-tools-6cexrur_/manifest.json",
+      "original_backup": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-warmup-prevention-plan-p2cs63w2/originals/hilega-operational-lifecycle-tools-6cexrur_/manifest.json"
+    },
+    {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-operational-lifecycle-tools-6cexrur_/cli.py",
+      "original_sha256": "a6335cb61dbb94e8d19f392dc884135c58728d4b5868c48bf1f58708a97035de",
+      "candidate_sha256": "bee983e37c4de5488d1bc851fa55d15db66a12c1613a592876bd4a4353c2bd37",
+      "current_plan_direct_binding": true,
+      "candidate": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-warmup-prevention-plan-p2cs63w2/candidate-repo/hilega-operational-lifecycle-tools-6cexrur_/cli.py",
+      "original_backup": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-warmup-prevention-plan-p2cs63w2/originals/hilega-operational-lifecycle-tools-6cexrur_/cli.py"
+    },
+    {
+      "path": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-reference-service-stage-yup3_wr1/lifecycle_reference_service.py",
+      "original_sha256": "b5275d29a9e5d7041314d228094455d734d25f869caf7f5b2928d8ec3f1d242f",
+      "candidate_sha256": "730395811277e67071503ebccdc201412d890287850f66d2683703055b21bf99",
+      "current_plan_direct_binding": true,
+      "candidate": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-warmup-prevention-plan-p2cs63w2/candidate-repo/hilega-reference-service-stage-yup3_wr1/lifecycle_reference_service.py",
+      "original_backup": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-warmup-prevention-plan-p2cs63w2/originals/hilega-reference-service-stage-yup3_wr1/lifecycle_reference_service.py"
+    }
+  ],
+  "proposal": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-warmup-prevention-plan-p2cs63w2/DEPLOYMENT-PROPOSAL.json",
+  "proposal_sha256": "21d9fc37d1ebee50778733ec855ab4a7e94e695aaf4c4c65e015240dc2941842",
+  "apply_available": false,
+  "prevention_deployed": false,
+  "application_sources_modified": false,
+  "services_changed": false,
+  "controller_resumed": false,
+  "broker_requests_issued": false,
+  "production_execution_enabled": false,
+  "production_ready": false,
+  "audit_folder": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-warmup-prevention-plan-p2cs63w2"
+}

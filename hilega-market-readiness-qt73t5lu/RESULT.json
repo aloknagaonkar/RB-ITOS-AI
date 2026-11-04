@@ -1,0 +1,57 @@
+{
+  "status": "MARKET_EVIDENCE_READ_REVIEW_REQUIRED",
+  "assessed_at": "2026-11-03T11:34:44.729543+05:30",
+  "source": {
+    "verified": true,
+    "policy": "BULLISH_GAP2_FULL_WMA2",
+    "version": "bullish-gap2-full-wma2-2.0.0-wma40-reversal",
+    "source_at": "2026-11-03T11:34:00+05:30",
+    "source_age_seconds": 44.729543,
+    "source_fresh": true,
+    "source_session_is_today": true,
+    "records_checked": 14777,
+    "natural_entry_signal_required_for_this_check": false
+  },
+  "warmup": {
+    "cached_monitor_fresh": true,
+    "cached_monitor_checked_at": "2026-11-03T11:34:41.670716+05:30",
+    "cached_warmup": {
+      "checked_at": "2026-11-03T11:30:22.802884+05:30",
+      "session_date": "2026-11-03",
+      "complete_sessions": 28,
+      "indicator_warmup_ready": true,
+      "ready": true,
+      "issues": []
+    },
+    "independently_recomputed": false,
+    "cache_repair_attempted": false,
+    "cached_current_warmup_ready": true
+  },
+  "option_quotes": {
+    "snapshot_at": "2026-10-31T03:39:20.910875+00:00",
+    "snapshot_fresh": false,
+    "stream_connected": false,
+    "observed_contract_count": 0,
+    "contracts": [],
+    "required_strategy_contract_coverage_verified": false,
+    "subscription_requests_written": false,
+    "broker_quote_requests_issued": false,
+    "fresh_observed_quote_count": 0
+  },
+  "remaining_checks": [
+    "NO_FRESH_COMPLETE_OBSERVED_OPTION_QUOTE",
+    "REQUIRED_STRATEGY_CONTRACT_COVERAGE_NOT_VERIFIED"
+  ],
+  "controller_mode": "PAUSED",
+  "broker_requests_issued": false,
+  "credentials_loaded": false,
+  "application_sql_mutations_issued": false,
+  "application_services_changed": false,
+  "source_cursor_changed_by_check": false,
+  "controller_resumed": false,
+  "orders_sent": false,
+  "production_execution_enabled": false,
+  "production_ready": false,
+  "group2_complete": false,
+  "audit_folder": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-market-readiness-qt73t5lu"
+}

@@ -1,0 +1,21 @@
+{
+  "status": "COORDINATED_WARMUP_INSTALL_CHECK_PASS",
+  "transaction_cases": 6,
+  "prior_binding_cases": 6,
+  "prior_18_writer_cases_reexecuted": false,
+  "native_warmup_ready": true,
+  "complete_warmup_sessions": 28,
+  "plan": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-warmup-install-plan-p4n8fyi5/PLAN.json",
+  "plan_sha256": "f4633a3f7cd211bf0f3ce7f676870b3ff07ceb6715800a1831c73eecfca1f896",
+  "apply_before": "2026-11-03T16:18:27.056751+00:00",
+  "apply_available": true,
+  "live_backups_created": false,
+  "prevention_deployed": false,
+  "application_sources_modified": false,
+  "services_changed": false,
+  "controller_resumed": false,
+  "production_execution_enabled": false,
+  "production_ready": false,
+  "milestones": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-warmup-install-plan-p4n8fyi5/MILESTONES.md",
+  "successor_status_driver": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-warmup-prevention-deploy-v1/manage.py"
+}

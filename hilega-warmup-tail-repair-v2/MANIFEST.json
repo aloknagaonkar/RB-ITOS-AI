@@ -1,0 +1,11 @@
+{
+  "writer-candidate.py.txt": "2bd6ae98e40a7b76b6e492f641feef5fc933ab27cefe48e369d2c9b38afc7b8f",
+  "SOURCE-PINS.json": "d422ac4aed2cee4b24253783d3d38569bbe17dcc960c7dedd1e5b3f86df47060",
+  "repair_core.py": "614248316b56e358ca954401b870ae3cb0dba28631f480b5fbbc3ea032b9b596",
+  "prevention.py": "dc880dee7e3cd5e38ce7272b7d2c042079a88abc51336c07bf782c64822aa224",
+  "test_repair.py": "eb75e35c5e607ad34658a5ef84bc536b1c37fd26652a377630b80ab86926911e",
+  "WRITER-PINS.json": "350744505aaa5e411a7c1a5a36f63c68ff7ee11dc37db1770b813930687f8246",
+  "repair.py": "0b39b09b078566d7c5f9861bb4b7ea9073efd8df78f93ec3f0bc1a3b05fedafd",
+  "test_prevention.py": "00f5f512c818cc87ff483c4b018113a2107fdee3e97f834e1ba1bef90c2cfdaf",
+  "README.md": "b404beb05c5524252e35bfc13cbbcf6de8679a13f1738f50d37ee5caa02cc42d"
+}

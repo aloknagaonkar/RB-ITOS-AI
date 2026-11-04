@@ -1,0 +1,1 @@
+{"sequence": 1, "previous_hash": null, "stage": "COMBINED_PRICE_OBSERVATION", "status": "PROCESSED", "payload": {"policy_id": "BULLISH_GAP2_FULL_WMA2", "strategy_version": "bullish-gap2-full-wma2-2.0.0-wma40-reversal", "decision_timestamp": "2026-11-03T23:51:27.146898+05:30"}, "record_hash": "94ae885283950f242107cf950fb93e192c143543298074b6c43ba418d26bf221"}

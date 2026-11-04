@@ -1,0 +1,40 @@
+{
+  "status": "NATIVE_DISABLED_ADMISSION_ENROLLMENT_INTEGRATION_CANDIDATE_PASS",
+  "new_cases": 8,
+  "native_fresh_seed_scan_and_binding_used": true,
+  "native_signed_local_provisioner_used": true,
+  "native_postcommit_same_key_recovery_used": true,
+  "hard_order_gate_overridden": false,
+  "real_network_denied_in_tests": true,
+  "test_transport_is_intercepted_and_no_send_expected": true,
+  "disposable_databases_and_private_files_only": true,
+  "final_activation_stays_blocked": true,
+  "candidate": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-admission-enrollment-review-s7ixg1qi/candidate",
+  "candidate_release_sha256": "de10dc94c7f7ff501cd25217deef38e7f5c78b9adf8e448a1551ce9447f99fdf",
+  "changed_modules": [
+    "runtime/admission_enrollment_flow.py"
+  ],
+  "changed_dependency_manifest": "backend/market_lab/hilega_preparation_runtime_v1/dependencies.json",
+  "existing_worker_dispatch_bytes_unchanged": true,
+  "source_worker_cli_assembly_for_live_bounded_window_implemented": false,
+  "live_window_guard_and_reload_plan_available": false,
+  "live_enrollment_apply_available": false,
+  "production_contract_admission_live_qualified": false,
+  "activation_apply_available": false,
+  "installed_sources_modified": false,
+  "services_changed": false,
+  "live_database_mutations_issued": false,
+  "live_authority_keys_created": false,
+  "broker_requests_issued": false,
+  "controller_resumed": false,
+  "production_execution_enabled": false,
+  "production_ready": false,
+  "remaining": [
+    "LIVE_BOUNDED_PREPARATION_WINDOW_ASSEMBLY_AND_INDEPENDENT_GUARD",
+    "OPEN_SESSION_V4_AND_REAL_FRESH_SEED_QUALIFICATION",
+    "EXACT_SIGNED_LIVE_DISABLED_ENROLLMENT_PLAN",
+    "BROKER_TIMESTAMP_FINAL_FEE_AND_FULL_CONTRACT_EVIDENCE",
+    "REGISTRY_ATTACHMENT_RECOVERY_AND_SEPARATE_FINAL_GATE_RELEASE"
+  ],
+  "audit_folder": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-admission-enrollment-review-s7ixg1qi"
+}

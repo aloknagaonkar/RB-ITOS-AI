@@ -1,0 +1,32 @@
+{
+  "grant": {
+    "binding": {
+      "account_scope": "UPSTOX:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "adapter_db": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-admission-enrollment-review-s7ixg1qi/synthetic/test_disabled_owner_does_not_e0/adapter.sqlite",
+      "application_db": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-admission-enrollment-review-s7ixg1qi/synthetic/test_disabled_owner_does_not_e0/application.sqlite",
+      "bridge_run_id": "synthetic-lease",
+      "journal": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-admission-enrollment-review-s7ixg1qi/synthetic/test_disabled_owner_does_not_e0/strategy.jsonl",
+      "policy_sha256": "2a9d21c7ec04006b2c32758975844ddcf44ea16eed4be0be5e1c826b953b49b8",
+      "private_parent": "/home/aloknagaonkar46/RB-ITOS-AI/hilega-admission-enrollment-review-s7ixg1qi/synthetic/test_disabled_owner_does_not_e0/private",
+      "release_sha256": "de10dc94c7f7ff501cd25217deef38e7f5c78b9adf8e448a1551ce9447f99fdf",
+      "seed_request_id": "4fe54086eaa2e4d5283dcd6f1a4638b3efb42d2ec51c5ae364b88da2a0937bd6",
+      "state_fingerprint": "e20f68b2bc3d177687acbdacff7c44486e6d7c8778240d588f952330ecd728de"
+    },
+    "expires_at": "2026-10-26T09:25:53+05:30",
+    "grant_id": "local-test-grant",
+    "issued_at": "2026-10-26T09:25:02+05:30",
+    "issuer_id": "local-test-root",
+    "model": "HILEGA_LOCAL_BOOTSTRAP_APPROVAL_CANDIDATE_V1",
+    "operation": "ENROLL_DISABLED_OWNER",
+    "order_transport_permission": false,
+    "production_execution_enabled": false,
+    "signature": "a1638eea5e57f8ae5fc6f21a75e51920277859137326526601fa084b3334b368"
+  },
+  "issuer_key_fingerprints": {
+    "local-test-root": "8de723e4024fc415375babe4e47a3da625c75840c6b8e14f44c303d738ea88df"
+  },
+  "model": "HILEGA_LOCAL_BOOTSTRAP_APPROVAL_AUDIT_V1",
+  "order_transport_permission": false,
+  "production_execution_enabled": false,
+  "verified_at": "2026-10-26T09:25:03+05:30"
+}

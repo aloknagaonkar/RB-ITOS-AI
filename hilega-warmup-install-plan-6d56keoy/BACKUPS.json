@@ -1,0 +1,12 @@
+{
+  "files": {
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-warmup-install-plan-6d56keoy/backups/file-0": "c5d640d66285f5e6b908b036b20bf57a909437b247d38757918dc8728c687319",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-warmup-install-plan-6d56keoy/backups/file-1": "67713245f538ab8217ac6016eb81d12c09edff18584db5adf30145d8eaa62acf",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-warmup-install-plan-6d56keoy/backups/file-2": "a6335cb61dbb94e8d19f392dc884135c58728d4b5868c48bf1f58708a97035de",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-warmup-install-plan-6d56keoy/backups/file-3": "b5275d29a9e5d7041314d228094455d734d25f869caf7f5b2928d8ec3f1d242f",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-warmup-install-plan-6d56keoy/backups/application_db.sqlite": "1c4088772acc43da7f05ee31e8a61bdaf8e565adb48d44ca7722d321e002dd41",
+    "/home/aloknagaonkar46/RB-ITOS-AI/hilega-warmup-install-plan-6d56keoy/backups/adapter_db.sqlite": "94476e29a35da9b2ade5e8d514a0e350d134f947196fb4b77c2cd2fca59ad86d"
+  },
+  "databases_quiescent": true,
+  "automatic_database_restore": false
+}

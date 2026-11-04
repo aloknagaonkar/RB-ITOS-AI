@@ -1,0 +1,9 @@
+{
+  "README.md": "f8dc38e4f5a5ec068b1c895246a4b2f63411340a1ec9bc20a7677722ec9045a5",
+  "WRITER-PINS.json": "350744505aaa5e411a7c1a5a36f63c68ff7ee11dc37db1770b813930687f8246",
+  "BASELINE-PINS.json": "ff1e0d52fe238326e7e02cdd6c1270d09c929175ba8c617f3bbb1b26259cefbb",
+  "test_bindings.py": "f94b21974830e12c7c9267b3d41562c5a37a73735a363f6fb4e59188cb3de121",
+  "bindings.py": "d2573889a7ac1bca4e91ffc3ba817d280cb203f73beb79528f74543377dae9ee",
+  "prepare.py": "f218461332e1a5049cef13fdc0d5eade3906e9cb495a6de89383aee6d5be78fc",
+  "writer-candidate.py.txt": "2bd6ae98e40a7b76b6e492f641feef5fc933ab27cefe48e369d2c9b38afc7b8f"
+}

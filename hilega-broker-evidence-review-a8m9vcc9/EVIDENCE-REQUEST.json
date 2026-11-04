@@ -1,0 +1,26 @@
+{
+  "session": "2026-11-02",
+  "documents_required": [
+    {
+      "kind": "BROKER_TIMESTAMP_REPLY",
+      "required": [
+        "Broker case reference and response date",
+        "Timezone/offset contract for daily trade and per-order trade order_timestamp and exchange_timestamp",
+        "Timezone contract for order history; explanation of the exact 5h30m discrepancy"
+      ]
+    },
+    {
+      "kind": "FINAL_CONTRACT_NOTE_OR_ITEMIZED_REPORT",
+      "required": [
+        "Statement finality and session/account scope",
+        "Exact instrument identifier, expiry, strike, CE/PE, quantity and price for each fill",
+        "Final component charges including IPFT treatment",
+        "Explicit per-fill attribution or broker documented allocation method with rounding and coverage"
+      ]
+    }
+  ],
+  "user_confirmation_recorded": "Manual activity for Nov 2 only; not Hilega strategy ownership proof",
+  "redaction_guidance": "Do not share access tokens, signing keys, login credentials, PAN, address or bank details. Retain a consistent masked account reference and enough fill/contract fields for matching.",
+  "automatic_document_acceptance": false,
+  "fee_or_timestamp_override_available": false
+}

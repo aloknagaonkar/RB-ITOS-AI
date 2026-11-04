@@ -1,0 +1,10 @@
+{
+  "native_rules_reference.py": "660c92d979626692898c4b154b3918be24ed6fe27424885f165ccd7ee45195e5",
+  "quote_core.py": "afc833ab8bf13d29d98240253b210b7dc2f424995ad124c086f2cec9e9ee1b99",
+  "test_stream.py": "5ed759ad0ba549fe7902b839886bf81df6ddff9a288e5c66d89345b431b13f7e",
+  "manage.py": "c46add5fe66ca16ea1d8ac7d523084d883086c687a915aa3b6cdb7746af9b493",
+  "BASELINE-PINS.json": "b111db078c0d017651c865c5ad71be06df542b3db104cf0fffd188c5123e9427",
+  "README.md": "c14e530ae32e4d40aadb8d0a2ab57fe6c499d08d94efbea2ad9e2e1cf274bbab",
+  "successor.py": "315f6f6ea6498200483f754fbb6d8afc19883bc27e1eb070b09e544e8c5c17d7",
+  "stream_worker.py": "ad35e4f11bc47cc1c94b78fe215adb48ac78f20b90d6f46cb3022263fa986648"
+}

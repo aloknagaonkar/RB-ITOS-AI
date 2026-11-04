@@ -96,7 +96,7 @@
     "backend/market_lab/hilega_milega_bearish_strategy_v1.py": "46d3f3c2c85c6270c85ff3a173a9e28aac45eecdf37187ca8b3cdac06fa3632d",
     "backend/market_lab/hilega_milega_functional_parity_replay_v1.py": "bc0ddee9eb573a6d31425ac833a43fd5715d311827230b3d204e93da6c3f6949",
     "backend/market_lab/hilega_milega_historical_replay_cli_v1.py": "00e62968ff70563e9a3b7d36e592a0c6d90c95ef34f4c9ef19fbcd79e9dbd470",
-    "backend/market_lab/hilega_milega_historical_replay_v1.py": "c5d640d66285f5e6b908b036b20bf57a909437b247d38757918dc8728c687319",
+    "backend/market_lab/hilega_milega_historical_replay_v1.py": "2bd6ae98e40a7b76b6e492f641feef5fc933ab27cefe48e369d2c9b38afc7b8f",
     "backend/market_lab/hilega_milega_live_shadow_ui_v1.py": "0ff69f4cf05f2520034b59c30b54b08a6303feb02401c1392c69fbf4b06cb332",
     "backend/market_lab/hilega_milega_live_shadow_v1.py": "15850bf343eca356a81cc1c8a7adad8ad4bfa427e40e9b016b29c85a7645c0f1",
     "backend/market_lab/hilega_milega_option_candidate_v1.py": "500730f032fd809b3c9af59753335d8d8fcf71f299c9a88fb9f0c9e1ec398df9",

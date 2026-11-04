@@ -1,0 +1,5 @@
+{
+  "exit_code": 0,
+  "stdout": "{\n  \"status\": \"PACKAGE_AND_RUNTIME_CHECK_PASS\",\n  \"database_access_performed\": false,\n  \"credentials_opened\": false,\n  \"broker_reads_performed\": false,\n  \"order_actions_available\": false,\n  \"production_execution_enabled\": false\n}\n",
+  "stderr": ""
+}

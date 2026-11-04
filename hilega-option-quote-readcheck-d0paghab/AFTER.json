@@ -1,0 +1,5 @@
+{
+  "exit_code": 0,
+  "stdout": "{\n  \"phase\": \"CLOSED_GROUP2_CANDIDATE_RUNNING\",\n  \"controller_resumed\": false,\n  \"production_execution_enabled\": false,\n  \"production_ready\": false\n}\n",
+  "stderr": ""
+}

@@ -1,0 +1,145 @@
+{
+  "exception_trace": [
+    {
+      "error_type": "FileNotFoundError",
+      "reason": "DETAIL_NOT_EXPORTED",
+      "file": "<frozen importlib._bootstrap_external>",
+      "line": 1115,
+      "function": "get_code"
+    },
+    {
+      "error_type": "FileNotFoundError",
+      "reason": "DETAIL_NOT_EXPORTED",
+      "file": "<frozen importlib._bootstrap_external>",
+      "line": 1214,
+      "function": "get_data"
+    },
+    {
+      "error_type": "FileNotFoundError",
+      "reason": "DETAIL_NOT_EXPORTED",
+      "file": "<frozen importlib._bootstrap_external>",
+      "line": 1115,
+      "function": "get_code"
+    },
+    {
+      "error_type": "IndexError",
+      "reason": "DETAIL_NOT_EXPORTED",
+      "file": "_local.py",
+      "line": 49,
+      "function": "__getitem__"
+    },
+    {
+      "error_type": "IndexError",
+      "reason": "DETAIL_NOT_EXPORTED",
+      "file": "<frozen _collections_abc>",
+      "line": 1035,
+      "function": "__iter__"
+    },
+    {
+      "error_type": "ValueError",
+      "reason": "PRIVATE_BINDING_FILE_REQUIRED",
+      "file": "authority_contract.py",
+      "line": 14,
+      "function": "need"
+    },
+    {
+      "error_type": "ValueError",
+      "reason": "PRIVATE_BINDING_FILE_REQUIRED",
+      "file": "authority_files.py",
+      "line": 18,
+      "function": "private_bytes"
+    },
+    {
+      "error_type": "ValueError",
+      "reason": "PRIVATE_BINDING_FILE_REQUIRED",
+      "file": "worker_binding.py",
+      "line": 14,
+      "function": "registration"
+    },
+    {
+      "error_type": "ValueError",
+      "reason": "PRIVATE_BINDING_FILE_REQUIRED",
+      "file": "worker_binding.py",
+      "line": 38,
+      "function": "poll"
+    },
+    {
+      "error_type": "ValueError",
+      "reason": "PRIVATE_BINDING_FILE_REQUIRED",
+      "file": "worker_binding.py",
+      "line": 101,
+      "function": "poll_with_journal_health"
+    },
+    {
+      "error_type": "ValueError",
+      "reason": "PRIVATE_BINDING_FILE_REQUIRED",
+      "file": "worker_binding.py",
+      "line": 92,
+      "function": "_default_worker_poll_without_window"
+    },
+    {
+      "error_type": "ValueError",
+      "reason": "PRIVATE_BINDING_FILE_REQUIRED",
+      "file": "worker_binding.py",
+      "line": 108,
+      "function": "default_worker_poll"
+    },
+    {
+      "error_type": "ValueError",
+      "reason": "PRIVATE_BINDING_FILE_REQUIRED",
+      "file": "hilega_worker_registration_v1.py",
+      "line": 18,
+      "function": "poll"
+    },
+    {
+      "error_type": "ValueError",
+      "reason": "PRIVATE_BINDING_FILE_REQUIRED",
+      "file": "hilega_worker_registration_v1.py",
+      "line": 37,
+      "function": "registered_worker_poll"
+    },
+    {
+      "error_type": "ValueError",
+      "reason": "PRIVATE_BINDING_FILE_REQUIRED",
+      "file": "hilega_production_simulator_bridge.py",
+      "line": 99,
+      "function": "main"
+    },
+    {
+      "error_type": "IndexError",
+      "reason": "DETAIL_NOT_EXPORTED",
+      "file": "_parser.py",
+      "line": 242,
+      "function": "__next"
+    },
+    {
+      "error_type": "IndexError",
+      "reason": "DETAIL_NOT_EXPORTED",
+      "file": "_parser.py",
+      "line": 170,
+      "function": "__getitem__"
+    },
+    {
+      "error_type": "ValueError",
+      "reason": "PRIVATE_BINDING_FILE_REQUIRED",
+      "file": "hilega_production_bridge_health_v1.py",
+      "line": 65,
+      "function": "worker_lock"
+    },
+    {
+      "error_type": "ValueError",
+      "reason": "PRIVATE_BINDING_FILE_REQUIRED",
+      "file": "contextlib.py",
+      "line": 162,
+      "function": "__exit__"
+    },
+    {
+      "error_type": "ValueError",
+      "reason": "PRIVATE_BINDING_FILE_REQUIRED",
+      "file": "hilega_production_simulator_bridge.py",
+      "line": 114,
+      "function": "<module>"
+    }
+  ],
+  "trace_changes_validation": false
+}

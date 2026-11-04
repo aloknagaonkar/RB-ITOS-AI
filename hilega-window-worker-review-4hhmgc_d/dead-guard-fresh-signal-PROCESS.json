@@ -1,0 +1,5 @@
+{
+  "exit_code": 0,
+  "stdout": "{\"scenario\": \"dead-guard-fresh-signal\", \"disposable_databases_only\": true, \"dead_guard_before_worker_poll\": true, \"recovery_lock_held_during_worker_rejection\": true, \"worker_paused_without_preparation\": true, \"orders_sent\": false, \"production_execution_enabled\": false, \"worker_cli_signed_seed_boundary_verified\": false}\n",
+  "stderr": ""
+}

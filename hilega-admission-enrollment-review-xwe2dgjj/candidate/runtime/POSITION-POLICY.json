@@ -1,0 +1,7 @@
+{
+  "model": "HILEGA_POSITION_POLICY_CANDIDATE_V1",
+  "max_simultaneous_positions": 1,
+  "max_premium_per_entry_cents": null,
+  "daily_loss_cutoff_cents": null,
+  "production_execution_enabled": false
+}

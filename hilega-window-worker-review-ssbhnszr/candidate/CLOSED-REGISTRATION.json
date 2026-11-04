@@ -1,0 +1,7 @@
+{
+  "model": "HILEGA_CLOSED_WORKER_REGISTRATION_V1",
+  "mode": "CLOSED_PREPARATION_ONLY",
+  "base_release_manifest_sha256": "e5b7172ab14099264e90aa7865e9e56588d1e4503aa3063707d3a446ec73131e",
+  "production_execution_enabled": false,
+  "execution_factory_configured": false
+}
