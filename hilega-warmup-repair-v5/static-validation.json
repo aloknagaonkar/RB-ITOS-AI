@@ -1,0 +1,9 @@
+{
+  "status": "STATIC_VALIDATION_PASS",
+  "package_revision": "v5-explicit-intraday-observation-handover",
+  "runtime_candidates_unchanged_from_v3": true,
+  "prior_v3_vm_tests_passed": 128,
+  "vm_tests_executed": false,
+  "vm_services_modified": false,
+  "broker_requests_sent": false
+}

@@ -7,7 +7,7 @@ def step(label, result, value, requirement, explanation):
     return dict(label=label,status='INFO' if result is None else 'PASS' if result else 'FAIL',value=value,requirement=requirement,explanation=explanation)
 
 def inspection(a):
-    if a.get("policy_id")=="BULLISH_GAP2_FULL_WMA2" or any(c.get("policy_name")=="BULLISH_GAP2_FULL_WMA2" for c in a.get("checks",[])):
+    if a.get("policy_id") in {"BULLISH_GAP2_FULL_WMA2","RSI_TWO_ROUTE_CONFIRMED_MIDPOINT"} or any(c.get("policy_name")=="BULLISH_GAP2_FULL_WMA2" for c in a.get("checks",[])):
         from .hilega_combined_policy_inspection_v1 import inspection as combined_inspection
         return combined_inspection(a)
     out=[]
@@ -41,7 +41,7 @@ def project_session(data, minute_rows=None):
     minute_rows=minute_rows or {}
     for i,a in enumerate(x.get('audit') or []):
         a=deepcopy(a)
-        cp=a['checkpoint'];session_closed=bool(x.get('policy_id')=='BULLISH_GAP2_FULL_WMA2' and cp[11:16]>='14:55')
+        cp=a['checkpoint'];session_closed=bool(x.get('policy_id')=='BULLISH_GAP2_FULL_WMA2' and cp[11:16]>=(x.get('rules',{}).get('session_end_IST') or '14:55'))
         if session_closed:a['checks']=[];a['owner_after']='NONE'
         ind=a.get('indicators') or {};prev=previous or {}
         checks=a.get('checks') or [];pending_side=checks[0]['direction'] if checks else None
@@ -61,7 +61,7 @@ def project_session(data, minute_rows=None):
                 event='ENTRY_V2_ALIGNMENT' if is_entry else 'V2_DUAL_EXIT'
                 emitted=[event]
                 ts=[dict(event_type=event,event_time=cp,price=t['price'],points=t.get('points'),source=source,
-                         exit_reason=t.get('reason') or ('SESSION_CUTOFF_1455' if a.get('minute_timestamp')==cp else 'BOTH_RSI9_EMA3_OPPOSITE_WMA21') if is_exit else None,
+                         exit_reason=t.get('reason') or (('SESSION_END_1530' if x.get('rules',{}).get('decision_interval_minutes')==3 else 'SESSION_CUTOFF_1455') if a.get('minute_timestamp')==cp else 'BOTH_RSI9_EMA3_OPPOSITE_WMA21') if is_exit else None,
                          details={'original_entry_time':origin,'original_entry_price':entry_price})]
             else:
                 ts=[]
@@ -79,7 +79,7 @@ def project_session(data, minute_rows=None):
               strategy={'strategy_id':engine.MODEL,'direction':direction,'decision_timestamp':cp,'owner_before':before,'owner_after':after,
                 'state_before':f'{before}_ACTIVE' if before!='NONE' else 'IDLE','state_after':'SESSION_LOCKED' if session_closed else f'{after}_ACTIVE' if after!='NONE' else 'IDLE',
                 'policy_id':x.get('policy_id'),'strategy_version':x.get('strategy_version'),'events_emitted':emitted,'selected_route':source or (setup or {}).get('source'),'original_entry_price':entry_price,
-                'rule_description':('SESSION CLOSED · 14:55 cutoff; no further entries' if session_closed and not is_exit else f'{direction} · '+('Combined ENTRY · completed5m signal + follow-up + bullish gap2/WMA2' if is_entry else 'V2 EXIT · '+str(ts[0]['exit_reason']) if is_exit else 'ACTIVE · dual-exit monitoring' if after!='NONE' else 'SETUP · waiting for entry gates' if checks or setup else 'NO SIGNAL'))},
+                'rule_description':('SESSION CLOSED · '+str(x.get('rules',{}).get('session_end_IST') or '14:55')+'; no further entries' if session_closed and not is_exit else f'{direction} · '+('RSI Two Route ENTRY · '+str(source) if is_entry else 'V2 EXIT · '+str(ts[0]['exit_reason']) if is_exit else 'ACTIVE · confirmed-midpoint / all-three exit monitoring' if after!='NONE' else 'SETUP · waiting for entry gates' if checks or setup else 'NO SIGNAL'))},
               transitions=ts,conditions={'authoritative_strategy_steps':True,'strategy_steps':inspection(a)},
               audit_integrity={'decision_timestamp':cp,'chain_ok':None,'evidence_source':x.get('source',engine.SOURCE),'raw_replay_audit':a},
               safety={'observation_only':True,'execution_enabled':False},option_candidate=None,option_lifecycle=None)

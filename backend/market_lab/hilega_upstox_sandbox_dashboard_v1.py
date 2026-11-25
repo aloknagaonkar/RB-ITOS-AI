@@ -1,5 +1,6 @@
 """Read-only Hilega Upstox Sandbox dashboard projection."""
 from __future__ import annotations
+from .hilega_active_strategy_v1 import effective_strategy
 
 import json
 import os
@@ -133,7 +134,7 @@ def build_dashboard(
     gross_loss = abs(sum(min(0.0, x["estimated_pnl_rupees"]) for x in closed))
     wins = sum(x["estimated_pnl_rupees"] > 0 for x in closed)
     losses = sum(x["estimated_pnl_rupees"] < 0 for x in closed)
-    active_strategy = os.getenv("LIVE_SHADOW_STRATEGY", "HILEGA_DIRECTIONAL_SHADOW_V1")
+    active_strategy = effective_strategy(os.getenv("LIVE_SHADOW_STRATEGY", "HILEGA_DIRECTIONAL_SHADOW_V1"))
     armed_strategy = str(control.get("strategy_id") or active_strategy)
     return {
         "model": "HILEGA_UPSTOX_SANDBOX_DASHBOARD_V1",

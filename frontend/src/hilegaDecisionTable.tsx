@@ -193,6 +193,7 @@ export function pathText(r:HilegaAudit,carriedRoute?:string):string {
   return 'Not evaluated'
 }
 export type DecisionRow = {
+  entryReconstructed:boolean
   report:HilegaAudit
   origin:string|null
   originRoute:string|null
@@ -317,10 +318,12 @@ export function expandRecordedReversals(reports:HilegaAudit[]):HilegaAudit[] {
   })
 }
 export function deriveDecisionRows(reports:HilegaAudit[]):DecisionRow[] {
+  let entryReconstructed=false
   let active=false,activeDirection:'BULLISH'|'BEARISH'|null=null,origin:string|null=null,originRoute:string|null=null,entryNifty:number|null=null,sessionDate:string|null=null
   return expandRecordedReversals([...reports].sort((a,b)=>a.checkpoint.localeCompare(b.checkpoint))).map(report=>{
     const date=report.checkpoint.slice(0,10)
-    if(sessionDate!==date){active=false;activeDirection=null;origin=null;originRoute=null;entryNifty=null;sessionDate=date}
+    const timelineKey=date+'|'+String(report.strategy?.strategy_version??'legacy')
+    if(sessionDate!==timelineKey){active=false;activeDirection=null;origin=null;originRoute=null;entryNifty=null;entryReconstructed=false;sessionDate=timelineKey}
     const rawKind=eventKind(report)
     const linked=explicitOrigin(report)
     let displayKind:DisplayKind=rawKind
@@ -337,6 +340,7 @@ export function deriveDecisionRows(reports:HilegaAudit[]):DecisionRow[] {
         origin=report.checkpoint
         originRoute=pathText(report)
         entryNifty=entryNiftyAt(report)
+        entryReconstructed=report.strategy?.reconstructed===true
       }
     }else if(rawKind==='EXIT'){
       if(active){
@@ -380,7 +384,7 @@ export function deriveDecisionRows(reports:HilegaAudit[]):DecisionRow[] {
     }
 
     const niftyPoints=(displayKind==='ENTRY'||displayKind==='ACTIVE'||displayKind==='EXIT')?niftyPointsFromEntry(currentNifty(report),entryNifty,activeDirection??reportDirection(report)):null
-    const result:DecisionRow={report,origin,originRoute,entryNifty,niftyPoints,rawKind,displayKind,lifecycleIssue}
+    const result:DecisionRow={report,origin,originRoute,entryNifty,niftyPoints,rawKind,displayKind,lifecycleIssue,entryReconstructed}
     if(displayKind==='EXIT'){
       active=false
       activeDirection=null
@@ -795,7 +799,7 @@ export default function HilegaDecisionTable({reports,mode,fetchDetail,visibleUnt
         const report=mergeLifecycleEvidence(phaseDetail(r),peers)
         const badge=k==='NONE'?'NO SIGNAL':k==='REVIEW'?'REVIEW REQUIRED':k==='REJECTED'?'REJECTED':displayDecisionText(k,reportDirection(r))
         const timing=candleTiming(r)
-        return <Fragment key={auditKey(r)}><tr className={`hd-row hd-${k.toLowerCase()}`}><td><span style={{display:'block'}}>{timing.window}</span>{timing.processed&&<small style={{display:'block'}}>{timing.label==='recovered'?`recovered ${timing.processed}`:timing.processed}</small>}</td><td><strong>{shortRuleText(r,k,lifecycleIssue)}</strong>{lifecycleIssue&&<small className="hd-lifecycle-issue">{lifecycleIssue}</small>}</td><td><span className={color(niftyPoints)} style={{display:'block'}}>{niftyPoints===null?'—':`${niftyPoints>0?'+':''}${money(niftyPoints)} pts`}</span><small style={{display:'block'}}>O {money(r.bar?.open)} → C {money(r.bar?.close)}</small></td><td>{pathText(r,originRoute??undefined)}</td><td><span className={`hd-badge hd-${k.toLowerCase()}`}>{badge}</span></td><td><button aria-expanded={opened} aria-label={`Audit ${r.checkpoint}`} onClick={()=>void toggle(row)}>{opened?'Hide audit':'View audit ▾'}</button></td></tr>
+        return <Fragment key={auditKey(r)}><tr className={`hd-row hd-${k.toLowerCase()}`}><td><span style={{display:'block'}}>{timing.window}</span>{timing.processed&&<small style={{display:'block'}}>{timing.label==='recovered'?`recovered ${timing.processed}`:timing.processed}</small>}</td><td><strong>{shortRuleText(r,k,lifecycleIssue)}</strong>{row.entryReconstructed&&['ENTRY','ACTIVE','EXIT'].includes(k)&&<small style={{display:'block'}}>Underlying reference reconstructed · not a live option entry</small>}{lifecycleIssue&&<small className="hd-lifecycle-issue">{lifecycleIssue}</small>}</td><td><span className={color(niftyPoints)} style={{display:'block'}}>{niftyPoints===null?'—':`${niftyPoints>0?'+':''}${money(niftyPoints)} pts`}</span><small style={{display:'block'}}>O {money(r.bar?.open)} → C {money(r.bar?.close)}</small></td><td>{pathText(r,originRoute??undefined)}</td><td><span className={`hd-badge hd-${k.toLowerCase()}`}>{badge}</span></td><td><button aria-expanded={opened} aria-label={`Audit ${r.checkpoint}`} onClick={()=>void toggle(row)}>{opened?'Hide audit':'View audit ▾'}</button></td></tr>
         {opened&&<tr className="hd-expanded"><td colSpan={6}>{loading&&!details[r.checkpoint]&&<p>Loading linked directional option lifecycle…</p>}<Detail r={report} reports={ordered} origin={origin} originRoute={originRoute} displayKind={k} lifecycleIssue={lifecycleIssue} allowedUntil={r.strategy?.decision_timestamp??candleBoundary(r.checkpoint)}/></td></tr>}
         </Fragment>
       })}

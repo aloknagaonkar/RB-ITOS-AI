@@ -1,4 +1,5 @@
 from __future__ import annotations
+from .hilega_active_strategy_v1 import effective_strategy
 
 import argparse
 import json
@@ -149,9 +150,9 @@ def arm_session(
         "sandbox_only": True,
         "live_execution_enabled": False,
         "armed_at": (now or datetime.now(IST)).astimezone(IST).isoformat(),
-        "strategy_id": os.getenv(
+        "strategy_id": effective_strategy(os.getenv(
             "LIVE_SHADOW_STRATEGY", "HILEGA_DIRECTIONAL_SHADOW_V1"
-        ),
+        )),
     }
     control.write(payload)
     return payload
@@ -222,9 +223,9 @@ class HilegaUpstoxSandboxLiveWorkerV1:
         if not control.get("armed") or control.get("kill_switch"):
             return self._summary(control, "DISARMED", 0, 0)
         session_date = str(control.get("session_date") or "")
-        active_strategy = os.getenv(
+        active_strategy = effective_strategy(os.getenv(
             "LIVE_SHADOW_STRATEGY", "HILEGA_DIRECTIONAL_SHADOW_V1"
-        )
+        ))
         armed_strategy = str(control.get("strategy_id") or active_strategy)
         if active_strategy != armed_strategy:
             self._engage_kill_switch(control, "ACTIVE_STRATEGY_CHANGED_REARM_REQUIRED")
@@ -357,9 +358,9 @@ class HilegaUpstoxSandboxLiveWorkerV1:
             "skipped_this_run": skipped,
             "accepted_orders_this_session": len(accepted),
             "open_trade_id": (self.dispatch.open_trade(session_date) or {}).get("trade_id") if session_date else None,
-            "strategy_id": control.get("strategy_id") or os.getenv(
+            "strategy_id": control.get("strategy_id") or effective_strategy(os.getenv(
                 "LIVE_SHADOW_STRATEGY", "HILEGA_DIRECTIONAL_SHADOW_V1"
-            ),
+            )),
             "sandbox_only": True,
             "live_execution_enabled": False,
             "live_order_sent": False,

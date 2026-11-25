@@ -1,4 +1,5 @@
 """Observation-only shadow worker; run alongside market_lab.worker."""
+from .hilega_active_strategy_v1 import effective_strategy
 import os,time
 import json
 from pathlib import Path
@@ -70,7 +71,7 @@ def run():
     with Session(engine) as s:config_id,config,enabled=active_config(s)
     if config.provider!='upstox':raise SystemExit('LIVE_SHADOW_PRODUCTION_WIRING_V1 requires provider=upstox')
     sources=UpstoxLiveShadowSourcesV1(os.getenv('UPSTOX_ACCESS_TOKEN',''))
-    selected=os.getenv('LIVE_SHADOW_STRATEGY',HILEGA_STRATEGY_ID).strip().upper()
+    selected=effective_strategy(os.getenv('LIVE_SHADOW_STRATEGY',HILEGA_STRATEGY_ID)).strip().upper()
     try:
         if selected==HILEGA_STRATEGY_ID:
             expiry_raw=os.getenv("HILEGA_MILEGA_OPTION_EXPIRY","").strip()
@@ -182,7 +183,10 @@ def run():
             try:
                 while True:
                     now=datetime.now(IST)
-                    if not in_session(now):time.sleep(5);continue
+                    if not in_session(now):
+                        from .hilega_three_minute_v1.worker_close import process_after_close
+                        process_after_close(now,selected,ALIGNMENT_V2_ID,coord,process_isolated_tick)
+                        time.sleep(5);continue
                     if evidence is not None and now.date()!=evidence_day:
                         evidence.close()
                         journal=EvidenceJournalV1(evidence_root/(now.date().isoformat()+".jsonl"))

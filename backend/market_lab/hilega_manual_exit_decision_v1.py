@@ -3,7 +3,7 @@ from datetime import datetime
 from pathlib import Path
 import json
 ROOT=Path('data/live-observation/hilega-upstox-sandbox-v2')
-STRATEGY='HILEGA_V2_ALIGNMENT_DUAL_EXIT'
+STRATEGY='HILEGA_RSI_TWO_ROUTE_CONFIRMED_MIDPOINT'
 def _read(path):return json.loads(path.read_text()) if path.exists() else {}
 def _at(value):return datetime.fromisoformat(value.replace('Z','+00:00'))
 def overlay_manual_exit_rows(rows,records,day,*,requests=None,acks=None):

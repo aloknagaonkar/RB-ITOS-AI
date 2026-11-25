@@ -495,6 +495,35 @@ def _latest_live_session() -> str | None:
     return max(sessions) if sessions else None
 
 
+def _policy_display_records(records, day):
+    """One version per session; retain processed/recovered priority within it.
+
+    This is a display selection only. Never modify the append-only journal.
+    """
+    versions = []
+    for record in records:
+        p = record.get('payload') or {}
+        if (record.get('stage') == 'DIRECTIONAL_DECISION'
+                and str(p.get('decision_timestamp') or '').startswith(day)
+                and p.get('decision_interval_minutes') == 3
+                and p.get('strategy_id') == 'HILEGA_RSI_TWO_ROUTE_CONFIRMED_MIDPOINT'
+                and p.get('strategy_version')):
+            version = p['strategy_version']
+            if not versions or versions[-1] != version:
+                versions.append(version)
+    selected = versions[-1] if versions else None
+    if selected is None:
+        return records, None, []
+    chosen = []
+    for record in records:
+        p = record.get('payload') or {}
+        if record.get('stage') in {'DIRECTIONAL_DECISION', 'DIRECTIONAL_MANUAL_EXIT_RESET'}:
+            if p.get('strategy_version') != selected:
+                continue
+        chosen.append(record)
+    return chosen, selected, list(dict.fromkeys(versions))
+
+
 def build_live_directional_candles(session_date: str | None = None, *, audit_only: bool = False) -> dict[str, Any]:
     day = session_date or _latest_live_session()
     if not day:
@@ -512,13 +541,18 @@ def build_live_directional_candles(session_date: str | None = None, *, audit_onl
     rows = {} if audit_only else _base_live_rows(day)
     directional_count = 0
     manual_audit_records = _read_audit(LIVE_DIRECTIONAL_AUDIT)
+    manual_audit_records, display_version, available_versions = _policy_display_records(manual_audit_records, day)
+    session_is_3m=any((r.get("payload") or {}).get("decision_interval_minutes")==3 and _iso_session((r.get("payload") or {}).get("decision_timestamp"))==day for r in manual_audit_records)
+    if session_is_3m:rows={}  # Never mix reconstructed 5m candles into recorded 3m decisions.
     if audit_only and not any(r.get('stage')=='DIRECTIONAL_DECISION' and _iso_session((r.get('payload') or {}).get('decision_timestamp') or (r.get('payload') or {}).get('bar_timestamp') or r.get('checkpoint'))==day for r in manual_audit_records):
         rows = _base_live_rows_legacy(day)
     for record in manual_audit_records:
         if record.get("stage") != "DIRECTIONAL_DECISION":
             continue
         payload = record.get("payload") or {}
-        is_v2 = payload.get("strategy_id") in {"HILEGA_WMA_GAP_V2_LIVE_SHADOW", "HILEGA_V2_ALIGNMENT_DUAL_EXIT"}
+        if session_is_3m and payload.get("decision_interval_minutes")!=3:
+            continue
+        is_v2 = payload.get("strategy_id") in {"HILEGA_WMA_GAP_V2_LIVE_SHADOW", "HILEGA_RSI_TWO_ROUTE_CONFIRMED_MIDPOINT"}
         ts = (payload.get("decision_timestamp") if is_v2 else None) or payload.get("bar_timestamp") or record.get("checkpoint")
         if not isinstance(ts, str) or _iso_session(ts) != day:
             continue
@@ -541,9 +575,12 @@ def build_live_directional_candles(session_date: str | None = None, *, audit_onl
                         "strategy_id": payload.get("strategy_id"),
                         "policy_id": payload.get("policy_id"),
                         "strategy_version": payload.get("strategy_version"),
+                        "decision_interval_minutes": payload.get("decision_interval_minutes",5),
+                        "indicator_timeframe": payload.get("indicator_timeframe","5m"),
                         "policy_events": payload.get("policy_events") or [],
                         "event_details": payload.get("event_details") or [],
                         "audit_status": record.get("status"),
+                        "reconstructed": payload.get("reconstructed") is True or record.get("status") == "RECOVERED",
                         "wma_gap_checks": payload.get("wma_gap_checks") or [],
                         "canonical_setup": {key: payload.get(key) for key in (
                             "canonical_setup_events", "canonical_suppressed_events", "canonical_owner",
@@ -554,6 +591,8 @@ def build_live_directional_candles(session_date: str | None = None, *, audit_onl
                         "ema3_rsi": indicator.get("ema3"), "wma21_rsi": indicator.get("wma21")})
             from .hilega_v2_replay_presentation_v1 import inspection
             row["strategy_steps"] = inspection({
+                "decision_interval_minutes": payload.get("decision_interval_minutes",5),
+                "strategy_version": payload.get("strategy_version"),
                 "policy_id": payload.get("policy_id"),
                 "policy_events": payload.get("policy_events") or [],
                 "price_ema_frame": payload.get("price_ema_frame"),
@@ -599,6 +638,9 @@ def build_live_directional_candles(session_date: str | None = None, *, audit_onl
         "session_date": day,
         "row_count": len(ordered),
         "directional_row_count": directional_count,
+        "display_strategy_version": display_version,
+        "available_strategy_versions": available_versions,
+        "version_selection": "LATEST_RECORDED_SESSION_POLICY; raw older-policy evidence retained",
         "rows": ordered,
         "warning": (
             "Fast view from recorded underlying snapshot; full journal chain verification was deferred. "

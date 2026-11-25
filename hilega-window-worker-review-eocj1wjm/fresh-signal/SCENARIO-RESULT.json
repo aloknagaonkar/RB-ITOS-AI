@@ -1,0 +1,11 @@
+{
+  "scenario": "fresh-signal",
+  "fresh_synthetic_signal_consumed_by_worker": true,
+  "atomic_binding_and_signed_reservation_verified": true,
+  "restart_replay_idempotence_verified": true,
+  "disposable_databases_only": true,
+  "synthetic_clock_injected": true,
+  "production_gate_patched": false,
+  "orders_sent": false,
+  "worker_cli_signed_seed_boundary_verified": true
+}

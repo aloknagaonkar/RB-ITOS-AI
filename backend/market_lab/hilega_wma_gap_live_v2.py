@@ -290,5 +290,5 @@ def assert_forward_control_strategy(day, source=None):
         if not line.strip():continue
         record=json.loads(line);payload=record.get('payload') or {}
         at=str(payload.get('minute_timestamp') or payload.get('bar_timestamp') or record.get('checkpoint') or record.get('event_time') or '')
-        if payload.get('strategy_id') in {STRATEGY_ID, 'HILEGA_V2_ALIGNMENT_DUAL_EXIT'} and at.startswith(day) and record.get('status')=='PROCESSED':
+        if payload.get('strategy_id') in {STRATEGY_ID, 'HILEGA_RSI_TWO_ROUTE_CONFIRMED_MIDPOINT'} and at.startswith(day) and record.get('status')=='PROCESSED':
             raise ValueError('V2_LIVE_POLICY_REQUIRES_SEPARATE_FORWARD_COHORT: do not use V2 decisions as canonical V1 control')

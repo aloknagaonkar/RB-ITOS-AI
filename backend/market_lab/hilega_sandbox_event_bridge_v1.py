@@ -223,7 +223,7 @@ class HilegaSandboxEventBridgeV1:
                 names = self._accepted_events(record)
                 if not names:
                     continue
-                if len(names) > 1 and not (record_strategy in {"HILEGA_WMA_GAP_V2_LIVE_SHADOW", "HILEGA_V2_ALIGNMENT_DUAL_EXIT"} and len(names)==2 and sum(n in EXIT_EVENTS for n in names)==1 and sum(n in ENTRY_EVENTS for n in names)==1):
+                if len(names) > 1 and not (record_strategy in {"HILEGA_WMA_GAP_V2_LIVE_SHADOW", "HILEGA_V2_ALIGNMENT_DUAL_EXIT", "HILEGA_RSI_TWO_ROUTE_CONFIRMED_MIDPOINT"} and len(names)==2 and sum(n in EXIT_EVENTS for n in names)==1 and sum(n in ENTRY_EVENTS for n in names)==1):
                     raise BridgeError(f"ambiguous accepted execution events: {names}")
                 # Causal ordering within one record: SELL intent before BUY intent.
                 for name in sorted(names, key=lambda n: 0 if n in EXIT_EVENTS else 1):

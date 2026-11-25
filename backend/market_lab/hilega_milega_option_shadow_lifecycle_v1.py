@@ -178,11 +178,15 @@ class HilegaMilegaOptionShadowLifecycleV1:
         candidate_set: OptionCandidateSet,
         option_minutes: Callable[[str], Iterable],
         signal_boundary_ts: datetime | None = None,
+        signal_interval_minutes: int = 5,
     ) -> ShadowOptionLifecycleSnapshot:
+        if signal_interval_minutes not in (3, 5):
+            raise ValueError("INVALID_SIGNAL_INTERVAL")
+        self._signal_interval_minutes = signal_interval_minutes
         bar_ts = _minute_key(signal_bar_ts)
         self._validated_paths.clear()
-        boundary = _minute_key(signal_boundary_ts) if signal_boundary_ts is not None else bar_ts + timedelta(minutes=5)
-        if boundary < bar_ts + timedelta(minutes=5):
+        boundary = _minute_key(signal_boundary_ts) if signal_boundary_ts is not None else bar_ts + timedelta(minutes=signal_interval_minutes)
+        if boundary < bar_ts + timedelta(minutes=signal_interval_minutes):
             raise ValueError("OPTION_ENTRY_BOUNDARY_BEFORE_SIGNAL_AVAILABLE")
 
         if candidate_set.status != "AVAILABLE":
@@ -485,9 +489,11 @@ class HilegaMilegaOptionShadowLifecycleV1:
             if duplicate:
                 issues.append(f"{candidate.instrument_key}:DUPLICATE_MINUTE")
                 continue
-            row = by_ts.get(boundary)
+            session_end = boundary.strftime("%H:%M") == "15:30"
+            evidence_time = boundary - timedelta(minutes=1) if session_end else boundary
+            row = by_ts.get(evidence_time)
             if row is None:
-                issues.append(f"{candidate.instrument_key}:MISSING_EXIT_MINUTE:{boundary.isoformat()}")
+                issues.append(f"{candidate.instrument_key}:MISSING_EXIT_MINUTE:{evidence_time.isoformat()}")
                 continue
             health = validate_option_minute(
                 row,
@@ -497,7 +503,7 @@ class HilegaMilegaOptionShadowLifecycleV1:
             if not health.allowed:
                 issues.append(f"{candidate.instrument_key}:{health.reason or health.state}")
                 continue
-            exit_open = float(row.open)
+            exit_open = float(row.close if session_end else row.open)
             new_legs.append(
                 ShadowOptionLegSnapshot(
                     **{
@@ -566,6 +572,7 @@ class HilegaMilegaOptionShadowLifecycleV1:
         return self.start(
             signal_bar_ts=datetime.fromisoformat(old.signal_bar),
             signal_boundary_ts=datetime.fromisoformat(old.signal_boundary),
+            signal_interval_minutes=getattr(self, "_signal_interval_minutes", 5),
             signal_spot=old.signal_spot,
             source=old.source,
             candidate_set=self._candidate_set,

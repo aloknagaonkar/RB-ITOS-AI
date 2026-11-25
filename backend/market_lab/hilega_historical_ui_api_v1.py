@@ -366,7 +366,7 @@ def _directional_report(row: dict) -> dict:
             "suppressed_events": row.get("suppressed_events"),
         },
     } for event in accepted]
-    if row.get("strategy_id") in {"HILEGA_WMA_GAP_V2_LIVE_SHADOW", "HILEGA_V2_ALIGNMENT_DUAL_EXIT"}:
+    if row.get("strategy_id") in {"HILEGA_WMA_GAP_V2_LIVE_SHADOW", "HILEGA_RSI_TWO_ROUTE_CONFIRMED_MIDPOINT"}:
         details = {x.get("event_type"): x for x in row.get("event_details") or []}
         for transition in transitions:
             event = details.get(transition["event_type"], {})
@@ -386,7 +386,7 @@ def _directional_report(row: dict) -> dict:
             "ema3_rsi": row.get("ema3_rsi"),
             "wma21_rsi": row.get("wma21_rsi"),
         },
-        "conditions": {"authoritative_strategy_steps": bool(row.get("strategy_steps")), "strategy_steps": row.get("strategy_steps") or [], "policy_events": row.get("policy_events") or [], "wma_gap_checks": row.get("wma_gap_checks") or [], "canonical_setup": row.get("canonical_setup")},
+        "conditions": {"authoritative_strategy_steps": bool(row.get("strategy_steps")), "strategy_steps": row.get("strategy_steps") or [], "policy_events": row.get("policy_events") or [], "wma_gap_checks": row.get("wma_gap_checks") or [], "canonical_setup": row.get("canonical_setup"), "decision_interval_minutes": row.get("decision_interval_minutes",5), "exit_validation": row.get("exit_validation"), "opposite_confirmation": row.get("opposite_confirmation"), "indicator_timestamp": row.get("indicator_timestamp"), "setup_attempts": row.get("setup_attempts") or [], "exit_warning_time": row.get("exit_warning_time")},
         "strategy": {
             "strategy_id": row.get("strategy_id"),
             "policy_id": row.get("policy_id"),
@@ -841,7 +841,7 @@ def comparison_metrics(session_date: str = Query(..., min_length=10, max_length=
     except ValueError as exc:raise HTTPException(422,'Invalid session date') from exc
     from .hilega_wma_gap_historical_v1 import recorded_live_metrics
     rows=[]
-    for key,identifier in [('LIVE','LIVE_RECORDED_V1'),('V1','HILEGA_V1_REPLAY'),('V2','HILEGA_WMA_GAP_V2_REPLAY'),('V2_ALIGN','HILEGA_V2_ALIGNMENT_DUAL_EXIT_REPLAY_V1')]:
+    for key,identifier in [('LIVE','LIVE_RECORDED_V1'),('V1','HILEGA_V1_REPLAY'),('V2','HILEGA_WMA_GAP_V2_REPLAY'),('V2_ALIGN','HILEGA_RSI_TWO_ROUTE_CONFIRMED_MIDPOINT_REPLAY_V1')]:
         try:
             if key=='LIVE':
                 source=load_session(day)

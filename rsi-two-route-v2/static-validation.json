@@ -1,0 +1,8 @@
+{
+  "status": "LOCAL_CHECKS_PASS",
+  "tests": 19,
+  "prior_day_model_reproductions": 32,
+  "november_supplied_frame_net_points": 1507.55,
+  "raw_cache_replay_run_locally": false,
+  "live_application_modified": false
+}

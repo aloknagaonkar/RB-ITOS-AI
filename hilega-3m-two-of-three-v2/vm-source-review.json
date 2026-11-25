@@ -1,0 +1,33 @@
+{
+  "package_revision": 2,
+  "reviewed_vm_sources": [
+    {
+      "path": "backend/market_lab/hilega_alignment_dual_exit_live_v1.py",
+      "sha256": "ecff7f7b3f00ab5a1fe37ae4e846dd1f1bfc5f12a14a6a5926b485b6f525080f"
+    },
+    {
+      "path": "backend/market_lab/hilega_milega_historical_replay_v1.py",
+      "sha256": "2bd6ae98e40a7b76b6e492f641feef5fc933ab27cefe48e369d2c9b38afc7b8f"
+    },
+    {
+      "path": "backend/market_lab/hilega_candle_evidence_v1.py",
+      "sha256": "80a7a98cdeffcaafa51abc7c025e10ae3e560ccaca2ed9c172632ca9db19aaa9"
+    }
+  ],
+  "live_changes_preserved": [
+    "input_context around completed-minute consumption",
+    "audit_fields on directional decisions and evaluations",
+    "input_context around session cutoff"
+  ],
+  "three_minute_adaptation": [
+    "Context calls consume_minutes directly instead of inherited five-minute consumption",
+    "Evaluation audit stage renamed COMBINED_THREE_MINUTE_EVALUATION",
+    "Regular-session close uses exact final-minute close"
+  ],
+  "unchanged_vm_sources": [
+    "backend/market_lab/hilega_candle_evidence_v1.py",
+    "backend/market_lab/hilega_milega_historical_replay_v1.py"
+  ],
+  "tests_executed": false,
+  "runtime_validation_pending": true
+}

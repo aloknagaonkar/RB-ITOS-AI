@@ -1,0 +1,2 @@
+--only-binary=:all:
+python-dotenv==1.2.3 --hash=sha256:904552145e8bfed22162c09dab1c2b9b54fefa7b23ba780f4f26ca0316b0f0d9

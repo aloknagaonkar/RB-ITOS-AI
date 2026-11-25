@@ -171,6 +171,7 @@ class HilegaDirectionalLiveShadowCoordinatorV1:
                 return
             snap = lifecycle.start(
                 signal_bar_ts=bar.ts,
+                signal_interval_minutes=getattr(self, "decision_interval_minutes", 5),
                 signal_spot=entry_spot,
                 source=event.source,
                 candidate_set=candidate_set,

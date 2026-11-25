@@ -37,7 +37,7 @@ export default function HilegaHistoricalReplay(){
   const [sessions,setSessions]=useState<Session[]>([])
   const [selectedDate,setSelectedDate]=useState('')
   const [inputBasis,setInputBasis]=useState<'LOCAL'|'VALIDATED'>('LOCAL')
-  const [strategyVersion,setStrategyVersion]=useState<'LIVE'|'V1'|'V2'|'V2_ALIGN'>('LIVE')
+  const [strategyVersion,setStrategyVersion]=useState<'LIVE'|'V1'|'V2'|'V2_ALIGN'>('V2_ALIGN')
   const [data,setData]=useState<Response|null>(null)
   const [error,setError]=useState('')
   const [busy,setBusy]=useState(false)
@@ -174,7 +174,7 @@ export default function HilegaHistoricalReplay(){
 
   return <section className="hime-replay" aria-label="Hilega historical replay">
     <h3>Hilega-Milega · Session Replay</h3>
-    <p>Review recorded live decisions, canonical Hilega v1, WMA-gap v2 and the promoted combined gap2/WMA2 replay using the shared audit flow. Replay views never change live behavior or submit orders.</p>
+    <p>Review recorded live decisions, canonical Hilega v1, WMA-gap v2 and the active RSI Two Route confirmed-midpoint replay using the shared audit flow. Replay views never change live behavior or submit orders.</p>
 
     <div className="hime-controls">
       <label>Session date <select aria-label="Hilega historical session" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)}>
@@ -187,7 +187,7 @@ export default function HilegaHistoricalReplay(){
         <option value="LIVE">Existing live strategy (recorded)</option>
         <option value="V1">Hilega v1 (canonical historical replay)</option>
         <option value="V2">WMA-gap V2 (historical observation)</option>
-        <option value="V2_ALIGN">Combined — bullish gap2 / WMA2 + EMA10-touch follow-up</option>
+        <option value="V2_ALIGN">RSI Two Route — Normal Route + WMA_bypass</option>
       </select></label>
       {strategyVersion==='V2_ALIGN'&&<label>Replay inputs <select value={inputBasis} onChange={e=>setInputBasis(e.target.value as 'LOCAL'|'VALIDATED')}><option value="LOCAL">Local candle cache</option><option value="VALIDATED">Validated research inputs</option></select></label>}
       <button onClick={()=>void load()} disabled={!selectedDate||busy}>{busy?'Loading…':'Reload session'}</button>
@@ -273,3 +273,4 @@ export default function HilegaHistoricalReplay(){
     </>}
   </section>
 }
+

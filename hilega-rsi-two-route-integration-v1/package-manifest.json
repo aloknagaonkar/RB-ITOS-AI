@@ -1,0 +1,25 @@
+{
+  "package": "hilega-rsi-two-route-integration-v1",
+  "version": "1.0.0",
+  "files": {
+    "README.md": "fb82cd6393352b0f6c47e53df539614709b77e55b37c43925467c466e1413550",
+    "companion_bindings.py": "70eb4a9cc3f61070787bdcf058bdcef4a4ea5cabd127fee3a474a8008ac20950",
+    "files/backend/market_lab/hilega_rsi_two_route_v1/__init__.py": "9cc02f4e57f8921558a7ade0f31a0a50eb213652972c5dbcaa1300c69afef0b7",
+    "files/backend/market_lab/hilega_rsi_two_route_v1/api.py": "d79cc3b3c4bffc250cae15af81347f4f54689b68ad6f5cebdf69458deee94550",
+    "files/backend/market_lab/hilega_rsi_two_route_v1/calendar.py": "423ea2347fbefec8d0ac0728275945930eddba868c17439889c56b931ab73782",
+    "files/backend/market_lab/hilega_rsi_two_route_v1/cli.py": "d88f29240761bb3547a73cb2bf8142571990262461eeb8d52f79b945dd0f2d70",
+    "files/backend/market_lab/hilega_rsi_two_route_v1/data.py": "465acf09de7c0cae1dd554ba5be4911b7adb3faa3b4342ae2c0725e396ac1a84",
+    "files/backend/market_lab/hilega_rsi_two_route_v1/engine.py": "47565196e19c6e62d838a0fbe82bfed749eb0dc6b16b7e727c5aa77ec98a4de5",
+    "files/backend/market_lab/hilega_rsi_two_route_v1/live.py": "8b77198e8404a4ea0ea5f37ff7d901b0fa4033f2f8b27a471e3f349f37843d7c",
+    "files/backend/market_lab/hilega_rsi_two_route_v1/reference.py": "0160798e98560281a453a4a837d8b2fae6719cfc63d414e3487b6c4520646f76",
+    "files/backend/market_lab/hilega_rsi_two_route_v1/worker.py": "a54082d1472d4fb97920dffb5589d3b739bd2b3f044d9504e953e0d4fd208d21",
+    "files/backend/market_lab/hilega_rsi_two_route_v1/workspace.html": "f935f4f2428b9d8cdedab7ccbc58afff75c76bea23a96dca17f961d903a07007",
+    "files/frontend/src/hilegaRsiTwoRouteWorkspace.tsx": "0bf92e15b094f36df26bda74cb7dbc5db9727632eafa5d610b14946d0ea8c973",
+    "manage.py": "e18721cf219b3c8949f5e11950f3b2a9e4420f3455e5ba10c7550eba26263da6",
+    "tests/test_install_controls.py": "ebb4fb9045c21b5cb1859c70d4a3bb317a7d4291561265d468309c764e4c8282",
+    "tests/test_integration.py": "2cae00f4d104778a56b23f148999a9871f2838c8b84ec145d6a1a344f2ead047",
+    "tests/ui_contract.js": "ef2a4a0d39d07e16bf10d3b31c1902bb8f47ef8c8f2423e0e05992f155804906",
+    "validate_evidence.py": "9c8a0b37e165ff85cc74db9d21ea2b5fc451f6a290a784a0bbb904c89f05fc00",
+    "validation.json": "8c3f1caf28111f7a711cd32fa53d96964e00ad64963a64bc76b1f9ebbf483943"
+  }
+}

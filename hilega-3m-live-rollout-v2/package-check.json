@@ -1,0 +1,19 @@
+{
+  "status": "STATIC_SYNTAX_PASS",
+  "files": {
+    "README.md": "a740846b9a645ff1dcf3f05b3af6c736da48918ee8cb2aac567e1944e2ebe6cf",
+    "companion-binding-review.json": "a2d0815636dc23afee2920fe010aa7ad23484d8b168f6cf9266fe864181206a0",
+    "companion_bindings.py": "333eed3702b7c2ddf37a2d870e9900ff89909761ed8b060c3deaf6ee677f3f6a",
+    "files/backend/market_lab/hilega_three_minute_v1/worker_close.py": "4e097ff60c8828154f3b0141ff1a358ef06c88589134480ce9dc64cd42aee8b2",
+    "reviewed-companion/hilega-operational-lifecycle-tools-6cexrur_/cli.py": "8dc9b970e6eb9c4ae3e935d8918d1bc00ef1c6d4b8d4f64b0570ae693d20e45d",
+    "reviewed-companion/hilega-operational-lifecycle-tools-6cexrur_/manifest.json": "98311a68370f7710fa21fb5e7b0b89cb69817fe24cada66e6256f1961026866e",
+    "reviewed-companion/hilega-reference-service-stage-yup3_wr1/lifecycle_reference_service.py": "d6e5e80f285b350eb971d623529c3960055c13f1a83c990b9db436571749ae4a",
+    "rollout.py": "78df5cb6c4561cccc56420321e355d8f83617893e0f484c20a519e04377d10f2",
+    "tests/test_companion_integrity.py": "a85a4d74d97ef6850e164383bd580e356aba8b5f154db6dae67b9a676da47a32",
+    "tests/test_worker_close.py": "8ddc4e6e21fd4ba0f8f85c330177f762ee1f51ae2d6eedc3d92e136f26416ced"
+  },
+  "tests_executed_locally": false,
+  "deployment_executed": false,
+  "vm_tests_required": true,
+  "expected_vm_test_cases": 26
+}

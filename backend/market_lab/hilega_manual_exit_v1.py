@@ -47,7 +47,7 @@ def request_exit(worker,*,request_id,session_date,expected_trade_ids):
   if c.get('sandbox_only') is not True or c.get('live_execution_enabled') is not False:raise ValueError('SANDBOX_ONLY_REQUIRED')
   if session_date!=c.get('session_date') or session_date!=worker.clock().date().isoformat():raise ValueError('STALE_SESSION_REFRESH_DASHBOARD')
   if not c.get('armed') or c.get('kill_switch'):raise ValueError('SANDBOX_NOT_ARMED_OR_KILLED')
-  if c.get('strategy_id')!='HILEGA_V2_ALIGNMENT_DUAL_EXIT':raise ValueError('MANUAL_RESET_REQUIRES_ALIGNMENT_STRATEGY')
+  if c.get('strategy_id')!='HILEGA_RSI_TWO_ROUTE_CONFIRMED_MIDPOINT':raise ValueError('MANUAL_RESET_REQUIRES_ALIGNMENT_STRATEGY')
   opened=worker.store.open_legs();uncertain=worker.store.uncertain()
   ids=sorted({x['trade_id'] for x in opened+uncertain})
   if sorted(set(expected_trade_ids))!=ids:raise ValueError('POSITION_CHANGED_REFRESH_DASHBOARD')

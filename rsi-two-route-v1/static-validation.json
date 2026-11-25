@@ -1,0 +1,7 @@
+{
+  "status": "LOCAL_CHECKS_PASS",
+  "tests": 18,
+  "november_replay_executed_locally": false,
+  "baseline_byte_identity_verified": true,
+  "live_application_modified": false
+}

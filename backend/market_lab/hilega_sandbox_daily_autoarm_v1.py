@@ -4,7 +4,7 @@ from pathlib import Path
 from datetime import datetime,time
 from zoneinfo import ZoneInfo
 IST=ZoneInfo('Asia/Kolkata')
-EXPECTED='HILEGA_V2_ALIGNMENT_DUAL_EXIT'
+EXPECTED='HILEGA_RSI_TWO_ROUTE_CONFIRMED_MIDPOINT'
 
 def decide(now,control,status,active_strategy,expected_strategy=EXPECTED,disabled_days=()):
  now=now.astimezone(IST);day=now.date().isoformat()

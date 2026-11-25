@@ -1,0 +1,5 @@
+{
+  "exit_code": 0,
+  "stdout": "{\"actual_candidate_worker_executed\": true, \"native_resume_and_pause_used\": true, \"managed_guard_sigkill_tested\": false, \"managed_recovery_pause_verified\": true, \"stop_post_recovery_verified\": true, \"disposable_databases_only\": true, \"non_signal_observation_fixture_only\": true, \"fresh_signal_preparation_verified\": false, \"scenario\": \"normal-timeout\", \"initiator_sigkill_tested\": false}\n",
+  "stderr": ""
+}
