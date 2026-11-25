@@ -8,7 +8,7 @@ import subprocess
 import sys
 import time
 
-CLI_SHA = 'bee983e37c4de5488d1bc851fa55d15db66a12c1613a592876bd4a4353c2bd37'
+CLI_SHA = 'b9c557b79543738ef05e68b92b4f180902708196c48db906286e72a55050a964'
 
 
 def check_package(repo, package):

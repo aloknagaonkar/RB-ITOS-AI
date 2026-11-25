@@ -1,4 +1,5 @@
 from __future__ import annotations
+from .hilega_active_strategy_v1 import effective_strategy
 
 import os
 import json
@@ -273,8 +274,8 @@ def status(fast: bool = False):
                              _store().verify_chain() if STEP_AUDIT_PATH.exists() else (True, None))
     today = datetime.now(IST).date().isoformat()
     session_rows = [row for row in rows if _record_session(row) == today]
-    if os.getenv("LIVE_SHADOW_STRATEGY", "").strip().upper() == "HILEGA_V2_ALIGNMENT_DUAL_EXIT":
-        session_rows = [row for row in session_rows if (row.get("payload") or {}).get("strategy_id") == "HILEGA_V2_ALIGNMENT_DUAL_EXIT"]
+    if effective_strategy(os.getenv("LIVE_SHADOW_STRATEGY", "")).strip().upper() == "HILEGA_RSI_TWO_ROUTE_CONFIRMED_MIDPOINT":
+        session_rows = [row for row in session_rows if (row.get("payload") or {}).get("strategy_id") == "HILEGA_RSI_TWO_ROUTE_CONFIRMED_MIDPOINT"]
     current, latest_state = _state_payload(session_rows)
     # Keep the nested current-state contract even before today's first audit.
     # An absent bootstrap is not yesterday's state and is not a trading lock.
@@ -283,7 +284,7 @@ def status(fast: bool = False):
     _, latest_saved_state = _state_payload(rows)
     latest_accepted, latest_suppressed = _latest_event_rows(session_rows)
     counts = Counter(row.get("stage") for row in rows)
-    selected = os.getenv("LIVE_SHADOW_STRATEGY", "").strip().upper()
+    selected = effective_strategy(os.getenv("LIVE_SHADOW_STRATEGY", "")).strip().upper()
     try:
         worker_health = json.loads(Path("data/live-observation/shadow-worker-health.json").read_text())
     except (OSError, ValueError):
@@ -291,10 +292,12 @@ def status(fast: bool = False):
     return {
         "model": MODEL,
         "strategy_id": STRATEGY_ID,
-        "strategy_version": (__import__("market_lab.hilega_combined_policy_v1",fromlist=["VERSION"]).VERSION if selected=="HILEGA_V2_ALIGNMENT_DUAL_EXIT" else STRATEGY_VERSION),
-        "policy_id": "BULLISH_GAP2_FULL_WMA2" if selected=="HILEGA_V2_ALIGNMENT_DUAL_EXIT" else None,
+        "strategy_version": (__import__("market_lab.hilega_combined_policy_v1",fromlist=["VERSION"]).VERSION if selected=="HILEGA_RSI_TWO_ROUTE_CONFIRMED_MIDPOINT" else STRATEGY_VERSION),
+        "policy_id": "RSI_TWO_ROUTE_CONFIRMED_MIDPOINT" if selected=="HILEGA_RSI_TWO_ROUTE_CONFIRMED_MIDPOINT" else None,
         "selected_live_shadow_strategy": selected or None,
-        "directional_mode_active": selected in {STRATEGY_ID, "HILEGA_WMA_GAP_V2_LIVE_SHADOW", "HILEGA_V2_ALIGNMENT_DUAL_EXIT"},
+        "configured_live_shadow_strategy": os.getenv("LIVE_SHADOW_STRATEGY"),
+        "configuration_alias_applied": os.getenv("LIVE_SHADOW_STRATEGY") != selected,
+        "directional_mode_active": selected in {STRATEGY_ID, "HILEGA_WMA_GAP_V2_LIVE_SHADOW", "HILEGA_RSI_TWO_ROUTE_CONFIRMED_MIDPOINT"},
         "active_strategy_id": selected or STRATEGY_ID,
         "observation_only": True,
         "execution_enabled": False,
@@ -364,7 +367,7 @@ def wma_gap_evaluations(limit: int = 100):
     if not 1 <= limit <= 2000:
         raise HTTPException(422, "limit must be between 1 and 2000")
     today = datetime.now(IST).date().isoformat()
-    result = [r for r in _rows() if r.get("stage") in {"WMA_GAP_MINUTE_EVALUATION","COMBINED_FIVE_MINUTE_EVALUATION"}
+    result = [r for r in _rows() if r.get("stage") in {"WMA_GAP_MINUTE_EVALUATION","COMBINED_FIVE_MINUTE_EVALUATION","COMBINED_THREE_MINUTE_EVALUATION"}
               and str((r.get("payload") or {}).get("minute_timestamp", "")).startswith(today)
               and r.get("status") != "RECOVERED"]
-    return {"strategy_id": os.getenv("LIVE_SHADOW_STRATEGY", "HILEGA_WMA_GAP_V2_LIVE_SHADOW"), "rows": [r for r in result if (r.get("payload") or {}).get("strategy_id") == os.getenv("LIVE_SHADOW_STRATEGY", "HILEGA_WMA_GAP_V2_LIVE_SHADOW")][-limit:]}
+    return {"strategy_id": effective_strategy(os.getenv("LIVE_SHADOW_STRATEGY", "HILEGA_WMA_GAP_V2_LIVE_SHADOW")), "rows": [r for r in result if (r.get("payload") or {}).get("strategy_id") == effective_strategy(os.getenv("LIVE_SHADOW_STRATEGY", "HILEGA_WMA_GAP_V2_LIVE_SHADOW"))][-limit:]}

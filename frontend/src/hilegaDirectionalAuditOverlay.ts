@@ -1,6 +1,9 @@
 import type {HilegaAudit} from './hilegaDecisionTable'
 
 export type DirectionalCandleOverlayRow={
+  strategy_version?:string
+  audit_status?:string
+  reconstructed?:boolean
   strategy_steps?:Array<Record<string,any>>
   setup_attempts?:Array<Record<string,any>>
   exit_validation?:Record<string,any>
@@ -207,9 +210,9 @@ export function overlayDirectionalAuditReports(
   base:HilegaAudit[],
   rows:DirectionalCandleOverlayRow[],
 ):HilegaAudit[]{
-  const v2Rows=rows.filter(r=>['HILEGA_WMA_GAP_V2_LIVE_SHADOW','HILEGA_V2_ALIGNMENT_DUAL_EXIT'].includes(r.strategy_id??''))
+  const v2Rows=rows.filter(r=>['HILEGA_WMA_GAP_V2_LIVE_SHADOW','HILEGA_RSI_TWO_ROUTE_CONFIRMED_MIDPOINT'].includes(r.strategy_id??''))
   if(v2Rows.length){
-    const legacy=overlayDirectionalAuditReports(base,rows.filter(r=>!['HILEGA_WMA_GAP_V2_LIVE_SHADOW','HILEGA_V2_ALIGNMENT_DUAL_EXIT'].includes(r.strategy_id??'')))
+    const legacy=overlayDirectionalAuditReports(base,rows.filter(r=>!['HILEGA_WMA_GAP_V2_LIVE_SHADOW','HILEGA_RSI_TWO_ROUTE_CONFIRMED_MIDPOINT'].includes(r.strategy_id??'')))
     const dates=new Set(v2Rows.map(r=>r.bar_timestamp.slice(0,10)))
     const projected:HilegaAudit[]=v2Rows.map(r=>{
       const events=Array.isArray(r.accepted_events)?r.accepted_events:String(r.accepted_events??'').split(',').filter(Boolean)
@@ -218,8 +221,13 @@ export function overlayDirectionalAuditReports(
         indicators:{rsi9:r.rsi9,ema3_rsi:r.ema3_rsi,wma21_rsi:r.wma21_rsi},
         conditions:{latest_strategy_audit:true,strategy_steps:r.strategy_steps,setup_attempts:r.setup_attempts,indicator_timestamp:r.indicator_timestamp,exit_validation:r.exit_validation,opposite_confirmation:r.opposite_confirmation,exit_warning_time:r.exit_warning_time,wma_gap_checks:r.wma_gap_checks??[],canonical_setup:r.canonical_setup},
         strategy:{strategy_id:r.strategy_id,decision_timestamp:r.decision_timestamp,
+          strategy_version:r.strategy_version,reconstructed:r.reconstructed===true||r.audit_status==='RECOVERED',
+          audit_status:r.audit_status,
+          selected_route:details.find(x=>x.combined_entry?.route_name)?.combined_entry?.route_name??r.wma_gap_checks?.find(x=>x.status==='ENTRY')?.route_name,
           source_bar_timestamp:r.source_bar_timestamp,events_emitted:events,
-          directional_action:r.action,state_before:r.owner_before,state_after:r.owner_after,
+          directional_action:r.action,state_before:r.owner_before,state_after:stateAfter(r,direction(r)),
+          bullish_state:r.bullish_state,bearish_state:r.bearish_state,
+          bullish_armed:r.bullish_armed,bearish_armed:r.bearish_armed,
           owner_before:r.owner_before,owner_after:r.owner_after,
           direction:r.owner_after==='NONE'?r.owner_before:r.owner_after},
         transitions:events.map(event=>{

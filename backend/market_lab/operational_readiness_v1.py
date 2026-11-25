@@ -1,4 +1,5 @@
 """Independent UI-only readiness monitoring. No order, arm, or strategy mutations."""
+from .hilega_active_strategy_v1 import effective_strategy
 import argparse,json,os,time,re
 from pathlib import Path
 from datetime import datetime,timedelta,time as walltime
@@ -83,7 +84,7 @@ def inspect_local(now):
         lines=raw.splitlines();lines=lines[1:] if size>512000 else lines
         rows=[json.loads(l) for l in lines if l.strip()]
     except (OSError,ValueError):pass
-    day=now.date().isoformat();sid=os.getenv('LIVE_SHADOW_STRATEGY','HILEGA_V2_ALIGNMENT_DUAL_EXIT')
+    day=now.date().isoformat();sid=effective_strategy(os.getenv('LIVE_SHADOW_STRATEGY','HILEGA_RSI_TWO_ROUTE_CONFIRMED_MIDPOINT'))
     rows=[r for r in rows if (r.get('payload') or {}).get('strategy_id')==sid and str((r.get('payload') or {}).get('decision_timestamp') or r.get('event_time','')).startswith(day)]
     decision_rows=[r for r in rows if r.get('stage') in ('DIRECTIONAL_DECISION','DIRECTIONAL_SESSION_CUTOFF') and r.get('status') in ('PROCESSED','PASS','RECOVERED')]
     latest=max(decision_rows,key=lambda r:str((r.get('payload') or {}).get('decision_timestamp') or r.get('event_time','')),default=None)
@@ -116,7 +117,7 @@ def evaluate(now,live,sandbox,warm,local,health,previous):
     if active:
         check('WARMUP','Warmup',bool(warm.get('ready') and warm.get('session_date')==day),'; '.join(i['message'] for i in warm.get('issues',[])) or ('Indicators warmed from validated historical bars' if warm.get('ready') else 'Historical warmup validation unavailable or incomplete'))
         check('API','API','monitor_error' not in live,'API reachable' if 'monitor_error' not in live else 'Live status request failed: '+live['monitor_error'])
-        sid=os.getenv('LIVE_SHADOW_STRATEGY','HILEGA_V2_ALIGNMENT_DUAL_EXIT')
+        sid=effective_strategy(os.getenv('LIVE_SHADOW_STRATEGY','HILEGA_RSI_TWO_ROUTE_CONFIRMED_MIDPOINT'))
         check('STRATEGY','Strategy',live.get('active_strategy_id')==sid,'Expected strategy '+sid)
         probe=warm.get('analytics_probe') or {}
         require_probe=now.time().replace(tzinfo=None)>=walltime(9,0)

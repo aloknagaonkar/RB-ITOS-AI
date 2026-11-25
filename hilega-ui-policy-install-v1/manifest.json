@@ -1,0 +1,53 @@
+{
+  "model": "HILEGA_UI_POLICY_FIX_V1",
+  "strategy_version": "bullish-gap2-full-wma2-3.0.2-3m-bounded-warmup",
+  "files": {
+    "backend/market_lab/hilega_directional_candle_ui_v1.py": {
+      "before": "1ce13c72343a9314927d49ee17c89b00bc853d5f52056bdb0a24e1708930ee47",
+      "after": "736cc72035792005a3e4ae48d0cad58f10f7dd4b910661d82ed1e828a0e60f4b"
+    },
+    "frontend/src/hilegaDirectionalAuditOverlay.ts": {
+      "before": "97ac319a3ef18c8a8a24b8ef9bab90b005a01d0acd11e716a2b09f4382c66374",
+      "after": "aac70d0e50a9275249d87b96a6d79937f537f8e9b844d35720d813c0095f94dc"
+    },
+    "frontend/src/hilegaDecisionTable.tsx": {
+      "before": "d37bb1c53a74c06881ca118cba88b93c9773f77c771fcc8cfd669b7f60d1092e",
+      "after": "f6d9012bc32036a5d07d9645d49fb06b9cdfb7c959baa0d7353dbd25a644c76d"
+    },
+    "hilega-operational-lifecycle-tools-6cexrur_/manifest.json": {
+      "before": "abcbcb5a0453fe906ac27a7d83534c5797eca676cafa5511350ebfdbc20eb0c3",
+      "after": "8fb4ee777e4ff01ec6432953fde08f38c6aeb1065043df5aa58fc57668cbb60f"
+    },
+    "hilega-operational-lifecycle-tools-6cexrur_/cli.py": {
+      "before": "8d67e84c58d0180a6776b3ad47c86df91e333e1087bf75e853842310d93544ba",
+      "after": "eeebcfeab4faf3ccb4d59cc84b0328be8d3d913e9ee8a6d5cfb968d6987c6d97"
+    },
+    "hilega-reference-service-stage-yup3_wr1/lifecycle_reference_service.py": {
+      "before": "1efb309c921727a0ee15f000d7d844e4fca154d0db3bb7d5ce1cc6ebb5819cf5",
+      "after": "42bd01509b8ed6602511fe54f3ab46047705e1e0f02f060deffd036aa1dffd08"
+    }
+  },
+  "runtime_pin_changes": [
+    "backend/market_lab/hilega_directional_candle_ui_v1.py"
+  ],
+  "added_runtime_pins": [],
+  "unchanged_runtime_count": 415,
+  "built_asset_sha256": {
+    "assets/hilegaHistoricalReplay-9EGqf7LG.css": "2fb2b1772aa2d751144becd330e52e91924adb7761efd02803259ec0a88ef324",
+    "assets/hilegaHistoricalReplay-BUlEK7Tp.js": "79d624639c20db47594ba3b3e37b962862af85173e740aabee056556844b1f97",
+    "assets/hilegaLivePolling-BNSIcYnS.js": "afefc4b21d9d9f440a3ecd520ee6e6b2aa09da95a229f127b839027d9001a54b",
+    "assets/hilegaMilegaShadow-kI6tRrK1.js": "0cad8b29bd80e183894bf573953ff377aa4391f0d1dfe732507cad00c0bd57d3",
+    "assets/hilegaProductionWorkspace-BL-HWHDd.css": "c6f920d9cc12f8becc03d485e6a3f56a99c6742ded21f8bba77211d4abaa0c4a",
+    "assets/hilegaProductionWorkspace-sbnD2SK0.js": "10eacdb61a0afca791af7171027896b6b713445bdebd836db2eda6397e9fb94d",
+    "assets/historicalReplay-DjVn1YEG.css": "46a1336f22ee4a71f8fa71404897ba909258282a2b055167a21775801d92ab9b",
+    "assets/historicalReplay-JPYv-HO6.js": "ae12d3a8ddea07b92a130784280ef4389041663bfde670eea54107882f63f081",
+    "assets/historicalResearch-e_Hq2inU.js": "a2c8bf8ed16c8e1cd076605fdb95a95d1e73b5b5cec8a9d5b444b979fbfb4cc7",
+    "assets/index-CRihEwQa.css": "0a6fc2b33f456d6276c5a6ae708d3d86b27819f1db9dc69fdccd86e683d93797",
+    "assets/index-lym21RYS.js": "54291f31046db8cba86076f6afa68427f34514716dc1a93c9657650d942821bc",
+    "assets/liveShadow-Dvw-PfzR.js": "273d895b0fb7c1f602875ba482dcb964ee976044a601244af1cc765ea0822d35",
+    "assets/liveShadow-rfWkdoUY.css": "6c90da05115926c4100544f13c03629a61742207178f4b83f1ee1f11556f8627",
+    "assets/midpointStrategyShadow-CQ5Eq8ho.js": "b24399bc4c55a2a1ffbf0450a9bee6bb5086ed13b27b6b37f044c987980a893b",
+    "assets/midpointStrategyShadow-DQ2L1a9z.css": "262c9fb5bcce4869b8c4076532ae42f1040347cbf903ef86790908241a44f056",
+    "index.html": "7e76a74a73c007561c1790ed1e16d2adfff0d1c443cc3d5a4ed323bf0b52dce0"
+  }
+}

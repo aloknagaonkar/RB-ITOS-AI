@@ -1,0 +1,108 @@
+"""Read-only GET requests for pinned five-session research; never sends orders."""
+import json,os,re,time
+from datetime import datetime,date,timedelta,time as clock
+from urllib.parse import quote,urlencode
+from urllib.request import Request,urlopen
+from urllib.error import HTTPError,URLError
+from pathlib import Path
+import strategy
+DAYS=['2026-10-29','2026-10-30','2026-11-02','2026-11-03','2026-11-04']
+API='https://api.upstox.com'
+INDEX='NSE_INDEX|Nifty 50'
+class DataError(RuntimeError):pass
+
+def get_json(path,token,params=None):
+    if not (path=='/v2/instruments/search' or path.startswith('/v3/historical-candle/')):raise DataError('GET_PATH_NOT_ALLOWED')
+    url=API+path+('?' + urlencode(params) if params else '')
+    req=Request(url,headers={'Authorization':'Bearer '+token,'Accept':'application/json'},method='GET')
+    for attempt in range(3):
+        try:
+            with urlopen(req,timeout=30) as response:body=json.loads(response.read())
+            time.sleep(.4)
+            if body.get('status')!='success':raise DataError('PROVIDER_NON_SUCCESS_STATUS')
+            return body
+        except HTTPError as e:
+            # Do not print response bodies, authorization headers, or token values.
+            if e.code in [429,500,502,503,504] and attempt<2:time.sleep(1+attempt);continue
+            raise DataError('PROVIDER_HTTP_'+str(e.code)) from None
+        except URLError:raise DataError('PROVIDER_NETWORK_ERROR') from None
+    raise DataError('PROVIDER_RETRY_EXHAUSTED')
+
+def token_from_env():
+    try:
+        from dotenv import load_dotenv
+    except ImportError:raise DataError('PYTHON_DOTENV_REQUIRED_FROM_PROJECT_VENV') from None
+    load_dotenv(Path.cwd()/'.env',override=False)
+    token=os.getenv('UPSTOX_ACCESS_TOKEN','').strip()
+    if not token:raise DataError('UPSTOX_ACCESS_TOKEN_MISSING_USE_EXISTING_VM_AUTH_SETUP')
+    return token
+
+def choose_contract(rows):
+    candidates={}
+    for r in rows:
+        if r.get('instrument_type')!='FUT' or r.get('segment')!='NSE_FO' or r.get('underlying_symbol')!='NIFTY' or r.get('underlying_key')!=INDEX:continue
+        try:expiry=date.fromisoformat(r['expiry'])
+        except (ValueError,KeyError,TypeError):continue
+        if expiry<date.fromisoformat(DAYS[-1]):continue
+        if not r.get('instrument_key') or not r.get('trading_symbol'):continue
+        candidates[r['instrument_key']]=r
+    if not candidates:raise DataError('NO_NIFTY_FUTURES_CONTRACT')
+    r=min(candidates.values(),key=lambda r:(r['expiry'],r['instrument_key']))
+    # These fixed dates are after Oct27 expiry and before November expiry.
+    # Current instrument search cannot recover an expired November contract later.
+    if r['expiry'][:7]!='2026-11':raise DataError('NOVEMBER_2026_FRONT_CONTRACT_UNAVAILABLE_DO_NOT_SUBSTITUTE_ANOTHER_MONTH')
+    return dict(instrument_type='FUT',instrument_key=r['instrument_key'],trading_symbol=r['trading_symbol'],expiry=r['expiry'],source='UPSTOX_INSTRUMENT_SEARCH_NOVEMBER_FRONT',underlying_key=INDEX)
+
+def resolve(token):
+    rows=[]
+    for expiry in ['current_month','next_month']:
+        for page in range(1,4):
+            body=get_json('/v2/instruments/search',token,dict(query='NIFTY',exchanges='NSE',segments='FO',instrument_types='FUT',expiry=expiry,page_number=page,records=30))
+            data=body.get('data')
+            if not isinstance(data,list):raise DataError('SEARCH_DATA_NOT_LIST')
+            rows.extend(data)
+            if len(data)<30:break
+    return choose_contract(rows)
+
+def normalize(body,day):
+    rows=body.get('data',{}).get('candles')
+    if not isinstance(rows,list):raise DataError('CANDLES_NOT_LIST')
+    regular={};outside=[]
+    for row in rows:
+        if not isinstance(row,list) or len(row)<6:raise DataError('INVALID_CANDLE_SCHEMA')
+        try:
+            at=datetime.fromisoformat(str(row[0]).replace('Z','+00:00'))
+            if at.tzinfo is None:raise DataError('NAIVE_PROVIDER_TIME')
+            at=at.astimezone(strategy.IST)
+            if at.date().isoformat()!=day:raise DataError('WRONG_PROVIDER_DATE')
+            d=dict(timestamp=at.isoformat(),open=float(row[1]),high=float(row[2]),low=float(row[3]),close=float(row[4]),volume=float(row[5]))
+            if len(row)>6 and row[6] is not None:d['open_interest']=float(row[6])
+        except (ValueError,TypeError):raise DataError('INVALID_CANDLE_VALUE') from None
+        if clock(9,15)<=at.time()<clock(15,30):
+            if at.isoformat() in regular:raise DataError('DUPLICATE_PROVIDER_MINUTE')
+            regular[at.isoformat()]=d
+        else:outside.append(at.isoformat())
+    return [regular[k] for k in sorted(regular)],outside
+
+def fetch_day(token,key,day,contract=None):
+    now=datetime.now(strategy.IST)
+    if date.fromisoformat(day)>now.date() or (day==now.date().isoformat() and now.time()<clock(15,35)):raise DataError('SESSION_NOT_YET_COMPLETE')
+    encoded=quote(key,safe='')
+    path=f'/v3/historical-candle/intraday/{encoded}/minutes/1' if day==now.date().isoformat() else f'/v3/historical-candle/{encoded}/minutes/1/{day}/{day}'
+    body=get_json(path,token);rows,outside=normalize(body,day)
+    data=dict(session_date=day,captured_at=now.isoformat(),candles=rows,provenance=dict(endpoint_type='INTRADAY_V3' if '/intraday/' in path else 'HISTORICAL_V3',instrument_key=key,study_window='09:15 inclusive to 15:30 exclusive',excluded_outside_study_window=outside,provider_candle_count=len(body.get('data',{}).get('candles',[]))))
+    if contract:data['contract']=contract
+    else:data['underlying']=INDEX
+    strategy.validate(data,require_futures=contract is not None)
+    return data
+
+def collect(output):
+    token=token_from_env();contract=resolve(token);input_root=output/'inputs';input_root.mkdir()
+    (output/'contract.json').write_text(json.dumps(contract,indent=2));result={}
+    for day in DAYS:
+        print('Fetching',day,contract['trading_symbol'],'and NIFTY index...',flush=True)
+        future=fetch_day(token,contract['instrument_key'],day,contract);index=fetch_day(token,INDEX,day)
+        for name,data in [('futures',future),('index',index)]:
+            path=input_root/(name+'-'+day+'.json');path.write_text(json.dumps(data,indent=2))
+        result[day]=(future,index)
+    return contract,result

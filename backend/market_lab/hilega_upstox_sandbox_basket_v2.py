@@ -1,5 +1,6 @@
 """Five-leg or approved one-leg Sandbox submissions; no live orders."""
 from __future__ import annotations
+from .hilega_active_strategy_v1 import effective_strategy
 import argparse,hashlib,json,os,time
 from dataclasses import asdict
 from datetime import date,datetime
@@ -19,7 +20,7 @@ FIVE_LEG_MODE='FIVE_ACTUAL_SANDBOX_LEGS'
 RANKED_MODE='RANKED_ONE_LEG_SANDBOX'
 OBSERVE_MODE='RANKED_OBSERVATION_ONLY'
 def now():return datetime.now(IST)
-def strategy(env=Path('.env')):return os.getenv('LIVE_SHADOW_STRATEGY') or dotenv_values(env).get('LIVE_SHADOW_STRATEGY') or 'HILEGA_DIRECTIONAL_SHADOW_V1'
+def strategy(env=Path('.env')):return effective_strategy(os.getenv('LIVE_SHADOW_STRATEGY') or dotenv_values(env).get('LIVE_SHADOW_STRATEGY') or 'HILEGA_DIRECTIONAL_SHADOW_V1')
 def selector_mode(env=Path('.env')):return os.getenv('HILEGA_STRIKE_SELECTOR_MODE') or dotenv_values(env).get('HILEGA_STRIKE_SELECTOR_MODE') or FIVE_LEG_MODE
 def selector_policy_path(env=Path('.env')):return os.getenv('HILEGA_STRIKE_POLICY_PATH') or dotenv_values(env).get('HILEGA_STRIKE_POLICY_PATH')
 
@@ -101,7 +102,7 @@ def arm(day,source,control,store,env=Path('.env'),at=None,check_legacy=True):
     policy=StrikePolicy.load(policy_file,require_approval=mode!=OBSERVE_MODE) if policy_file else None
     if policy:
         from .hilega_alignment_dual_exit_live_v1 import RULES
-        if strategy(env)!='HILEGA_V2_ALIGNMENT_DUAL_EXIT' or policy.strategy_version!=RULES['version']:
+        if strategy(env)!='HILEGA_RSI_TWO_ROUTE_CONFIRMED_MIDPOINT' or policy.strategy_version!=RULES['version']:
             raise ValueError('STRIKE_POLICY_STRATEGY_VERSION_MISMATCH')
     if check_legacy:
         legacy=DispatchStore(DEFAULT_DISPATCH).rows();open_ids=set()
@@ -135,7 +136,7 @@ class BasketWorker:
         c=self.control.read();rows=self.store.rows();base=dict(intent_id=intent['intent_id'],event_id=intent['event_id'],trade_id=intent['trade_id'],event_type=intent['event_type'],direction=intent['direction'],session_date=c['session_date'],event_timestamp=intent['event_timestamp'],source_sequence=intent['source_sequence'],strategy_id=c['strategy_id'])
         base.update(strategy_version=intent.get('strategy_version'),policy_id=intent.get('policy_id'))
         if intent['intent_id'] in self.store.terminal_ids():return
-        if intent['event_type']=='ENTRY' and c.get('strategy_id')=='HILEGA_V2_ALIGNMENT_DUAL_EXIT' and (intent.get('policy_id')=='BULLISH_GAP2_FULL_WMA2' or c.get('policy_id')=='BULLISH_GAP2_FULL_WMA2'):
+        if intent['event_type']=='ENTRY' and c.get('strategy_id')=='HILEGA_RSI_TWO_ROUTE_CONFIRMED_MIDPOINT' and (intent.get('policy_id')=='RSI_TWO_ROUTE_CONFIRMED_MIDPOINT' or c.get('policy_id')=='RSI_TWO_ROUTE_CONFIRMED_MIDPOINT'):
             from .hilega_combined_policy_v1 import VERSION,POLICY_ID
             if c.get('strategy_version')!=VERSION or intent.get('strategy_version')!=VERSION or intent.get('policy_id')!=POLICY_ID:
                 self.store.append(dict(base,status='SKIPPED_STRATEGY_VERSION_MISMATCH',terminal=True,reason='Rearm flat sandbox for promoted policy; never replay old BUY'))

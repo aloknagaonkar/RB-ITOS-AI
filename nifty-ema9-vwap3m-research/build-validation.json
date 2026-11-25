@@ -1,0 +1,15 @@
+{
+  "status": "AST_AND_INPUT_ARCHIVE_ONLY",
+  "tests_run": false,
+  "strategy_replays_run": false,
+  "python_files": 3,
+  "sha256": {
+    "README.md": "664edaa496a65a3058d8348446855a544b8476d0d781bb6a02e3a88d6ef3c943",
+    "input-hashes.json": "9c1d4dca103aa7cec44a5f8a85913342243f21533fc05b4baff105920f10a2e9",
+    "inputs/futures-20261026.json": "7d0abf5ce781e91b9c349dc8f531ec1685d298c59d2fc39d301acd09d0ed741c",
+    "inputs/index-20261026.json": "63879ad0172f6e2b5004855c38a0d1e38a4bb37ef17efe140f67cb930a9ea0ca",
+    "run.py": "734df9e112e01ab86e130dd9fe4919eb1df0f7e96fbdf2dcd65ca9877038b221",
+    "strategy.py": "4bf9491e8b9684de3ba7b57b1d814fcc4c970d1fc643fa305c11be49a364645d",
+    "test_strategy.py": "18deaea003af4ff35ceb312a8a254425f2adb816eb4aa339256b67a472b2d9a3"
+  }
+}

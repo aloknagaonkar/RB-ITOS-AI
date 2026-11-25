@@ -1,0 +1,57 @@
+{
+  "model": "HILEGA_WARMUP_REPAIR_V1",
+  "old_version": "bullish-gap2-full-wma2-3.0.0-3m-two-of-three-session-close",
+  "strategy_version": "bullish-gap2-full-wma2-3.0.1-3m-warmup-freshness",
+  "source_before": {
+    "backend/market_lab/hilega_three_minute_v1/hilega_combined_policy_v1.py": "741f2ea83c441daaa76f290462ae9bc093f95aae35f083d2493d35bf9527f1d5",
+    "backend/market_lab/hilega_three_minute_v1/hilega_alignment_dual_exit_live_v1.py": "c827272fe1f942cb92961e31d3f86e3775cab55a0def4a32f0ce24a6450b7c89",
+    "backend/market_lab/hilega_three_minute_v1/hilega_v2_alignment_replay_v1.py": "5618f4ce28f2402c1ca325a0c4d116145697277f4035be773e5e6708721a5f8b",
+    "backend/market_lab/hilega_three_minute_v1/hilega_combined_replay_v1.py": "4a2d09c7ce61ce1aadf94b2b285177a7562e377c19b412f63982c17a17a3f1dd",
+    "backend/market_lab/hilega_ui_journal_cache_v1.py": "690975e386f8483d88080a36073515ac91b16bd356503132cab05682b0773860",
+    "hilega-operational-lifecycle-tools-6cexrur_/manifest.json": "98311a68370f7710fa21fb5e7b0b89cb69817fe24cada66e6256f1961026866e",
+    "hilega-operational-lifecycle-tools-6cexrur_/cli.py": "8dc9b970e6eb9c4ae3e935d8918d1bc00ef1c6d4b8d4f64b0570ae693d20e45d",
+    "hilega-reference-service-stage-yup3_wr1/lifecycle_reference_service.py": "d6e5e80f285b350eb971d623529c3960055c13f1a83c990b9db436571749ae4a"
+  },
+  "candidate_sha256": {
+    "backend/market_lab/hilega_three_minute_v1/hilega_alignment_dual_exit_live_v1.py": "3b35b178bc026b601e1e01a22199e3ad7e78e7fa2aace09984986704703a3c5a",
+    "backend/market_lab/hilega_three_minute_v1/hilega_combined_policy_v1.py": "cbceae72295b50bfbcd6d1cb1f5ceda11ee3a06b9207803859b1544b34ad787f",
+    "backend/market_lab/hilega_three_minute_v1/hilega_combined_replay_v1.py": "902c8c5b377b7129818572dc4a7aaabd46fd3a5e97b557cde7c7b83035d92093",
+    "backend/market_lab/hilega_three_minute_v1/hilega_v2_alignment_replay_v1.py": "c2f8ca3d2369799fca0433efd193119cdfad557952e7ca878058fd69837f9138",
+    "backend/market_lab/hilega_three_minute_v1/lifecycle_view.py": "4ea4174853661eee47fa6045c6037f3f5531ea2fc8bf68b786bdc951eab398e0",
+    "backend/market_lab/hilega_three_minute_v1/warmup.py": "e6ea222bd7aca89da775e9b4aed5513640a5c990ffc8fea16a7ac0fce018d8be",
+    "backend/market_lab/hilega_ui_journal_cache_v1.py": "0e2a7485d426acee9d96f2de247914d5620558648d6317f558ce8d0a127929db",
+    "hilega-operational-lifecycle-tools-6cexrur_/cli.py": "f63d9d9408a7a3f4486ac1e273a5cef8d152e5e89f98620398286612292cf50f",
+    "hilega-operational-lifecycle-tools-6cexrur_/manifest.json": "cc91fcaf536279657b888b03273f877855bcf1727fe5f06e45c0614fa303ee8a",
+    "hilega-reference-service-stage-yup3_wr1/lifecycle_reference_service.py": "4709e8768f0819d94989acab22d60fb0e07e71198a3dc37ac6b0ce07ccaee5f1"
+  },
+  "companion_changes": {
+    "changed_runtime": [
+      "backend/market_lab/hilega_three_minute_v1/hilega_alignment_dual_exit_live_v1.py",
+      "backend/market_lab/hilega_three_minute_v1/hilega_combined_policy_v1.py",
+      "backend/market_lab/hilega_three_minute_v1/hilega_combined_replay_v1.py",
+      "backend/market_lab/hilega_three_minute_v1/hilega_v2_alignment_replay_v1.py",
+      "backend/market_lab/hilega_ui_journal_cache_v1.py"
+    ],
+    "added_runtime": [
+      "backend/market_lab/hilega_three_minute_v1/lifecycle_view.py",
+      "backend/market_lab/hilega_three_minute_v1/warmup.py"
+    ],
+    "unchanged_runtime_count": 409,
+    "old_runtime_count": 414,
+    "new_runtime_count": 416
+  },
+  "runtime_validation_performed": false,
+  "tool_sha256": {
+    "companion_bindings.py": "53198ded7830bd90c7aacbc42cedd9e20be0ba0fa5ade75387343c2df49fbf6b",
+    "repair.py": "c1cba40da27878769f209837a21954144afd90b6dd19868ea04e2b01cd81e618",
+    "research.py": "854294f0f2e45ac4429a0fa29b2cc1b463c15c7f0ba06a44e067316fd137d308",
+    "rollout_safety.py": "eae60ebf8416c29cb5ce35b8584db18a7b1ed8c15f2e94ec898329a54e7d1060",
+    "tests/test_companion_integrity.py": "a85a4d74d97ef6850e164383bd580e356aba8b5f154db6dae67b9a676da47a32",
+    "tests/test_install_controls.py": "649caff4b383f10dbf465a3f7618a3c51b3c6a31d578151afedca522649910cc",
+    "tests/test_option_session_close.py": "736b5b50bfd4fa0f9f7629072adb1bd77769ef2a66846adf78354f77ce839e90",
+    "tests/test_three_minute_policy.py": "29d4f90c212158b39cd83cf02102f6ae250ef666072768830a53ee34a96c6fbb",
+    "tests/test_vm_evidence_and_cache_preservation.py": "282dc6d5514d4ca2df43789cbe09613972e1d554ba545b060230d872d5e94d87",
+    "tests/test_warmup_repair.py": "c7eb90abc294e00df072b0f25d248170e2e77e0537024c14bbb05956169f9b4f",
+    "tests/test_worker_close.py": "8ddc4e6e21fd4ba0f8f85c330177f762ee1f51ae2d6eedc3d92e136f26416ced"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "status": "LOCAL_VALIDATION_PASS",
+  "tests": 29,
+  "frozen_engine_byte_identity": true,
+  "november_regression_sessions": 16,
+  "november_regression_trades": 60,
+  "november_regression_net_points": 1765.25,
+  "october_replay_executed_locally": false,
+  "expected_october_trading_sessions": 20,
+  "expected_first_seed_session": "2026-09-02",
+  "live_application_modified": false
+}

@@ -1,0 +1,10 @@
+{
+  "scenario": "guard-loss-after-plan",
+  "checkpoint": "AFTER_PLAN_INSERT",
+  "observed_guard_death": true,
+  "application_and_adapter_rollback_verified": true,
+  "disposable_databases_only": true,
+  "orders_sent": false,
+  "production_execution_enabled": false,
+  "worker_cli_signed_seed_boundary_verified": false
+}

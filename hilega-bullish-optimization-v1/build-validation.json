@@ -1,0 +1,24 @@
+{
+  "status": "AST_SYNTAX_AND_SAVED_OUTPUT_ARITHMETIC_ONLY",
+  "tests_run": false,
+  "strategy_replays_run": false,
+  "python_files": 11,
+  "sha256": {
+    "README.md": "e99a33918d3f9be39b8b833535cf37504d74bcdcb1f81aacdffe7af6556af13e",
+    "baseline-diagnostics.json": "0d37cd093855a571ba58b3cd06b6199563e6598c2076cc0ddef855c35d022ae7",
+    "baseline_hybrid.py": "87d6d46990a18986cf20322c6c1223855dd251099bbb9c4a013c56dcc2b6a318",
+    "baseline_rules.py": "98ce6285c9d8cbd2621771f1a9e57980e26981f82c3a92f284730ff4d24532d2",
+    "bullish-baseline-review.html": "1fbd3416806f5388a2c469b8f16ed13a0d60e34a370fb5c70301d345c8877346",
+    "common_input.py": "36152e3f7206df1bf1a4b514fadb39d95394f80560ae9e106bb1ee7c59b41845",
+    "core.py": "c96ab72a7aa837ec9b560f824bc5b1adddb4f02c7eaf8e86e4dd72a015546f4a",
+    "expected-controls.json": "7c04db9c484ec265b06afada1dadbdb16bebe22f75dc5b97d31f0548b896b61b",
+    "hybrid.py": "6465c7577e8254220aa95e23768096f275b58dafdf7af8b285e7213cf4223199",
+    "profit_protection.py": "2ac087bc3f5c4b484cb65646add6c9814bdced01f7edfa1576a06df4ac32ac6b",
+    "reporting.py": "d8ebcdb92f8475a03ba6cc2e52d83b534ac7805b8b828c80b6ec14c4441df0d0",
+    "rules.py": "01edb03d6080b6fe9b024e1fd1966d62f23a5b52af5adf103cfb074560f20181",
+    "run.py": "65d30da46a4efb26d08e738498612e7ac372b72a5e2be1d67ef28f73e1f9460d",
+    "source-hashes.json": "0dc2eece5785eec686ec22003cdb2596942e1de177846e26f0a647295ea677dc",
+    "study.py": "effbef1ad08fcb08a29e94ed42d0dc189f3c4345b7617b3b71c56a6289f2e9f2",
+    "test_bullish.py": "a3ab5ecc553774bc407686ab9510516ade5918588c400b6b34fc22b191fbbc27"
+  }
+}

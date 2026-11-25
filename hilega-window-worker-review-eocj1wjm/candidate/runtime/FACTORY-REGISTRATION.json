@@ -1,0 +1,12 @@
+{
+  "model": "HILEGA_WORKER_AUTHORITY_REGISTRATION_CANDIDATE_V1",
+  "enabled": false,
+  "expected_binding": null,
+  "private_config_file": null,
+  "private_config_sha256": null,
+  "trust_registry_file": null,
+  "trust_registry_sha256": null,
+  "grant_file": null,
+  "grant_sha256": null,
+  "production_execution_enabled": false
+}

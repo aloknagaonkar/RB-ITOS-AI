@@ -1,0 +1,12 @@
+{
+  "status": "STATIC_SYNTAX_PASS",
+  "files": {
+    "rollout.py": "9d10fb3418a8c949bb6fbebf91db57886ee926473f14aa9af48688812fe711d8",
+    "README.md": "4ee802bc83f536cdc427b425fcbdaa8310cc7752f2f406f38b2d0d70f5754dd4",
+    "tests/test_worker_close.py": "8ddc4e6e21fd4ba0f8f85c330177f762ee1f51ae2d6eedc3d92e136f26416ced",
+    "files/backend/market_lab/hilega_three_minute_v1/worker_close.py": "4e097ff60c8828154f3b0141ff1a358ef06c88589134480ce9dc64cd42aee8b2"
+  },
+  "tests_executed_locally": false,
+  "deployment_executed": false,
+  "vm_tests_required": true
+}

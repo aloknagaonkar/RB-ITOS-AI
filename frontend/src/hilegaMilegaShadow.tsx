@@ -291,7 +291,7 @@ export default function HilegaMilegaShadow(){
       const dr=await fetchLive('/api/live-shadow/hilega-directional-candles/live?audit_only=true&session_date='+day,controller.signal)
       if(!dr.ok)throw new Error('Decision audit HTTP '+dr.status+': '+await dr.text())
       const directional=await dr.clone().json()
-      const combined=(directional.rows??[]).some((r:any)=>r.strategy_id==='HILEGA_V2_ALIGNMENT_DUAL_EXIT')
+      const combined=(directional.rows??[]).some((r:any)=>r.strategy_id==='HILEGA_RSI_TWO_ROUTE_CONFIRMED_MIDPOINT')
       const results=await Promise.allSettled([
         combined?Promise.resolve([] as AuditReport[]):getBullish<AuditReport[]>('/audit-index?limit=200'),
         Promise.resolve(dr),
@@ -307,11 +307,11 @@ export default function HilegaMilegaShadow(){
     let merged=a as HilegaAudit[]
     if(directionalRef.current.length){
       const rawRows=directionalRef.current
-      const directionalRows=[...augmentDirectionalRowsWithTrades(rawRows.filter((r:any)=>!['HILEGA_WMA_GAP_V2_LIVE_SHADOW','HILEGA_V2_ALIGNMENT_DUAL_EXIT'].includes(r.strategy_id)),d.trades??[]),...rawRows.filter((r:any)=>['HILEGA_WMA_GAP_V2_LIVE_SHADOW','HILEGA_V2_ALIGNMENT_DUAL_EXIT'].includes(r.strategy_id))]
+      const directionalRows=[...augmentDirectionalRowsWithTrades(rawRows.filter((r:any)=>!['HILEGA_WMA_GAP_V2_LIVE_SHADOW','HILEGA_RSI_TWO_ROUTE_CONFIRMED_MIDPOINT'].includes(r.strategy_id)),d.trades??[]),...rawRows.filter((r:any)=>['HILEGA_WMA_GAP_V2_LIVE_SHADOW','HILEGA_RSI_TWO_ROUTE_CONFIRMED_MIDPOINT'].includes(r.strategy_id))]
       merged=overlayDirectionalAuditReports(a as HilegaAudit[],directionalRows)
     }
-    const v2Reports=merged.filter(r=>['HILEGA_WMA_GAP_V2_LIVE_SHADOW','HILEGA_V2_ALIGNMENT_DUAL_EXIT'].includes(r.strategy?.strategy_id))
-    merged=overlayDirectionalTradeMarkers(merged.filter(r=>!['HILEGA_WMA_GAP_V2_LIVE_SHADOW','HILEGA_V2_ALIGNMENT_DUAL_EXIT'].includes(r.strategy?.strategy_id)),d.trades??[])
+    const v2Reports=merged.filter(r=>['HILEGA_WMA_GAP_V2_LIVE_SHADOW','HILEGA_RSI_TWO_ROUTE_CONFIRMED_MIDPOINT'].includes(r.strategy?.strategy_id))
+    merged=overlayDirectionalTradeMarkers(merged.filter(r=>!['HILEGA_WMA_GAP_V2_LIVE_SHADOW','HILEGA_RSI_TWO_ROUTE_CONFIRMED_MIDPOINT'].includes(r.strategy?.strategy_id)),d.trades??[])
     merged=attachDirectionalTradeAuditMetadata(merged,d.trades??[])
     if(active())setRows([...merged.filter(r=>!v2Reports.some(v=>v.checkpoint.slice(0,10)===r.checkpoint.slice(0,10))),...v2Reports].sort((a,b)=>b.checkpoint.localeCompare(a.checkpoint)) as AuditReport[])
       if(errors.length)throw new Error(errors.join(' · '))
@@ -367,11 +367,11 @@ export default function HilegaMilegaShadow(){
     {error&&<div className="banner error">{error}</div>}
 
     <div className="shadow-safety"><b>Active strategy: {status?.selected_live_shadow_strategy??'Loading'}</b><span>Structural exit · exit-first processing</span></div>
-    {['HILEGA_WMA_GAP_V2_LIVE_SHADOW','HILEGA_V2_ALIGNMENT_DUAL_EXIT'].includes(status?.selected_live_shadow_strategy??'')&&<section className="panel">
+    {['HILEGA_WMA_GAP_V2_LIVE_SHADOW','HILEGA_RSI_TWO_ROUTE_CONFIRMED_MIDPOINT'].includes(status?.selected_live_shadow_strategy??'')&&<section className="panel">
       <h2>{status?.selected_live_shadow_strategy} · entry decision audit</h2>
-      <p>BULLISH_GAP2_FULL_WMA2 uses completed five-minute signal and follow-up evidence, with no persistence or time expiry. Historical rows retain their recorded policy.</p>
-      <div style={{overflowX:'auto'}}><table><thead><tr><th>Decision time</th><th>Direction</th><th>Previous gap</th><th>Current gap</th><th>Expansion</th><th>Previous WMA strength</th><th>Current WMA strength</th><th>Persistence</th><th>Decision / reason</th></tr></thead>
-      <tbody>{gapChecks.slice().reverse().map((r,i)=>{const p=r.payload??{};return <tr key={r.record_hash??i}><td>{tm(p.decision_timestamp)}</td><td>{p.direction}</td><td>{num(p.previous_gap,4)}</td><td>{num(p.current_gap,4)}</td><td>{num(p.gap_delta,4)}</td><td>{num(p.previous_directional_wma_strength,4)}</td><td>{num(p.directional_wma_strength,4)}</td><td>{p.persistence_required===false?'NOT REQUIRED':p.persistence_pass?'PASS':'WAIT'}</td><td>{p.status} · {(p.reasons??[]).join(', ')||'All conditions passed'}</td></tr>})}</tbody></table></div>
+      <p>Completed 3-minute RSI Two Route: Normal Route needs any two RSI votes plus WMA21(RSI9); WMA_bypass needs all five RSI votes. Directional candle colour and EMA30 High/Low price checks apply to both. Existing trade cards and manual controls remain below.</p>
+      <div style={{overflowX:'auto'}}><table><thead><tr><th>Decision time</th><th>Direction</th><th>Route</th><th>RSI votes</th><th>Close</th><th>EMA30 High</th><th>EMA30 Low</th><th>WMA21 RSI9</th><th>Decision / blockers</th></tr></thead>
+      <tbody>{gapChecks.slice().reverse().map((r,i)=>{const p=r.payload??{},f=p.frame??{};return <tr key={r.record_hash??i}><td>{tm(p.decision_timestamp)}</td><td>{p.direction}</td><td>{p.route_name??'—'}</td><td>{p.rsi_pass_count??'—'}/5</td><td>{num(f.close)}</td><td>{num(f.ema30_high)}</td><td>{num(f.ema30_low)}</td><td>{num(f.wma21_rsi9)}</td><td>{p.status} · {(p.reasons??[]).join(', ')||'All entry rules passed'}</td></tr>})}</tbody></table></div>
       {!gapChecks.length&&<p>No current-session V2 evaluations yet.</p>}
     </section>}
     <HilegaExpiryWorkspace/>
@@ -466,3 +466,4 @@ export default function HilegaMilegaShadow(){
     </section>
   </div>
 }
+

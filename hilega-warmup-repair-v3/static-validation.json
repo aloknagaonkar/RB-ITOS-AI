@@ -1,0 +1,12 @@
+{
+  "status": "STATIC_VALIDATION_PASS",
+  "package_revision": "v3-bounded-recent-window",
+  "python_files": 20,
+  "candidate_files": 10,
+  "runtime_inventory": 416,
+  "vm_tests_executed": false,
+  "prior_v2_vm_tests_passed": 124,
+  "added_regression_tests": 4,
+  "vm_services_modified": false,
+  "broker_requests_sent": false
+}

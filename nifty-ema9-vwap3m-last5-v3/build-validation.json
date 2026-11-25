@@ -1,0 +1,17 @@
+{
+  "status": "AST_AND_STRATEGY_BYTE_COMPARISON_ONLY",
+  "tests_run": false,
+  "strategy_replays_run": false,
+  "broker_api_requests_run": false,
+  "unchanged_strategy": true,
+  "sha256": {
+    "README.md": "e6fa4072f4661f589ccf6d6fb4bffdf79afad17f0599414859a5319f18f28d51",
+    "batch.py": "1c73408b487751129ff44d53bab92b218e1fb7877577fc35b4176c47b51db96c",
+    "collect.py": "921e8f67b1fd8797a77703ebf3b1ba83ad6aa68e52f242cc4631169c88706dfe",
+    "daily_report.py": "9fdb6f875519a97b75cab7f5b5f3510184af79e4e2b286f65c892c59a88d0147",
+    "strategy-pin.json": "cc65bb4e850d0ad4b9afddb29d6faca482b98b064b89ee602b0ea5537ce68965",
+    "strategy.py": "4bf9491e8b9684de3ba7b57b1d814fcc4c970d1fc643fa305c11be49a364645d",
+    "test_batch.py": "94707a47fa804f33f9b8bfabdb982cae65c36d5269c57c939430e4cf6d95b8a9",
+    "test_strategy.py": "18deaea003af4ff35ceb312a8a254425f2adb816eb4aa339256b67a472b2d9a3"
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "status": "LOCAL_IMPLEMENTATION_VALIDATED_VM_ROLLOUT_PENDING",
+  "strategy_id": "HILEGA_RSI_TWO_ROUTE_CONFIRMED_MIDPOINT",
+  "strategy_version": "1.0.0",
+  "local_checks": {
+    "integration_tests": {
+      "status": "PASS",
+      "tests": 20
+    },
+    "audit_ui_javascript": {
+      "status": "PASS",
+      "checks": [
+        "complete script parses",
+        "direction/route filters",
+        "HTML escaping",
+        "threshold labels",
+        "audit fields"
+      ]
+    },
+    "contextual_patch_snapshot": {
+      "status": "PASS",
+      "files": 14
+    },
+    "python_sources_parse": "PASS",
+    "regression": {
+      "status": "PASS",
+      "sessions": 36,
+      "trades": 169,
+      "net_points": {
+        "October": 543.8499999999985,
+        "November": 1765.2499999999818
+      },
+      "october_basis": "20 sessions independently reseeded from 40 raw input sessions; restart after every boundary",
+      "november_basis": "16 supplied 3m indicator-frame sessions; not an independent raw-candle reseed",
+      "checks": "all frames, routes, gates, exit flags, trades, marks, extrema, events, owner and summaries"
+    },
+    "staged_endpoint_probe": {
+      "status": "PASS_ON_STANDALONE_APP_WITH_REAL_INCLUDED_ROUTER",
+      "local_router_type": "_IncludedRouter",
+      "lifespan_started": false
+    }
+  },
+  "reference_sha256": "0160798e98560281a453a4a837d8b2fae6719cfc63d414e3487b6c4520646f76",
+  "vm_required_checks": [
+    "current source anchors and hash leases",
+    "current and staged companion startup checks",
+    "full installed application import",
+    "complete TypeScript/Vite build",
+    "service and API health",
+    "rendered browser audit verification"
+  ],
+  "local_limitations": [
+    "Full application dependencies and frontend node_modules are not installed locally; full application import and frontend build are mandatory VM preparation gates.",
+    "November regression used supplied indicator frames, not an independent raw-candle reseed.",
+    "VM services have not been changed; no direct VM connection is available."
+  ],
+  "execution_mode": "SIMULATION_ONLY",
+  "broker_orders_sent": false,
+  "broker_execution_validated": false,
+  "installer_revision": "v3: HTTP checks of staged rules/workspace instead of inspecting deferred router internals",
+  "added_regression_checks": [
+    "complete real package updates pass companion rebinding including workspace.html",
+    "unexpected backend assets and path traversal still rejected",
+    "HTTP endpoint verification with real included router; application lifespan remains unstarted",
+    "missing rules, wrong execution mode, and missing workspace fail validation"
+  ]
+}

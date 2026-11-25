@@ -112,7 +112,7 @@ def review(journal, root, session):
         p = record["payload"]
         if (record.get("status") != "PROCESSED"
                 or p.get("reconstructed") is not False
-                or p.get("strategy_id") != "HILEGA_V2_ALIGNMENT_DUAL_EXIT"):
+                or p.get("strategy_id") != "HILEGA_RSI_TWO_ROUTE_CONFIRMED_MIDPOINT"):
             continue
         if aware(p["decision_timestamp"]).astimezone(IST).date() != session:
             continue

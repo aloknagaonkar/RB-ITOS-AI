@@ -2,6 +2,7 @@
 
 Authoritative audit verification and all strategy readers are untouched.
 """
+from .hilega_active_strategy_v1 import effective_strategy
 import json
 import os
 import threading
@@ -83,4 +84,12 @@ def entry(path):
         if key not in _registry:_registry[key]=JournalCache(key)
         return _registry[key]
 def read_rows(path):return entry(path).read()
-def read_dashboard(path):return entry(path).read_dashboard()
+def read_dashboard(path):
+    value = entry(path).read_dashboard()
+    if effective_strategy(os.getenv("LIVE_SHADOW_STRATEGY", "")).strip().upper() == "HILEGA_RSI_TWO_ROUTE_CONFIRMED_MIDPOINT":
+        from datetime import datetime
+        from .domain import IST
+        from .hilega_combined_policy_v1 import VERSION
+        from .hilega_three_minute_v1.lifecycle_view import current_view
+        return current_view(value, datetime.now(IST).date().isoformat(), VERSION)
+    return value

@@ -1,0 +1,14 @@
+{
+  "status": "STATIC_VALIDATION_PASS",
+  "python_files": 20,
+  "candidate_files": 10,
+  "reviewed_runtime_hashes_changed": 5,
+  "runtime_inventory": 416,
+  "vm_tests_executed": false,
+  "vm_services_modified": false,
+  "broker_requests_sent": false,
+  "limitations": [
+    "VM dependency/runtime tests must pass during --prepare before installation.",
+    "Current VM sources and lifecycle state must pass guarded checks."
+  ]
+}

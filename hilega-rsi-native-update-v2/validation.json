@@ -1,0 +1,59 @@
+{
+  "status": "LOCAL_NATIVE_INTEGRATION_VALIDATED_VM_INSTALL_PENDING",
+  "strategy_id": "HILEGA_RSI_TWO_ROUTE_CONFIRMED_MIDPOINT",
+  "strategy_version": "rsi-two-route-1.0.0-3m-native-confirmed-midpoint",
+  "tests": 28,
+  "unit_tests": "PASS",
+  "full_application_http_routes": "PASS",
+  "frontend_typescript_vite_build": "PASS",
+  "companion_runtime_check": {
+    "status": "PACKAGE_AND_RUNTIME_CHECK_PASS",
+    "database_access_performed": false,
+    "credentials_opened": false,
+    "broker_reads_performed": false,
+    "order_actions_available": false,
+    "production_execution_enabled": false
+  },
+  "regression": {
+    "sessions": 36,
+    "trades": 169,
+    "october": {
+      "sessions": 20,
+      "trades": 109,
+      "net_points": 543.85,
+      "basis": "Independent raw-minute reseed from 20 prior sessions per target; native historical and real native live coordinator callbacks match all20 sessions"
+    },
+    "november": {
+      "sessions": 16,
+      "trades": 60,
+      "net_points": 1765.25,
+      "basis": "Supplied completed indicator frames; native rule/event adapter matches, not an independent raw-minute reseed"
+    }
+  },
+  "scopes_verified": [
+    "Normal Route and WMA_bypass CE/PE",
+    "fixed signal midpoint with both RSI confirmations",
+    "opposite exit before entry",
+    "original5-leg CE/PE lifecycle start/close at3m boundary",
+    "manual gate/model reset",
+    "old and new reversal bridge records",
+    "stale strategy-version entry rejection",
+    "pending/open/manual-exit flat guard",
+    "activation commit and recovery entry proof",
+    "rollback preserves journals and refuses post-install edits",
+    "existing screens contain no added iframe/workspace"
+  ],
+  "current_execution_settings_preserved": true,
+  "approved_env_bytes_unchanged": true,
+  "supervisor_guard_preserved": true,
+  "configuration_alias_tests": "PASS",
+  "full_apply_env_approval_regression": "PASS",
+  "production_execution_enabled_by_update": false,
+  "broker_order_submission_tested": false,
+  "limitations": [
+    "Actual VM source/config hash leases, complete frontend build and companion startup checks are mandatory preparation gates.",
+    "Local frontend build used unchanged index.html and .mjs/declaration inputs from the prior snapshot because the uploaded exporter omitted those file types; these are not shipped/overwritten.",
+    "Current local ledger checks are not broker-account reconciliation.",
+    "Rendered browser review and actual native worker readiness require installation on VM."
+  ]
+}
