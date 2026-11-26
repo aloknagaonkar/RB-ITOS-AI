@@ -1,9 +1,10 @@
 """Approved CLOSED preparation bundle launcher; no execution factory."""
 from pathlib import Path
 import hashlib,json,runpy,os,sys
-root=Path('/home/aloknagaonkar46/RB-ITOS-AI/data/runtime/hilega-closed-releases/e9e092399fcf29672d5273c18ef138de645a8feec573407954d1db62392d0b59')
+sys.dont_write_bytecode=True
+root=Path('/home/aloknagaonkar46/RB-ITOS-AI/data/runtime/hilega-closed-releases/e21825cbe956c8d13492684861dee2e00a2e48d17c79d0a9f6418e615d956b75')
 raw=(root/"RELEASE-MANIFEST.json").read_bytes()
-if hashlib.sha256(raw).hexdigest()!='e9e092399fcf29672d5273c18ef138de645a8feec573407954d1db62392d0b59':raise ValueError("CLOSED_RELEASE_MANIFEST_CHANGED")
+if hashlib.sha256(raw).hexdigest()!='e21825cbe956c8d13492684861dee2e00a2e48d17c79d0a9f6418e615d956b75':raise ValueError("CLOSED_RELEASE_MANIFEST_CHANGED")
 for name,expected in json.loads(raw)["files"].items():
     rel=Path(name)
     if rel.is_absolute() or ".." in rel.parts:raise ValueError("CLOSED_RELEASE_PATH_INVALID")

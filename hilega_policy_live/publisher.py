@@ -285,49 +285,8 @@ class Publisher:
             self.save()
 
     def on_row(self, row):
-        payload = row.get('payload') or {}
-        at = payload.get('decision_timestamp') or row.get('checkpoint') or row.get('event_time')
-        if not at:
-            return
-        current_session = stamp(at).astimezone(IST).date() == now().astimezone(IST).date()
-        stage = row.get('stage')
-        if stage == 'COMBINED_PRICE_OBSERVATION':
-            if payload.get('strategy_id')=='HILEGA_V2_ALIGNMENT_DUAL_EXIT' and current_session and row.get('status')=='PROCESSED' and payload.get('nifty_close') is not None:
-                self.state['closes'][stamp(at).astimezone(timezone.utc).isoformat()]=float(payload['nifty_close'])
-            return
-        if stage == 'DIRECTIONAL_DECISION':
-            if payload.get('strategy_id') != 'HILEGA_V2_ALIGNMENT_DUAL_EXIT':
-                return
-            close = payload.get('nifty_close')
-            if close is not None and current_session:
-                self.state['closes'][stamp(at).astimezone(timezone.utc).isoformat()] = float(close)
-            if row.get('status') != 'PROCESSED':
-                return
-            before, after = payload.get('trade_owner_before'), payload.get('trade_owner_after')
-            events = payload.get('accepted_events') or []
-            if before in ('BULLISH', 'BEARISH') and (after != before or any('EXIT' in e for e in events)):
-                self.request_exit(before, at, 'STRATEGY_EXIT')
-            if not current_session:
-                return
-            for event in events:
-                if event not in ENTRIES:
-                    continue
-                direction = ENTRIES[event]
-                oid = 'HILEGA-POLICY-'+fingerprint({'time':at,'direction':direction})[:24]
-                if oid in self.state['pending'] or self.store.db.execute('SELECT 1 FROM state WHERE id=?',(oid,)).fetchone():
-                    continue
-                if close is None:
-                    raise ValueError('CONFIRMED_SIGNAL_SPOT_MISSING')
-                context = dict(direction=direction, signal_confirmed=True, velocity_confirmed=False,
-                               signal_timestamp=at, spot=float(close), strategy_version=payload.get('strategy_version'),strategy_policy_id=payload.get('policy_id'))
-                self.state['pending'][oid] = dict(context=context, audit_sequence=row['sequence'], event_type=event)
-        elif stage == 'DIRECTIONAL_SESSION_CUTOFF' and row.get('status') == 'PROCESSED':
-            for direction in ('BULLISH', 'BEARISH'):
-                self.request_exit(direction, at, 'STRATEGY_CUTOFF')
-        elif stage == 'DIRECTIONAL_MANUAL_EXIT_RESET' and row.get('status') == 'PROCESSED':
-            # Coordinator emits this only after verified manual close/reset.
-            for direction in ('BULLISH', 'BEARISH'):
-                self.request_exit(direction, at, 'VERIFIED_MANUAL_EXIT_RESET')
+        from native_routing import on_row
+        return on_row(self, row, current=now())
 
     def request_exit(self, direction, at, reason):
         for pending in self.state['pending'].values():
